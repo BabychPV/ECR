@@ -6669,7 +6669,9 @@ public sealed record RowDto(
   `ReadFromDocument`, `RecalculateDependents`; `UpdatedAt`, `UpdatedByUserId`) і `cfg.DocumentSourceBindingConsumer`
   (`BindingId`, `TemplateId`). Сід (`99-epilogue.sql`, секція `B80:source-binding`): рядок `HSE400_LAND_COMPOSITION`
   лише коли є шаблон `HSE400` і довідник `LAND_HSE400_COMPOSITION`, лише INSERT відсутнього (`Any`, `ConfirmWithReason`,
-  біти 1/1); споживач — шаблон `LAND_UI`.
+  біти 1/1); споживач — шаблон `LAND_UI`. ✎ B179 L7 (D-574): `cfg.DocumentSourceBindingConsumer` знято міграцією
+  `B179L7DropSourceBindingConsumer` (рядки — одним записом `DocumentSourceBindingConsumerRetired` в `aud.SecurityEvent`),
+  сід споживачів не заводить; споживачів називає лише граф залежностей.
 - **Ворота в завантажувачі.** `Hse400CompositionSnapshotLoader`: за `ApprovedOnly` місяць `MM` обраного документа HSE400
   дає рядки складу лише коли аркуш таблиці (оригінал) має `Approved` у періоді-власнику місяця (місячний проєкт —
   `yyyyMM`); інший місяць — без вводу, без `F_`, без нульового паритету, і довідник за рік документа не повертається.
@@ -6810,6 +6812,12 @@ public sealed record RowDto(
   `POST /documents/{id}/submit` і `…/approve` (`ECR-SUB-4221`), `calculation-issues.sourceIssues` і правило
   `STALE_APPROVED_DEPENDENT` вважають споживачем шаблон, якого називає граф. Таблицю `cfg.DocumentSourceBindingConsumer`
   не читає жоден код (сторож `SourceBindingConsumerTableReadGuardTests`), сід її рядки лишає; зняття — L7.
+- ✎ **B179 L7 — таблицю споживачів знято (D-574).** Міграція `B179L7DropSourceBindingConsumer`: перевірка бази (жоден
+  модуль, синонім чи чужий FK не посилається на таблицю, інакше `THROW 50574` без змін) → рядки з кодами зв'язки й
+  шаблону — одним записом `aud.SecurityEvent` (`EventType = DocumentSourceBindingConsumerRetired`, `ChangedByUserId = 0`;
+  порожня таблиця — без запису) → `DROP TABLE` з PK, FK і індексом. Нічний перерахунок (джерела документа-споживача) і
+  дотик споживачів перед видаленням документа-джерела теж беруть споживачів із графа (L6 їх пропустив: читали навігацію
+  `Consumers`). Контракт API не змінюється.
 - **Відмова циклу при публікації версії-скрипта** (`POST /methodologies/{id}/versions/{versionId}/publish`) перевіряється
   ПІСЛЯ публікації й збереження в транзакції (граф читає лише опубліковані версії): відмова `422 ECR-TMPL-0422`
   відкочує публікацію; золотий набір відхиляється раніше за відмову циклу.
