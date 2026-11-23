@@ -31224,6 +31224,28 @@ export interface components {
             /** @description Name of the area group node, when the tree has one. */
             name: null | string;
         };
+        /** @description ✎ D-569 (P-1123-1): the permit's current parameters table — the last file applied to it. */
+        AirCurrentTableDto: {
+            /** @description Name of the uploaded file; `null` — not recorded (an import before 23.11). */
+            fileName: null | string;
+            /**
+             * Format: date-time
+             * @description When it was applied, UTC.
+             */
+            importedAt: string;
+            /** @description Display name of the user who applied it. */
+            importedBy: null | string;
+            /**
+             * Format: int32
+             * @description Source rows the import wrote.
+             */
+            sources: number;
+            /**
+             * Format: int32
+             * @description Substance rows the import wrote.
+             */
+            substances: number;
+        };
         /** @description Result of `POST /api/v1/air-limits/import/analyse`: layout of the file, no database. */
         AirLimitsAnalysisDto: {
             /** @description Header block, mapped and unmapped columns, counts, findings. */
@@ -31290,6 +31312,7 @@ export interface components {
         AirLimitsPermitDto: {
             /** @description P1 07.11: columns added to the two tables (sources first, then substances), in table order. */
             addedColumns?: null | components["schemas"]["AirAddedColumnDto"][];
+            currentTable?: null | components["schemas"]["AirCurrentTableDto"];
             /**
              * Format: int64
              * @description Permit.
@@ -31332,6 +31355,9 @@ export interface components {
              * @description Area registry entry; `null` — none.
              */
             areaEntryId?: null | number;
+            /** @description ✎ D-569 (P-1123-1): columns of the two tables no field reads from this file — after the apply they are empty in every row of
+             *     the permit (the last uploaded table is the only current one; nothing is carried over from the replaced rows). */
+            emptiedColumns?: null | components["schemas"]["AirAddedColumnDto"][];
             /**
              * Format: int64
              * @description Permit.
@@ -36344,6 +36370,12 @@ export interface components {
         ImportDiffCounts: {
             /**
              * Format: int32
+             * @description ✎ D-569: child rows in both, different.
+             * @default 0
+             */
+            changedChildren: number;
+            /**
+             * Format: int32
              * @description In both, different.
              */
             changedParents: number;
@@ -36354,9 +36386,21 @@ export interface components {
             children: number;
             /**
              * Format: int32
+             * @description ✎ D-569: child rows in the file only (also those of new parents).
+             * @default 0
+             */
+            newChildren: number;
+            /**
+             * Format: int32
              * @description In the file only.
              */
             newParents: number;
+            /**
+             * Format: int32
+             * @description ✎ D-569: stored child rows of the owner the file no longer has (also those of removed parents).
+             * @default 0
+             */
+            removedChildren: number;
             /**
              * Format: int32
              * @description Stored for the owner in the bucket, not in the file (deleted by the replace).
@@ -36372,6 +36416,15 @@ export interface components {
              * @description In both, equal.
              */
             unchangedParents: number;
+        };
+        /** @description One value that the apply changes. */
+        ImportFieldChange: {
+            /** @description Field name (built-in field or added column code). */
+            field: string;
+            /** @description Value of the file as text; `null` — empty (also a column the file does not have: the last table is the truth). */
+            new: null | string;
+            /** @description Stored value as text; `null` — empty. */
+            old: null | string;
         };
         /** @description One mapped field. */
         ImportFieldSpec: {
@@ -36606,6 +36659,27 @@ export interface components {
             tableInstanceId?: null | number;
             tableNameL10n?: null | components["schemas"]["LocalizedText"];
         };
+        /** @description ✎ D-569 (P-1123-1): one row of the preview's list «what the new table replaces» — a parent (ChildKey is
+         *     `null`) or one child of it. */
+        ImportRowChange: {
+            /** @description Child key (substance); `null` — the row is the parent itself. */
+            childKey: null | string;
+            /** @description Changed values (changed rows only; empty for added and removed). */
+            fields: components["schemas"]["ImportFieldChange"][];
+            /** @description Parent key (NAE). */
+            key: string;
+            /** @description Added, changed or removed. */
+            kind: components["schemas"]["ImportRowChangeKind"];
+            /** @description A removed row of ANOTHER owner for the same key (replaced only with the confirmation): that owner's label; `null` — this owner. */
+            ownerLabel?: null | string;
+            /** @description Bucket of a removed row outside the import's bucket; `null` — the import's bucket. */
+            scope: null | string;
+        };
+        /**
+         * @description What happens to one row.
+         * @enum {unknown}
+         */
+        ImportRowChangeKind: "Added" | "Changed" | "Removed";
         /**
          * @description Issue severity.
          * @enum {unknown}
@@ -41568,6 +41642,12 @@ export interface components {
             issues: components["schemas"]["ImportIssue"][];
             missing: components["schemas"]["MissingReference"][];
             replace: components["schemas"]["ReplaceScope"];
+            rows?: null | components["schemas"]["ImportRowChange"][];
+            /**
+             * Format: int32
+             * @default 0
+             */
+            rowsDropped: number;
             stats: components["schemas"]["ImportStats"];
         };
         /** @description Layout and mapping of an Excel file onto a two-level target (parent rows with child rows),

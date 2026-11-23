@@ -25,8 +25,53 @@ public sealed record ReplaceScope(OwnerReplace ThisOwner, IReadOnlyList<OwnerRep
 /// <param name="RemovedParents">Stored for the owner in the bucket, not in the file (deleted by the replace).</param>
 /// <param name="SkippedParents">Left out by a human decision.</param>
 /// <param name="Children">Child rows that will be inserted.</param>
+/// <param name="NewChildren">✎ D-569: child rows in the file only (also those of new parents).</param>
+/// <param name="ChangedChildren">✎ D-569: child rows in both, different.</param>
+/// <param name="RemovedChildren">✎ D-569: stored child rows of the owner the file no longer has (also those of removed parents).</param>
 public sealed record ImportDiffCounts(
-    int NewParents, int ChangedParents, int UnchangedParents, int RemovedParents, int SkippedParents, int Children);
+    int NewParents,
+    int ChangedParents,
+    int UnchangedParents,
+    int RemovedParents,
+    int SkippedParents,
+    int Children,
+    int NewChildren = 0,
+    int ChangedChildren = 0,
+    int RemovedChildren = 0);
+
+/// <summary>What happens to one row.</summary>
+public enum ImportRowChangeKind
+{
+    /// <summary>In the file only: inserted.</summary>
+    Added,
+
+    /// <summary>In both, at least one value differs.</summary>
+    Changed,
+
+    /// <summary>Stored for the owner, not in the file: deleted.</summary>
+    Removed,
+}
+
+/// <summary>One value that the apply changes.</summary>
+/// <param name="Field">Field name (built-in field or added column code).</param>
+/// <param name="Old">Stored value as text; <c>null</c> — empty.</param>
+/// <param name="New">Value of the file as text; <c>null</c> — empty (also a column the file does not have: the last table is the truth).</param>
+public sealed record ImportFieldChange(string Field, string? Old, string? New);
+
+/// <summary>
+/// ✎ D-569 (P-1123-1): one row of the preview's list «what the new table replaces» — a parent (<paramref name="ChildKey"/> is
+/// <c>null</c>) or one child of it.
+/// </summary>
+/// <param name="Kind">Added, changed or removed.</param>
+/// <param name="Key">Parent key (NAE).</param>
+/// <param name="ChildKey">Child key (substance); <c>null</c> — the row is the parent itself.</param>
+/// <param name="Scope">Bucket of a removed row outside the import's bucket; <c>null</c> — the import's bucket.</param>
+/// <param name="Fields">Changed values (changed rows only; empty for added and removed).</param>
+/// <param name="OwnerLabel">
+/// A removed row of ANOTHER owner for the same key (replaced only with the confirmation): that owner's label; <c>null</c> — this owner.
+/// </param>
+public sealed record ImportRowChange(
+    ImportRowChangeKind Kind, string Key, string? ChildKey, string? Scope, IReadOnlyList<ImportFieldChange> Fields, string? OwnerLabel = null);
 
 /// <summary>A referenced code the target registry does not have.</summary>
 /// <param name="Kind">Reference kind.</param>
@@ -47,7 +92,9 @@ public sealed record RegistryImportPreview(
     IReadOnlyList<MissingReference> Missing,
     ReplaceScope Replace,
     bool CanApply,
-    string Fingerprint);
+    string Fingerprint,
+    IReadOnlyList<ImportRowChange>? Rows = null,
+    int RowsDropped = 0);
 
 /// <summary>Caller's choices for a preview or a commit.</summary>
 /// <param name="Scope">Owner and bucket.</param>
@@ -56,13 +103,17 @@ public sealed record RegistryImportPreview(
 /// <param name="ExpectedFingerprint">Fingerprint the preview showed; a commit that would apply something else is refused.</param>
 /// <param name="FileSha256">Hash of the uploaded file for the audit trail.</param>
 /// <param name="ProfileCode">Profile used, for the audit trail.</param>
+/// <param name="FileName">✎ D-569: name of the uploaded file, for the audit trail.</param>
+/// <param name="SpecJson">✎ D-569: the specification as JSON, for the audit trail.</param>
 public sealed record ImportRequest(
     ImportScope Scope,
     IReadOnlyList<MissingResolution>? Resolutions = null,
     IReadOnlyList<string>? ConfirmedOtherOwners = null,
     string? ExpectedFingerprint = null,
     string? FileSha256 = null,
-    string? ProfileCode = null);
+    string? ProfileCode = null,
+    string? FileName = null,
+    string? SpecJson = null);
 
 /// <summary>Result of a commit.</summary>
 /// <param name="Plan">The plan that was applied.</param>
@@ -227,13 +278,30 @@ public sealed class RegistryImportService(IRegistryImportTarget target, IEnumera
             .ReadExistingAsync(request.Scope, [.. parsed.Parents.Select(p => p.Key)], ct)
             .ConfigureAwait(false);
 
-        var own = stored.Where(s => s.OwnerKey == request.Scope.OwnerKey).ToDictionary(s => s.Key, StringComparer.Ordinal);
+        // ✎ D-569 (P-1123-1): the owner's last uploaded table is the only current one. EVERY stored row of the owner is replaced:
+        // the rows of the import's bucket are compared with the file by key, the rows of its other buckets (and a second stored
+        // row of the same key) are removed. The other owners' rows stay matched by key, as before.
+        var ownAll = stored.Where(s => s.OwnerKey == request.Scope.OwnerKey).ToList();
+        var own = new Dictionary<string, ExistingParent>(StringComparer.Ordinal);
+        var ownElsewhere = new List<ExistingParent>();
+        foreach (var row in ownAll)
+        {
+            if (row.Scope is not null || !own.TryAdd(row.Key, row))
+            {
+                ownElsewhere.Add(row);
+            }
+        }
+
         var insertKeys = inserted.Select(p => p.Key).ToHashSet(StringComparer.Ordinal);
         var others = stored
             .Where(s => s.OwnerKey != request.Scope.OwnerKey && insertKeys.Contains(s.Key))
             .ToList();
 
-        var ignored = spec.Fields.Where(f => f.Informational).Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
+        var ignored = spec.Fields
+            .Where(f => f.Informational || f.Name == spec.ParentKeyField || f.Name == spec.ChildKeyField)
+            .Select(f => f.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        var rows = new RowChanges();
         var added = 0;
         var changed = 0;
         var same = 0;
@@ -242,8 +310,13 @@ public sealed class RegistryImportService(IRegistryImportTarget target, IEnumera
             if (!own.TryGetValue(parent.Key, out var old))
             {
                 added++;
+                rows.Add(new ImportRowChange(ImportRowChangeKind.Added, parent.Key, null, null, []));
+                foreach (var child in parent.Children)
+                {
+                    rows.Add(new ImportRowChange(ImportRowChangeKind.Added, parent.Key, child.Key, null, []));
+                }
             }
-            else if (Equivalent(parent, old, ignored))
+            else if (Compare(parent, old, ignored, rows))
             {
                 same++;
             }
@@ -253,14 +326,38 @@ public sealed class RegistryImportService(IRegistryImportTarget target, IEnumera
             }
         }
 
-        var removed = own.Keys.Count(k => !insertKeys.Contains(k));
-        var diff = new ImportDiffCounts(added, changed, same, removed, skipped.Count, inserted.Sum(p => p.Children.Count));
+        var gone = own.Values.Where(o => !insertKeys.Contains(o.Key)).Concat(ownElsewhere).ToList();
+        foreach (var old in gone)
+        {
+            rows.Add(new ImportRowChange(ImportRowChangeKind.Removed, old.Key, null, old.Scope, []));
+            foreach (var child in old.Children)
+            {
+                rows.Add(new ImportRowChange(ImportRowChangeKind.Removed, old.Key, child.Key, old.Scope, []));
+            }
+        }
+
+        // Rows of OTHER owners the confirmed replace takes: listed too (who loses what), never counted as this owner's change.
+        foreach (var theirs in others)
+        {
+            var label = theirs.OwnerLabel ?? theirs.OwnerKey;
+            rows.Add(new ImportRowChange(ImportRowChangeKind.Removed, theirs.Key, null, null, [], label));
+            foreach (var child in theirs.Children)
+            {
+                rows.Add(new ImportRowChange(ImportRowChangeKind.Removed, theirs.Key, child.Key, null, [], label));
+            }
+        }
+
+        var diff = new ImportDiffCounts(
+            added, changed, same, gone.Count, skipped.Count, inserted.Sum(p => p.Children.Count),
+            rows.Count(ImportRowChangeKind.Added, child: true),
+            rows.Count(ImportRowChangeKind.Changed, child: true),
+            rows.Count(ImportRowChangeKind.Removed, child: true));
 
         var thisOwner = new OwnerReplace(
             request.Scope.OwnerKey,
-            own.Values.Select(o => o.OwnerLabel).FirstOrDefault(l => l is not null),
-            own.Count,
-            own.Values.Sum(o => o.Children.Count));
+            ownAll.Select(o => o.OwnerLabel).FirstOrDefault(l => l is not null),
+            ownAll.Count,
+            ownAll.Sum(o => o.Children.Count));
 
         var otherOwners = others
             .GroupBy(o => o.OwnerKey, StringComparer.Ordinal)
@@ -270,10 +367,12 @@ public sealed class RegistryImportService(IRegistryImportTarget target, IEnumera
 
         var replace = new ReplaceScope(thisOwner, otherOwners, otherOwners.Count > 0);
 
-        var delete = own.Values.Select(o => new ExistingRef(o.OwnerKey, o.Key))
-            .Concat(others.Select(o => new ExistingRef(o.OwnerKey, o.Key)))
+        var delete = ownAll.Select(o => new ExistingRef(o.OwnerKey, o.Key, o.Scope))
+            .Concat(others.Select(o => new ExistingRef(o.OwnerKey, o.Key, o.Scope)))
+            .Distinct()
             .OrderBy(d => d.OwnerKey, StringComparer.Ordinal)
             .ThenBy(d => d.Key, StringComparer.Ordinal)
+            .ThenBy(d => d.Scope, StringComparer.Ordinal)
             .ToList();
 
         var fingerprint = Fingerprint(request.Scope, delete, inserted, creations);
@@ -286,32 +385,131 @@ public sealed class RegistryImportService(IRegistryImportTarget target, IEnumera
         };
 
         var plan = new ImportApplyPlan(
-            request.Scope, delete, inserted, creations, fingerprint, request.FileSha256, request.ProfileCode, stats);
+            request.Scope, delete, inserted, creations, fingerprint, request.FileSha256, request.ProfileCode, stats,
+            request.FileName, request.SpecJson);
 
         var preview = new RegistryImportPreview(
-            parsed.Header, parsed.Stats, parsed.Groups, issues, parsed.DroppedIssues, diff, missing, replace, canApply, fingerprint);
+            parsed.Header, parsed.Stats, parsed.Groups, issues, parsed.DroppedIssues, diff, missing, replace, canApply, fingerprint,
+            rows.Kept, rows.Dropped);
 
         return new Built(preview, plan);
     }
 
     // ---------- equality and fingerprint ----------
 
-    private static bool Equivalent(ImportedParent file, ExistingParent stored, ISet<string> ignored)
+    /// <summary>Most row changes a preview lists; the rest are only counted (<see cref="RegistryImportPreview.RowsDropped"/>).</summary>
+    public const int MaxRowChanges = 20_000;
+
+    /// <summary>The preview's list of row changes with its cap; counts every change, also the dropped ones.</summary>
+    private sealed class RowChanges
     {
-        if (!SameValues(file.Values, stored.Values, ignored) || file.Children.Count != stored.Children.Count)
+        private readonly Dictionary<(ImportRowChangeKind, bool), int> _counts = [];
+
+        public List<ImportRowChange> Kept { get; } = [];
+
+        public int Dropped { get; private set; }
+
+        public void Add(ImportRowChange change)
         {
-            return false;
+            if (change.OwnerLabel is null)
+            {
+                var key = (change.Kind, change.ChildKey is not null);
+                _counts[key] = _counts.GetValueOrDefault(key) + 1;
+            }
+
+            if (Kept.Count < MaxRowChanges)
+            {
+                Kept.Add(change);
+            }
+            else
+            {
+                Dropped++;
+            }
         }
 
-        var storedChildren = stored.Children.ToDictionary(c => c.Key, StringComparer.Ordinal);
-        return file.Children.All(c => storedChildren.TryGetValue(c.Key, out var s) && SameValues(c.Values, s.Values, ignored));
+        public int Count(ImportRowChangeKind kind, bool child) => _counts.GetValueOrDefault((kind, child));
     }
 
-    private static bool SameValues(IReadOnlyDictionary<string, object?> file, IReadOnlyDictionary<string, object?> stored, ISet<string> ignored)
-        => file.Where(p => !ignored.Contains(p.Key)).All(p => SameValue(p.Value, stored.GetValueOrDefault(p.Key)));
+    /// <summary>
+    /// Compares a file parent with the stored one and lists the differences. ✎ D-569 (P-1123-1, no carry-over): the stored row is
+    /// replaced as a whole, so a stored value of a field the file does not carry counts as «→ empty»; a field of the file the store
+    /// does not have (a value that is not saved) is not a difference.
+    /// </summary>
+    /// <returns><c>true</c> — the parent and all its children are the same.</returns>
+    private static bool Compare(ImportedParent file, ExistingParent stored, ISet<string> ignored, RowChanges rows)
+    {
+        var same = true;
+        var fields = Changes(file.Values, stored.Values, ignored);
+        if (fields.Count > 0)
+        {
+            same = false;
+            rows.Add(new ImportRowChange(ImportRowChangeKind.Changed, file.Key, null, null, fields));
+        }
+
+        var storedChildren = new Dictionary<string, ExistingChild>(StringComparer.Ordinal);
+        foreach (var child in stored.Children)
+        {
+            if (!storedChildren.TryAdd(child.Key, child))
+            {
+                // A second stored row of the same substance: the replace removes it (no duplicates survive).
+                same = false;
+                rows.Add(new ImportRowChange(ImportRowChangeKind.Removed, file.Key, child.Key, null, []));
+            }
+        }
+
+        var fileKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var child in file.Children)
+        {
+            fileKeys.Add(child.Key);
+            if (!storedChildren.TryGetValue(child.Key, out var old))
+            {
+                same = false;
+                rows.Add(new ImportRowChange(ImportRowChangeKind.Added, file.Key, child.Key, null, []));
+                continue;
+            }
+
+            var childFields = Changes(child.Values, old.Values, ignored);
+            if (childFields.Count > 0)
+            {
+                same = false;
+                rows.Add(new ImportRowChange(ImportRowChangeKind.Changed, file.Key, child.Key, null, childFields));
+            }
+        }
+
+        foreach (var old in storedChildren.Values.Where(c => !fileKeys.Contains(c.Key)))
+        {
+            same = false;
+            rows.Add(new ImportRowChange(ImportRowChangeKind.Removed, file.Key, old.Key, null, []));
+        }
+
+        return same;
+    }
+
+    private static List<ImportFieldChange> Changes(
+        IReadOnlyDictionary<string, object?> file, IReadOnlyDictionary<string, object?> stored, ISet<string> ignored)
+    {
+        var result = new List<ImportFieldChange>();
+        foreach (var name in stored.Keys.Where(k => !ignored.Contains(k)).OrderBy(k => k, StringComparer.Ordinal))
+        {
+            var now = file.GetValueOrDefault(name);
+            var was = stored[name];
+            if (!SameValue(now, was))
+            {
+                result.Add(new ImportFieldChange(name, Shown(was), Shown(now)));
+            }
+        }
+
+        return result;
+    }
+
+    private static string? Shown(object? value)
+        => value is null || (value is string s && s.Length == 0) ? null : Canon(value);
 
     private static bool SameValue(object? a, object? b)
     {
+        // An empty text is «no value» on both sides (the store keeps no row for it).
+        a = a is string { Length: 0 } ? null : a;
+        b = b is string { Length: 0 } ? null : b;
         if (a is null || b is null)
         {
             return a is null && b is null;
@@ -356,7 +554,7 @@ public sealed class RegistryImportService(IRegistryImportTarget target, IEnumera
 
         foreach (var d in delete)
         {
-            sb.Append("D|").Append(d.OwnerKey).Append('|').Append(d.Key).Append('\n');
+            sb.Append("D|").Append(d.OwnerKey).Append('|').Append(d.Key).Append('|').Append(d.Scope).Append('\n');
         }
 
         foreach (var c in create.OrderBy(c => c.Kind, StringComparer.Ordinal).ThenBy(c => c.Code, StringComparer.Ordinal))

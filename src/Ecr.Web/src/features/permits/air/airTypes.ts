@@ -23,6 +23,8 @@ export type AirImportResult = Schemas['AirLimitsImportResultDto'];
 export type ImportIssue = Schemas['ImportIssue'];
 export type MissingReference = Schemas['MissingReference'];
 export type OwnerReplace = Schemas['OwnerReplace'];
+/** D-569: one row of «what the new table replaces» (added / changed with field changes / removed). */
+export type ImportRowChange = Schemas['ImportRowChange'];
 export type ImportHeaderReport = Schemas['ImportHeaderReport'];
 export type MappedColumn = Schemas['MappedColumn'];
 export type UnmappedColumn = Schemas['UnmappedColumn'];

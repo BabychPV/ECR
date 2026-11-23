@@ -43,7 +43,7 @@ public static partial class RegistryImportParser
         var (headerFrom, headerTo, dataFrom) = LocateHeader(grid, spec);
         var headers = ReadHeaders(grid, headerFrom, headerTo);
         var columns = MapColumns(spec, headers, log);
-        spec = MatchByHeaderName(spec, headers, columns);
+        spec = MatchByHeaderName(spec, headers, columns, log);
 
         var header = BuildReport(grid, spec, headers, columns, headerFrom, headerTo, dataFrom, ct);
 
@@ -294,15 +294,23 @@ public static partial class RegistryImportParser
 
             if (column is null)
             {
-                log.Add(new ImportIssue(
-                    field.Required ? ImportSeverity.Error : ImportSeverity.Warning,
-                    RegistryImportKeys.ColumnMissing, null, null, field.Name,
-                    new Dictionary<string, string> { ["field"] = field.Name }));
+                log.Add(field.UnreadKey is { } unread
+                    ? Unread(field, unread, null, null)
+                    : new ImportIssue(
+                        field.Required ? ImportSeverity.Error : ImportSeverity.Warning,
+                        RegistryImportKeys.ColumnMissing, null, null, field.Name,
+                        new Dictionary<string, string> { ["field"] = field.Name }));
                 continue;
             }
 
             if (claimedBy.TryGetValue(column.Value, out var other))
             {
+                if (field.UnreadKey is { } unread)
+                {
+                    log.Add(Unread(field, unread, ColumnLetters.ToLetters(column.Value), other));
+                    continue;
+                }
+
                 // ✎ Pass 3b (UAT P2-2, profile TEST2): an optional field that matches a column another field already reads is left
                 // unread and reported on the field (a warning); only a required one blocks — before, it zeroed every row silently.
                 log.Add(new ImportIssue(
@@ -323,11 +331,24 @@ public static partial class RegistryImportParser
         return mapped;
     }
 
+    /// <summary>✎ D-569: a field the caller stores (<see cref="ImportFieldSpec.UnreadKey"/>) that reads no column — an error.</summary>
+    private static ImportIssue Unread(ImportFieldSpec field, string key, string? column, string? other)
+    {
+        var values = new Dictionary<string, string>
+        {
+            ["field"] = field.Name,
+            ["column"] = field.TargetLabel ?? field.Name,
+            ["fileColumn"] = column ?? "",
+            ["other"] = other ?? "",
+        };
+        return new ImportIssue(ImportSeverity.Error, key, null, column, field.Name, values);
+    }
+
     /// <summary>
     /// Columns no field reads whose WHOLE header text (or the last header row) equals a candidate's name get that candidate
     /// (<see cref="RegistryImportSpec.ByHeaderName"/>): it joins the fields with the column set, and the column is no longer unmapped.
     /// </summary>
-    private static RegistryImportSpec MatchByHeaderName(RegistryImportSpec spec, ColumnHeader[] headers, Dictionary<string, int> columns)
+    private static RegistryImportSpec MatchByHeaderName(RegistryImportSpec spec, ColumnHeader[] headers, Dictionary<string, int> columns, IssueLog log)
     {
         if (spec.ByHeaderName.Count == 0)
         {
@@ -353,6 +374,13 @@ public static partial class RegistryImportParser
                 .ToList();
             if (hits.Count != 1)
             {
+                // ✎ D-569: a candidate the caller stores no matter what (a field of the specification named after an added column)
+                // must be found — otherwise the column would stay empty after a «successful» apply.
+                if (candidate.Field.UnreadKey is { } unread)
+                {
+                    log.Add(Unread(candidate.Field, unread, null, null));
+                }
+
                 continue;
             }
 

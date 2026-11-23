@@ -75,10 +75,13 @@ public sealed class AirLimitsImportTarget(
                 await CreateNaeAsync(tables, plan, air.NaeRegionForCreate, air.NaeAreaForCreate, token).ConfigureAwait(false);
                 Data.Invalidate();
 
-                // 2. The replaced rows (substances first: a source with substances is referenced).
+                // 2. The replaced rows (substances first: a source with substances is referenced). ✎ D-569 (P-1123-1): EVERY row of
+                // the permit, in every region / area, plus the confirmed rows of other permits for the same NAE — the plan lists them.
+                var own = permitId.ToString(CultureInfo.InvariantCulture);
                 var keys = plan.Delete.Select(d => d.Key).ToList();
                 var doomed = (await StoredAsync(tables, permitId, air, keys, token).ConfigureAwait(false))
-                    .Where(s => plan.Delete.Any(d => d.OwnerKey == s.Parent.OwnerKey && d.Key == s.Parent.Key))
+                    .Where(s => s.Parent.OwnerKey == own
+                                || plan.Delete.Any(d => d.OwnerKey == s.Parent.OwnerKey && d.Key == s.Parent.Key))
                     .ToList();
                 // Set-based: substances first (a source with substances is referenced), then the sources, one batch each.
                 await deleter.HandleManyAsync(AirLimitsSchema.SubstancesRegistry, [.. doomed.SelectMany(d => d.ChildIds)], token).ConfigureAwait(false);
@@ -86,18 +89,53 @@ public sealed class AirLimitsImportTarget(
                 uow.ReleaseSavedRegistryRows();
                 Data.Invalidate();
 
-                // 3. The new rows. ✎ F13-p198 P3-3: values of ADDED columns the profile does not map are carried over from this
-                // permit's replaced row with the same NAE (and substance): a re-import must not wipe what the file does not carry.
-                var own = permitId.ToString(CultureInfo.InvariantCulture);
-                var carry = new Carry(
-                    doomed.Where(d => d.Parent.OwnerKey == own)
-                        .GroupBy(d => d.Parent.Key, StringComparer.Ordinal)
-                        .ToDictionary(g => g.Key, g => g.First().Parent.Values, StringComparer.Ordinal),
-                    doomed.Where(d => d.Parent.OwnerKey == own)
-                        .SelectMany(d => d.Parent.Children.Select(c => (Key: $"{d.Parent.Key}/{c.Key}", c.Values)))
-                        .GroupBy(c => c.Key, StringComparer.Ordinal)
-                        .ToDictionary(g => g.Key, g => g.First().Values, StringComparer.Ordinal));
-                var inserted = await InsertAsync(tables, plan, permitId, air, carry, token).ConfigureAwait(false);
+                // 3. The new rows. ✎ D-569 (P-1123-1): the last uploaded table is the truth — nothing is carried over from the
+                // replaced rows (the former F13-p198 P3-3 carry-over of added columns is gone): a column the file does not have is empty.
+                var inserted = await InsertAsync(tables, plan, permitId, air, token).ConfigureAwait(false);
+                var insertedKeys = plan.Insert.Select(p => p.Key).ToHashSet(StringComparer.Ordinal);
+                var removed = doomed
+                    .Where(d => d.Parent.OwnerKey == own && (d.Parent.Scope is not null || !insertedKeys.Contains(d.Parent.Key)))
+                    .Select(d => d.Parent.Scope is null ? d.Parent.Key : $"{d.Parent.Key}@{d.Parent.Scope}")
+                    .ToList();
+                var removedOthers = doomed
+                    .Where(d => d.Parent.OwnerKey != own)
+                    .Select(d => $"{d.Parent.Key}@{d.Parent.OwnerLabel ?? d.Parent.OwnerKey}")
+                    .ToList();
+
+                // ✎ D-569: the permit's «current table» — one record per permit (seek by entity), read by the permit card.
+                await audit.WriteStructureChangeAsync(
+                    new StructureChangeRecord(
+                        ChangedAt: clock.UtcNow,
+                        TemplateVersionId: 0,
+                        EntityType: AirLimitsSchema.CurrentTableAuditEntity,
+                        EntityId: checked((int)permitId),
+                        ChangeClass: ChangeClass.Guarded,
+                        Operation: "AirLimitsImport",
+                        OldJson: JsonSerializer.Serialize(new { replaced = doomed.Count(d => d.Parent.OwnerKey == own), removed, removedOthers }),
+                        NewJson: JsonSerializer.Serialize(new
+                        {
+                            fileName = plan.FileName,
+                            fileSha256 = plan.FileSha256,
+                            profile = plan.ProfileCode,
+                            spec = plan.SpecJson,
+                            sources = inserted.Sources,
+                            substances = inserted.Substances,
+                            region = air.Region.Code,
+                            area = air.Area?.Code,
+                            fingerprint = plan.Fingerprint,
+                        }),
+                        ChangeReason: JsonSerializer.Serialize(new
+                        {
+                            k = "registryAudit.airLimitsImport",
+                            p = new
+                            {
+                                sources = inserted.Sources.ToString(CultureInfo.InvariantCulture),
+                                substances = inserted.Substances.ToString(CultureInfo.InvariantCulture),
+                            },
+                        }),
+                        ChangedByUserId: userId,
+                        CorrelationId: currentUser.CorrelationId),
+                    token).ConfigureAwait(false);
 
                 await audit.WriteStructureChangeAsync(
                     new StructureChangeRecord(
@@ -107,10 +145,11 @@ public sealed class AirLimitsImportTarget(
                         EntityId: tables.Sources.Id,
                         ChangeClass: ChangeClass.Guarded,
                         Operation: "AirLimitsImport",
-                        OldJson: JsonSerializer.Serialize(new { replaced = doomed.Count, owners = plan.Delete.Select(d => d.OwnerKey).Distinct().Count() }),
+                        OldJson: JsonSerializer.Serialize(new { replaced = doomed.Count, owners = plan.Delete.Select(d => d.OwnerKey).Distinct().Count(), removed, removedOthers }),
                         NewJson: JsonSerializer.Serialize(new
                         {
                             permitId,
+                            fileName = plan.FileName,
                             sources = inserted.Sources,
                             substances = inserted.Substances,
                             createdNae = plan.CreateReferences.Count,
@@ -151,16 +190,35 @@ public sealed class AirLimitsImportTarget(
         var sameNae = await Data.EntriesPointingAtAsync(tables.Sources, AirLimitsSchema.Nae, [.. naeIds.Values], ct).ConfigureAwait(false);
         var sources = await Data.ReadAsync(tables.Sources, [.. own, .. sameNae], ct).ConfigureAwait(false);
 
-        // ✎ AIR-ON-AIR: own rows only inside the scope (the same region / area VALUES stored on the rows — one AIR permit holds
-        // several region/area blocks); other permits' rows are matched by NAE (which already carries region and area), Q2.
+        // ✎ D-569 (P-1123-1, was AIR-ON-AIR «own rows only inside the scope»): EVERY own row of the permit — the last uploaded
+        // table is the only current one, whatever region / area it was loaded for; a row outside the import's region / area carries
+        // that scope's label and is only ever removed. Other permits' rows are matched by NAE (which already carries region and
+        // area), Q2.
         var chosen = sources.Values
             .Where(r => r.Ref(permitField) == permitId
-                ? air.Holds(r)
-                : r.Ref(AirLimitsSchema.Nae) is { } n && naeIds.ContainsValue(n))
+                        || (r.Ref(AirLimitsSchema.Nae) is { } n && naeIds.ContainsValue(n)))
             .ToList();
         if (chosen.Count == 0)
         {
             return [];
+        }
+
+        var scopeCodes = new Dictionary<long, string>();
+        foreach (var id in chosen.Where(r => r.Ref(permitField) == permitId && !air.Holds(r))
+                     .SelectMany(r => new[] { r.Ref(AirLimitsSchema.Region), r.Ref(AirLimitsSchema.Area) })
+                     .OfType<long>()
+                     .Distinct())
+        {
+            if (await registries.FindEntryAsync(id, ct).ConfigureAwait(false) is { } scopeEntry)
+            {
+                scopeCodes[id] = scopeEntry.Code;
+            }
+        }
+
+        string ScopeLabel(AirRow row)
+        {
+            string Part(string column) => row.Ref(column) is { } id ? scopeCodes.GetValueOrDefault(id) ?? id.ToString(CultureInfo.InvariantCulture) : row.Text(column) ?? "-";
+            return $"{Part(AirLimitsSchema.Region)} / {Part(AirLimitsSchema.Area)}";
         }
 
         var naeCodes = await Data.NaeCodesAsync(tables, [.. chosen.Select(c => c.Ref(AirLimitsSchema.Nae)).OfType<long>().Distinct()], ct).ConfigureAwait(false);
@@ -177,13 +235,25 @@ public sealed class AirLimitsImportTarget(
         var result = new List<StoredSource>();
         foreach (var row in chosen)
         {
-            if (row.Ref(AirLimitsSchema.Nae) is not { } naeId || !naeCodes.TryGetValue(naeId, out var naeCode))
+            var owner = row.Ref(permitField)!.Value;
+            var mine = owner == permitId;
+            string naeCode;
+            if (row.Ref(AirLimitsSchema.Nae) is { } naeId && naeCodes.TryGetValue(naeId, out var code0))
+            {
+                naeCode = code0;
+            }
+            else if (mine)
+            {
+                // ✎ D-569: an own row whose NAE node is gone is still the permit's old data — removed with the rest, never kept.
+                naeCode = $"#{row.Entry.Id.ToString(CultureInfo.InvariantCulture)}";
+            }
+            else
             {
                 continue;
             }
 
-            var owner = row.Ref(permitField)!.Value;
             var label = permits.TryGetValue(owner, out var permit) ? permit.Text("Permit_Number") : null;
+            var scope = mine && (!air.Holds(row) || naeCode.StartsWith('#')) ? ScopeLabel(row) : null;
 
             var values = new Dictionary<string, object?>(StringComparer.Ordinal) { ["naeCode"] = naeCode };
             foreach (var (field, column) in parentColumns)
@@ -212,7 +282,7 @@ public sealed class AirLimitsImportTarget(
             }
 
             result.Add(new StoredSource(
-                new ExistingParent(owner.ToString(CultureInfo.InvariantCulture), label, naeCode, values, kids), row.Entry.Id, kidIds));
+                new ExistingParent(owner.ToString(CultureInfo.InvariantCulture), label, naeCode, values, kids, scope), row.Entry.Id, kidIds));
         }
 
         return result;
@@ -349,13 +419,10 @@ public sealed class AirLimitsImportTarget(
 
     // ---------- insert ----------
 
-    /// <summary>Stored values of the replaced own rows: NAE → source values, «NAE/substance» → substance values (by field name).</summary>
-    private sealed record Carry(
-        IReadOnlyDictionary<string, IReadOnlyDictionary<string, object?>> Sources,
-        IReadOnlyDictionary<string, IReadOnlyDictionary<string, object?>> Substances);
+
 
     private async Task<(int Sources, int Substances)> InsertAsync(
-        AirTables tables, ImportApplyPlan plan, long permitId, AirImportScope air, Carry carry, CancellationToken ct)
+        AirTables tables, ImportApplyPlan plan, long permitId, AirImportScope air, CancellationToken ct)
     {
         if (plan.Insert.Count == 0)
         {
@@ -385,17 +452,12 @@ public sealed class AirLimitsImportTarget(
                 [AirLimitsSchema.Area] = air.Area?.Stored,
                 [AirLimitsSchema.SiteLabel] = parent.GroupLabel,
             };
-            var keptSource = carry.Sources.GetValueOrDefault(parent.Key);
             foreach (var (field, column) in parentColumns)
             {
+                // ✎ D-569: only what the file carries; a column the file does not have stays empty on the new row (no carry-over).
                 if (parent.Values.TryGetValue(field, out var value) || AirLimitsSchema.ParentColumns.ContainsKey(field))
                 {
                     values[column] = value;
-                }
-                else if (keptSource?.GetValueOrDefault(field) is { } kept)
-                {
-                    // An added column the profile does not map: the replaced row's value stays (P3-3).
-                    values[column] = kept;
                 }
             }
 
@@ -433,16 +495,11 @@ public sealed class AirLimitsImportTarget(
                     [AirLimitsSchema.Source] = sourceIds[i],
                     [AirLimitsSchema.Substance] = substanceId,
                 };
-                var keptSubstance = carry.Substances.GetValueOrDefault($"{plan.Insert[i].Key}/{child.Key}");
                 foreach (var (field, column) in childColumns)
                 {
                     if (child.Values.TryGetValue(field, out var value) || AirLimitsSchema.ChildColumns.ContainsKey(field))
                     {
                         values[column] = value;
-                    }
-                    else if (keptSubstance?.GetValueOrDefault(field) is { } kept)
-                    {
-                        values[column] = kept;
                     }
                 }
 

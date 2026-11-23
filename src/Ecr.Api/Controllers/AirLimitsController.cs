@@ -223,7 +223,8 @@ public sealed class AirLimitsController(
         using var parsePermit = await parseGate.EnterAsync(ct).ConfigureAwait(false);
         var options = WithScope(ParseOptions(request), regionEntryId, areaEntryId, region, area);
         await using var stream = file.OpenReadStream();
-        return Ok(await import.ApplyAsync(permitId, stream, options, ct).ConfigureAwait(false));
+        // ✎ D-569: the file name becomes the permit's «current table» (audit); the name the browser sent, never a path.
+        return Ok(await import.ApplyAsync(permitId, stream, options, ct, file.FileName).ConfigureAwait(false));
     }
 
     /// <summary>
