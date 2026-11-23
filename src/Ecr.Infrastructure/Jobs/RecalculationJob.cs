@@ -70,7 +70,8 @@ public sealed partial class RecalculationJob(
     IRecalculationCompletionHook? completionHook = null,
     IMonthColumnRouter? monthRouter = null,
     IJobLeaseContext? lease = null,
-    IJobQueue? queue = null) : IRecalculationJob
+    IJobQueue? queue = null,
+    IDependencyGraphProvider? graph = null) : IRecalculationJob
 {
     [LoggerMessage(
         Level = LogLevel.Error,
@@ -1107,7 +1108,25 @@ public sealed partial class RecalculationJob(
         // ✎ PSS-04: у ланцюжку — після КОЖНОГО кроку: період уже актуальний, залежні від нього не чекають решти року.
         if (completionHook is not null && scopeByDocument.Count > 0)
         {
-            await completionHook.OnSucceededAsync(scopeByDocument, request.SourceHop, ct).ConfigureAwait(false);
+            // ✎ PERF-06b (D-572): місяці правки річного/квартального джерела — лише з доказом, що його методології й формули не
+            // переносять зміну в інші місяці; сумнів — увесь рік.
+            IReadOnlyDictionary<long, int[]> completed = scopeByDocument;
+            if (request is { SourceMonths.Length: > 0, PeriodKey: { } autoPeriod }
+                && await SourceKeepsMonthsAsync(request.DocumentId, ct).ConfigureAwait(false))
+            {
+                var withMonths = new ChangedPeriodsDictionary
+                {
+                    SourceMonths = new Dictionary<int, IReadOnlySet<int>> { [autoPeriod] = request.SourceMonths.ToHashSet() },
+                };
+                foreach (var (doc, periods) in scopeByDocument)
+                {
+                    withMonths[doc] = periods;
+                }
+
+                completed = withMonths;
+            }
+
+            await completionHook.OnSucceededAsync(completed, request.SourceHop, ct).ConfigureAwait(false);
         }
 
         if (chainContinues)
@@ -4019,6 +4038,12 @@ public sealed partial class RecalculationJob(
 /// <c>-dependents-approved</c> — надмножина роботи), але пізніші місяці, що читають їхні обчислені числа, — так: задача
 /// названого періоду будить лише ранніших читачів. Злиття — об'єднанням.
 /// </param>
+/// <param name="SourceMonths">
+/// ✎ PERF-06b (<c>D-572</c>): власний перерахунок (<c>-auto</c>) РІЧНОГО/КВАРТАЛЬНОГО документа-джерела після правки — місяці
+/// правки (усі змінені колонки місячні). Успіх прогону передає їх хуку джерела, ЯКЩО методології й формули джерела не
+/// переносять зміну в інші місяці (<c>SourceKeepsMonthsAsync</c>); інакше — увесь рік. Злиття — об'єднанням, постановка без
+/// місяців знімає їх. <c>null</c> — увесь рік.
+/// </param>
 public sealed record RecalculationRequest(
     int ProjectId,
     long DocumentId,
@@ -4047,7 +4072,8 @@ public sealed record RecalculationRequest(
     bool ChainRecheck = false,
     int[]? CascadePeriods = null,
     int[]? CascadeAppend = null,
-    int[]? CascadeSeeds = null)
+    int[]? CascadeSeeds = null,
+    int[]? SourceMonths = null)
 {
     /// <summary>
     /// ✎ B59: нижня межа ключа періоду скоупу (включно); без року — <see cref="int.MinValue"/>.

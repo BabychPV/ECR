@@ -164,6 +164,31 @@ public interface IBackgroundJobScheduler
         => Task.FromResult<string?>(null);
 
     /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>): те саме, що <see cref="FindQueuedAsync{TJob}"/>, для кількох цілей одним зверненням (постановка
+    /// каскаду споживача за 12 періодів): ціль → <c>JobId</c> задачі, що чекає; цілі без такої задачі в результаті немає.
+    /// </summary>
+    /// <typeparam name="TJob">Маркер задачі.</typeparam>
+    /// <param name="targetKeys">Цілі (без префікса типу).</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Ціль → <c>JobId</c>.</returns>
+    /// <remarks>Типова реалізація — по одній ціллю (<see cref="FindQueuedAsync{TJob}"/>).</remarks>
+    public async Task<IReadOnlyDictionary<string, string>> FindQueuedManyAsync<TJob>(
+        IReadOnlyCollection<string> targetKeys, CancellationToken ct) where TJob : IBackgroundJob
+    {
+        ArgumentNullException.ThrowIfNull(targetKeys);
+        var found = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var target in targetKeys.Distinct(StringComparer.Ordinal))
+        {
+            if (await FindQueuedAsync<TJob>(target, ct).ConfigureAwait(false) is { Length: > 0 } jobId)
+            {
+                found[target] = jobId;
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>
     /// Скасовує задачу, що ЧЕКАЄ на ціль, не чіпаючи виконуваної.
     /// </summary>
     /// <typeparam name="TJob">Маркер задачі.</typeparam>

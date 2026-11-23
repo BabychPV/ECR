@@ -455,6 +455,36 @@ public sealed class FormulaRecalculationDocumentPassSqlTests(SqlServerFixture sq
     }
 
     /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>): хук правки отримує колонки, змінені в кожному періоді проходу (насіння й похідні) — з них
+    /// хук джерела виводить місяці правки річного/квартального документа-джерела.
+    /// </summary>
+    /// <remarks>Мутація: не передавати <c>ChangedColumns</c> у <c>ChangedPeriodsDictionary</c> — червоний.</remarks>
+    [Fact]
+    [Trait("Finding", "PERF-06")]
+    public async Task PERF06b_хук_правки_отримує_змінені_колонки_за_періодом()
+    {
+        var world = await ArrangeAsync(Chain);
+        await SetInputAsync(world, 4, 46m);
+
+        var hook = Substitute.For<IRecalculationCompletionHook>();
+        IReadOnlyDictionary<long, int[]>? seen = null;
+        hook.OnCellsEditedAsync(Arg.Do<IReadOnlyDictionary<long, int[]>>(s => seen = s), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        await RunJobAsync(
+            world,
+            new FormulaRecalculationRequest(world.Instance(4).InstanceId, Period(4), [Seed(world, 4)], world.Doc.DocumentId),
+            new RecordingAuditWriter(),
+            hook);
+
+        var columns = Assert.IsType<ChangedPeriodsDictionary>(seen).ChangedColumns;
+        Assert.NotNull(columns);
+        Assert.Contains(world.Doc.ColumnDefIds[1], columns[Period(4)]);
+        Assert.Contains(world.Doc.ColumnDefIds[3], columns[Period(4)]);
+        Assert.Contains(world.Doc.ColumnDefIds[2], columns[Period(5)]);
+    }
+
+    /// <summary>
     /// B179 L2b, запобіжник петлі: прохід ЛИШЕ з міжперіодних джерел (його ставить <c>CrossPeriodFanOut</c>, зокрема сам
     /// <c>RecalculationJob</c>) — не правка: хук як у L2 (<c>OnSucceededAsync</c>, ланка 0), власного перерахунку не просить.
     /// </summary>

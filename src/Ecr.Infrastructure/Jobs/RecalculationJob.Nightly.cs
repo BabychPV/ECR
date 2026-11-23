@@ -480,7 +480,7 @@ public sealed partial class RecalculationJob
             .AsNoTracking()
             .Where(b => b.ReadFromDocument && b.Consumers.Any(c => c.TemplateId == consumerTemplateId))
             .OrderBy(b => b.Id)
-            .Select(b => new { b.SourceTemplateId, b.UpdatedAt })
+            .Select(b => new { b.Id, b.SourceTemplateId, b.UpdatedAt })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -506,7 +506,8 @@ public sealed partial class RecalculationJob
             result.Add(new NightlySource(
                 binding.UpdatedAt is { } at ? DateTime.SpecifyKind(at, DateTimeKind.Utc) : null,
                 documents,
-                documents.Count > MaxNightlySourceDocuments));
+                documents.Count > MaxNightlySourceDocuments,
+                binding.Id));
         }
 
         context.SourcesByConsumer[consumerTemplateId] = result;
@@ -673,4 +674,5 @@ internal sealed record NightlyContext(int ProjectId, int Year, bool SkipUnchange
 /// <param name="UpdatedAt">Коли змінено стан чи біти зв'язки.</param>
 /// <param name="DocumentIds">Документи шаблону-джерела.</param>
 /// <param name="Overflow">Документів понад стелю — перелік неповний.</param>
-internal sealed record NightlySource(DateTime? UpdatedAt, IReadOnlyList<long> DocumentIds, bool Overflow);
+/// <param name="BindingId">✎ PERF-06b (<c>D-572</c>): зв'язка (обсяг ребра графа для помісячної гілки джерел детектора кнопки).</param>
+internal sealed record NightlySource(DateTime? UpdatedAt, IReadOnlyList<long> DocumentIds, bool Overflow, int BindingId = 0);

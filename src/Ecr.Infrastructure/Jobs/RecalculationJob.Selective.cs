@@ -364,7 +364,7 @@ public sealed partial class RecalculationJob
 
         // (4) Документні входи D-562: зміна в момент T будить місяці з межею ≤ T — межі за зростанням, двійковий пошук.
         var bySince = open.OrderBy(Since).ToList();
-        var docLevel = await DocumentLevelProbeAsync(projectId, documentId, year, ct).ConfigureAwait(false);
+        var (docLevel, sourceMonths) = await DocumentLevelProbeAsync(projectId, documentId, year, ct).ConfigureAwait(false);
         int lo = 0, hi = bySince.Count;
         while (lo < hi)
         {
@@ -384,6 +384,20 @@ public sealed partial class RecalculationJob
         if (open.Count == 0)
         {
             return flagged;
+        }
+
+        // ✎ PERF-06b (D-572): гілка джерел B179 — ПОМІСЯЧНО: місяць споживача будить лише зміна (правка, актуальний прогін,
+        // погодження) періоду джерела, що покриває місяць, який він читає за обсягом ребра графа; не «усі місяці, новіші за
+        // прогін джерела» (доти рівень документа будив і місяці, які каскад уже порахував).
+        if (sourceMonths is not null)
+        {
+            var woken = await sourceMonths([.. open.Select(m => (m, Since(m)))]).ConfigureAwait(false);
+            flagged.UnionWith(woken);
+            open = [.. open.Where(m => !woken.Contains(m))];
+            if (open.Count == 0)
+            {
+                return flagged;
+            }
         }
 
         // (5) Читач результатів місяця-власника (скрипт, колонка Calculated з чужим власником) з новішим прогоном власника —
@@ -497,6 +511,125 @@ public sealed partial class RecalculationJob
     }
 
     /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>): доказ «зміна місяця m річного/квартального документа-джерела лишається в місяці m» — тоді
+    /// каскад споживачів отримує місяці правки, а не весь рік. Кожна умова — інакше <c>false</c> (увесь рік):
+    /// </summary>
+    /// <remarks>
+    /// <list type="number">
+    /// <item>кожна версія кожної методології, прив'язаної до таблиць документа, — рівня <c>Module</c> (модуль місячних колонок:
+    /// аргументи — комірки СВОГО місяця, D-545); інший рівень читає що завгодно;</item>
+    /// <item>скрипт (і кожна бібліотека, яку він імпортує, до 8 рівнів) компілюється, не читає місячної колонки ІНШОГО місяця
+    /// (<see cref="ReadsOtherMonths"/> — та сама перевірка, що D-564a п. 7 і D-568) і не читає інших таблиць
+    /// (<c>ReadTables</c>);</item>
+    /// <item>жодна формула версій документа не переносить місяць: зсув періоду, залежність на таблицю/діапазон без колонки,
+    /// формула без колонки-цілі (рядкова), місячна колонка іншого місяця у формулі місячної, не-місячна ОБЧИСЛЮВАНА колонка у
+    /// формулі місячної (річний підсумок у не-місячній колонці споживачі не читають — вони беруть лише місячні колонки й F_).
+    /// Залежність формули від введеного іншого місяця, яку бачить прохід формул, однаково дала б не-місячну/іншу колонку в
+    /// змінених — тут перевіряється те, що порахує лише сам прогін (результати методологій, відкладені крос-аркушні).</item>
+    /// </list>
+    /// Звернень: 3–4 (лише для <c>-auto</c> річного/квартального джерела з місяцями).
+    /// </remarks>
+    private async Task<bool> SourceKeepsMonthsAsync(long documentId, CancellationToken ct)
+    {
+        var instances = await (
+                from i in DocumentInstancesQuery(db, documentId)
+                where i.DocumentId == documentId
+                join t in db.TableDefs.AsNoTracking() on i.TableDefId equals t.Id
+                join sh in db.SheetDefs.AsNoTracking() on t.SheetDefId equals sh.Id
+                select new { i.TableDefId, sh.TemplateVersionId })
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var tableDefIds = instances.Select(i => i.TableDefId).Distinct().ToList();
+        var versionIds = instances.Select(i => i.TemplateVersionId).Distinct().ToList();
+
+        var methodologyIds = await db.CalculationBindings
+            .AsNoTracking()
+            .Where(b => b.IsActive && tableDefIds.Contains(b.TableDefId))
+            .Select(b => b.MethodologyId)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var seen = new HashSet<int>();
+        var pending = methodologyIds.ToList();
+        for (var depth = 0; pending.Count > 0; depth++)
+        {
+            if (depth >= 8)
+            {
+                return false;
+            }
+
+            var batch = pending.Where(seen.Add).ToList();
+            pending.Clear();
+            if (batch.Count == 0)
+            {
+                break;
+            }
+
+            var versions = await db.MethodologyVersions
+                .AsNoTracking()
+                .Where(v => batch.Contains(v.MethodologyId))
+                .Select(v => new { v.Id, v.Engine, v.Level, v.ScriptText, v.NumericMode,
+                                   Library = db.Methodologies.Any(m => m.Id == v.MethodologyId && m.Kind == Domain.Enums.MethodologyKind.Library) })
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            foreach (var version in versions)
+            {
+                // Рівень — лише прив'язаних (бібліотека сама не рахує, її читає скрипт, що імпортує).
+                if (depth == 0 && !version.Library && version.Level != Domain.Enums.CalculationLevel.Module)
+                {
+                    return false;
+                }
+
+                if (version.Engine != Domain.Enums.MethodologyEngine.Script)
+                {
+                    continue;
+                }
+
+                var compiled = Ecr.Scripting.ScriptCompiler.Compile(
+                    version.ScriptText ?? string.Empty,
+                    new Ecr.Scripting.ScriptCompileOptions(version.NumericMode, version.Library)).Script;
+                if (compiled is null || compiled.ReadTables.Count > 0 || ReadsOtherMonths(compiled))
+                {
+                    return false;
+                }
+            }
+
+            var scriptVersionIds = versions.Where(v => v.Engine == Domain.Enums.MethodologyEngine.Script).Select(v => v.Id).ToList();
+            pending.AddRange(await db.MethodologyImports
+                .AsNoTracking()
+                .Where(i => scriptVersionIds.Contains(i.MethodologyVersionId))
+                .Select(i => i.ImportedMethodologyId)
+                .Distinct()
+                .ToListAsync(ct)
+                .ConfigureAwait(false));
+        }
+
+        const Domain.Enums.CellDataType formula = Domain.Enums.CellDataType.Formula;
+        const Domain.Enums.CellDataType calculated = Domain.Enums.CellDataType.Calculated;
+        return !await (
+                from d in db.FormulaDependencies.AsNoTracking()
+                join f in db.FormulaDefs.AsNoTracking() on d.FormulaDefId equals f.Id
+                join t in db.TableDefs.AsNoTracking() on f.TableDefId equals t.Id
+                join sh in db.SheetDefs.AsNoTracking() on t.SheetDefId equals sh.Id
+                where versionIds.Contains(sh.TemplateVersionId) && !f.IsDeleted
+                join c in db.ColumnDefs.AsNoTracking() on d.ColumnDefId equals (int?)c.Id into cs
+                from c in cs.DefaultIfEmpty()
+                join tc in db.ColumnDefs.AsNoTracking() on f.ColumnDefId equals (int?)tc.Id into tcs
+                from tc in tcs.DefaultIfEmpty()
+                where (d.PeriodOffset != null && d.PeriodOffset != 0)
+                      || (d.ColumnDefId == null && d.TableDefId != null)
+                      || (tc == null && (d.ColumnDefId != null || d.TableDefId != null))
+                      || (c != null && tc != null && c.IsMonthColumn && tc.IsMonthColumn && c.MonthNumber != tc.MonthNumber)
+                      || (c != null && tc != null && !c.IsMonthColumn && tc.IsMonthColumn
+                          && (c.DataType == formula || c.DataType == calculated))
+                select d.FormulaDefId)
+            .AnyAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Чи скрипт читає місячну колонку з індексом, ІНШИМ за свій місяць: кожен виклик <c>$month</c>/<c>$cellMonth</c> у
     /// скомпільованому дереві, чий індекс не дослівно <c>[Period].Sequence</c> (<c>row.X[period.Month]</c>). Змінна з тим самим
     /// значенням, <c>row.X[3]</c>, <c>row.X[m-1]</c>, цикл — «читає інші» (консервативно).
@@ -600,8 +733,14 @@ public sealed partial class RecalculationJob
     /// Перевірка документних входів D-562 (усі гілки, крім правок комірок) від межі <c>since</c>: версії шаблону документа й
     /// зв'язки документів-джерел читаються один раз.
     /// </summary>
-    private async Task<Func<DateTime, Task<bool>>> DocumentLevelProbeAsync(
-        int projectId, long documentId, int year, CancellationToken ct)
+    /// <remarks>
+    /// ✎ PERF-06b (<c>D-572</c>): гілку документів-джерел (8) перевіряє не перша функція (рівень документа), а друга —
+    /// помісячно (<see cref="SourceMonthsProbe"/>); <c>null</c> — документ не споживач. Зміна самої зв'язки (<c>UpdatedAt</c>) —
+    /// рівень документа, як доти.
+    /// </remarks>
+    private async Task<(Func<DateTime, Task<bool>> DocumentLevel,
+            Func<IReadOnlyList<(int Month, DateTime Since)>, Task<HashSet<int>>>? SourceMonths)>
+        DocumentLevelProbeAsync(int projectId, long documentId, int year, CancellationToken ct)
     {
         var versions = await (
                 from i in DocumentInstancesQuery(db, documentId)
@@ -616,29 +755,179 @@ public sealed partial class RecalculationJob
             .ConfigureAwait(false);
         if (versions.Count > MaxNightlyTemplateVersions)
         {
-            return _ => Task.FromResult(true);
+            return (_ => Task.FromResult(true), null);
         }
 
         var context = new NightlyContext(projectId, year, SkipUnchanged: true);
-        var sources = new List<NightlySource>();
+        var sources = new List<(int ConsumerTemplateId, NightlySource Source)>();
         foreach (var templateId in versions.Select(v => v.TemplateId).Distinct())
         {
-            sources.AddRange(await NightlySourcesOfAsync(templateId, context, ct).ConfigureAwait(false));
+            sources.AddRange((await NightlySourcesOfAsync(templateId, context, ct).ConfigureAwait(false)).Select(s => (templateId, s)));
         }
 
-        var sourceDocuments = sources.SelectMany(s => s.DocumentIds).Where(id => id != documentId).Distinct().ToArray();
-        if (sources.Exists(s => s.Overflow) || sourceDocuments.Length > MaxNightlySourceDocuments)
+        var sourceDocuments = sources.SelectMany(s => s.Source.DocumentIds).Where(id => id != documentId).Distinct().ToArray();
+        if (sources.Exists(s => s.Source.Overflow) || sourceDocuments.Length > MaxNightlySourceDocuments)
         {
-            return _ => Task.FromResult(true);
+            return (_ => Task.FromResult(true), null);
         }
 
         int[] templateVersionIds = [.. versions.Select(v => v.TemplateVersionId).Distinct()];
-        return async since =>
-            sources.Exists(s => s.UpdatedAt is { } updated && updated >= since)
+        Func<DateTime, Task<bool>> documentLevel = async since =>
+            sources.Exists(s => s.Source.UpdatedAt is { } updated && updated >= since)
             || await NightlyInputChangeQuery
                 .FirstChangeAsync(
-                    db, new NightlyInputProbe(projectId, documentId, since, templateVersionIds, sourceDocuments), cellBranch: false, ct)
+                    db, new NightlyInputProbe(projectId, documentId, since, templateVersionIds, []), cellBranch: false, ct)
                 .ConfigureAwait(false) is not null;
+
+        return (documentLevel, sourceDocuments.Length == 0
+            ? null
+            : months => SourceMonthsProbe(projectId, documentId, year, sources, months, ct));
+    }
+
+    /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>): помісячна гілка документів-джерел B179 детектора кнопки (<c>D-564a</c> п. 5) — які з
+    /// <paramref name="months"/> (місяць споживача, його межа входів) треба рахувати через зміну джерела.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Місяць споживача P читає за обсягом ребра графа зв'язки × шаблон-споживач (<see cref="Ecr.Expressions.Binding.PeriodScope"/>): «місяць» — місяці
+    /// періоду P; «рік» з літеральними місяцями — ці місяці; «рік» — усі місяці року P. Покривні періоди джерела — його періоди
+    /// року P, що володіють хоч одним із цих місяців (<see cref="Persistence.DocumentSourceGate.OwnedMonths"/>: місячний — свій, квартальний —
+    /// три, річний — усі). P будиться, якщо після межі P у покривному періоді: правка комірки (крім записів перерахунку), новий
+    /// актуальний прогін джерела (результати його методологій), подія погодження; а також правка НЕ-місячної колонки якоря року
+    /// джерела в таблиці з місячними колонками (загальні дані року річної розкладки, D-540) чи додавання/видалення рядка джерела
+    /// (рядок року — у всіх місяцях). Не-місячна колонка таблиці БЕЗ місячних колонок — дані свого періоду (покривний період).
+    /// </para>
+    /// <para>
+    /// «Усе» (рік не впізнано), граф недоступний чи ребра немає — рівень документа, як доти: будь-яка зміна джерела після межі.
+    /// Один запит на виклик (≤ 12 місяців × документи джерела × покривні періоди), плюс знімок графа (кеш процесу) і періоди
+    /// документів джерела.
+    /// </para>
+    /// </remarks>
+    private async Task<HashSet<int>> SourceMonthsProbe(
+        int projectId, long documentId, int year, IReadOnlyList<(int ConsumerTemplateId, NightlySource Source)> sources,
+        IReadOnlyList<(int Month, DateTime Since)> months, CancellationToken ct)
+    {
+        var woken = new HashSet<int>();
+        if (months.Count == 0)
+        {
+            return woken;
+        }
+
+        var snapshot = graph is null ? null : await graph.GetAsync(ct).ConfigureAwait(false);
+        var consumerKind = await db.Projects.AsNoTracking().Where(p => p.Id == projectId).Select(p => p.PeriodKind)
+            .FirstAsync(ct).ConfigureAwait(false);
+
+        var documentIds = sources.SelectMany(s => s.Source.DocumentIds).Where(id => id != documentId).Distinct().ToList();
+        var (fromKey, toKey) = ((year * 100) + 1, (year * 100) + 99);
+        var periods = (await (
+                    from i in db.TableInstances.AsNoTracking()
+                    where documentIds.Contains(i.DocumentId) && i.PeriodKeyValue >= fromKey && i.PeriodKeyValue <= toKey
+                          && i.SheetCopyId == null
+                    join d in db.Documents.AsNoTracking() on i.DocumentId equals d.Id
+                    join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
+                    select new { i.DocumentId, i.PeriodKeyValue, p.PeriodKind })
+                .Distinct()
+                .ToListAsync(ct)
+                .ConfigureAwait(false))
+            .GroupBy(x => x.DocumentId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        var rows = new HashSet<(int P, DateTime Since, long Document, int? Covering, int? Anchor)>();
+        foreach (var (consumerTemplateId, source) in sources)
+        {
+            var edges = snapshot?.TemplateDependencies
+                .Where(d => d.BindingId == source.BindingId && d.ConsumerTemplateId == consumerTemplateId)
+                .Select(d => d.Scope)
+                .ToList();
+            Ecr.Expressions.Binding.PeriodScope? scope = edges is { Count: > 0 } ? edges.Aggregate((a, b) => a.Join(b)) : null;
+
+            foreach (var sourceDocument in source.DocumentIds.Where(id => id != documentId))
+            {
+                foreach (var (month, since) in months)
+                {
+                    if (scope is not { Kind: not Ecr.Expressions.Binding.PeriodScopeKind.All } known)
+                    {
+                        rows.Add((month, since, sourceDocument, null, null));
+                        continue;
+                    }
+
+                    var read = known.Kind == Ecr.Expressions.Binding.PeriodScopeKind.Month
+                        ? Persistence.DocumentSourceGate.OwnedMonths(consumerKind, month % 100).ToHashSet()
+                        : known.MonthMask != 0
+                            ? Enumerable.Range(1, 12).Where(m => (known.MonthMask & (1 << m)) != 0).ToHashSet()
+                            : Enumerable.Range(1, 12).ToHashSet();
+                    var own = periods.GetValueOrDefault(sourceDocument) ?? [];
+                    var anchor = own.Where(p => p.PeriodKeyValue / 100 == month / 100).Select(p => (int?)p.PeriodKeyValue).Min();
+                    foreach (var covering in own.Where(p => p.PeriodKeyValue / 100 == month / 100
+                                                           && Persistence.DocumentSourceGate.OwnedMonths(p.PeriodKind, p.PeriodKeyValue % 100).Any(read.Contains)))
+                    {
+                        rows.Add((month, since, sourceDocument, covering.PeriodKeyValue, anchor));
+                    }
+
+                    // Рядки джерела (будь-який період) і не-місячні колонки якоря — дані року для кожного місяця.
+                    if (anchor is { } a)
+                    {
+                        rows.Add((month, since, sourceDocument, 0, a));
+                    }
+                }
+            }
+        }
+
+        if (rows.Count == 0)
+        {
+            return woken;
+        }
+
+        var (recalc, calcError, calcResolved) =
+            (Ecr.Application.Documents.CellChangeOrigins.Recalculation, Ecr.Application.Documents.CellChangeOrigins.CalcError, Ecr.Application.Documents.CellChangeOrigins.CalcErrorResolved);
+        var args = new List<object?> { recalc, calcError, calcResolved };
+        var values = new System.Text.StringBuilder();
+        foreach (var row in rows)
+        {
+            var at = args.Count;
+            args.Add(row.P);
+            args.Add(DateTime.SpecifyKind(row.Since, DateTimeKind.Utc));
+            args.Add(row.Document);
+            args.Add(row.Covering ?? -1);
+            args.Add(row.Anchor ?? -1);
+            values.Append(values.Length == 0 ? "(" : ", (")
+                .Append(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    $"{{{at}}}, {{{at + 1}}}, {{{at + 2}}}, {{{at + 3}}}, {{{at + 4}}})");
+        }
+
+        // K = -1 — рівень документа (будь-який період); K = 0 — лише рядки й не-місячні колонки якоря A; інакше — покривний період K.
+        var sql = $$"""
+            /* ecr:source-month-change */
+            SELECT DISTINCT m.P AS Value
+              FROM (VALUES {{values}}) AS m (P, Since, D, K, A)
+              JOIN doc.Document AS sd ON sd.Id = m.D
+             WHERE (m.K <> 0
+                    AND (EXISTS (SELECT 1 FROM aud.CellChange AS c
+                                  WHERE c.DocumentId = m.D AND (m.K = -1 OR c.PeriodKey = m.K) AND c.ChangedAt >= m.Since
+                                    AND c.Origin NOT IN ({0}, {1}, {2}))
+                         OR EXISTS (SELECT 1 FROM calc.CalculationRun AS r
+                                     WHERE r.ProjectId = sd.ProjectId AND r.DocumentId = m.D AND (m.K = -1 OR r.PeriodKey = m.K)
+                                       AND r.Status = N'Current' AND COALESCE(r.FinishedAt, r.StartedAt) >= m.Since)
+                         OR EXISTS (SELECT 1 FROM wf.ApprovalEvent AS e
+                                     WHERE e.DocumentId = m.D AND (m.K = -1 OR e.PeriodKey = m.K) AND e.At >= m.Since)))
+                OR (m.K = 0
+                    AND (EXISTS (SELECT 1 FROM aud.RowChange AS rc WHERE rc.DocumentId = m.D AND rc.ChangedAt >= m.Since)
+                         OR EXISTS (SELECT 1 FROM aud.CellChange AS a
+                                      JOIN cfg.ColumnDef AS cd ON cd.Id = a.ColumnDefId
+                                     WHERE a.DocumentId = m.D AND a.PeriodKey = m.A AND a.ChangedAt >= m.Since
+                                       AND a.Origin NOT IN ({0}, {1}, {2}) AND cd.IsMonthColumn = 0
+                                       AND EXISTS (SELECT 1 FROM cfg.ColumnDef AS mc
+                                                    WHERE mc.TableDefId = cd.TableDefId AND mc.IsMonthColumn = 1 AND mc.IsDeleted = 0))))
+            """;
+        woken.UnionWith(await db.Database
+            .SqlQuery<int>(System.Runtime.CompilerServices.FormattableStringFactory.Create(sql, [.. args]))
+            .OrderBy(p => p)
+            .Take(months.Count)
+            .ToListAsync(ct)
+            .ConfigureAwait(false));
+        return woken;
     }
 
     /// <summary>

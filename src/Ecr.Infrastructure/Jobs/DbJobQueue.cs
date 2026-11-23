@@ -436,6 +436,27 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                         FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'') + N']'));
                     SET @rewrite = 1;
                 END
+                IF JSON_QUERY(@existing, '$.sourceMonths') IS NOT NULL
+                BEGIN
+                    -- ✎ PERF-06b (D-572): місяці правки річного/квартального джерела (`-auto`). Нова постановка без місяців
+                    -- (правка не-місячної колонки, збір PI) — увесь рік: місяці знято; з місяцями — об'єднанням.
+                    IF JSON_QUERY(@payload, '$.sourceMonths') IS NULL
+                    BEGIN
+                        SET @existing = JSON_MODIFY(@existing, '$.sourceMonths', NULL);
+                        SET @rewrite = 1;
+                    END
+                    ELSE IF EXISTS (SELECT [value] FROM OPENJSON(@payload, '$.sourceMonths')
+                                    EXCEPT SELECT [value] FROM OPENJSON(@existing, '$.sourceMonths'))
+                    BEGIN
+                        SET @existing = JSON_MODIFY(@existing, '$.sourceMonths', JSON_QUERY(N'[' + STUFF((
+                            SELECT N',' + u.v
+                            FROM (SELECT [value] AS v FROM OPENJSON(@existing, '$.sourceMonths')
+                                  UNION SELECT [value] FROM OPENJSON(@payload, '$.sourceMonths')) AS u
+                            ORDER BY TRY_CAST(u.v AS int)
+                            FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'') + N']'));
+                        SET @rewrite = 1;
+                    END
+                END
                 IF TRY_CAST(JSON_VALUE(@payload, '$.sourceHop') AS int)
                    < ISNULL(TRY_CAST(JSON_VALUE(@existing, '$.sourceHop') AS int), 0)
                 BEGIN
@@ -553,10 +574,14 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                 -- передає свої періоди тій, що позаду: інакше її місяці загубилися б разом із нею.
                 -- ✎ F5 (огляд b9, п. 1): так само поглинутий прохід читача (чи натискання з ним) — позначку `readerPassMerged`
                 -- отримує задача позаду, інакше ворота подання відпустили б місяць, якого прохід ще не перерахував.
+                -- ✎ PERF-06b (D-572): так само місяці правки річного джерела (`sourceMonths`) — у будь-якого з двох: поглинута з
+                -- місяцями передає їх позаду (об'єднання), поглинута без місяців знімає їх у задачі позаду (увесь рік).
                 SET @payload = CASE WHEN ISJSON({{chainPayload}}) = 1
                                     THEN CASE WHEN JSON_QUERY({{chainPayload}}, '$.cascadePeriods') IS NOT NULL
                                                    OR ISNULL(JSON_VALUE({{chainPayload}}, '$.foreignOwnerPass'), N'false') = N'true'
                                                    OR ISNULL(JSON_VALUE({{chainPayload}}, '$.readerPassMerged'), N'false') = N'true'
+                                                   OR JSON_QUERY({{chainPayload}}, '$.sourceMonths') IS NOT NULL
+                                                   OR (ISJSON(@payload) = 1 AND JSON_QUERY(@payload, '$.sourceMonths') IS NOT NULL)
                                               THEN {{chainPayload}} END
                                END;
         {{CoalescePayloadSql("@behind")}}
@@ -1472,6 +1497,42 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
             p => p.Add("@target", SqlDbType.NVarChar, JobProgress.MaxTargetKeyLength).Value = targetKey,
             async r => await r.ReadAsync(ct).ConfigureAwait(false) ? r.GetString(0) : null,
             ct);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ PERF-06b (<c>D-572</c>): той самий відбір, що <see cref="FindQueuedByTargetAsync"/>, на перелік цілей (JSON-параметр,
+    /// як <c>OPENJSON</c> в інших місцях черги) — одне звернення замість звернення на ціль.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<string, string>> FindQueuedByTargetsAsync(
+        IReadOnlyCollection<string> targetKeys, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(targetKeys);
+        if (targetKeys.Count == 0)
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        var json = System.Text.Json.JsonSerializer.Serialize(targetKeys.Distinct(StringComparer.Ordinal));
+        return await RunAsync<IReadOnlyDictionary<string, string>>(
+            """
+            SELECT q.TargetKey, q.JobId
+            FROM itg.JobProgress AS q WITH (INDEX(UX_JobProgress_Target_Queued))
+            WHERE q.TargetKey IN (SELECT CAST(t.[value] AS nvarchar(200)) FROM OPENJSON(@targets) AS t)
+              AND q.TargetKey IS NOT NULL AND q.[State] = 'Queued' AND q.Lane IS NOT NULL;
+            """,
+            p => p.Add("@targets", SqlDbType.NVarChar, -1).Value = json,
+            async r =>
+            {
+                var found = new Dictionary<string, string>(StringComparer.Ordinal);
+                while (await r.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    found[r.GetString(0)] = r.GetString(1);
+                }
+
+                return found;
+            },
+            ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

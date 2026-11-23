@@ -526,6 +526,24 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    /// <remarks>✎ PERF-06b (<c>D-572</c>): той самий відбір (B138), що <c>GetSheetsAsync</c>, — одним запитом на всі ключі.</remarks>
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<ApprovalState>>> GetSheetsForPeriodsAsync(
+        long documentId, IReadOnlyCollection<int> periodKeys, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(periodKeys);
+        var keys = periodKeys.Distinct().ToList();
+        var rows = keys.Count == 0
+            ? []
+            : await db.ApprovalStates
+                .ExceptWorkflowNone(db)
+                .Where(s => s.DocumentId == documentId && keys.Contains(s.PeriodKey))
+                .OrderBy(s => s.SheetDefId)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+        return keys.ToDictionary(k => k, k => (IReadOnlyList<ApprovalState>)[.. rows.Where(s => s.PeriodKey == k)]);
+    }
+
+    /// <inheritdoc />
     public async Task<SubmissionCalendar?> GetSubmissionCalendarAsync(
         long documentId, int sheetDefId, DateTime utcNow, CancellationToken ct, long? sheetCopyId = null)
     {
