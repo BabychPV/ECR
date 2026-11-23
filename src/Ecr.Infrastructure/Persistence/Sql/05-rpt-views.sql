@@ -270,7 +270,9 @@ BEGIN
         N';defs=', CONVERT(varchar(64), HASHBYTES('SHA2_256', CONCAT(
             COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'rpt.usp_GenerateTemplateViews')), N''), N'|',
             COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'rpt.usp_GenerateStableViews')), N''), N'|',
-            COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'rpt.fn_ViewsFingerprint')), N''))), 2),
+            COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'rpt.fn_ViewsFingerprint')), N''),
+            -- ✎ D-573: генератор вʼюх «місяць - рядок» (_m) теж входить: зміна його тексту => перегенерація.
+            N'|', COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'rpt.usp_GenerateMonthView')), N''))), 2),
         -- D-474: розкладка версії (Layout = 1 - маршрутизація місяців лише для неї) входить у відбиток: зміна => перегенерація.
         -- B138: режим погодження версії (_WorkflowMode - літерал у тексті вʼюх) теж входить у відбиток.
         N';tpl=', CAST((SELECT t.Id AS i, t.Code AS c, tv.Id AS v, tv.[Version] AS n, tv.Layout AS l, tv.WorkflowMode AS w
@@ -298,6 +300,129 @@ BEGIN
                         WHERE cb.IsActive = 1 AND REPLACE(cb.MatchJson, CHAR(32), N'') <> N'{}'
                         GROUP BY cb.TableDefId ORDER BY cb.TableDefId FOR XML RAW(N'r'), TYPE) AS nvarchar(max)));
     RETURN CONVERT(varchar(64), HASHBYTES('SHA2_256', @s), 2);
+END;
+GO
+
+-- ══ D-573 (людина 23.11, «Додати вузькі поряд»): вʼюха «місяць - рядок» rpt.<широка>_m ПОРЯД із кожною широкою ═══════════════
+-- Широкі вʼюхи (стабільні v_<Шаблон>_<Аркуш>_<Таблиця> і версійні _vN) НЕ змінюються (D-53). Для кожної згенерованої широкої
+-- вʼюхи W ця процедура будує адитивну rpt.W_m (довше 128 - те саме правило: 115 символів + '_' + 12 знаків SHA-256):
+--   * службові колонки (ім'я з '_') - як у W, у кожному рядку; нова службова _Month (tinyint) - одразу після _PeriodKey;
+--   * місячна родина: колонки шаблону <Код>_M01..<Код>_M12 (IsMonthColumn = 1, MonthNumber = mm, ім'я закінчується _Mmm; у
+--     стабільній - за ОСТАННЬОЮ версією коду, як і тип колонки W), разом із їхніми супутниками <Код>_Mmm_Text / _Id, стає
+--     ОДНІЄЮ колонкою <Код> (<Код>_Text / <Код>_Id) у рядку _Month = mm; місяць без колонки - NULL;
+--   * немісячні колонки шаблону - лише в рядку _Month = 0 (у місячних рядках NULL): кожна комірка W є в W_m рівно ОДИН раз, тож
+--     SUM по W_m не подвоює річних значень. Рядок _Month = 0 є, лише коли немісячні колонки є (або колонок шаблону немає зовсім);
+--     рядки місяців - лише ті місяці, що мають колонки;
+--   * ім'я родини, яке збігається з наявною колонкою W, дістає суфікс _M; родина з різними типами членів (конфлікт типу між
+--     версіями) не згортається - її колонки лишаються немісячними; повтор імені після цього - W_m не створюється.
+-- Значення - ті самі вирази W (W_m читає W: CROSS APPLY VALUES), тож маршрутизація власників, аліаси, rv і rpt.ViewSlot - як у
+-- W; власних рядків rpt.ViewSlot у W_m немає. Ім'я W_m, зайняте іншим обʼєктом (напр. широкою вʼюхою таблиці з кодом <X>_m), -
+-- W_m не створюється (широка має перевагу). Відбиток (rpt.fn_ViewsFingerprint) включає текст цієї процедури.
+-- @Apply = 0 - лише відповідь, чи потрібен DDL (@Action Created/Altered/Unchanged/Skipped); 1 - ще й виконати (у транзакції
+-- викликача, після DDL широкої). Викликають лише генератори (EXECUTE AS OWNER): окремого GRANT не потрібно.
+CREATE OR ALTER PROCEDURE rpt.usp_GenerateMonthView
+    @View sysname,
+    @Header nvarchar(400),
+    @Marker nvarchar(128),
+    @Codes nvarchar(max),
+    @DdlWrap nvarchar(200),
+    @Apply bit,
+    @Action nvarchar(16) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @mMarker nvarchar(200) = @Marker + N', місяць - рядок (D-573)';
+    DECLARE @mView nvarchar(130) = CASE WHEN LEN(@View) + 2 > 128
+                                        THEN LEFT(@View + N'_m', 115) + N'_' + LEFT(CONVERT(varchar(64), HASHBYTES('SHA2_256', @View + N'_m'), 2), 12)
+                                        ELSE @View + N'_m' END;
+    DECLARE @wid int = OBJECT_ID(N'rpt.' + QUOTENAME(@View), N'V');
+    DECLARE @mid int = OBJECT_ID(N'rpt.' + QUOTENAME(@mView));
+    DECLARE @existing nvarchar(max) = OBJECT_DEFINITION(@mid), @sql nvarchar(max), @list nvarchar(max), @rows nvarchar(max), @names nvarchar(max);
+    SET @Action = N'Skipped';
+    IF @wid IS NULL OR (@mid IS NOT NULL AND CHARINDEX(@mMarker, COALESCE(@existing, N'')) = 0)
+        RETURN;
+
+    DECLARE @meta TABLE (Code nvarchar(128) NOT NULL PRIMARY KEY, Mo tinyint NOT NULL);
+    INSERT INTO @meta (Code, Mo)
+    SELECT j.c, MAX(j.m) FROM OPENJSON(COALESCE(@Codes, N'[]')) WITH (c nvarchar(128) N'$.c', m tinyint N'$.m') AS j
+     WHERE j.c IS NOT NULL GROUP BY j.c;
+    DECLARE @col TABLE (ColId int NOT NULL PRIMARY KEY, Name nvarchar(128) NOT NULL, TypeKey nvarchar(300) NOT NULL,
+                        Kind char(1) NOT NULL, Fam nvarchar(140) NULL, Mo tinyint NULL);
+    INSERT INTO @col (ColId, Name, TypeKey, Kind)
+    SELECT c.column_id, c.name COLLATE DATABASE_DEFAULT,
+           CONCAT(c.system_type_id, N':', c.user_type_id, N':', c.max_length, N':', c.precision, N':', c.scale, N':', c.collation_name),
+           CASE WHEN LEFT(c.name, 1) = N'_' THEN 'S' ELSE 'A' END
+      FROM sys.columns AS c WHERE c.object_id = @wid;
+    -- Члени родин: колонка шаблону з місяцем mm і іменем <Код>_Mmm.
+    UPDATE c SET Kind = 'M', Fam = LEFT(c.Name, LEN(c.Name) - 4), Mo = m.Mo
+      FROM @col AS c JOIN @meta AS m ON m.Code = c.Name
+     WHERE c.Kind = 'A' AND m.Mo BETWEEN 1 AND 12 AND LEN(c.Name) > 4
+       AND RIGHT(c.Name, 4) = N'_M' + RIGHT(N'0' + CAST(m.Mo AS nvarchar(3)), 2);
+    -- Супутники членів (<Код>_Mmm_Text / _Id), що самі не є колонками шаблону.
+    UPDATE c SET Kind = 'M', Fam = b.Fam + SUBSTRING(c.Name, LEN(b.Name) + 1, 10), Mo = b.Mo
+      FROM @col AS c JOIN @col AS b ON b.Kind = 'M' AND (c.Name = b.Name + N'_Text' OR c.Name = b.Name + N'_Id')
+     WHERE c.Kind = 'A' AND NOT EXISTS (SELECT 1 FROM @meta AS m WHERE m.Code = c.Name);
+    -- Родина з різними типами членів чи повтором місяця не згортається.
+    UPDATE @col SET Kind = 'A', Fam = NULL, Mo = NULL
+     WHERE Kind = 'M' AND Fam IN (SELECT Fam FROM @col WHERE Kind = 'M' GROUP BY Fam
+                                   HAVING COUNT(DISTINCT TypeKey) > 1 OR COUNT(*) <> COUNT(DISTINCT Mo));
+
+    DECLARE @out TABLE (Ord int NOT NULL PRIMARY KEY, Name nvarchar(140) NOT NULL, Kind char(1) NOT NULL, Fam nvarchar(140) NULL,
+                        Src nvarchar(128) NULL);
+    INSERT INTO @out (Ord, Name, Kind, Fam, Src)
+    SELECT ColId * 2, Name, Kind, NULL, Name FROM @col WHERE Kind IN ('S', 'A')
+    UNION ALL
+    SELECT COALESCE((SELECT ColId FROM @col WHERE Name = N'_PeriodKey'), 0) * 2 + 1, N'_Month', 'T', NULL, NULL
+    UNION ALL
+    SELECT f.FirstId * 2, f.Name, 'F', f.Fam, f.Name0
+      FROM (SELECT c.Fam, MIN(c.ColId) AS FirstId,
+                   (SELECT TOP (1) x.Fam FROM @col AS x WHERE x.Kind = 'M' AND x.Fam = c.Fam ORDER BY x.ColId) AS Name,
+                   (SELECT TOP (1) x.Name FROM @col AS x WHERE x.Kind = 'M' AND x.Fam = c.Fam ORDER BY x.ColId) AS Name0
+              FROM @col AS c WHERE c.Kind = 'M' GROUP BY c.Fam) AS f;
+    UPDATE o SET Name = o.Name + N'_M'
+      FROM @out AS o
+     WHERE o.Kind = 'F' AND EXISTS (SELECT 1 FROM @out AS z WHERE z.Kind <> 'F' AND z.Name = o.Name);
+    IF EXISTS (SELECT 1 FROM @out GROUP BY Name HAVING COUNT(*) > 1)
+        RETURN;   -- Skipped: ім'я не розвести
+
+    DECLARE @mo TABLE (Mo tinyint NOT NULL PRIMARY KEY);
+    INSERT INTO @mo (Mo) SELECT DISTINCT Mo FROM @col WHERE Kind = 'M';
+    IF EXISTS (SELECT 1 FROM @col WHERE Kind = 'A') OR NOT EXISTS (SELECT 1 FROM @mo)
+        INSERT INTO @mo (Mo) VALUES (0);
+
+    SET @list = STUFF((SELECT N',
+       ' + CASE o.Kind WHEN 'S' THEN N'w.' ELSE N'mo.' END + QUOTENAME(o.Name)
+                       FROM @out AS o ORDER BY o.Ord FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'');
+    SET @names = COALESCE((SELECT N', ' + QUOTENAME(o.Name) FROM @out AS o WHERE o.Kind IN ('A', 'F') ORDER BY o.Ord
+                             FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N'');
+    SET @rows = STUFF((SELECT N',
+             (CAST(' + CAST(k.Mo AS nvarchar(3)) + N' AS tinyint)'
+                              + COALESCE((SELECT N', ' + CASE WHEN o.Kind = 'A' AND k.Mo = 0 THEN N'w.' + QUOTENAME(o.Src)
+                                                              WHEN o.Kind = 'A' THEN N'CASE WHEN 1 = 0 THEN w.' + QUOTENAME(o.Src) + N' END'
+                                                              ELSE COALESCE((SELECT N'w.' + QUOTENAME(c.Name) FROM @col AS c
+                                                                              WHERE c.Kind = 'M' AND c.Fam = o.Fam AND c.Mo = k.Mo),
+                                                                            N'CASE WHEN 1 = 0 THEN w.' + QUOTENAME(o.Src) + N' END') END
+                                            FROM @out AS o WHERE o.Kind IN ('A', 'F') ORDER BY o.Ord
+                                            FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N'')
+                              + N')'
+                       FROM @mo AS k ORDER BY k.Mo FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'');
+    SET @sql = CONCAT(N'CREATE OR ALTER VIEW rpt.', QUOTENAME(@mView), N'
+AS
+', @mMarker, N': ', @Header, N'. Не редагувати руками. Читає rpt.', QUOTENAME(@View), N': місячна родина <Код>_M01..<Код>_M12 - одна колонка <Код> у рядку _Month = місяць; немісячні колонки - у рядку _Month = 0.
+SELECT', @list, N'
+FROM rpt.', QUOTENAME(@View), N' AS w
+CROSS APPLY (VALUES', @rows, N') AS mo ([_Month]', @names, N');');
+
+    IF @existing IS NOT NULL
+       AND SUBSTRING(@existing, CHARINDEX(@mMarker, @existing), LEN(@existing)) COLLATE Latin1_General_BIN2
+           = SUBSTRING(@sql, CHARINDEX(@mMarker, @sql), LEN(@sql)) COLLATE Latin1_General_BIN2
+    BEGIN
+        SET @Action = N'Unchanged';
+        RETURN;
+    END
+    SET @Action = CASE WHEN @existing IS NULL THEN N'Created' ELSE N'Altered' END;
+    IF @Apply = 1
+        EXEC sys.sp_executesql @DdlWrap, N'@d nvarchar(max)', @d = @sql;
 END;
 GO
 
@@ -453,6 +578,11 @@ BEGIN
        AND @fp = (SELECT CONVERT(varchar(64), ep.value) FROM sys.extended_properties AS ep
                    WHERE ep.class = 3 AND ep.major_id = SCHEMA_ID(N'rpt') AND ep.minor_id = 0 AND ep.name = @fpName)
        AND NOT EXISTS (SELECT 1 FROM @tables AS tt WHERE OBJECT_ID(N'rpt.' + QUOTENAME(tt.ViewName), N'V') IS NULL)
+       -- ✎ D-573: і вʼюха «місяць - рядок» кожної (ім'я - правило rpt.usp_GenerateMonthView).
+       AND NOT EXISTS (SELECT 1 FROM @tables AS tt
+                        WHERE OBJECT_ID(N'rpt.' + QUOTENAME(CASE WHEN LEN(tt.ViewName) + 2 > 128
+                                                                 THEN LEFT(tt.ViewName + N'_m', 115) + N'_' + LEFT(CONVERT(varchar(64), HASHBYTES('SHA2_256', tt.ViewName + N'_m'), 2), 12)
+                                                                 ELSE tt.ViewName + N'_m' END)) IS NULL)
        -- Q-17.slotmap: вʼюха, що читає мапу слотів, має свої рядки в rpt.ViewSlot (інакше - перегенерувати, а не пропустити).
        AND NOT EXISTS (SELECT 1 FROM @tables AS tt
                          JOIN sys.sql_expression_dependencies AS dep
@@ -490,6 +620,7 @@ BEGIN
     DECLARE @sheetNameLit nvarchar(max), @copyCols nvarchar(max);
     -- Q-17.slotmap: агрегати за слотом (pc / sc), літерал імені вʼюхи, бажані рядки rpt.ViewSlot і чи їх треба переписати.
     DECLARE @plainAggS nvarchar(max), @scAggS nvarchar(max), @vnLit nvarchar(300), @useSlots bit, @mapDiff bit, @ddl bit;
+    DECLARE @mCodes nvarchar(max), @mNeed bit, @mAction nvarchar(16);   -- ✎ D-573: вʼюха _m
     DECLARE @slot TABLE (ColumnDefId int NOT NULL, Slot int NOT NULL, Mo int NULL, PRIMARY KEY (ColumnDefId, Slot));
     -- D-474: маршрутизація місяців версії поточної вʼюхи (@MonthRouting = 1 або cfg.TemplateVersion.Layout = 1).
     DECLARE @mr bit;
@@ -1146,9 +1277,20 @@ WHERE ti.TableDefId = ', CAST(@id AS nvarchar(10)), N';');
                               OR EXISTS (SELECT ColumnDefId, Slot, Mo FROM rpt.ViewSlot WHERE ViewName = @view
                                          EXCEPT SELECT ColumnDefId, Slot, Mo FROM @slot WHERE @useSlots = 1)
                             THEN 1 ELSE 0 END;
+        -- ✎ D-573: вʼюха «місяць - рядок» rpt.<вʼюха>_m поряд (rpt.usp_GenerateMonthView): місяці колонок версії. Широка без змін -
+        -- спершу питання, чи _m потрібен DDL; інакше _m перебудовується в тій самій транзакції після широкої.
+        SET @mCodes = (SELECT c.Code AS c, CASE WHEN c.IsMonthColumn = 1 AND c.MonthNumber BETWEEN 1 AND 12 THEN c.MonthNumber ELSE 0 END AS m
+                         FROM cfg.ColumnDef AS c WHERE c.TableDefId = @id AND c.IsDeleted = 0 FOR JSON PATH);
+        SET @mNeed = 0;
+        IF @ddl = 0
+        BEGIN
+            EXEC rpt.usp_GenerateMonthView @View = @view, @Header = @header, @Marker = @marker, @Codes = @mCodes, @DdlWrap = @ddlWrap,
+                 @Apply = 0, @Action = @mAction OUTPUT;
+            SET @mNeed = CASE WHEN @mAction IN (N'Created', N'Altered') THEN 1 ELSE 0 END;
+        END
 
         SET @ddlAttempt = 0;
-        IF @ddl = 1 OR @mapDiff = 1
+        IF @ddl = 1 OR @mapDiff = 1 OR @mNeed = 1
         BEGIN
             -- M3: бюджет очікування виклику вичерпано - без спроби, одразу Blocked.
             SET @ddlAttempt = CASE WHEN @ddlSpent >= @ddlBudget THEN -1 ELSE 1 END;
@@ -1164,6 +1306,8 @@ WHERE ti.TableDefId = ', CAST(@id AS nvarchar(10)), N';');
                     END
                     IF @ddl = 1
                         EXEC sys.sp_executesql @ddlWrap, N'@d nvarchar(max)', @d = @sql;
+                    EXEC rpt.usp_GenerateMonthView @View = @view, @Header = @header, @Marker = @marker, @Codes = @mCodes, @DdlWrap = @ddlWrap,
+                         @Apply = 1, @Action = @mAction OUTPUT;   -- ✎ D-573
                     COMMIT TRANSACTION;
                     SET @ddlAttempt = 0;
                 END TRY
@@ -1578,6 +1722,11 @@ BEGIN
        AND @fp = (SELECT CONVERT(varchar(64), ep.value) FROM sys.extended_properties AS ep
                    WHERE ep.class = 3 AND ep.major_id = SCHEMA_ID(N'rpt') AND ep.minor_id = 0 AND ep.name = @fpName)
        AND NOT EXISTS (SELECT 1 FROM @groups AS gg WHERE OBJECT_ID(N'rpt.' + QUOTENAME(gg.ViewName), N'V') IS NULL)
+       -- ✎ D-573: і вʼюха «місяць - рядок» кожної (ім'я - правило rpt.usp_GenerateMonthView).
+       AND NOT EXISTS (SELECT 1 FROM @groups AS gg
+                        WHERE OBJECT_ID(N'rpt.' + QUOTENAME(CASE WHEN LEN(gg.ViewName) + 2 > 128
+                                                                 THEN LEFT(gg.ViewName + N'_m', 115) + N'_' + LEFT(CONVERT(varchar(64), HASHBYTES('SHA2_256', gg.ViewName + N'_m'), 2), 12)
+                                                                 ELSE gg.ViewName + N'_m' END)) IS NULL)
        -- Q-17.slotmap: a view that reads the slot map has its rpt.ViewSlot rows (otherwise regenerate, do not skip).
        AND NOT EXISTS (SELECT 1 FROM @groups AS gg
                          JOIN sys.sql_expression_dependencies AS dep
@@ -1688,6 +1837,7 @@ BEGIN
     DECLARE @sheetNameCase nvarchar(max), @copyCols nvarchar(max);
     -- Q-17.slotmap: як у rpt.usp_GenerateTemplateViews - агрегати за слотом і бажані рядки rpt.ViewSlot (усі Id коду й аліасів).
     DECLARE @plainAggS nvarchar(max), @scAggS nvarchar(max), @vnLit nvarchar(300), @useSlots bit, @mapDiff bit, @ddl bit, @slotAgg nvarchar(max);
+    DECLARE @mCodes nvarchar(max), @mNeed bit, @mAction nvarchar(16);   -- ✎ D-573: вʼюха _m
     DECLARE @slot TABLE (ColumnDefId int NOT NULL, Slot int NOT NULL, Mo int NULL, Scope int NOT NULL DEFAULT 0, PRIMARY KEY (ColumnDefId, Slot, Scope));
     -- B129: Id коду з аліасами по скоупах (0 - безумовно; s - надлишок понад 0, лише для проєктів скоупу s), шаблон предиката
     -- з маркером #c# (колонка Id: x./q.ColumnDefId), предикат рядків R-2 і вираз скоупу рядка для мапи слотів.
@@ -2383,7 +2533,18 @@ UNION ALL
                               OR EXISTS (SELECT ColumnDefId, Slot, Mo, Scope FROM rpt.ViewSlot WHERE ViewName = @view
                                          EXCEPT SELECT ColumnDefId, Slot, Mo, Scope FROM @slot WHERE @useSlots = 1)
                             THEN 1 ELSE 0 END;
-        IF @ddl = 1 OR @mapDiff = 1
+        -- ✎ D-573: вʼюха «місяць - рядок» rpt.<вʼюха>_m поряд (rpt.usp_GenerateMonthView): місяць і тип - ОСТАННЬОЇ версії коду
+        -- (@cols, як колонки широкої). Широка без змін - спершу питання, чи _m потрібен DDL.
+        SET @mCodes = (SELECT Code AS c, CASE WHEN LastIsMonth = 1 AND LastMonthNo BETWEEN 1 AND 12 THEN LastMonthNo ELSE 0 END AS m
+                         FROM @cols FOR JSON PATH);
+        SET @mNeed = 0;
+        IF @ddl = 0
+        BEGIN
+            EXEC rpt.usp_GenerateMonthView @View = @view, @Header = @header, @Marker = @marker, @Codes = @mCodes, @DdlWrap = @ddlWrap,
+                 @Apply = 0, @Action = @mAction OUTPUT;
+            SET @mNeed = CASE WHEN @mAction IN (N'Created', N'Altered') THEN 1 ELSE 0 END;
+        END
+        IF @ddl = 1 OR @mapDiff = 1 OR @mNeed = 1
         BEGIN TRY
             BEGIN TRANSACTION;
             IF @mapDiff = 1
@@ -2393,6 +2554,8 @@ UNION ALL
             END
             IF @ddl = 1
                 EXEC sys.sp_executesql @ddlWrap, N'@d nvarchar(max)', @d = @sql;
+            EXEC rpt.usp_GenerateMonthView @View = @view, @Header = @header, @Marker = @marker, @Codes = @mCodes, @DdlWrap = @ddlWrap,
+                 @Apply = 1, @Action = @mAction OUTPUT;   -- ✎ D-573
             COMMIT TRANSACTION;
         END TRY
         BEGIN CATCH
