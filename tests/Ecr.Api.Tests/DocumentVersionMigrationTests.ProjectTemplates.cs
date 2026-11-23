@@ -206,6 +206,9 @@ public sealed partial class DocumentVersionMigrationTests
                 INSERT doc.ProjectTemplate (ProjectId, TemplateId, CurrentTemplateVersionId) VALUES ({c.ProjectId}, {t.B.TemplateId}, {t.B.TemplateVersionId});
                 UPDATE doc.Document SET TemplateId = {t.B.TemplateId} WHERE Id = {c.DocumentId};
                 UPDATE doc.Document SET ProjectId = {bHome}, TemplateId = {d.TemplateId} WHERE Id = {d.DocumentId};
+                -- ✎ B74 P3: документ шаблону D у bHome — лише разом із парою (bHome, D): без неї документ «без версії» ламав
+                -- DependencyGraphProvider (fn_TemplateVersionOf = NULL) усім наступним тестам спільної бази.
+                INSERT doc.ProjectTemplate (ProjectId, TemplateId, CurrentTemplateVersionId) VALUES ({bHome}, {d.TemplateId}, {d.TemplateVersionId});
                 """).ConfigureAwait(true);
         }
 
