@@ -156,6 +156,13 @@ namespace Ecr.Application.Ports;
 /// архівованому проєкті. Метадані проєкту не секрет — звуження читача не знімає. Лише картка (<c>GET /documents/{id}</c>);
 /// перелік — <c>null</c>; <c>null</c> і тоді, коли проєкту не знайдено.
 /// </param>
+/// <param name="SourceChangedPeriods">
+/// ✎ F5-R (D-570): ЗАТВЕРДЖЕНІ періоди документа (<c>yyyyMM</c>, за зростанням), чий документ-джерело (склад HSE400, зв'язка
+/// будь-якого стану) змінився після затвердження — затверджений місяць каскад не переписує (D-493/D-510), тож числа можуть
+/// бути застарілими: переглянути, повернути в роботу чи перерахувати «з затвердженими» (B80 N5). Лише перелік: з періодом
+/// — цей період, з роком — затверджені місяці смуги. <c>null</c> — таких немає (чи шлях читання поле не несе); документа-
+/// джерела не розкриває.
+/// </param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
@@ -189,7 +196,8 @@ public sealed record DocumentSummary(
     string? TemplateLayout = null,
     string? WorkflowMode = null,
     bool? CanLockRows = null,
-    string? ProjectStatus = null);
+    string? ProjectStatus = null,
+    IReadOnlyList<int>? SourceChangedPeriods = null);
 
 /// <summary>
 /// ✎ 10.11 (слово людини через координатора): закритий місяць, відкритий для ЦЬОГО документа

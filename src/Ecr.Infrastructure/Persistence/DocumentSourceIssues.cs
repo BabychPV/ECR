@@ -45,6 +45,11 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
 
     private readonly Dictionary<(int BindingId, int Year), SourceYear?> years = [];
     private readonly Dictionary<long, (string ProjectCode, string DocumentKey)> sources = [];
+    private readonly Dictionary<(long DocumentId, int PeriodKey, DateTime Since), DateTime?> changes = [];
+    private (bool ApprovedOnly, bool Any)? kindsCache;
+
+    /// <summary>✎ F5-R (D-570): причина <c>SourceChangedAfterApproval</c> за <c>Any</c> — дані місяця джерела змінено після затвердження.</summary>
+    public const string ReasonChanged = "changed";
 
     /// <summary>Чи є хоч одна зв'язка складу HSE400 у стані <c>ApprovedOnly</c> — дрібна перевірка, за <c>Any</c> єдина.</summary>
     /// <param name="db">Контекст.</param>
@@ -64,14 +69,25 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
     /// <param name="periodKeys">Періоди документа.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>За зростанням періоду й місяця; без повторів (кілька зв'язок одного місяця — один рядок).</returns>
+    /// <remarks>
+    /// ✎ F5-R (D-570, рішення людини P-1122-4): і зв'язки в стані <c>Any</c> — для ЗАТВЕРДЖЕНОГО періоду споживача, чиї дані
+    /// місяця джерела змінено після затвердження (<see cref="SourceChangedAtAsync"/>): каскад затверджений аркуш не
+    /// переписує (D-493/D-510), тож без позначки місяць мовчки лишався б зі старими числами. Жоден період не
+    /// затверджено, а зв'язок <c>ApprovedOnly</c> немає — далі станів запитів немає.
+    /// </remarks>
     public async Task<List<SourceIssueFinding>> ListAsync(
         long documentId, IReadOnlyCollection<int> periodKeys, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(periodKeys);
 
         // Явне «не читати з документа» — Land читає довідник, джерело не потрібне: жодного запиту.
-        if (readOverride == false || periodKeys.Count == 0
-            || !await AnyApprovedOnlyAsync(db, ct).ConfigureAwait(false))
+        if (readOverride == false || periodKeys.Count == 0)
+        {
+            return [];
+        }
+
+        var kinds = await BindingKindsAsync(ct).ConfigureAwait(false);
+        if (!kinds.ApprovedOnly && !kinds.Any)
         {
             return [];
         }
@@ -82,9 +98,21 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
             .Select(s => new { s.Id, s.PeriodKey, s.Status, s.ApprovedAt })
             .ToListAsync(ct).ConfigureAwait(false);
 
+        bool Approved(int periodKey)
+        {
+            var own = states.Where(s => s.PeriodKey == periodKey).ToList();
+            return own.Count > 0 && own.TrueForAll(s => s.Status == DocumentStatus.Approved);
+        }
+
+        // ✎ F5-R: лише Any — потрібен хоч один затверджений період, інакше проблем Any бути не може.
+        if (!kinds.ApprovedOnly && !keys.Exists(Approved))
+        {
+            return [];
+        }
+
         // ✎ B80 N5 (F13): зв'язки споживача для ВСІХ періодів — один прохід поза циклом (раніше 2 запити на період).
         var bindingsByPeriod = await DocumentSourceMonthGate
-            .ConsumerBindingsByPeriodAsync(db, graph, documentId, keys, ct).ConfigureAwait(false);
+            .ConsumerBindingsByPeriodAsync(db, graph, documentId, keys, ct, includeAny: kinds.Any).ConfigureAwait(false);
 
         var findings = new List<SourceIssueFinding>();
         foreach (var periodKey in keys)
@@ -95,14 +123,15 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
             }
 
             var own = states.Where(s => s.PeriodKey == periodKey).ToList();
-            var approved = own.Count > 0 && own.TrueForAll(s => s.Status == DocumentStatus.Approved);
+            var approved = Approved(periodKey);
             var approvedAt = approved ? own.Min(s => s.ApprovedAt) : null;
             var stateId = own.Count == 0 ? (long?)null : own.Min(s => s.Id);
             var year = periodKey / 100;
 
             foreach (var binding in bindings)
             {
-                if (!(readOverride ?? binding.ReadFromDocument))
+                if (!(readOverride ?? binding.ReadFromDocument)
+                    || (binding.State == DocumentSourceState.Any && approvedAt is null))
                 {
                     continue;
                 }
@@ -116,8 +145,24 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
 
                 foreach (var month in DocumentSourceGate.OwnedMonths(binding.PeriodKind, periodKey % 100))
                 {
-                    var sourceApproved = source.Approved.TryGetValue(month, out var sourceApprovedAt);
-                    var (kind, reason) = Classify(approved, approvedAt, sourceApproved, sourceApprovedAt);
+                    string? kind;
+                    string? reason;
+                    DateTime? sourceApprovedAt = null;
+                    DateTime? changedAt = null;
+                    if (binding.State == DocumentSourceState.Any)
+                    {
+                        changedAt = await SourceChangedAtAsync(source, year, month, approvedAt!.Value, ct).ConfigureAwait(false);
+                        (kind, reason) = changedAt is null
+                            ? (null, null)
+                            : (ISourceIssueReader.SourceChangedAfterApproval, ReasonChanged);
+                    }
+                    else
+                    {
+                        var sourceApproved = source.Approved.TryGetValue(month, out var at);
+                        sourceApprovedAt = sourceApproved ? at : null;
+                        (kind, reason) = Classify(approved, approvedAt, sourceApproved, at);
+                    }
+
                     if (kind is null)
                     {
                         continue;
@@ -127,7 +172,7 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
                     findings.Add(new SourceIssueFinding(
                         new SourceIssueRow(
                             kind, periodKey, month, (year * 100) + month, source.DocumentId, facts.ProjectCode,
-                            facts.DocumentKey, sourceApproved ? sourceApprovedAt : null, approvedAt),
+                            facts.DocumentKey, sourceApprovedAt, approvedAt, changedAt),
                         reason,
                         stateId));
                 }
@@ -137,6 +182,80 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
         return [.. findings.DistinctBy(f => (f.Row.Kind, f.Row.PeriodKey, f.Row.MonthNumber))];
     }
 
+    /// <summary>
+    /// ✎ F5-R (D-570): запас перед моментом затвердження споживача. Момент затвердження (<c>ApprovedAt</c>) береться ДО
+    /// читання воріт F5, а момент правки джерела (<c>aud.CellChange.ChangedAt</c>) — на початку транзакції правки: правка,
+    /// що закомічена між воротами й комітом затвердження, може мати мітку трохи раніше за <c>ApprovedAt</c>. Сумнів — у бік
+    /// позначки (D-567 (3)): правка джерела за цей запас ДО затвердження теж позначається («перегляньте»).
+    /// </summary>
+    internal static readonly TimeSpan ApprovalRaceMargin = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// ✎ F5-R (D-570): коли востаннє змінено дані місяця <paramref name="month"/> обраного документа-джерела в таблицях зв'язки
+    /// (журнал комірок, період-власник місяця за періодичністю проєкту джерела) ПІСЛЯ <paramref name="approvedAt"/>
+    /// мінус <see cref="ApprovalRaceMargin"/>; <c>null</c> — не змінено. Позначки помилок формул (<c>CalcError*</c>) — не
+    /// зміна чисел. Один запит (ключ <c>IX_CellChange_DocPeriodChanged</c>), кеш на документ × період × поріг.
+    /// </summary>
+    private async Task<DateTime?> SourceChangedAtAsync(SourceYear source, int year, int month, DateTime approvedAt, CancellationToken ct)
+    {
+        var owner = OwnerPeriod(source.PeriodKind, year, month);
+        var since = approvedAt - ApprovalRaceMargin;
+        if (changes.TryGetValue((source.DocumentId, owner, since), out var cached))
+        {
+            return cached;
+        }
+
+        source.ColumnIds ??= await db.ColumnDefs.AsNoTracking()
+            .Where(c => source.TableIds.Contains(c.TableDefId))
+            .Select(c => c.Id)
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        var found = await db.Database
+            .SqlQueryRaw<DateTime?>(
+                """
+                SELECT MAX(c.ChangedAt) AS Value
+                  FROM aud.CellChange AS c
+                 WHERE c.DocumentId = @doc AND c.PeriodKey = @period AND c.ChangedAt > @since
+                   AND c.Origin NOT IN (N'CalcError', N'CalcErrorResolved')
+                   AND c.ColumnDefId IN (SELECT CAST(j.[value] AS int) FROM OPENJSON(@columns) AS j)
+                """,
+                new Microsoft.Data.SqlClient.SqlParameter("@doc", source.DocumentId),
+                new Microsoft.Data.SqlClient.SqlParameter("@period", owner),
+                new Microsoft.Data.SqlClient.SqlParameter("@since", System.Data.SqlDbType.DateTime2) { Value = since },
+                new Microsoft.Data.SqlClient.SqlParameter("@columns", System.Text.Json.JsonSerializer.Serialize(source.ColumnIds)))
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        var result = found.FirstOrDefault() is { } at ? DateTime.SpecifyKind(at, DateTimeKind.Utc) : (DateTime?)null;
+        changes[(source.DocumentId, owner, since)] = result;
+        return result;
+    }
+
+    /// <summary>Період-власник місяця за періодичністю проєкту (те саме правило, що <see cref="DocumentSourceGate.OwnedMonths"/>).</summary>
+    internal static int OwnerPeriod(PeriodKind kind, int year, int month) => (year * 100) + kind switch
+    {
+        PeriodKind.Yearly => 1,
+        PeriodKind.Quarterly => (((month - 1) / 3) * 3) + 1,
+        _ => month,
+    };
+
+    /// <summary>Які стани мають зв'язки складу HSE400 (з читанням із документа для <c>Any</c>); кеш на екземпляр.</summary>
+    private async Task<(bool ApprovedOnly, bool Any)> BindingKindsAsync(CancellationToken ct)
+    {
+        if (kindsCache is { } cached)
+        {
+            return cached;
+        }
+
+        var found = await db.DocumentSourceBindings.AsNoTracking()
+            .Where(b => b.MappingKind == DocumentSourceBinding.Hse400CompositionMapping
+                        && (b.SourceState == DocumentSourceState.ApprovedOnly || readOverride == true || b.ReadFromDocument))
+            .Select(b => b.SourceState)
+            .Distinct()
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        kindsCache = (found.Contains(DocumentSourceState.ApprovedOnly), found.Contains(DocumentSourceState.Any));
+        return kindsCache.Value;
+    }
     /// <summary>Вид проблеми місяця за станом споживача і джерела; <c>null</c> — проблеми немає.</summary>
     private static (string? Kind, string? Reason) Classify(
         bool approved, DateTime? approvedAt, bool sourceApproved, DateTime? sourceApprovedAt)
@@ -185,7 +304,7 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
                     : at;
             }
 
-            result = new SourceYear(chosen.DocumentId, approved);
+            result = new SourceYear(chosen.DocumentId, approved, chosen.PeriodKind, [.. tableIds]);
         }
 
         years[(bindingId, year)] = result;
@@ -212,7 +331,11 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
         return result;
     }
 
-    private sealed record SourceYear(long DocumentId, Dictionary<int, DateTime?> Approved);
+    private sealed record SourceYear(long DocumentId, Dictionary<int, DateTime?> Approved, PeriodKind PeriodKind, List<int> TableIds)
+    {
+        /// <summary>Колонки таблиць зв'язки — лише для <c>Any</c> (лінива: <c>ApprovedOnly</c> їх не читає).</summary>
+        public List<int>? ColumnIds { get; set; }
+    }
 }
 
 /// <summary>Проблема джерела з тим, що потрібно правилу узгодженості.</summary>

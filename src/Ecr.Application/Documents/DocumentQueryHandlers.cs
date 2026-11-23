@@ -10,7 +10,10 @@ namespace Ecr.Application.Documents;
 /// <summary>Перелік документів. Право <c>Document.View</c>.</summary>
 public sealed class ListDocumentsHandler(
     IDocumentStore documents, IAccessDecisionService access, ICurrentUser currentUser,
-    IDocumentListSummaryStore samples, Domain.Abstractions.IClock? clock = null)
+    IDocumentListSummaryStore samples, Domain.Abstractions.IClock? clock = null,
+
+    // ✎ F5-R (D-570): позначка «джерело змінено після затвердження» в рядку; `null` (старі тести) — позначки немає.
+    ISourceIssueReader? sourceIssues = null)
 {
     /// <summary>Право перегляду документів.</summary>
     public const string Permission = "Document.View";
@@ -276,7 +279,51 @@ public sealed class ListDocumentsHandler(
         // `PagedResult.TotalCount`), а не правдоподібне неправильне число.
         var total = page.Cursor is null && all.NextCursor is null ? visible.Count : (int?)null;
 
+        visible = await MarkSourceChangedAsync(visible, periodKey, ct).ConfigureAwait(false);
+
         return new PagedResult<DocumentSummary>(visible, all.NextCursor, total);
+    }
+
+    /// <summary>
+    /// ✎ F5-R (D-570, рішення людини P-1122-4: «так познач щоб користувач бачив це»): затверджені періоди рядків сторінки,
+    /// чиє джерело змінилося після затвердження (<see cref="DocumentSummary.SourceChangedPeriods"/>). Кандидати — без
+    /// запитів: з періодом — документ, усі аркуші якого за період затверджені; з роком — клітинки смуги «Approved».
+    /// </summary>
+    private async Task<List<DocumentSummary>> MarkSourceChangedAsync(
+        List<DocumentSummary> page, int? periodKey, CancellationToken ct)
+    {
+        if (sourceIssues is null || page.Count == 0)
+        {
+            return page;
+        }
+
+        var approved = new Dictionary<long, IReadOnlyList<int>>();
+        foreach (var d in page)
+        {
+            var periods = new List<int>();
+            if (periodKey is { } period
+                && d.Sheets is { Count: > 0 } sheets
+                && sheets.All(s => string.Equals(s.State, nameof(DocumentStatus.Approved), StringComparison.Ordinal)))
+            {
+                periods.Add(period);
+            }
+
+            periods.AddRange((d.PeriodStates ?? [])
+                .Where(s => string.Equals(s.State, nameof(DocumentStatus.Approved), StringComparison.Ordinal))
+                .Select(s => s.PeriodKey));
+            if (periods.Count > 0)
+            {
+                approved[d.Id] = [.. periods.Distinct().Order()];
+            }
+        }
+
+        if (approved.Count == 0)
+        {
+            return page;
+        }
+
+        var changed = await sourceIssues.ListSourceChangedPeriodsAsync(approved, ct).ConfigureAwait(false);
+        return [.. page.Select(d => changed.TryGetValue(d.Id, out var periods) ? d with { SourceChangedPeriods = periods } : d)];
     }
 
     /// <summary>

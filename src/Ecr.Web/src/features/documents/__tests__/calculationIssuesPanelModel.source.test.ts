@@ -50,6 +50,27 @@ function rows(sourceIssues: readonly SourceIssue[] | undefined, formulaErrors: F
   return { issues: [], hints: [], finishedAt: null, formulaErrors, ...(sourceIssues === undefined ? {} : { sourceIssues }) };
 }
 
+describe('calculationIssuesPanelModel: змінені дані джерела за Any (F5-R, D-570)', () => {
+  /** Мутація: прибрати `variant` з ключа групи — червоне (одна причина замість двох); `latestChange` → перший — червоне. */
+  it('окрема причина від ApprovedOnly, дата зміни — найпізніша в групі', () => {
+    const causes = buildIssueCauses(
+      rows([
+        source({ kind: 'SourceChangedAfterApproval', sourceApprovedAt: '2026-04-10T09:00:00Z' }),
+        source({ kind: 'SourceChangedAfterApproval', monthNumber: 4, sourcePeriodKey: 202604, sourceChangedAt: '2026-04-20T10:00:00Z' }),
+        source({ kind: 'SourceChangedAfterApproval', monthNumber: 5, sourcePeriodKey: 202605, sourceChangedAt: '2026-05-02T10:00:00Z' }),
+      ]),
+      [],
+    );
+
+    expect(causes).toHaveLength(2);
+    const data = causes.find((cause) => (cause.source?.sourceChangedAt ?? null) !== null)!;
+    expect(data.kind).toBe('sourceChanged');
+    expect(data.count).toBe(2);
+    expect(data.source?.sourceChangedAt).toBe('2026-05-02T10:00:00Z');
+    expect(causes.find((cause) => cause !== data)?.source?.sourceChangedAt).toBeNull();
+  });
+});
+
 describe('calculationIssuesPanelModel: причини джерела (B80 N4)', () => {
   it('два види і невідомий вид — окремі причини; невідомий не ламає модель', () => {
     expect(sourceKindOf('SourceMonthNotApproved')).toBe('sourceNotApproved');
@@ -89,6 +110,8 @@ describe('calculationIssuesPanelModel: причини джерела (B80 N4)', 
       label: 'KPO-2026 · HSE400-2026',
       sourceApprovedAt: null,
       approvedAt: null,
+      // ✎ F5-R: рядок ApprovedOnly — моменту зміни даних джерела немає.
+      sourceChangedAt: null,
     });
   });
 
@@ -119,6 +142,7 @@ describe('calculationIssuesPanelModel: причини джерела (B80 N4)', 
       label: null,
       sourceApprovedAt: null,
       approvedAt: '2026-04-02T08:00:00Z',
+      sourceChangedAt: null,
     });
   });
 

@@ -11,6 +11,7 @@ import { documentState, hasSheetStates, sheetLabels } from './documentSheets';
 import { boardColumns, type BoardColumnId } from './documentsBoardModel';
 import { DocumentStateBadge, NoApprovalState } from './NoApprovalChip';
 import { LateEditsMark } from './LateEditsMark';
+import { SourceChangedMark } from './SourceChangedMark';
 import { StaleResultsMark, StaleResultsUndeterminedMark } from './StaleResultsMark';
 import './documentsBoard.css';
 
@@ -134,6 +135,7 @@ export function DocumentsBoard({ documents, documentHref, projectCode, onQuickLo
                           <DocumentStateBadge state={state} quiet />
                         )}
                         {document.hasLateEdits && <LateEditsMark />}
+                        {document.sourceChangedPeriods !== undefined && document.sourceChangedPeriods !== null && <SourceChangedMark periods={document.sourceChangedPeriods} />}
                         {document.resultsStale === true && <StaleResultsMark since={document.resultsStaleSince} />}
                         {/* ✎ D-446: застарілість не визначена — частину документа читачеві закрито. */}
                         {document.resultsStaleUndetermined === 'PartiallyHidden' && <StaleResultsUndeterminedMark />}

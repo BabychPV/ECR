@@ -25,6 +25,7 @@ import { DocumentVersionCell, DocumentVersionTh } from '@/features/documents/Doc
 import { parseDocumentsView } from '@/features/documents/documentsBoardModel';
 import '@/features/documents/documentsList.css';
 import { LateEditsMark } from '@/features/documents/LateEditsMark';
+import { SourceChangedMark } from '@/features/documents/SourceChangedMark';
 import { DocumentYearStrip, DocumentYearStripHeader, DocumentYearStripLegend } from '@/features/documents/DocumentYearStrip';
 import { calendarYears, yearsWithProjects } from '@/features/projects/projectYear';
 import { CollapsibleNote } from '@/features/common/CollapsibleNote';
@@ -675,6 +676,10 @@ export function DocumentsPage(): JSX.Element {
                                 </Text>
                                 {/* `BE-09b`: пізні правки за період (без періоду — за будь-який). */}
                                 {document.hasLateEdits && <LateEditsMark />}
+                                {/* ✎ F5-R (D-570): джерело змінено після затвердження місяця. */}
+                                {document.sourceChangedPeriods !== undefined && document.sourceChangedPeriods !== null && (
+                                  <SourceChangedMark periods={document.sourceChangedPeriods} />
+                                )}
                                 {/* RC14-D: результати методологій застаріли (лише `true`; `null` — доступ звужено). */}
                                 {document.resultsStale === true && (
                                   <Suspense fallback={null}><StaleResultsMark since={document.resultsStaleSince} /></Suspense>

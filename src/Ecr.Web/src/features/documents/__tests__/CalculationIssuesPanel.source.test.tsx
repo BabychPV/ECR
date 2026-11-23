@@ -93,6 +93,48 @@ describe('CalculationIssuesPanel: причини джерела HSE400 (B80 N4)'
     ]);
   });
 
+  /**
+   * ✎ F5-R (D-570, P-1122-4): зв'язка Any — змінено ДАНІ джерела (`sourceChangedAt`): свій заголовок, дата зміни замість
+   * дати затвердження джерела, підказка дії. Мутації: заголовок без гілки `sourceChangedAt` — червоне «changedData»;
+   * прибрати рядок підказки — червоне «hint».
+   */
+  it('змінено дані джерела (Any) — свій текст, дата зміни, підказка дії; не блокує', () => {
+    show([
+      source({
+        kind: 'SourceChangedAfterApproval',
+        approvedAt: '2026-04-02T08:00:00Z',
+        sourceChangedAt: '2026-04-05T11:00:00Z',
+      }),
+    ]);
+
+    expect(screen.getByTestId('document-calc-issues').getAttribute('data-blocking')).toBe('false');
+    expect(screen.getByTestId('document-calc-issue').getAttribute('data-kind')).toBe('sourceChanged');
+    expect(screen.getByTestId('document-calc-issue-title').textContent).toContain(
+      'document.calcIssues.source.changedData.title',
+    );
+    const dates = screen.getByTestId('document-calc-issue-source-dates');
+    expect(dates.textContent).toContain('document.calcIssues.source.sourceChangedAt');
+    expect(dates.textContent).not.toContain('document.calcIssues.source.sourceApprovedAt');
+    expect(Array.from(dates.querySelectorAll('time')).map((time) => time.getAttribute('dateTime'))).toEqual([
+      '2026-04-05T11:00:00Z',
+      '2026-04-02T08:00:00Z',
+    ]);
+    expect(screen.getByTestId('document-calc-issue-source-hint').textContent).toContain(
+      'document.calcIssues.source.changed.hint',
+    );
+  });
+
+  it('підказка дії є й для причини ApprovedOnly; для «не затверджено» — ні', () => {
+    show([
+      source({ kind: 'SourceChangedAfterApproval', sourceApprovedAt: '2026-04-10T09:00:00Z', approvedAt: '2026-04-02T08:00:00Z' }),
+      source({ monthNumber: 5, sourcePeriodKey: 202605 }),
+    ]);
+
+    const hints = screen.getAllByTestId('document-calc-issue-source-hint');
+    expect(hints).toHaveLength(1);
+    expect(hints[0]!.closest('[data-kind]')?.getAttribute('data-kind')).toBe('sourceChanged');
+  });
+
   it('невідомий вид — загальний текст, без збою', () => {
     show([source({ kind: 'SomethingNew' })]);
 

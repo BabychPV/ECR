@@ -152,6 +152,11 @@ public sealed record CalculationIssuesDto(
 /// Коли затверджено місяць джерела (UTC); <c>null</c> — зараз не затверджено або читач не може відкрити документ-джерело.
 /// </param>
 /// <param name="ApprovedAt">Коли затверджено місяць споживача (UTC, найраніший аркуш); <c>null</c> — не затверджено.</param>
+/// <param name="SourceChangedAt">
+/// ✎ F5-R (D-570): зв'язка в стані <c>Any</c> — коли востаннє змінено дані місяця джерела після затвердження цього місяця
+/// (UTC; вид <c>SourceChangedAfterApproval</c>). Момент не розкриває документа-джерела, тож віддається й читачеві, що його
+/// не бачить. <c>null</c> — рядок <c>ApprovedOnly</c>.
+/// </param>
 public sealed record SourceIssueDto(
     string Kind,
     int MonthNumber,
@@ -160,7 +165,8 @@ public sealed record SourceIssueDto(
     string? SourceProjectCode,
     string? SourceDocumentKey,
     DateTime? SourceApprovedAt,
-    DateTime? ApprovedAt);
+    DateTime? ApprovedAt,
+    DateTime? SourceChangedAt = null);
 
 /// <summary>✎ C-1 (D-475): запис групи «Помилки формул» — корінь помилки (або джерело «не оновлено», якого не видно).</summary>
 /// <param name="TableCode">Код таблиці.</param>
