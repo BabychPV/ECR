@@ -54,6 +54,20 @@ public interface ICalculationTrigger
     public Task<string?> RequestAsync(long documentId, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>): те саме, що <see cref="RequestAsync(long, PeriodKey, CancellationToken)"/>, для власного
+    /// перерахунку РІЧНОГО/КВАРТАЛЬНОГО документа-джерела після правки — з місяцями правки, які прогін донесе до каскаду
+    /// споживачів (злиття постановок — об'єднанням; постановка без місяців — увесь рік).
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sourceMonths">Місяці правки (1–12) у межах періоду.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Як у <see cref="RequestAsync(long, PeriodKey, CancellationToken)"/>.</returns>
+    /// <remarks>Реалізація без підтримки місяців (тестові заглушки) — без них: увесь рік, як доти.</remarks>
+    public Task<string?> RequestAsync(long documentId, PeriodKey periodKey, IReadOnlyCollection<int> sourceMonths, CancellationToken ct)
+        => RequestAsync(documentId, periodKey, ct);
+
+    /// <summary>
     /// B63: ставить перерахунок документа, ЗАЛЕЖНОГО від зміненого довідника чи документа-джерела (RT-25, HSE400 3b,
     /// FLERT F6) — пропускаються лише затверджені аркуші, подані перераховуються з позначкою для погоджувача.
     /// </summary>
@@ -64,7 +78,7 @@ public interface ICalculationTrigger
     /// Ідентифікатор задачі; <c>null</c> — період не знайдено, <c>Scheduled</c>, закритий, проєкт архівований (B97)
     /// або затверджено всі аркуші.
     /// </returns>
-    /// <remarks>Типова реалізація — як <see cref="RequestAsync"/> (для фейків тестів); справжня — <c>CalculationTrigger</c>.</remarks>
+    /// <remarks>Типова реалізація — як <see cref="RequestAsync(long, PeriodKey, CancellationToken)"/> (для фейків тестів); справжня — <c>CalculationTrigger</c>.</remarks>
     public Task<string?> RequestDependentsAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
         => RequestAsync(documentId, periodKey, ct);
 

@@ -31,6 +31,28 @@ public interface IWorkflowStore
         long documentId, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>): те саме, що <see cref="GetSheetsAsync(long, PeriodKey, CancellationToken)"/>, для кількох
+    /// періодів документа одним зверненням. Ключ є для кожного запитаного періоду (порожній перелік — станів немає).
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKeys">Ключі періодів.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Стани аркушів за ключем періоду.</returns>
+    /// <remarks>Типова реалізація — по одному (тестові заглушки); справжня — <c>WorkflowStore</c>, один запит.</remarks>
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<ApprovalState>>> GetSheetsForPeriodsAsync(
+        long documentId, IReadOnlyCollection<int> periodKeys, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(periodKeys);
+        var sheets = new Dictionary<int, IReadOnlyList<ApprovalState>>();
+        foreach (var key in periodKeys.Distinct())
+        {
+            sheets[key] = await GetSheetsAsync(documentId, new PeriodKey(key), ct).ConfigureAwait(false);
+        }
+
+        return sheets;
+    }
+
+    /// <summary>
     /// Календар подання аркуша (D-441): усі періоди проєкту документа з ЕФЕКТИВНИМ станом на
     /// <paramref name="utcNow"/> і станом аркуша в кожному; <c>null</c> — документа немає.
     /// </summary>

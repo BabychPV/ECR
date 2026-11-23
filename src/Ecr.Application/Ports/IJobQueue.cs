@@ -74,6 +74,29 @@ public interface IJobQueue
     public Task<string?> FindQueuedByTargetAsync(string targetKey, CancellationToken ct) => Task.FromResult<string?>(null);
 
     /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>): те саме, що <see cref="FindQueuedByTargetAsync"/>, для кількох цілей одним зверненням: ціль → <c>JobId</c>
+    /// задачі, що чекає (цілі без такої задачі в результаті немає).
+    /// </summary>
+    /// <param name="targetKeys">Цілі <c>{ТипМаркера}~{ціль}</c>.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>Типова реалізація — по одній ціллю (<see cref="FindQueuedByTargetAsync"/>).</remarks>
+    public async Task<IReadOnlyDictionary<string, string>> FindQueuedByTargetsAsync(
+        IReadOnlyCollection<string> targetKeys, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(targetKeys);
+        var found = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var target in targetKeys.Distinct(StringComparer.Ordinal))
+        {
+            if (await FindQueuedByTargetAsync(target, ct).ConfigureAwait(false) is { } jobId)
+            {
+                found[target] = jobId;
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>
     /// Скасовує задачу, що ЧЕКАЄ (<c>Queued</c>) на ціль, і НЕ чіпає виконувану (на відміну від
     /// <see cref="RequestCancelAsync"/>, який виконуваній ставить запит скасування).
     /// </summary>

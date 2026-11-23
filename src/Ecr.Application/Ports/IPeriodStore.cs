@@ -129,6 +129,28 @@ public interface IPeriodStore
         long documentId, int periodKey, CancellationToken ct);
 
     /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>): те саме, що <see cref="FindPeriodStateAsync"/>, для кількох періодів документа одним зверненням
+    /// (каскад споживача за ребром «рік» — 12 періодів). Ключ є для кожного запитаного періоду; <c>null</c> — періоду немає.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKeys">Ключі періодів.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Стан за ключем періоду.</returns>
+    /// <remarks>Типова реалізація — по одному (тестові заглушки); справжня — <c>PeriodStore</c>, один запит.</remarks>
+    public async Task<IReadOnlyDictionary<int, Ecr.Domain.Enums.PeriodState?>> FindPeriodStatesAsync(
+        long documentId, IReadOnlyCollection<int> periodKeys, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(periodKeys);
+        var states = new Dictionary<int, Ecr.Domain.Enums.PeriodState?>();
+        foreach (var key in periodKeys.Distinct())
+        {
+            states[key] = await FindPeriodStateAsync(documentId, key, ct).ConfigureAwait(false);
+        }
+
+        return states;
+    }
+
+    /// <summary>
     /// Чи є серед аркушів такий, що після <c>Reopen</c> ще не затверджений
     /// знову (ФВ-5.20a, <c>D-70</c> б): <c>ReopenedAt</c> заповнено й немає
     /// <c>Approved</c> пізнішого за нього.

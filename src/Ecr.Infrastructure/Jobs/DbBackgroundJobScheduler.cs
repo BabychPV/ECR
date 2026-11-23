@@ -185,6 +185,33 @@ public sealed class DbBackgroundJobScheduler(
     }
 
     /// <inheritdoc />
+    /// <remarks>✎ PERF-06b (<c>D-572</c>): ті самі правила, що <see cref="FindQueuedAsync{TJob}"/> (у транзакції — «немає»), одним зверненням.</remarks>
+    public async Task<IReadOnlyDictionary<string, string>> FindQueuedManyAsync<TJob>(
+        IReadOnlyCollection<string> targetKeys, CancellationToken ct)
+        where TJob : IBackgroundJob
+    {
+        ArgumentNullException.ThrowIfNull(targetKeys);
+        var found = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (targetKeys.Count == 0
+            || (queue as DbJobQueue)?.Context.Database.CurrentTransaction is not null
+            || System.Transactions.Transaction.Current is not null)
+        {
+            return found;
+        }
+
+        var byKey = targetKeys.Distinct(StringComparer.Ordinal).ToDictionary(TargetKeyOf<TJob>, t => t, StringComparer.Ordinal);
+        foreach (var (key, jobId) in await queue.FindQueuedByTargetsAsync(byKey.Keys, ct).ConfigureAwait(false))
+        {
+            if (byKey.TryGetValue(key, out var target))
+            {
+                found[target] = jobId;
+            }
+        }
+
+        return found;
+    }
+
+    /// <inheritdoc />
     public Task<bool> CancelQueuedAsync<TJob>(string targetKey, string? coveredByJobId, CancellationToken ct)
         where TJob : IBackgroundJob
     {

@@ -124,6 +124,7 @@ public sealed partial class FormulaRecalculationJob(
 
         int written = 0;
         var writtenPeriods = new SortedSet<int>();
+        var changedColumnsByPeriod = new Dictionary<int, HashSet<int>>();
         JobDeferredException? deferral = null;
 
         // ⛔ D-8: відкладені періоди проходу. Повтор задачі виконує ПОЧАТКОВИЙ payload (лише насіння), а читачі, знайдені
@@ -237,6 +238,16 @@ public sealed partial class FormulaRecalculationJob(
                 {
                     writtenPeriods.Add(slot);
                 }
+
+                // ✎ PERF-06b (D-572): колонки, змінені в періоді (насіння й похідні), — з них хук джерела виводить місяці правки
+                // річного/квартального документа-джерела.
+                if (!changedColumnsByPeriod.TryGetValue(slot, out var periodColumns))
+                {
+                    changedColumnsByPeriod[slot] = periodColumns = [];
+                }
+
+                periodColumns.UnionWith(changed.Select(c => c.ColumnDefId));
+                periodColumns.UnionWith(item.Dirty.Seeds.Select(s => s.ColumnDefId));
 
                 // ✎ B79: поданий аркуш, у який каскад записав, — запис журналу й позначка «перераховано після подання»
                 // (той самий механізм, що B63/B83: `SheetRecalc/RecalculatedAfterSubmission`, читає картка документа).
@@ -363,6 +374,7 @@ public sealed partial class FormulaRecalculationJob(
                 {
                     [documentId] = changedPeriods,
                     TemplateVersionIds = shared.TemplateVersionsOf(documentId, changedPeriods),
+                    ChangedColumns = changedColumnsByPeriod.ToDictionary(p => p.Key, p => (IReadOnlySet<int>)p.Value),
                 };
                 await (seedPeriods.Count > 0
                         ? completionHook.OnCellsEditedAsync(changed, ct)
