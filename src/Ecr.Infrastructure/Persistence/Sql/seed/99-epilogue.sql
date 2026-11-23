@@ -554,12 +554,7 @@ WHEN NOT MATCHED BY TARGET AND NOT EXISTS (SELECT 1 FROM cfg.DocumentSourceBindi
     INSERT (Code, SourceTemplateId, RegistryDefId, MappingKind, SourceTableCodes, Policy, SourceState,
             ReadFromDocument, RecalculateDependents, UpdatedAt, UpdatedByUserId)
     VALUES (N'HSE400_LAND_COMPOSITION', s.SourceTemplateId, s.RegistryDefId, 1, NULL, 2, 0, 1, 1, NULL, NULL);
--- Споживач — шаблон Land (код LAND_UI, tools/land/Build-LandTemplate.ps1). Лише відсутня пара.
-INSERT INTO cfg.DocumentSourceBindingConsumer (BindingId, TemplateId)
-SELECT b.Id, tpl.Id
-FROM cfg.DocumentSourceBinding AS b
-JOIN cfg.Template AS tpl ON tpl.Code = N'LAND_UI'
-WHERE b.Code = N'HSE400_LAND_COMPOSITION'
-  AND NOT EXISTS (SELECT 1 FROM cfg.DocumentSourceBindingConsumer AS c WHERE c.BindingId = b.Id AND c.TemplateId = tpl.Id);
+-- ✎ B179 L7 (D-574): споживачів (Land тощо) сід більше не заводить — їх називає граф залежностей за формулами й
+-- методологіями; ручну таблицю споживачів знято міграцією B179L7DropSourceBindingConsumer.
 GO
 -- B80:source-binding ── кінець секції ──

@@ -1468,23 +1468,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         });
                 });
 
-            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.DocumentSourceBindingConsumer", b =>
-                {
-                    b.Property<int>("BindingId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("TemplateId")
-                        .HasColumnType("int");
-
-                    b.HasKey("BindingId", "TemplateId")
-                        .HasName("PK_DocumentSourceBindingConsumer");
-
-                    b.HasIndex("TemplateId")
-                        .HasDatabaseName("IX_DocSrcBindingConsumer_Template");
-
-                    b.ToTable("DocumentSourceBindingConsumer", "cfg");
-                });
-
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.FormulaDef", b =>
                 {
                     b.Property<int>("Id")
@@ -7714,23 +7697,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasConstraintName("FK_DocSrcBinding_UpdatedBy");
                 });
 
-            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.DocumentSourceBindingConsumer", b =>
-                {
-                    b.HasOne("Ecr.Domain.Entities.Configuration.DocumentSourceBinding", null)
-                        .WithMany("Consumers")
-                        .HasForeignKey("BindingId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("FK_DocSrcBindingConsumer_Binding");
-
-                    b.HasOne("Ecr.Domain.Entities.Configuration.Template", null)
-                        .WithMany()
-                        .HasForeignKey("TemplateId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("FK_DocSrcBindingConsumer_Template");
-                });
-
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.FormulaDef", b =>
                 {
                     b.HasOne("Ecr.Domain.Entities.Configuration.TableDef", null)
@@ -9353,11 +9319,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.Methodology", b =>
                 {
                     b.Navigation("Versions");
-                });
-
-            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.DocumentSourceBinding", b =>
-                {
-                    b.Navigation("Consumers");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.PermitGroup", b =>

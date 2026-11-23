@@ -70,7 +70,8 @@ public sealed partial class RecalculationJob(
     IRecalculationCompletionHook? completionHook = null,
     IMonthColumnRouter? monthRouter = null,
     IJobLeaseContext? lease = null,
-    IJobQueue? queue = null) : IRecalculationJob
+    IJobQueue? queue = null,
+    IDependencyGraphProvider? dependencyGraph = null) : IRecalculationJob
 {
     [LoggerMessage(
         Level = LogLevel.Error,

@@ -45,24 +45,7 @@ public sealed class DocumentSourceBindingConfiguration : IEntityTypeConfiguratio
         builder.HasOne<User>().WithMany().HasForeignKey(x => x.UpdatedByUserId)
                .HasConstraintName("FK_DocSrcBinding_UpdatedBy");
 
-        builder.HasMany(x => x.Consumers).WithOne().HasForeignKey(c => c.BindingId)
-               .HasConstraintName("FK_DocSrcBindingConsumer_Binding");
-        builder.Navigation(x => x.Consumers).UsePropertyAccessMode(PropertyAccessMode.Field);
-    }
-}
-
-/// <summary>Конфігурація <see cref="DocumentSourceBindingConsumer"/>.</summary>
-public sealed class DocumentSourceBindingConsumerConfiguration : IEntityTypeConfiguration<DocumentSourceBindingConsumer>
-{
-    /// <inheritdoc />
-    public void Configure(EntityTypeBuilder<DocumentSourceBindingConsumer> builder)
-    {
-        ArgumentNullException.ThrowIfNull(builder);
-
-        builder.ToTable("DocumentSourceBindingConsumer", "cfg");
-        builder.HasKey(x => new { x.BindingId, x.TemplateId }).HasName("PK_DocumentSourceBindingConsumer");
-        builder.HasIndex(x => x.TemplateId).HasDatabaseName("IX_DocSrcBindingConsumer_Template");
-        builder.HasOne<Template>().WithMany().HasForeignKey(x => x.TemplateId)
-               .HasConstraintName("FK_DocSrcBindingConsumer_Template");
+        // ✎ B179 L7 (D-574): ручного переліку споживачів (cfg.DocumentSourceBindingConsumer) немає — міграція
+        // B179L7DropSourceBindingConsumer; споживачів дає граф залежностей.
     }
 }

@@ -11,7 +11,7 @@ namespace Ecr.Infrastructure.Persistence;
 /// (усі <c>NO_ACTION</c>), тож видалення — явне, від листя до кореня. <c>aud.CellChange</c>
 /// НЕ чіпається: це журнал, і сам факт видалення лягає поруч у <c>aud.SecurityEvent</c>.
 /// </remarks>
-public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionStore
+public sealed class DocumentDeletionStore(EcrDbContext db, IDependencyGraphProvider? dependencyGraph = null) : IDocumentDeletionStore
 {
     /// <summary>Стеля станів на документ: 500 аркушів × 12 періодів із запасом.</summary>
     private const int MaxStates = 10_000;
@@ -112,9 +112,16 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
     /// Шаблони документа — за його екземплярами (як у хуку джерела, <c>SourceDocumentChangeHook</c>); не джерело — один
     /// запит шаблонів, один зв'язок і нічого більше. Споживачі — документи з екземплярами версій шаблонів-споживачів; дотик
     /// — у ТІЙ САМІЙ транзакції, що й видалення (відкат видалення відкочує й дотик).
+    /// ✎ B179 L7 (D-574): шаблони-споживачі називає граф залежностей (<see cref="IDependencyGraphProvider"/>), а не знята
+    /// ручна таблиця споживачів. Без графа (ручна збірка сховища в тесті) — нуль дотиків; контейнер граф дає завжди.
     /// </remarks>
     public async Task<int> TouchSourceConsumersAsync(long documentId, int userId, DateTime utcNow, CancellationToken ct)
     {
+        if (dependencyGraph is null)
+        {
+            return 0;
+        }
+
         var templates = await (
                 from i in db.TableInstances.AsNoTracking()
                 where i.DocumentId == documentId
@@ -130,12 +137,22 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
             return 0;
         }
 
-        var consumers = await db.DocumentSourceBindings.AsNoTracking()
+        var bindingIds = await db.DocumentSourceBindings.AsNoTracking()
             .Where(b => b.ReadFromDocument && templates.Contains(b.SourceTemplateId))
-            .SelectMany(b => b.Consumers.Select(c => c.TemplateId))
-            .Distinct()
+            .Select(b => b.Id)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+        if (bindingIds.Count == 0)
+        {
+            return 0;
+        }
+
+        var consumers = (await dependencyGraph.GetAsync(ct).ConfigureAwait(false)).TemplateDependencies
+            .Where(d => bindingIds.Contains(d.BindingId))
+            .Select(d => d.ConsumerTemplateId)
+            .Distinct()
+            .Order()
+            .ToList();
         if (consumers.Count == 0)
         {
             return 0;
