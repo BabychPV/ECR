@@ -35018,11 +35018,44 @@
           "toTableCode": {
             "description": "Код таблиці в цільовій версії; рівний FromTableCode — лише перейменування колонок.",
             "type": "string"
+          },
+          "unitRelabels": {
+            "description": "✎ P-1123-4: заявлені перепідписання одиниць колонок цієї таблиці (без перерахунку); `null` — немає.",
+            "items": {
+              "$ref": "#/components/schemas/VersionMigrationUnitRelabel"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           }
         },
         "required": [
           "fromTableCode",
           "toTableCode"
+        ],
+        "type": "object"
+      },
+      "VersionMigrationUnitRelabel": {
+        "description": "✎ P-1123-4: заявлене ПЕРЕПІДПИСАННЯ одиниці колонки без перерахунку значень («було безрозмірне → стало підтверджена\nодиниця»): числа вже в цій одиниці, змінюється лише підпис. Без заяви зміна одиниці колонки зі значеннями лишається\n`guardedWithData`.",
+        "properties": {
+          "columnCode": {
+            "description": "Код колонки у вихідній версії (у таблиці запису мапи).",
+            "type": "string"
+          },
+          "fromUnitCode": {
+            "description": "Одиниця у вихідній версії — лише безрозмірна (розмірність `Dimensionless`).",
+            "type": "string"
+          },
+          "toUnitCode": {
+            "description": "Одиниця в цільовій версії.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "columnCode",
+          "fromUnitCode",
+          "toUnitCode"
         ],
         "type": "object"
       },
