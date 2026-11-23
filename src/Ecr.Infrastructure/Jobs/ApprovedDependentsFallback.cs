@@ -48,11 +48,17 @@ public sealed partial class ApprovedDependentsFallback(
     /// <summary>Дешевий відбір без звернення до бази: перерахунок документа з ціллю «з затвердженими».</summary>
     /// <param name="jobCode">Код задачі.</param>
     /// <param name="targetKey">Ціль черги.</param>
+    /// <param name="payloadJson">
+    /// ✎ B80-N5f: payload задачі — ціль <c>NULL</c> (черга знімає її, коли рядок не зливається чи позаду вже чекає інша,
+    /// або задачу поставлено без цілі) не означає «не з затвердженими»: тоді вирішує <c>IncludeApproved</c> payload
+    /// (його ставить лише постановка «з затвердженими», <c>CalculationTrigger</c>).
+    /// </param>
     /// <returns><c>true</c> — варто перевірити, чим задача закінчилась.</returns>
-    public static bool IsCandidate(string? jobCode, string? targetKey)
+    public static bool IsCandidate(string? jobCode, string? targetKey, string? payloadJson = null)
         => string.Equals(jobCode, JobListKinds.RecalculationJobCode, StringComparison.Ordinal)
-           && targetKey is not null
-           && targetKey.EndsWith(CalculationTrigger.DependentsApprovedSuffix, StringComparison.Ordinal);
+           && (targetKey is not null
+               ? targetKey.EndsWith(CalculationTrigger.DependentsApprovedSuffix, StringComparison.Ordinal)
+               : Parse(payloadJson) is { IncludeApproved: true });
 
     /// <summary>
     /// Для кожної з <paramref name="jobIds"/>, що є «залежні з затвердженими» і закінчилась <c>Failed</c> чи
@@ -80,20 +86,22 @@ public sealed partial class ApprovedDependentsFallback(
                 .Where(p => ids.Contains(p.JobId)
                             && p.JobCode == code
                             && (p.State == "Failed" || p.State == "Cancelled")
-                            && p.TargetKey != null
-                            && p.TargetKey.EndsWith(CalculationTrigger.DependentsApprovedSuffix))
+                            && (p.TargetKey == null || p.TargetKey.EndsWith(CalculationTrigger.DependentsApprovedSuffix)))
                 .Select(p => new { p.JobId, p.State, p.TargetKey, p.Payload })
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
 
             foreach (var row in rows)
             {
+                // ✎ B80-N5f: ціль NULL — документ і період відновлюються з payload (IncludeApproved ставить лише постановка
+                // «з затвердженими»); ціль є — вона має бути саме ціллю «з затвердженими» цього документа й періоду.
                 if (Parse(row.Payload) is not { DocumentId: > 0, PeriodKey: { } period, IncludeApproved: true } request
-                    || !string.Equals(
-                        row.TargetKey,
-                        DbBackgroundJobScheduler.TargetKeyOf<IRecalculationJob>(
-                            CalculationTrigger.DependentsApprovedTargetOf(request.DocumentId, new PeriodKey(period))),
-                        StringComparison.Ordinal))
+                    || (row.TargetKey is not null
+                        && !string.Equals(
+                            row.TargetKey,
+                            DbBackgroundJobScheduler.TargetKeyOf<IRecalculationJob>(
+                                CalculationTrigger.DependentsApprovedTargetOf(request.DocumentId, new PeriodKey(period))),
+                            StringComparison.Ordinal)))
                 {
                     continue;
                 }
