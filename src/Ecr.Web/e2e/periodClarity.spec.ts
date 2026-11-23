@@ -165,7 +165,12 @@ test.describe('Period clarity', () => {
     await page.getByRole('listbox', { name: /Project/ }).getByRole('option', { name: project.code, exact: true }).click();
     await dialog.getByRole('button', { name: /^Next$/ }).click();
 
-    // Одразу аркуші — кроку періоду немає.
+    // ✎ B74 P4: крок Template — у проєкту один шаблон, він обраний сам.
+    await expect(dialog.getByRole('textbox', { name: /^Template/ })).not.toHaveValue('', { timeout: 60_000 });
+    await expect(dialog.getByRole('button', { name: /^Next$/ })).toBeEnabled({ timeout: 60_000 });
+    await dialog.getByRole('button', { name: /^Next$/ }).click();
+
+    // Далі аркуші — кроку періоду немає.
     await expect(dialog.getByText(/Leave out sheets that do not apply/)).toBeVisible({ timeout: 60_000 });
     await expect(dialog.getByRole('textbox', { name: /^Period/ })).toHaveCount(0);
     await dialog.getByRole('button', { name: /^Next$/ }).click();

@@ -583,6 +583,8 @@ export function DocumentsPage(): JSX.Element {
                   <Table.Thead>
                     <Table.Tr>
                       <Table.Th>{t('documents.document')}</Table.Th>
+                      {/* ✎ B74 P4 (D-576): у проєкті «рік · об'єкт» документи різних шаблонів — шаблон окремою колонкою. */}
+                      <Table.Th data-column="template">{t('documents.template')}</Table.Th>
                       <Table.Th data-column="owner">{t('documents.owner')}</Table.Th>
                       {/* ✎ Period clarity / g3: смуга 12 місяців — над нею перші літери місяців (макет `.ms.hd`). */}
                       <Table.Th data-column="months">
@@ -635,6 +637,16 @@ export function DocumentsPage(): JSX.Element {
                                 )}
                               </Group>
                             </Box>
+                          </Table.Td>
+                          <Table.Td data-column="template" data-document-template={document.templateCode ?? ''}>
+                            {/* `null` — документ без шаблону (до ремонту 99-epilogue): видиме «—», а не порожнеча. */}
+                            {typeof document.templateCode === 'string' && document.templateCode.length > 0 ? (
+                              <Text size="sm" ff="monospace">
+                                {document.templateCode}
+                              </Text>
+                            ) : (
+                              <Text c="dimmed">—</Text>
+                            )}
                           </Table.Td>
                           <Table.Td data-column="owner">
                             {/* ✎ D-450: власник (автор документа, передається D-443). `null` — людини вже немає або

@@ -210,7 +210,8 @@
 
 @media (max-width: 640px) {
   .ecr-docs-table-scroll [data-column='updated'],
-  .ecr-docs-table-scroll [data-column='owner'] {
+  .ecr-docs-table-scroll [data-column='owner'],
+  .ecr-docs-table-scroll [data-column='template'] {
     display: none;
   }
 }

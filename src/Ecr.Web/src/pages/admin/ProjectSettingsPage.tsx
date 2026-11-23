@@ -23,6 +23,11 @@ const ProjectTemplateRoutes = lazy(async () => ({
   default: (await import('@/features/approvalRoutes/ProjectTemplateRoutes')).ProjectTemplateRoutes,
 }));
 
+/* ✎ B74 P4 (D-576): шаблони проєкту «рік · об'єкт» — за `import()` з тієї ж причини (бюджет маршруту). */
+const ProjectTemplatesSection = lazy(async () => ({
+  default: (await import('@/features/projects/ProjectTemplatesSection')).ProjectTemplatesSection,
+}));
+
 /** Розділ вкладки: заголовок `h2` і вміст. */
 function Section({ id, title, children }: { readonly id: string; readonly title: string; readonly children: ReactNode }): JSX.Element {
   return (
@@ -121,6 +126,14 @@ export function ProjectSettingsPage({ projectId }: { readonly projectId: number 
           </SettingsAction>
         </Section>
       )}
+
+      {/* ✎ B74 P4 (D-576): шаблони проєкту — бачить кожен, хто відкрив налаштування (`Document.View`); додати й
+          від'єднати — `Project.Manage` + грант Manage і не архівний проєкт (як решта дій вкладки). */}
+      <Section id="templates" title={t('projects.templates.title')}>
+        <Suspense fallback={null}>
+          <ProjectTemplatesSection projectId={selected.id} readOnly={selected.status === 'Archived' || !managesProject} />
+        </Suspense>
+      </Section>
 
       {/* ⛔ Маршрут погодження (`ФВ-5.17`) — налаштування проєкту, не місяця. */}
       {managesProject && (
