@@ -183,10 +183,13 @@ public sealed partial class SourceDocumentChangeHook(
             if (cellsEdited && sourceRecalculation is not null)
             {
                 // ✎ PERF-06b (D-572): річне/квартальне джерело — місяці правки (усі змінені колонки місячні) їдуть крізь `-auto`.
-                var editedMonths = await EditedMonthsAsync(
-                        matched.Where(f => f.PeriodKind != PeriodKind.Monthly).Select(f => (f.DocumentId, f.PeriodKeyValue, f.PeriodKind)),
-                        (periodsByDocument as ChangedPeriodsDictionary)?.ChangedColumns, ct)
-                    .ConfigureAwait(false);
+                // Черга без об'єднання (Quartz) місяців однаково не несе — колонок не читаємо (жодного звернення понад доти).
+                var editedMonths = sourceRecalculation.CoalescesCascadePeriods
+                    ? await EditedMonthsAsync(
+                            matched.Where(f => f.PeriodKind != PeriodKind.Monthly).Select(f => (f.DocumentId, f.PeriodKeyValue, f.PeriodKind)),
+                            (periodsByDocument as ChangedPeriodsDictionary)?.ChangedColumns, ct)
+                        .ConfigureAwait(false)
+                    : new Dictionary<(long DocumentId, int PeriodKey), int[]>();
 
                 var declined = new HashSet<(long DocumentId, int PeriodKey)>();
                 foreach (var (documentId, periodKey) in matched.Select(f => (f.DocumentId, f.PeriodKeyValue)).Distinct())
