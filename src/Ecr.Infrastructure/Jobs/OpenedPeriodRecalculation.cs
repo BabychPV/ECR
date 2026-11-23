@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Ecr.Infrastructure.Jobs;
 
 /// <summary>
-/// ✎ D-575: реалізація <see cref="IOpenedPeriodRecalculation"/> — <see cref="ICalculationTrigger.RequestAsync"/> (ціль
+/// ✎ D-575: реалізація <see cref="IOpenedPeriodRecalculation"/> — <see cref="ICalculationTrigger.RequestAsync(long, PeriodKey, CancellationToken)"/> (ціль
 /// <c>doc{id}-p{період}-auto</c>, лише не затверджені аркуші, B83) для кожного документа проєкту з таблицями в періоді.
 /// </summary>
 /// <remarks>

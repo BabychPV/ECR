@@ -74,8 +74,8 @@ public sealed partial class YearPressSkipsUnchangedMonthsTests
         formula.AssignColumn(document.ColumnDefIds[2]);
         db.FormulaDefs.Add(formula);
 
+        // ✎ B179 L7 (D-574): ручного переліку споживачів немає — споживача називає граф за формулою вище.
         var binding = new DocumentSourceBinding($"P6B_{tag}", source.TemplateId, registry.Id);
-        binding.AddConsumer(document.TemplateId);
         db.DocumentSourceBindings.Add(binding);
         await db.SaveChangesAsync();
         return (source, sourcePeriod);
