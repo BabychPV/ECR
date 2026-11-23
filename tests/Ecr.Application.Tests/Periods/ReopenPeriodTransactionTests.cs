@@ -521,6 +521,9 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
 
         public Task<bool> IsDocumentProjectArchivedOrArchivingAsync(long documentId, CancellationToken ct)
             => inner.IsDocumentProjectArchivedOrArchivingAsync(documentId, ct);
+
+        public Task<PeriodEvaluationState?> FindEvaluationStateAsync(long documentId, int periodKey, CancellationToken ct)
+            => inner.FindEvaluationStateAsync(documentId, periodKey, ct);
     }
 
     /// <summary>

@@ -223,6 +223,15 @@ public sealed class CrossPeriodFanOut(
                 continue;
             }
 
+            // ✎ D-575: формули не відкритого періоду не обчислюються (прогін повернув би 0) — читача не будимо. Зайвий
+            // запит — лише для Scheduled (стан чернетки — так само Scheduled, але там D-575 не діє: її читач рахується).
+            if (state == Ecr.Domain.Enums.PeriodState.Scheduled
+                && (await periods.FindEvaluationStateAsync(documentId, readerKey.Value, ct).ConfigureAwait(false))
+                    is { AwaitingOpen: true })
+            {
+                continue;
+            }
+
             // L1: не ставимо задачу, яка б повернулася з `written = 0` (порожні цілі в періоді-читачі).
             if (!await ReaderHasWorkAsync(documentId, readerKey, source.Sequence, carried, carriedInputs, shared, ct)
                     .ConfigureAwait(false))

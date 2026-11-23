@@ -2460,6 +2460,22 @@ public static class PeriodMaterializationTrigger
 }
 ```
 
+#### `IOpenedPeriodRecalculation`
+
+✎ D-575: формули не відкритого періоду (`Scheduled` активного проєкту) не обчислюються, тож перехід `Scheduled → Open/Grace` (`PeriodOpenedRecalculationTrigger.Requires`) ставить перерахунок (`ICalculationTrigger.RequestAsync`, ціль `-auto`) кожного документа проєкту з таблицями в періоді. Викликати лише ПІСЛЯ коміту переходу (`PeriodStateJob`, `UpdatePeriodPolicyHandler`); збій постановки — у журнал, не викликачу. Активація чернетки не викликає: у чернетці D-575 не діє.
+
+```csharp
+public interface IOpenedPeriodRecalculation
+{
+    public Task RequestAsync(int projectId, IReadOnlyCollection<int> periodKeys, CancellationToken ct);
+}
+
+public static class PeriodOpenedRecalculationTrigger
+{
+    public static bool Requires(PeriodState before, PeriodState after);
+}
+```
+
 #### `ICollectionScheduleStore`
 
 Розклади збору (`ext.CollectionSchedule`) для редагування з інтерфейсу (`BE-21b`, ФВ-14.3). Окремо від `ICollectionStore`: той обслуговує ПРОГІН збору і живе в адаптерах джерела, а цей — конфігурацію, яку править людина. Розклад завжди віддається разом із кодом і підписом сутності джерела (`ScheduledSourceEntity`): сам по собі він має лише `SourceEntityId`, і перелік із голими числами не каже, ЩО збирається за цим cron.

@@ -265,7 +265,8 @@ public sealed class UpdatePeriodPolicyHandler(
     IUnitOfWork uow,
     IAuditWriter audit,
     IClock clock,
-    IMaterializationScheduler? materialization = null)
+    IMaterializationScheduler? materialization = null,
+    IOpenedPeriodRecalculation? openedRecalculation = null)
 {
     /// <summary>Право керування проєктами.</summary>
     public const string Permission = "Project.Manage";
@@ -308,11 +309,13 @@ public sealed class UpdatePeriodPolicyHandler(
 
         PeriodPolicyDto? result = null;
         var toMaterialize = new Dictionary<int, IReadOnlyList<int>>();
+        var toRecalculate = new Dictionary<int, IReadOnlyList<int>>();
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             // ⚠ Стратегія повторів може виконати замикання вдруге — перелік збирається заново.
             toMaterialize.Clear();
+            toRecalculate.Clear();
 
             var policy = await periods.GetPolicyAsync(id, innerCt).ConfigureAwait(false);
             var projectIds = await periods.ListProjectIdsUsingPolicyAsync(id, innerCt).ConfigureAwait(false);
@@ -389,6 +392,12 @@ public sealed class UpdatePeriodPolicyHandler(
                 {
                     toMaterialize[projectId] = keys;
                 }
+
+                // ✎ D-575: місяць, який нова політика відкрила, досі не мав обчислених формул.
+                if (Periods.PeriodStateCatchUp.ToRecalculate(advanced) is { Count: > 0 } opened)
+                {
+                    toRecalculate[projectId] = opened;
+                }
             }
 
             // ⛔ Журнал — у тій самій транзакції, що й зміна: збій збереження не
@@ -422,6 +431,15 @@ public sealed class UpdatePeriodPolicyHandler(
             foreach (var (projectId, keys) in toMaterialize)
             {
                 await materialization.EnqueueAfterTransitionAsync(projectId, keys, ct).ConfigureAwait(false);
+            }
+        }
+
+        // ✎ D-575: після коміту — перерахунок документів відкритих політикою періодів (збій постановки не валить запит).
+        if (openedRecalculation is not null)
+        {
+            foreach (var (projectId, keys) in toRecalculate)
+            {
+                await openedRecalculation.RequestAsync(projectId, keys, ct).ConfigureAwait(false);
             }
         }
 
