@@ -139,7 +139,12 @@ describe('B74 P4: крок Template майстра нового документ
     expect(within(body).queryByLabelText('Air emissions (AIR)')).toBeNull();
 
     fireEvent.click(next()); // → Review
-    await screen.findByTestId('wizard-summary');
+    const summary = await screen.findByTestId('wizard-summary');
+    // ✎ B74 P4: шаблон — під підписом «Template», версія — окремим рядком «Version».
+    expect(within(summary).getByText('⟦documents.template⟧')).toBeTruthy();
+    expect(within(summary).getByText('LAND')).toBeTruthy();
+    expect(within(summary).getByText('⟦documents.version⟧')).toBeTruthy();
+    expect(within(summary).getByText('v1.0')).toBeTruthy();
     fireEvent.click(screen.getByTestId('wizard-apply'));
 
     await waitFor(() => expect(posted).not.toBeNull());

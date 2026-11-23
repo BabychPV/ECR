@@ -429,11 +429,15 @@ export function CreateDocumentModal({
         <KeyValue
           items={[
             { label: t('documents.project'), value: projectCode },
+            // ✎ B74 P4 (D-576): шаблон — під власним підписом «Template»; версія — окремим рядком.
             {
-              label: t('documents.version'),
+              label: t('documents.template'),
               value: template.data === undefined ? null : template.data.templateCode,
               mono: true,
-              ...(template.data === undefined ? {} : { hint: `v${template.data.version}` }),
+            },
+            {
+              label: t('documents.version'),
+              value: template.data === undefined ? null : `v${template.data.version}`,
             },
             {
               label: t('documents.sheets'),

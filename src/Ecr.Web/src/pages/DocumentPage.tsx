@@ -1261,6 +1261,7 @@ export function DocumentPage(): JSX.Element {
           periodKey={periodKey}
           businessKey={document.businessKey}
           templateVersion={document.templateVersion ?? undefined}
+          templateCode={document.templateCode ?? undefined}
           showRequiredErrors={validatedSeq > 0}
           // ✎ UI-16: згорнута з підсумком; розгортається сама, коли поле
           // потребує уваги (обов'язкове порожнє, недійсна дата, незбережене).
