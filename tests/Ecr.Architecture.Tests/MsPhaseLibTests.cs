@@ -111,10 +111,12 @@ public sealed class MsPhaseLibTests
             @{ VersionId = 7; Code = 'M_DONE'; Version = 'V1'; DbHash = 'h7'; GoldenExpectations = 'ok'; Engine = 1 },
             @{ VersionId = 8; Code = 'M_BAD'; Version = 'V1'; DbHash = 'h8'; GoldenExpectations = 'ok'; Engine = 0 },
             @{ VersionId = 9; Code = 'M_NONE'; Version = 'V1'; DbHash = 'h9'; GoldenExpectations = 'none'; Engine = 0 },
-            @{ VersionId = 10; Code = 'M_NODOC'; Version = 'V1'; DbHash = 'h10'; GoldenExpectations = 'invalid'; Engine = 0 })
-        $p = Get-MsSwitchPlan -Candidates $c -Live @{ 1 = 'h1'; 5 = 'h5'; 6 = 'old'; 10 = 'h10' } -Reference @{ 2 = 'h2'; 4 = 'h4' } -Mismatched @(8)
+            @{ VersionId = 10; Code = 'M_NODOC'; Version = 'V1'; DbHash = 'h10'; GoldenExpectations = 'invalid'; Engine = 0 },
+            @{ VersionId = 11; Code = 'M_SYN'; Version = 'V1'; DbHash = 'h11'; GoldenExpectations = 'ok'; Engine = 0 })
+        $p = Get-MsSwitchPlan -Candidates $c -Live @{ 1 = 'h1'; 5 = 'h5'; 6 = 'old'; 10 = 'h10' } -Reference @{ 2 = 'h2'; 4 = 'h4' } -Synthetic @{ 11 = 'h11' } -Mismatched @(8)
         'LIVE=' + ($p.Live -join ',')
         'REF=' + ($p.Reference -join ',')
+        'SYN=' + ($p.Synthetic -join ',')
         'GOLD=' + ($p.Golden -join ',')
         'ALREADY=' + ($p.Already -join ',')
         foreach ($s in $p.Stay) { 'STAY ' + $s.VersionId + ' ' + $s.Reason }
@@ -130,6 +132,7 @@ public sealed class MsPhaseLibTests
         Assert.Matches(@"LIVE=1\s", output);
         Assert.Contains("REF=2", output, StringComparison.Ordinal);
         Assert.Contains("GOLD=3", output, StringComparison.Ordinal);
+        Assert.Matches(@"SYN=11\s", output);
         Assert.Contains("ALREADY=7", output, StringComparison.Ordinal);
         Assert.Contains("STAY 4 golden set without expectations", output, StringComparison.Ordinal);
         Assert.Contains("STAY 8 parity mismatch", output, StringComparison.Ordinal);
@@ -178,5 +181,47 @@ public sealed class MsPhaseLibTests
         Assert.Contains("MISSING=False", output, StringComparison.Ordinal);
         Assert.Contains("ALL=True", output, StringComparison.Ordinal);
         Assert.Contains("ONE=True", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Синтетичні_рядки_покривають_кожне_правило_і_обидва_боки_кожної_умови_з_нулем_і_null()
+    {
+        var (exit, output) = RunPowerShell("""
+            $conds = @(Get-MsBranchConditions -Expressions @("if(@Op = 0, 0, @Flow * 2)", "if(@Month >= 4 and @Month <= 9, 1, 2)", "if(in(@Nae, '6491', '6493'), 1, 0)", "if(in(CURRENT_SUBSTANCE(), '333'), 1, 0)"))
+            'CONDS=' + (($conds | ForEach-Object { $_.Text }) -join ';')
+            $rules = @([pscustomobject]@{ Code = 'R1'; Args = [ordered]@{ Nae = @{ valueString = '6491' } } }, [pscustomobject]@{ Code = 'R2'; Args = [ordered]@{ Nae = @{ valueString = '6493' } } })
+            $rows = @(New-MsSyntheticRows -Arguments @('Op', 'Flow', 'Month', 'Nae') -Conditions $conds -RuleArgs $rules)
+            $cov = Get-MsBranchCoverage -Conditions $conds -Rows $rows -RuleCodes @('R1', 'R2')
+            'UNCOVERED=' + @($cov.Uncovered).Count
+            'RULES=' + (($cov.Rules | ForEach-Object { "$($_.rule):$($_.rows)" }) -join ',')
+            'FLOWZERO=' + @($rows | Where-Object { $null -ne $_.Args['Flow'] -and $_.Args['Flow'].value -eq 0 }).Count
+            'FLOWNULL=' + @($rows | Where-Object { $_.Args.Contains('Flow') -and $null -eq $_.Args['Flow'] }).Count
+            'OPBOUND=' + (@($rows | Where-Object { $null -ne $_.Args['Op'] -and $_.Args['Op'].value -eq 1 }).Count -gt 0)
+            """);
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("CONDS=@Op = 0;@Month >= 4;@Month <= 9;in(@Nae, '6491', '6493')", output, StringComparison.Ordinal);
+        Assert.Contains("UNCOVERED=0", output, StringComparison.Ordinal);
+        Assert.Contains("RULES=R1:1,R2:1", output, StringComparison.Ordinal);
+        Assert.Contains("FLOWZERO=1", output, StringComparison.Ordinal);
+        Assert.Contains("FLOWNULL=1", output, StringComparison.Ordinal);
+        Assert.Contains("OPBOUND=True", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Покриття_називає_умову_без_хибного_рядка()
+    {
+        var (exit, output) = RunPowerShell("""
+            $conds = @(Get-MsBranchConditions -Expressions @("if(@Op = 0, 0, 1)"))
+            $rows = @([pscustomobject]@{ Key = 'A'; Args = [ordered]@{ Op = @{ value = [decimal]0 } }; Rule = 'R1' })
+            $cov = Get-MsBranchCoverage -Conditions $conds -Rows $rows -RuleCodes @('R1', 'R2')
+            ($cov.Uncovered -join ';')
+            """);
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("rule R2", output, StringComparison.Ordinal);
+        Assert.Contains("condition @Op = 0", output, StringComparison.Ordinal);
     }
 }

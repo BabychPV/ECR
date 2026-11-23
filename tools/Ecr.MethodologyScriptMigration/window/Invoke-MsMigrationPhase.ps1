@@ -17,6 +17,9 @@
       ✎ P-1123-4 (людина 23.11):
       Reference — входи з еталонних даних старої системи (ECR, лише читання; Build-MsReferenceCases.ps1) -> parity-cases: паритет
                   формули ↔ скрипт на рядках ECR; ref-eligible.json (хеш тексту) і golden-proposals.json. Розбіжність — СТОП.
+                  ✎ P-1123-6: версіям без жодного рядка live/ECR — синтетичні еталони з покриттям правил і гілок
+                  (Build-MsSyntheticCases.ps1 -> syn-coverage.json; непокрите — СТОП), паритет -> syn-eligible.json, усі рядки з
+                  виходами -> syn-golden.json (очікування — старий рушій).
       GoldenVersions — для чинних версій із золотим набором без очікувань: нова версія-клон, випадки — вхід і очікування з
                   рядка ECR, публікація (дата чинності «чинна + 1 день»). ПЕРЕД Convert (нові версії стають чинними).
       Switch    — план Get-MsSwitchPlan: доказ live -> еталон ECR -> золотий набір (PSS-23 на Script); вода — ніколи; окремий
@@ -116,6 +119,8 @@ switch ($Stage) {
     'Convert' {
         $out = Join-Path $Work 'convert'
         if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Recurse -Force }
+        # Пакет попереднього запуску не має пережити невдалий Convert (інакше Apply узяв би застарілі тексти).
+        foreach ($f in 'package.json', 'apply-package.json') { $x = Join-Path $Work $f; if (Test-Path -LiteralPath $x) { Remove-Item -LiteralPath $x -Force } }
         $code = Invoke-Tool @('convert', '--connection', $cs, '--out', $out)
         $report = Get-Content -LiteralPath (Join-Path $out 'convert-report.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         $failed = @($report.versions | Where-Object { $_.status -eq 'Failed' } | ForEach-Object { "$($_.methodology) $($_.version): " + (@($_.issues | Where-Object { $_.severity -eq 'Error' } | ForEach-Object { $_.code }) -join ',') })
@@ -139,7 +144,7 @@ switch ($Stage) {
             $sec = $m.Value.PSObject.Properties['argumentSources']
             if ($sec) { foreach ($s in $sec.Value.PSObject.Properties) {
                 $alt = [string]$s.Value.alternative
-                $gap = @(Invoke-Sql "SELECT COUNT(DISTINCT b.TableDefId), COUNT(DISTINCT CASE WHEN a.Id IS NULL AND NOT EXISTS (SELECT 1 FROM cfg.MonthInputAlias ma WHERE ma.TableDefId = b.TableDefId AND ma.Alias = '$($s.Name)') THEN b.TableDefId END) FROM cfg.CalculationBinding b JOIN calc.Methodology m ON m.Id = b.MethodologyId JOIN cfg.ColumnDef x ON x.TableDefId = b.TableDefId AND (x.Code = '$alt' OR x.Id IN (SELECT xa.ColumnDefId FROM cfg.MonthInputAlias xa WHERE xa.TableDefId = b.TableDefId AND xa.Alias = '$alt')) AND x.IsDeleted = 0 LEFT JOIN cfg.ColumnDef a ON a.TableDefId = b.TableDefId AND a.Code = '$($s.Name)' AND a.IsDeleted = 0 WHERE m.Code = '$mc' AND b.IsActive = 1")[0] -split '\|'
+                $gap = @(Invoke-Sql "SELECT COUNT(DISTINCT q.TableDefId), COUNT(DISTINCT CASE WHEN q.HasArg = 0 THEN q.TableDefId END) FROM (SELECT b.TableDefId, CASE WHEN EXISTS (SELECT 1 FROM cfg.ColumnDef a WHERE a.TableDefId = b.TableDefId AND a.Code = '$($s.Name)' AND a.IsDeleted = 0) OR EXISTS (SELECT 1 FROM cfg.MonthInputAlias ma WHERE ma.TableDefId = b.TableDefId AND ma.Alias = '$($s.Name)') THEN 1 ELSE 0 END AS HasArg FROM cfg.CalculationBinding b JOIN calc.Methodology m ON m.Id = b.MethodologyId WHERE m.Code = '$mc' AND b.IsActive = 1 AND (EXISTS (SELECT 1 FROM cfg.ColumnDef x WHERE x.TableDefId = b.TableDefId AND x.Code = '$alt' AND x.IsDeleted = 0) OR EXISTS (SELECT 1 FROM cfg.MonthInputAlias xa WHERE xa.TableDefId = b.TableDefId AND xa.Alias = '$alt'))) q")[0] -split '\|'
                 $facts.ArgumentColumns["$($m.Name)|$($s.Name)"] = ([int]$gap[0] -gt 0 -and [int]$gap[1] -eq 0)
             } }
         }
@@ -215,15 +220,37 @@ switch ($Stage) {
         $rp = Read-Json 'ref-parity.json'
         if (@($rp.mismatches).Count -gt 0) { Stop-Phase "reference parity has $(@($rp.mismatches).Count) mismatch(es): nothing will be switched" $null }
         $proven = @($rp.versions | Where-Object { $null -eq $_.reason })
-        Write-Phase "reference parity ($ReferenceDatabase): proven $($proven.Count) of $(@($rp.versions).Count), rows $((@($rp.versions) | Measure-Object rows -Sum).Sum), values $((@($rp.versions) | Measure-Object valuesCompared -Sum).Sum)" @{
+        # ✎ P-1123-6 («створи еталони і мігруй»): чинні формульні версії, яким ні live, ні ECR не дали жодного рядка, — синтетичні
+        # еталони з покриттям кожного правила й гілки (Build-MsSyntheticCases.ps1); очікування рахує СТАРИЙ рушій (parity-cases).
+        $withRef = @($rp.versions | Where-Object { [int]$_.rows -gt 0 } | ForEach-Object { [string]$_.methodologyCode })
+        $need = @(Invoke-Sql "SELECT m.Code FROM calc.MethodologyVersion v JOIN calc.Methodology m ON m.Id = v.MethodologyId WHERE v.Status = 1 AND v.Engine = 0 AND v.Level = 1 AND m.Kind <> 2 AND v.EffectiveFrom = (SELECT MAX(x.EffectiveFrom) FROM calc.MethodologyVersion x WHERE x.MethodologyId = v.MethodologyId AND x.Status = 1)" | Where-Object { $withRef -notcontains $_ -and $MsPermanentExclusions -notcontains $_ })
+        $synCases = Join-Path $Work 'syn-cases.json'
+        foreach ($f in 'syn-cases.json', 'syn-coverage.json', 'syn-parity.json', 'syn-eligible.json', 'syn-golden.json') { $x = Join-Path $Work $f; if (Test-Path -LiteralPath $x) { Remove-Item -LiteralPath $x -Force } }
+        if ($need.Count -gt 0) {
+            & (Join-Path $PSScriptRoot 'Build-MsSyntheticCases.ps1') -Server $Server -Database $Database -Methodology $need -BorrowedRules (Join-Path $Work 'borrowed-rules.json') -Out $synCases -CoverageOut (Join-Path $Work 'syn-coverage.json')
+            if ($LASTEXITCODE -ne 0) { Stop-Phase 'synthetic reference rows do not cover every rule and branch (see syn-coverage.json)' $null }
+            $code = Invoke-Tool @('parity-cases', '--connection', $cs, '--in', $synCases, '--out', (Join-Path $Work 'syn-parity.json'),
+                '--eligible-out', (Join-Path $Work 'syn-eligible.json'), '--golden-out', (Join-Path $Work 'syn-golden.json'), '--golden-all')
+            $sp = Read-Json 'syn-parity.json'
+            if (@($sp.mismatches).Count -gt 0) { Stop-Phase "synthetic parity has $(@($sp.mismatches).Count) mismatch(es): nothing will be switched" $null }
+            $cv = Read-Json 'syn-coverage.json'
+            Write-Phase "synthetic parity: versions $(@($sp.versions).Count), rows $((@($sp.versions) | Measure-Object rows -Sum).Sum), values $((@($sp.versions) | Measure-Object valuesCompared -Sum).Sum), proven $(@($sp.versions | Where-Object { $null -eq $_.reason }).Count)" @{
+                coverage = @($cv.versions | ForEach-Object { "$($_.methodologyCode): rows $($_.rows), rules $(@($_.rules | Where-Object { $_.rows -gt 0 }).Count)/$(@($_.rules).Count), conditions $(@($_.conditions | Where-Object { $_.covered }).Count)/$(@($_.conditions).Count)" })
+                notProven = @($sp.versions | Where-Object { $null -ne $_.reason } | ForEach-Object { "$($_.methodologyCode) $($_.version): $($_.reason)" })
+            }
+        }        Write-Phase "reference parity ($ReferenceDatabase): proven $($proven.Count) of $(@($rp.versions).Count), rows $((@($rp.versions) | Measure-Object rows -Sum).Sum), values $((@($rp.versions) | Measure-Object valuesCompared -Sum).Sum)" @{
             proven = @($proven | ForEach-Object { "$($_.methodologyCode) $($_.version) values=$($_.valuesCompared)" })
             notProven = @($rp.versions | Where-Object { $null -ne $_.reason } | ForEach-Object { "$($_.methodologyCode) $($_.version): $($_.reason)" })
         }
     }
     'GoldenVersions' {
         # ✎ P-1123-4: нові версії з очікуваннями золотого набору з рядка-еталона ECR (PSS-23 вимагає очікувань для перемикання).
-        $proposals = Join-Path $Work 'golden-proposals.json'
-        if (-not (Test-Path -LiteralPath $proposals)) { Stop-Phase 'missing golden-proposals.json (run Reference first)' $null }
+        $proposals = Join-Path $Work 'golden-all.json'
+        if (-not (Test-Path -LiteralPath (Join-Path $Work 'golden-proposals.json'))) { Stop-Phase 'missing golden-proposals.json (run Reference first)' $null }
+        # ECR (один рядок на версію) + синтетичні (усі рядки з виходами, P-1123-6) — один перелік.
+        $all = @((Read-Json 'golden-proposals.json').versions)
+        if (Test-Path -LiteralPath (Join-Path $Work 'syn-golden.json')) { $all += @((Read-Json 'syn-golden.json').versions) }
+        [IO.File]::WriteAllText($proposals, (@{ format = 'ecr-ms-golden-proposals'; formatVersion = 1; versions = $all } | ConvertTo-Json -Depth 12), (New-Object Text.UTF8Encoding($false)))
         if ($CopyAsUser -gt 0) {
             $code = Invoke-Tool @('golden-versions', '--connection', $cs, '--in', $proposals, '--borrowed', (Join-Path $Work 'borrowed-rules.json'), '--as-user', $CopyAsUser, '--out', (Join-Path $Work 'golden-versions.json'))
             # Невдалі (BLOCKED: публікація відмовила, чернетку видалено) лишаються на Formulas; решта версій уже опублікована.
@@ -260,6 +287,13 @@ switch ($Stage) {
                 $put = Invoke-Api PUT "/api/v1/methodologies/$($info[0])/versions/$newId/tests/$tc" (@{ inputJson = $inputJson; expectedJson = $expectedJson; tolerance = 0.000000001 } | ConvertTo-Json -Depth 4)
                 if ($put.StatusCode -ne 200) { Stop-Phase "test $tc of $mcode $number HTTP $($put.StatusCode)" $put.Content }
             }
+            if ($null -ne $pr -and $pr.PSObject.Properties['cases'] -and $pr.cases) {
+                foreach ($xc in @($pr.cases | Select-Object -Skip 1)) {
+                    $xin = @{ documentId = [long]$pr.documentId; periodKey = @{ value = [int]$pr.periodKey }; arguments = @($xc.arguments | ForEach-Object { @{ argumentCode = $_.argumentCode; value = $_.value; valueString = $_.valueString; unitId = $null; entryId = $_.entryId } }) } | ConvertTo-Json -Depth 8 -Compress
+                    $put = Invoke-Api PUT "/api/v1/methodologies/$($info[0])/versions/$newId/tests/$($xc.key)" (@{ inputJson = $xin; expectedJson = ($xc.expected | ConvertTo-Json -Compress); tolerance = 0.000000001 } | ConvertTo-Json -Depth 4)
+                    if ($put.StatusCode -ne 200) { Stop-Phase "test $($xc.key) of $mcode $number HTTP $($put.StatusCode)" $put.Content }
+                }
+            }
             foreach ($rule in $extraRules) {
                 $put = Invoke-Api PUT "/api/v1/methodologies/$($info[0])/versions/$newId/rules/$($rule.code)" (@{ matchJson = [string]$rule.matchJson; priority = [int]$rule.priority; isActive = $true } | ConvertTo-Json)
                 if ($put.StatusCode -ne 200) { Stop-Phase "rule $($rule.code) of $mcode $number HTTP $($put.StatusCode)" $put.Content }
@@ -295,12 +329,14 @@ WHERE v.Status = 1 AND m.Kind <> 2 AND v.ScriptText IS NOT NULL
         $live = @{}; $ref = @{}; $mism = New-Object System.Collections.Generic.List[int]
         if (Test-Path -LiteralPath (Join-Path $Work 'eligible.json')) { foreach ($v in (Read-Json 'eligible.json').proven) { $live[[int]$v.versionId] = [string]$v.scriptHash } }
         if (Test-Path -LiteralPath (Join-Path $Work 'ref-eligible.json')) { foreach ($v in (Read-Json 'ref-eligible.json').proven) { $ref[[int]$v.versionId] = [string]$v.scriptHash } }
-        foreach ($f in 'parity.json', 'ref-parity.json') {
+        $syn = @{}
+        if (Test-Path -LiteralPath (Join-Path $Work 'syn-eligible.json')) { foreach ($v in (Read-Json 'syn-eligible.json').proven) { $syn[[int]$v.versionId] = [string]$v.scriptHash } }
+        foreach ($f in 'parity.json', 'ref-parity.json', 'syn-parity.json') {
             if (Test-Path -LiteralPath (Join-Path $Work $f)) { foreach ($m in @((Read-Json $f).mismatches)) { $mism.Add([int]$m.versionId) } }
         }
-        $plan = Get-MsSwitchPlan -Candidates $candidates -Live $live -Reference $ref -Mismatched @($mism.ToArray())
+        $plan = Get-MsSwitchPlan -Candidates $candidates -Live $live -Reference $ref -Synthetic $syn -Mismatched @($mism.ToArray())
         [IO.File]::WriteAllText((Join-Path $Work 'switch-plan.json'), ($plan | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
-        Write-Phase "plan: live $($plan.Live.Count), reference $($plan.Reference.Count), golden $($plan.Golden.Count), already Script $($plan.Already.Count), stay on Formulas $($plan.Stay.Count)" @{
+        Write-Phase "plan: live $($plan.Live.Count), reference $($plan.Reference.Count), synthetic $($plan.Synthetic.Count), golden $($plan.Golden.Count), already Script $($plan.Already.Count), stay on Formulas $($plan.Stay.Count)" @{
             stay = @($plan.Stay | ForEach-Object { "$($_.Code) $($_.Version): $($_.Reason)" })
         }
         $byId = @{}; foreach ($c in $candidates) { $byId[$c.VersionId] = $c }
@@ -312,7 +348,7 @@ WHERE v.Status = 1 AND m.Kind <> 2 AND v.ScriptText IS NOT NULL
         # змінює в ній самій; причина журналу називає джерело доказу. Бібліотек з імпортерами на live немає (calc.MethodologyImport 0);
         # якщо з'являться — switch сам відмовить switchGroupIncomplete, і версія лишиться на Formulas з цією причиною.
         $blocked = New-Object System.Collections.Generic.List[string]
-        foreach ($g in @(@('live', $plan.Live), @('reference', $plan.Reference), @('golden', $plan.Golden))) {
+        foreach ($g in @(@('live', $plan.Live), @('reference', $plan.Reference), @('synthetic', $plan.Synthetic), @('golden', $plan.Golden))) {
             foreach ($id in @($g[1])) {
                 $why = "$Reason; proof=$($g[0])" + $(if ($g[0] -eq 'reference') { ":$ReferenceDatabase" } else { '' })
                 $ok = $true; $detail = $null
