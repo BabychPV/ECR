@@ -498,7 +498,8 @@ public sealed partial class JobWorker(
             // періоду (CalculationTrigger). Закінчилась Failed/Cancelled (провал, межа тривалості чи відкладень, скасування
             // людиною виконуваної) — покрита робота повертається. Стан читається з бази після фіксації: відкладена,
             // повернута в чергу чи втрачена оренда — не кінець, і повернення не буде.
-            if (ApprovedDependentsFallback.IsCandidate(job.JobCode, job.TargetKey))
+            // ✎ B80-N5f: ціль NULL (знята чергою) — за payload.
+            if (ApprovedDependentsFallback.IsCandidate(job.JobCode, job.TargetKey, job.PayloadJson))
             {
                 await ReturnCoveredAsync([job.Claim.JobId]).ConfigureAwait(false);
             }

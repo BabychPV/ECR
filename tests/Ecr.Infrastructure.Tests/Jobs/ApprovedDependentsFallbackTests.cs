@@ -156,6 +156,85 @@ public sealed class ApprovedDependentsFallbackTests(SqlServerFixture sql) : DbJo
         Assert.Equal(0, await db.JobProgresses.CountAsync(p => p.TargetKey == RegularTarget(document)));
     }
 
+    /// <summary>
+    /// ✎ B80-N5f: «з затвердженими» без цілі черги (рядок без <c>TargetKey</c> — поставлений без цілі планувальником)
+    /// провалилась — покрита робота все одно повертається: документ і період — з payload (<c>IncludeApproved</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ ДОКАЗ (локально): повернути <c>p.TargetKey != null</c> у відбір <c>OnEndedAsync</c> чи <c>targetKey is not null &amp;&amp;</c>
+    /// в <c>IsCandidate</c> — червоний (звичайної немає).
+    /// </remarks>
+    [Fact]
+    [Trait("Finding", "B80-N5f")]
+    public async Task Провалена_затверджена_без_цілі_черги_повертає_звичайну()
+    {
+        const long document = 7906;
+        var script = new RecalcScript { ApprovedFails = true };
+        await using var host = Build(script);
+
+        string approved;
+        await using (var scope = host.CreateAsyncScope())
+        {
+            // Той самий payload, що ставить CalculationTrigger для «з затвердженими», — справжнім планувальником, без цілі.
+            approved = await scope.ServiceProvider.GetRequiredService<IBackgroundJobScheduler>().EnqueueAsync<IRecalculationJob>(
+                new
+                {
+                    DocumentId = document,
+                    PeriodKey = Period.Value,
+                    TriggeredByUserId = (int?)null,
+                    SheetDefId = (int?)null,
+                    RecalculateSubmitted = true,
+                    SourceHop = 1,
+                    IncludeApproved = true,
+                    OverrideUserId = (int?)AdminOverride.UserId,
+                    OverrideReason = AdminOverride.Reason,
+                },
+                CancellationToken.None);
+        }
+
+        var stored = (await RowAsync(approved))!;
+        Assert.Null(stored.TargetKey);
+        Assert.Equal(JobListKinds.RecalculationJobCode, stored.JobCode);
+
+        await host.StartWorkerAsync();
+        await WaitForStateAsync(approved, "Failed");
+        var regular = await WaitForRegularAsync(document, "Succeeded");
+        Assert.StartsWith($"{nameof(IRecalculationJob)}~", regular.TargetKey, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// ✎ B80-N5f: ретрай «з затвердженими», поки позаду на ту саму ціль уже чекає інша, — рядок ПОГЛИНАЄТЬСЯ (Cancelled) і
+    /// ціль у збереженій формі <c>{JobType}~{ціль}</c> лишається (зняття цілі в <c>DbJobQueue</c> — лише для задачі формул
+    /// з масивом злиття); повернення віддає ту, що чекає (покриття), звичайної не з'являється.
+    /// </summary>
+    [Fact]
+    [Trait("Finding", "B80-N5f")]
+    public async Task Ретрай_затвердженої_за_чекаючої_лишає_ціль_і_повертає_покриття()
+    {
+        const long document = 7907;
+        await using var host = Build(new RecalcScript());
+        await using var worker = NewHost();
+        await using var scope = host.CreateAsyncScope();
+        var trigger = scope.ServiceProvider.GetRequiredService<ICalculationTrigger>();
+        var fallback = scope.ServiceProvider.GetRequiredService<ApprovedDependentsFallback>();
+        var approvedTarget = $"{nameof(IRecalculationJob)}~{CalculationTrigger.DependentsApprovedTargetOf(document, Period)}";
+
+        var first = (await trigger.RequestDependentsAsync(document, Period, 1, AdminOverride, CancellationToken.None))!;
+        var claim = await worker.Queue.ClaimAsync([JobLanes.Recalc], "host/w", JobQueueLimits.DefaultLease, CancellationToken.None);
+        Assert.Equal(first, claim!.Claim.JobId);
+        var behind = (await trigger.RequestDependentsAsync(document, Period, 1, AdminOverride, CancellationToken.None))!;
+        Assert.True(await worker.Queue.RequeueAsync(claim.Claim, TimeSpan.Zero, CancellationToken.None));
+
+        var row = (await RowAsync(first))!;
+        Assert.Equal("Cancelled", row.State);
+        Assert.Equal(approvedTarget, row.TargetKey);
+        Assert.Equal(approvedTarget, (await RowAsync(behind))!.TargetKey);
+
+        Assert.Equal([behind], await fallback.OnEndedAsync([first], CancellationToken.None));
+        await using var db = Sql.CreateContext();
+        Assert.Equal(0, await db.JobProgresses.CountAsync(p => p.TargetKey == RegularTarget(document)));
+    }
+
     /// <summary>Затверджена стоїть у черзі, звичайна прийшла після неї й покрита (не поставлена).</summary>
     private static async Task<(string Approved, string Covered)> ApprovedCoveringRegularAsync(ServiceProvider host, long document)
     {
