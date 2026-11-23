@@ -196,6 +196,58 @@ public sealed class ParityDbTests(SqlServerFixture sql)
         Assert.Contains("НЕДОВЕДЕНО " + scene.MainCode + " V2", cli.Output, StringComparison.Ordinal);
     }
 
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task D571_версія_з_екземплярами_але_без_жодного_значення_недоведена_й_не_потрапляє_в_перелік_перемикання()
+    {
+        // До D-571 така версія мала comparedForVersion = 1 і рахувалась доведеною поруч із будь-якою зеленою.
+        var scene = await ArrangeAsync(209909, noMatch: true);
+        await ShadowAsync(scene);
+
+        var report = await RunAsync(scene);
+
+        var main = Assert.Single(report.Versions, v => v.VersionId == scene.MainVersionId);
+        Assert.Equal(1, main.Targets);
+        Assert.Equal(0, main.ValuesCompared);
+        Assert.False(main.IsProven);
+        Assert.Contains(report.UnprovenVersions, u => u.StartsWith(scene.MainCode + " V1: no values compared", StringComparison.Ordinal));
+        Assert.DoesNotContain(report.Eligible, v => v.VersionId == scene.MainVersionId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task D571_eligible_out_пише_доведені_версії_а_за_розбіжності_видаляє_файл()
+    {
+        var scene = await ArrangeAsync(209910);
+        await ShadowAsync(scene);
+        var directory = Path.Combine(Path.GetTempPath(), "ecr-ms-parity-" + Guid.NewGuid().ToString("N"));
+        var report = Path.Combine(directory, "parity.json");
+        var eligible = Path.Combine(directory, "eligible.json");
+        var docId = scene.DocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        var ok = await CliAsync("parity", "--connection", sql.ConnectionString, "--methodology", scene.MainCode,
+            "--document", docId, "--out", report, "--eligible-out", eligible);
+
+        Assert.Equal(MigrationCli.Ok, ok.Code);
+        var json = await File.ReadAllTextAsync(eligible);
+        Assert.Contains("\"versionIds\": [\n    " + scene.MainVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture), json, StringComparison.Ordinal);
+
+        await using (var db = MigrationCli.CreateContext(sql.ConnectionString, readOnly: false))
+        {
+            var version = await db.MethodologyVersions.SingleAsync(v => v.Id == scene.MainVersionId);
+            var changed = version.ScriptText!.Replace("\"0304\": 0.7,", "\"0304\": 0.8,", StringComparison.Ordinal);
+            Assert.NotEqual(version.ScriptText, changed);
+            version.SetScript(changed, ScriptCompiler.Hash(changed));
+            await db.SaveChangesAsync();
+        }
+
+        var failed = await CliAsync("parity", "--connection", sql.ConnectionString, "--methodology", scene.MainCode,
+            "--document", docId, "--out", report, "--eligible-out", eligible, "--allow-unproven");
+
+        Assert.Equal(MigrationCli.Failures, failed.Code);
+        Assert.False(File.Exists(eligible), "after a mismatch the switch list must not survive");
+    }
+
     // ───── стенд ─────
 
     private async Task<ParityRunReport> RunAsync(Scene scene)

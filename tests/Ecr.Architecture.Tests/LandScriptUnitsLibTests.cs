@@ -158,4 +158,25 @@ public sealed class LandScriptUnitsLibTests
         Assert.NotEqual(0, exit);
         Assert.Contains("Missing", output, StringComparison.Ordinal);
     }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void D571_Apply_LandScriptUnits_працює_під_StrictMode_фази_вікна()
+    {
+        // Фаза вікна (Invoke-MsMigrationPhase.ps1) вмикає Set-StrictMode -Version 2.0, і він діє на викликаний скрипт: до D-571
+        // звернення до відсутньої властивості (ECW_C11_10 без «arguments»/«constants») зупиняло фазу PropertyNotFoundStrict.
+        var apply = Path.Combine(SourceTree.Root, "tools", "land", "Apply-LandScriptUnits.ps1").Replace("'", "''", StringComparison.Ordinal);
+        var (exit, output) = RunPowerShell($$"""
+            Set-StrictMode -Version 2.0
+            $d = Join-Path ([IO.Path]::GetTempPath()) ('ecr-units-' + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Force (Join-Path $d 'ECW_C11_10') | Out-Null
+            [IO.File]::WriteAllText((Join-Path $d 'ECW_C11_10\V1.ecrs'), "rows from T9_07;`noutput O1 : t = row.Land_Measure_SubstanceConsumption * 2;`n")
+            & '{{apply}}' -Dir $d
+            [IO.File]::ReadAllText((Join-Path $d 'ECW_C11_10\V1.ecrs'))
+            Remove-Item -Recurse -Force $d
+            """);
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("row.Land_Measure_SubstanceConsumptionSm3?", output, StringComparison.Ordinal);
+    }
 }
