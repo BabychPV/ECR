@@ -190,16 +190,17 @@ public sealed class DataSourceSqlEndpointPolicyTests
     [Fact]
     public async Task Ім_я_що_розв_язується_у_linklocal_відхиляється_loopback_і_приватне_дозволені()
     {
-        Assert.NotNull(await TryCreate("af-server", new FakeNetwork([], "169.254.169.254")));
-        Assert.Null(await TryCreate("af-server\\PIAF", new FakeNetwork([], "127.0.0.1", "10.0.0.5")));
-        Assert.Null(await TryCreate("af-server,5461", new FakeNetwork([])));
+        // ⚠ Голе ім'я адаптер не прочитає (рядок з'єднання) — тут сервер у рядку ODBC.
+        Assert.NotNull(await TryCreate("Driver={PI SQL Client};Server=af-server", new FakeNetwork([], "169.254.169.254")));
+        Assert.Null(await TryCreate("Driver={PI SQL Client};Server=af-server\\PIAF", new FakeNetwork([], "127.0.0.1", "10.0.0.5")));
+        Assert.Null(await TryCreate("Driver={PI SQL Client};Server=af-server,5461", new FakeNetwork([])));
     }
 
     /// <summary>ent4 P2-1/P3-4: ім'я всередині рядка з'єднання теж розв'язується й перевіряється.</summary>
     [Theory]
     [InlineData("Driver={PI SQL Client};Server=af-server;Integrated Security=SSPI")]
     [InlineData("Driver={PI SQL Client};AF Server=tcp:af-server,5461")]
-    [InlineData("metadata")]
+    [InlineData("Driver={PI SQL Client};Server=metadata")]
     public async Task Ім_я_в_рядку_з_єднання_що_розв_язується_у_linklocal_відхиляється(string endpoint)
     {
         Assert.NotNull(await TryCreate(endpoint, new FakeNetwork([], "169.254.169.254")));
@@ -208,5 +209,5 @@ public sealed class DataSourceSqlEndpointPolicyTests
 
     [Fact]
     public async Task Хост_поза_allowlist_лише_попередження_не_відмова()
-        => Assert.Null(await TryCreate("af.other.local", new FakeNetwork(["*.corp.local"], "10.0.0.5")));
+        => Assert.Null(await TryCreate("Driver={PI SQL Client};Server=af.other.local", new FakeNetwork(["*.corp.local"], "10.0.0.5")));
 }

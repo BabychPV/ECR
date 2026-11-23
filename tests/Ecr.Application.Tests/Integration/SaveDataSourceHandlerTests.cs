@@ -121,12 +121,14 @@ public sealed class SaveDataSourceHandlerTests
     }
 
     [Fact]
-    public async Task Create_Sql_запасна_адреса_теж_перевіряється()
+    public async Task Create_Sql_запасна_адреса_не_зберігається_бо_Sql_її_не_читає()
     {
+        // ⚠ Sql не має перемикання на запасну адресу: будь-яке значення — відмова біля поля, а не політика адреси.
         var refused = await TryCreate("Server=flert", new FakeNetwork(), "Server=169.254.169.254");
 
         Assert.NotNull(refused);
         Assert.Equal("secondaryEndpoint", refused.Details!["field"]);
+        Assert.Equal(SaveDataSourceHandler.FieldNotReadKey, refused.Details!["messageKey"]);
     }
 
     [Fact]
