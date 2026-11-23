@@ -23,6 +23,7 @@ import {
 import { fieldLabel, type ColumnNames } from './fieldLabels';
 import { IssuesTable } from './IssuesTable';
 import { nodeOptions } from './naeNodes';
+import { RowChangesPanel } from './RowChangesPanel';
 
 export interface PreviewStepProps {
   readonly preview: AirPreview;
@@ -390,6 +391,7 @@ export function PreviewStep(props: PreviewStepProps): JSX.Element {
           </div>
         </div>
       </div>
+      <RowChangesPanel preview={preview} columnNames={props.columnNames} />
     </div>
   );
 }

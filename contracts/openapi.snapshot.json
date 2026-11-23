@@ -388,6 +388,48 @@
         ],
         "type": "object"
       },
+      "AirCurrentTableDto": {
+        "description": "✎ D-569 (P-1123-1): the permit's current parameters table — the last file applied to it.",
+        "properties": {
+          "fileName": {
+            "description": "Name of the uploaded file; `null` — not recorded (an import before 23.11).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "importedAt": {
+            "description": "When it was applied, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "importedBy": {
+            "description": "Display name of the user who applied it.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sources": {
+            "description": "Source rows the import wrote.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "substances": {
+            "description": "Substance rows the import wrote.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fileName",
+          "importedAt",
+          "importedBy",
+          "sources",
+          "substances"
+        ],
+        "type": "object"
+      },
       "AirLimitsAnalysisDto": {
         "description": "Result of `POST /api/v1/air-limits/import/analyse`: layout of the file, no database.",
         "properties": {
@@ -524,6 +566,17 @@
               "array"
             ]
           },
+          "currentTable": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AirCurrentTableDto",
+                "description": "✎ D-569: the last parameters table applied to the permit; `null` — none recorded."
+              }
+            ]
+          },
           "permitId": {
             "description": "Permit.",
             "format": "int64",
@@ -612,6 +665,16 @@
             "type": [
               "null",
               "integer"
+            ]
+          },
+          "emptiedColumns": {
+            "description": "✎ D-569 (P-1123-1): columns of the two tables no field reads from this file — after the apply they are empty in every row of\nthe permit (the last uploaded table is the only current one; nothing is carried over from the replaced rows).",
+            "items": {
+              "$ref": "#/components/schemas/AirAddedColumnDto"
+            },
+            "type": [
+              "null",
+              "array"
             ]
           },
           "permitId": {
@@ -11214,6 +11277,12 @@
       "ImportDiffCounts": {
         "description": "Counts of the diff between the file and the stored rows of the owner.",
         "properties": {
+          "changedChildren": {
+            "default": 0,
+            "description": "✎ D-569: child rows in both, different.",
+            "format": "int32",
+            "type": "integer"
+          },
           "changedParents": {
             "description": "In both, different.",
             "format": "int32",
@@ -11224,8 +11293,20 @@
             "format": "int32",
             "type": "integer"
           },
+          "newChildren": {
+            "default": 0,
+            "description": "✎ D-569: child rows in the file only (also those of new parents).",
+            "format": "int32",
+            "type": "integer"
+          },
           "newParents": {
             "description": "In the file only.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "removedChildren": {
+            "default": 0,
+            "description": "✎ D-569: stored child rows of the owner the file no longer has (also those of removed parents).",
             "format": "int32",
             "type": "integer"
           },
@@ -11252,6 +11333,35 @@
           "removedParents",
           "skippedParents",
           "children"
+        ],
+        "type": "object"
+      },
+      "ImportFieldChange": {
+        "description": "One value that the apply changes.",
+        "properties": {
+          "field": {
+            "description": "Field name (built-in field or added column code).",
+            "type": "string"
+          },
+          "new": {
+            "description": "Value of the file as text; `null` — empty (also a column the file does not have: the last table is the truth).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "old": {
+            "description": "Stored value as text; `null` — empty.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "field",
+          "old",
+          "new"
         ],
         "type": "object"
       },
@@ -11750,6 +11860,63 @@
           "message"
         ],
         "type": "object"
+      },
+      "ImportRowChange": {
+        "description": "✎ D-569 (P-1123-1): one row of the preview's list «what the new table replaces» — a parent (ChildKey is\n`null`) or one child of it.",
+        "properties": {
+          "childKey": {
+            "description": "Child key (substance); `null` — the row is the parent itself.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fields": {
+            "description": "Changed values (changed rows only; empty for added and removed).",
+            "items": {
+              "$ref": "#/components/schemas/ImportFieldChange"
+            },
+            "type": "array"
+          },
+          "key": {
+            "description": "Parent key (NAE).",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ImportRowChangeKind",
+            "description": "Added, changed or removed."
+          },
+          "ownerLabel": {
+            "description": "A removed row of ANOTHER owner for the same key (replaced only with the confirmation): that owner's label; `null` — this owner.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "scope": {
+            "description": "Bucket of a removed row outside the import's bucket; `null` — the import's bucket.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "key",
+          "childKey",
+          "scope",
+          "fields"
+        ],
+        "type": "object"
+      },
+      "ImportRowChangeKind": {
+        "description": "What happens to one row.",
+        "enum": [
+          "Added",
+          "Changed",
+          "Removed"
+        ]
       },
       "ImportSeverity": {
         "description": "Issue severity.",
@@ -22357,6 +22524,20 @@
           },
           "replace": {
             "$ref": "#/components/schemas/ReplaceScope"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ImportRowChange"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "rowsDropped": {
+            "default": 0,
+            "format": "int32",
+            "type": "integer"
           },
           "stats": {
             "$ref": "#/components/schemas/ImportStats"

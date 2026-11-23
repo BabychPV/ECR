@@ -2,6 +2,7 @@ import { Fragment, useMemo, useState, type JSX } from 'react';
 import { Button, SegmentedControl, Text, TextInput, Title } from '@mantine/core';
 import { Link } from 'react-router-dom';
 import { language, t } from '@/shared/i18n';
+import { formatDateTime } from '@/shared/format/datetime';
 import { formatNumber } from '@/shared/format/number';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Banner } from '@/shared/ui/Banner';
@@ -340,6 +341,16 @@ function Card({ data, permitId, mayImport }: { readonly data: AirLimitsPermit; r
         <Text size="sm" c="dimmed" data-testid="air-counts">
           {t('permits.air.counts', { sources: formatNumber(data.sources.length), rows: formatNumber(data.substanceRows) })}
         </Text>
+        {/* D-569 (P-1123-1): the last uploaded table is the only current one — the card names it. */}
+        {data.currentTable != null && (
+          <Text size="sm" data-testid="air-current-table">
+            {t('permits.air.currentTable', {
+              file: data.currentTable.fileName ?? t('permits.air.currentTableNoName'),
+              date: formatDateTime(data.currentTable.importedAt),
+              user: data.currentTable.importedBy ?? '—',
+            })}
+          </Text>
+        )}
         {mayImport && (
           <Button component={Link} to={permitImportPath(permitId)} className="pa-import">
             {t('permits.air.import')}

@@ -318,6 +318,12 @@ public static class AirLimitsKeys
     /// <summary>The type is not provisioned.</summary>
     public const string NotProvisioned = "err.ECR-IMP-0422.airNotProvisioned";
 
+    /// <summary>
+    /// ✎ D-569 (P-1123-1, «Цех»): a field of the specification that is stored into a column ADDED to the table reads no file column
+    /// (not found, taken by another field, its header not in the file) — an error: the apply would leave the column empty.
+    /// </summary>
+    public const string AddedColumnUnread = "err.ECR-IMP-0422.airAddedColumnUnread";
+
     /// <summary>The region is missing.</summary>
     public const string ScopeInvalid = "err.ECR-IMP-0422.airScopeInvalid";
 

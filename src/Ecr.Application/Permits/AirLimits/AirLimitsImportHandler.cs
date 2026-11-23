@@ -43,11 +43,11 @@ public sealed class AirLimitsImportHandler(
 
         var tables = await accessor.Data.TablesAsync(ct).ConfigureAwait(false);
         var (spec, code) = await SpecAsync(options, tables, ct).ConfigureAwait(false);
-        // The analysis keeps the user's field names (the wizard matches findings by them); it only reports the unbound ones.
-        var (bound, unsaved) = AirLimitsSchema.BindFields(spec, tables.Sources, tables.Substances);
+        // The analysis keeps the user's field names (the wizard matches findings by them) with the SAME reading rules as preview and
+        // apply (✎ D-569: a field stored into an added column must be read — else an error here already); unbound ones are reported.
         // ✎ Pass 3b (P2-1): a file column named like an added column is read into it, so it is mapped, not «unmapped».
-        var read = spec.WithFields(spec.Fields, bound.ByHeaderName);
-        return new AirLimitsAnalysisDto(code, await importer.AnalyseAsync(file, read, ct).ConfigureAwait(false), unsaved);
+        var binding = AirLimitsSchema.Bind(spec, tables.Sources, tables.Substances);
+        return new AirLimitsAnalysisDto(code, await importer.AnalyseAsync(file, binding.Read, ct).ConfigureAwait(false), binding.Unsaved);
     }
 
     /// <summary>Preview: nothing is written. Permission <c>Registry.EditData</c> on the permit's tables.</summary>
@@ -58,11 +58,35 @@ public sealed class AirLimitsImportHandler(
     public async Task<AirLimitsPreviewDto> PreviewAsync(long permitId, Stream file, AirLimitsImportOptions options, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(file);
-        var ctx = await PrepareAsync(permitId, options, ct).ConfigureAwait(false);
+        var ctx = await PrepareAsync(permitId, options, null, ct).ConfigureAwait(false);
         var preview = await importer.PreviewAsync(file, ctx.Spec, ctx.Request with { ExpectedFingerprint = null }, ct).ConfigureAwait(false);
+        var tables = await accessor.Data.TablesAsync(ct).ConfigureAwait(false);
         return new AirLimitsPreviewDto(
             permitId, ctx.Number, ctx.Region, ctx.Area, ctx.ProfileCode, preview,
-            ctx.Scope.Region.EntryId, ctx.Scope.Area?.EntryId, ScopeInNaeTree: ctx.Scope.InTree, UnsavedFields: ctx.Unsaved);
+            ctx.Scope.Region.EntryId, ctx.Scope.Area?.EntryId, ScopeInNaeTree: ctx.Scope.InTree, UnsavedFields: ctx.Unsaved,
+            EmptiedColumns: EmptiedColumns(tables, preview));
+    }
+
+    /// <summary>
+    /// ✎ D-569 (P-1123-1, no carry-over): the columns of the two tables that no field reads from THIS file — after the apply they
+    /// are empty in every row of the permit (the last uploaded table is the truth); the preview says so before the apply.
+    /// </summary>
+    private static IReadOnlyList<AirAddedColumnDto> EmptiedColumns(AirTables tables, RegistryImportPreview preview)
+    {
+        var read = (preview.Header?.Mapped ?? []).Select(m => m.Field).ToHashSet(StringComparer.Ordinal);
+        AirAddedColumnDto Column(string table, Domain.Entities.Configuration.RegistryDef def, string code)
+        {
+            var field = def.Fields.FirstOrDefault(f => string.Equals(f.Code, code, StringComparison.OrdinalIgnoreCase));
+            return new AirAddedColumnDto(
+                table, code, field is null ? new Dictionary<string, string>() : new Dictionary<string, string>(field.NameL10n.Values, StringComparer.Ordinal),
+                field?.DataType.ToString() ?? "String");
+        }
+
+        return
+        [
+            .. AirLimitsSchema.ParentColumnsOf(tables.Sources).Where(p => !read.Contains(p.Key)).Select(p => Column("sources", tables.Sources, p.Value)),
+            .. AirLimitsSchema.ChildColumnsOf(tables.Substances).Where(p => !read.Contains(p.Key)).Select(p => Column("substances", tables.Substances, p.Value)),
+        ];
     }
 
     /// <summary>Apply: the same plan as the preview, all or nothing, one transaction.</summary>
@@ -70,10 +94,12 @@ public sealed class AirLimitsImportHandler(
     /// <param name="file">The workbook.</param>
     /// <param name="options">Profile, region, area, decisions, confirmed owners, expected fingerprint.</param>
     /// <param name="ct">Cancellation token.</param>
-    public async Task<AirLimitsImportResultDto> ApplyAsync(long permitId, Stream file, AirLimitsImportOptions options, CancellationToken ct)
+    /// <param name="fileName">✎ D-569: name of the uploaded file (the permit's «current table», audit); <c>null</c> — unknown.</param>
+    public async Task<AirLimitsImportResultDto> ApplyAsync(
+        long permitId, Stream file, AirLimitsImportOptions options, CancellationToken ct, string? fileName = null)
     {
         ArgumentNullException.ThrowIfNull(file);
-        var ctx = await PrepareAsync(permitId, options, ct).ConfigureAwait(false);
+        var ctx = await PrepareAsync(permitId, options, fileName, ct).ConfigureAwait(false);
         var result = await importer.CommitAsync(file, ctx.Spec, ctx.Request, ct).ConfigureAwait(false);
         var plan = result.Plan;
         var own = permitId.ToString(CultureInfo.InvariantCulture);
@@ -105,7 +131,7 @@ public sealed class AirLimitsImportHandler(
         public string Area => Scope.NaeArea ?? Scope.Area?.Code ?? AirLimitsSchema.NoArea;
     }
 
-    private async Task<Ctx> PrepareAsync(long permitId, AirLimitsImportOptions options, CancellationToken ct)
+    private async Task<Ctx> PrepareAsync(long permitId, AirLimitsImportOptions options, string? fileName, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(options);
 
@@ -154,9 +180,25 @@ public sealed class AirLimitsImportHandler(
             options.ConfirmedOtherOwners,
             options.ExpectedFingerprint,
             null,
-            profileCode);
+            profileCode,
+            CleanFileName(fileName),
+            raw.ToJson());
 
         return new Ctx(spec, profileCode, request, number, air, unsaved);
+    }
+
+    /// <summary>The file name as shown on the card: no directory part (either separator), no control characters, ≤ 255 chars.</summary>
+    internal static string? CleanFileName(string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return null;
+        }
+
+        var name = fileName.Trim();
+        var cut = name.LastIndexOfAny(['/', '\\']);
+        name = new string([.. name[(cut + 1)..].Where(c => !char.IsControl(c))]).Trim();
+        return name.Length == 0 ? null : name.Length > 255 ? name[..255] : name;
     }
 
     /// <summary>

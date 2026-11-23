@@ -33,17 +33,24 @@ public sealed record ExistingChild(string Key, IReadOnlyDictionary<string, objec
 /// <param name="Key">Parent key.</param>
 /// <param name="Values">Stored values, by field name.</param>
 /// <param name="Children">Stored children.</param>
+/// <param name="Scope">
+/// ✎ D-569 (P-1123-1): <c>null</c> — the row lies in the import's bucket and is compared with the file row of the same key;
+/// otherwise the label of the OTHER bucket of the same owner it lies in: the owner's last uploaded table is the only current one,
+/// so such a row is never matched and is always removed.
+/// </param>
 public sealed record ExistingParent(
     string OwnerKey,
     string? OwnerLabel,
     string Key,
     IReadOnlyDictionary<string, object?> Values,
-    IReadOnlyList<ExistingChild> Children);
+    IReadOnlyList<ExistingChild> Children,
+    string? Scope = null);
 
 /// <summary>Reference to a stored parent that the plan deletes.</summary>
 /// <param name="OwnerKey">Owner.</param>
 /// <param name="Key">Parent key.</param>
-public sealed record ExistingRef(string OwnerKey, string Key);
+/// <param name="Scope">Bucket of the owner's row outside the import's bucket (<see cref="ExistingParent.Scope"/>); <c>null</c> — inside.</param>
+public sealed record ExistingRef(string OwnerKey, string Key, string? Scope = null);
 
 /// <summary>A missing entry to create with the import.</summary>
 /// <param name="Kind">Reference kind.</param>
@@ -69,6 +76,8 @@ public sealed record ReferenceCreation(
 /// <param name="FileSha256">Hash of the uploaded file (audit).</param>
 /// <param name="ProfileCode">Profile used (audit).</param>
 /// <param name="Stats">Counters of the parse.</param>
+/// <param name="FileName">✎ D-569: name of the uploaded file (audit, «current table» of the owner).</param>
+/// <param name="SpecJson">✎ D-569: the specification the file was read with, as JSON (audit).</param>
 public sealed record ImportApplyPlan(
     ImportScope Scope,
     IReadOnlyList<ExistingRef> Delete,
@@ -77,7 +86,9 @@ public sealed record ImportApplyPlan(
     string Fingerprint,
     string? FileSha256,
     string? ProfileCode,
-    ImportStats Stats);
+    ImportStats Stats,
+    string? FileName = null,
+    string? SpecJson = null);
 
 /// <summary>
 /// Storage side of an import. Implemented with the permit tables (plan phase N3); the engine only fakes it in tests.

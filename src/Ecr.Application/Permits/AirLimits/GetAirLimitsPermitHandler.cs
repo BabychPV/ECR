@@ -13,7 +13,8 @@ public sealed class GetAirLimitsPermitHandler(
     IRegistryStore registries,
     IRegistryRowsQuery rows,
     Security.IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IAuditReader audit)
 {
     /// <summary>Permission to read registries.</summary>
     public const string Permission = "Registry.View";
@@ -139,6 +140,88 @@ public sealed class GetAirLimitsPermitHandler(
             permitId, number, type.Code, entry.ValidFrom, entry.ValidTo, list, totals, list.Sum(s => s.Substances.Count),
             [.. addedSources.Select(f => Column("sources", f)), .. addedSubstances.Select(f => Column("substances", f))],
             tables.Sources.Code,
-            tables.Substances.Code);
+            tables.Substances.Code,
+            await CurrentTableAsync(permitId, ct).ConfigureAwait(false) ?? await EarlierTableAsync(tables.Sources.Id, permitId, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>Recent imports scanned for a permit imported before D-569 (no per-permit record yet).</summary>
+    private const int EarlierImportsScanned = 500;
+
+    /// <summary>
+    /// ✎ D-569: a permit imported before the per-permit record existed still names its current table — from the import's record on
+    /// the sources table (a seek by entity, the last <see cref="EarlierImportsScanned"/>): when and who; the file name only if recorded.
+    /// </summary>
+    private async Task<AirCurrentTableDto?> EarlierTableAsync(int sourcesDefId, long permitId, CancellationToken ct)
+    {
+        var records = await audit.ReadStructureChangesAsync(["cfg.RegistryDef"], sourcesDefId, EarlierImportsScanned, ct).ConfigureAwait(false);
+        foreach (var record in records.Where(r => r.Operation == "AirLimitsImport"))
+        {
+            try
+            {
+                using var json = System.Text.Json.JsonDocument.Parse(record.NewJson ?? "{}");
+                var root = json.RootElement;
+                if (!root.TryGetProperty("permitId", out var p) || !p.TryGetInt64(out var id) || id != permitId)
+                {
+                    continue;
+                }
+
+                return Parse(record);
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // A damaged record is not this permit's answer.
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>✎ D-569 (P-1123-1): the last table applied to the permit, from its own audit record (a seek by entity).</summary>
+    private async Task<AirCurrentTableDto?> CurrentTableAsync(long permitId, CancellationToken ct)
+    {
+        if (permitId is <= 0 or > int.MaxValue)
+        {
+            return null;
+        }
+
+        var records = await audit.ReadStructureChangesAsync([AirLimitsSchema.CurrentTableAuditEntity], (int)permitId, 1, ct).ConfigureAwait(false);
+        if (records.Count == 0)
+        {
+            return null;
+        }
+
+        return Parse(records[0]);
+    }
+
+    private static AirCurrentTableDto Parse(StructureChangeView last)
+    {
+        string? fileName = null;
+        var sources = 0;
+        var substances = 0;
+        try
+        {
+            using var json = System.Text.Json.JsonDocument.Parse(last.NewJson ?? "{}");
+            var root = json.RootElement;
+            if (root.TryGetProperty("fileName", out var f) && f.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                fileName = f.GetString();
+            }
+
+            if (root.TryGetProperty("sources", out var s) && s.TryGetInt32(out var sn))
+            {
+                sources = sn;
+            }
+
+            if (root.TryGetProperty("substances", out var c) && c.TryGetInt32(out var cn))
+            {
+                substances = cn;
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // A damaged record still says when and who.
+        }
+
+        return new AirCurrentTableDto(fileName, last.ChangedAt, last.ChangedByDisplayName, sources, substances);
     }
 }

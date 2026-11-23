@@ -279,6 +279,19 @@ public sealed class ImportFieldSpec
     /// <summary>Unit aliases for <see cref="ImportParser.Unit"/>: file text (folded) to canonical unit code.</summary>
     public IReadOnlyDictionary<string, string> Units { get; init; } = new Dictionary<string, string>();
 
+    /// <summary>
+    /// ✎ D-569 (P-1123-1, «Цех»): the caller STORES this field (e.g. into a column added to the target table), so a file column it
+    /// cannot read (not found, taken by another field, not found by its header name) is an ERROR with this message key — never a
+    /// warning after which the apply silently leaves the column empty. <c>null</c> — the usual rules (required → error, else warning).
+    /// Not part of a profile (never serialised).
+    /// </summary>
+    [JsonIgnore]
+    public string? UnreadKey { get; init; }
+
+    /// <summary>Name of the target column shown in the <see cref="UnreadKey"/> finding (<c>{column}</c>); not serialised.</summary>
+    [JsonIgnore]
+    public string? TargetLabel { get; init; }
+
     /// <summary>The same field under another name (every other property copied).</summary>
     /// <param name="name">New name.</param>
     public ImportFieldSpec Renamed(string name) => Copy(name, Column);
@@ -287,9 +300,64 @@ public sealed class ImportFieldSpec
     /// <param name="letter">Column letter.</param>
     public ImportFieldSpec AtColumn(string letter) => Copy(Name, letter);
 
+    /// <summary>The same field at another level (every other property copied; a source-level field fills down its merge).</summary>
+    /// <param name="level">New level.</param>
+    public ImportFieldSpec AtLevel(ImportLevel level)
+        => new()
+        {
+            Name = Name,
+            Level = level,
+            Patterns = Patterns,
+            UnitQualifier = UnitQualifier,
+            Column = Column,
+            Required = Required,
+            NonEmpty = NonEmpty,
+            Informational = Informational,
+            WarnIfEmpty = WarnIfEmpty,
+            Parser = Parser,
+            FillDown = level == ImportLevel.Parent ? FillDown.Merge : FillDown.None,
+            Reference = Reference,
+            Pad = Pad,
+            Factor = Factor,
+            NonNegative = NonNegative,
+            Choices = Choices,
+            Units = Units,
+            UnreadKey = UnreadKey,
+            TargetLabel = TargetLabel,
+        };
+
+    /// <summary>The same field that must be read (<see cref="UnreadKey"/>); every other property copied.</summary>
+    /// <param name="unreadKey">Message key of the finding when it is not read.</param>
+    /// <param name="targetLabel">Target column name for the finding.</param>
+    public ImportFieldSpec MustRead(string unreadKey, string? targetLabel)
+        => new()
+        {
+            Name = Name,
+            Level = Level,
+            Patterns = Patterns,
+            UnitQualifier = UnitQualifier,
+            Column = Column,
+            Required = Required,
+            NonEmpty = NonEmpty,
+            Informational = Informational,
+            WarnIfEmpty = WarnIfEmpty,
+            Parser = Parser,
+            FillDown = FillDown,
+            Reference = Reference,
+            Pad = Pad,
+            Factor = Factor,
+            NonNegative = NonNegative,
+            Choices = Choices,
+            Units = Units,
+            UnreadKey = unreadKey,
+            TargetLabel = targetLabel,
+        };
+
     private ImportFieldSpec Copy(string name, string? column)
         => new()
         {
+            UnreadKey = UnreadKey,
+            TargetLabel = TargetLabel,
             Name = name,
             Level = Level,
             Patterns = Patterns,
