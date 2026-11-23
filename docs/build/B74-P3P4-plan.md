@@ -59,3 +59,10 @@
 | Перенос версії на пару | `DocumentVersionMigrationTests.ProjectTemplates` (6) |
 | Від'єднання при документах шаблону — 409 під блоком проєкту | `ProjectTemplatesApiTests.Відєднання_з_документами_409` |
 | Сторож B74 (храповик читань) | `ProjectTemplateVersionB74GuardTests` |
+
+## ✎ 24.11: закриття відкритих питань (координатор: «без жодних боргів»)
+
+- Питання 1, 2, 3, 5, 6 — прийняті типові рішення, записані в D-576 п. 8.
+- Q4: фільтр/сортування/варіанти версій переліку — за зрізом «проєкт × шаблон документа» (DocumentStore.ProjectVersionLabelsAsync, SliceKey). Тест: ProjectTemplatesApiTests.Фільтр_і_сортування_за_версією_групують_за_шаблоном_документа.
+- Q7: шапка документа — рядок «Template» (код шаблону); огляд майстра — «Template» і «Version» окремо. Тести: DocumentHeaderPanel.templateCode.test.tsx, CreateDocumentModal.templateStep.test.tsx, e2e projectTemplates.spec.ts.
+- Окремі тести на двошаблонний проєкт: якір року нічного перерахунку (YearLayoutCalculatedRoutingSqlTests.B74_…), маршрутизація Q-17 і замок правки без періоду (B74DocumentTemplateVersionTests), нічна перевірка узгодженості (ConsistencyCheckJobDetectionTests.B74_…); мутація на кожен шлях.
