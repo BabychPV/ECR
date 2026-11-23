@@ -2362,6 +2362,45 @@ public sealed partial class RecalculationJob(
     }
 
     /// <summary>
+    /// Пари «таблиця × методологія» активних прив'язок (W15z, C11_10 на T9a_28).
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="tableDefIds">Таблиці екземплярів прогону.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Різні пари; рівно те, що потрібно розкладу прогону.</returns>
+    /// <remarks>
+    /// ⛔ Раніше читалися РЯДКИ прив'язок за <c>Id</c> зі стелею <see cref="MaxBindings"/> (5 000): річна розкладка
+    /// (D-474) дає по прив'язці на кожен місяць кожного виходу, і в LAND_UI 1.0.20.0 їх 9 300 - стеля мовчки відрізала
+    /// найновіші, і методологія, чиї прив'язки опинились за межею (C11_10 на T9a_28 після клону), просто не рахувалась:
+    /// без помилки, без попередження, результати зникали (репетиція W15z на копії живої бази, 23.11). Розкладу прогону
+    /// потрібна лише пара (таблиця, методологія) - її й читаємо, DISTINCT у базі. Стеля лишається, але переповнення - відмова,
+    /// а не обрізання.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">Пар більше за <see cref="MaxBindings"/>.</exception>
+    internal static async Task<List<BindingRow>> BindingPairsAsync(EcrDbContext db, IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(tableDefIds);
+        var ids = tableDefIds.Distinct().ToList();
+        var pairs = await db.CalculationBindings
+            .AsNoTracking()
+            .Where(b => b.IsActive && ids.Contains(b.TableDefId))
+            .Select(b => new { b.TableDefId, b.MethodologyId })
+            .Distinct()
+            .OrderBy(p => p.TableDefId).ThenBy(p => p.MethodologyId)
+            .Take(MaxBindings + 1)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (pairs.Count > MaxBindings)
+        {
+            throw new InvalidOperationException(
+                $"Пар «таблиця × методологія» у прогоні більше за {MaxBindings}: прогін не обрізає прив'язки мовчки.");
+        }
+
+        return [.. pairs.Select(p => new BindingRow(p.TableDefId, p.MethodologyId))];
+    }
+
+    /// <summary>
     /// Екземпляри таблиць документа з ключем партиції (O3d, I2-2 ФВ-9.8).
     /// </summary>
     /// <param name="db">Контекст.</param>
@@ -2454,14 +2493,7 @@ public sealed partial class RecalculationJob(
 
         var tableDefIds = instances.Select(i => i.TableDefId).Distinct().ToList();
 
-        var bindings = await db.CalculationBindings
-            .AsNoTracking()
-            .Where(b => b.IsActive && tableDefIds.Contains(b.TableDefId))
-            .OrderBy(b => b.Id)
-            .Take(MaxBindings)
-            .Select(b => new BindingRow(b.TableDefId, b.MethodologyId))
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        var bindings = await BindingPairsAsync(db, tableDefIds, ct).ConfigureAwait(false);
 
         // ⛔ RC15 (P2-A/P2-C): які таблиці прогін ПЕРЕРАХОВУЄ («активні») — а які ні:
         //  - область аркуша: лише таблиці цього аркуша;
@@ -3648,7 +3680,7 @@ public sealed partial class RecalculationJob(
     private sealed record InstanceRow(long Id, int TableDefId, int PeriodKeyValue, int SheetDefId);
 
     /// <summary>Прив'язка методології до опису таблиці.</summary>
-    private sealed record BindingRow(int TableDefId, int MethodologyId);
+    internal sealed record BindingRow(int TableDefId, int MethodologyId);
 
     /// <summary>Прив'язка разом із періодом, у якому вона рахується.</summary>
     private sealed record PeriodBindingRow(int PeriodKeyValue, CalculationBindingRef Binding);
