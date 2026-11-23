@@ -69,15 +69,35 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
+    -- ✎ W15z (замір на копії живої бази 23.11): UPDATE 300 колонок ОДНІЄЮ командою йшов 173 с (без тригера — 0,3 с):
+    -- перевірки нижче з'єднують inserted × deleted, а псевдотаблиці не мають індексів і читаються з версійного сховища,
+    -- тож вартість росла квадратично. Через це клон версії писав перев'язки по рядку, а збирач Land — порціями по 200.
+    -- (1) Швидкий вихід: усі перевірки вимагають замороженої версії (Status IN (1, 2)) таблиці рядка, старої чи нової;
+    --     немає такої серед таблиць inserted ∪ deleted — немає чого перевіряти (чернетки: клон, збирач). Один прохід.
+    IF NOT EXISTS (
+        SELECT 1
+        FROM (SELECT TableDefId FROM inserted UNION SELECT TableDefId FROM deleted) x
+        JOIN cfg.TableDef t ON t.Id = x.TableDefId
+        JOIN cfg.SheetDef s ON s.Id = t.SheetDefId
+        JOIN cfg.TemplateVersion v ON v.Id = s.TemplateVersionId
+        WHERE v.Status IN (1, 2)
+    )
+        RETURN;
+
+    -- (2) Інакше — ті самі перевірки над копіями з кластерним індексом за Id (лінійно-логарифмічно, а не квадратично).
+    SELECT * INTO #TRCD_i FROM inserted;
+    SELECT * INTO #TRCD_d FROM deleted;
+    CREATE UNIQUE CLUSTERED INDEX UX_TRCD_i ON #TRCD_i (Id);
+    CREATE UNIQUE CLUSTERED INDEX UX_TRCD_d ON #TRCD_d (Id);
     -- INSERT: нова колонка в замороженій версії.
     IF EXISTS (
         SELECT 1
-        FROM inserted i
+        FROM #TRCD_i i
         JOIN cfg.TableDef t ON t.Id = i.TableDefId
         JOIN cfg.SheetDef s ON s.Id = t.SheetDefId
         JOIN cfg.TemplateVersion v ON v.Id = s.TemplateVersionId
         WHERE v.Status IN (1, 2)   -- Published, Deprecated
-          AND NOT EXISTS (SELECT 1 FROM deleted d WHERE d.Id = i.Id)
+          AND NOT EXISTS (SELECT 1 FROM #TRCD_d d WHERE d.Id = i.Id)
     )
     BEGIN
         THROW 50004, N'Додати колонку в опубліковану або виведену з обігу версію заборонено [ECR-TMPL-0409 structurallyFrozen]. Використайте CloneFrom (ФВ-7.1).', 1;
@@ -87,12 +107,12 @@ BEGIN
     -- видалення в Draft; застосунок жорстко не видаляє нічого).
     IF EXISTS (
         SELECT 1
-        FROM deleted d
+        FROM #TRCD_d d
         JOIN cfg.TableDef t ON t.Id = d.TableDefId
         JOIN cfg.SheetDef s ON s.Id = t.SheetDefId
         JOIN cfg.TemplateVersion v ON v.Id = s.TemplateVersionId
         WHERE v.Status IN (1, 2)
-          AND NOT EXISTS (SELECT 1 FROM inserted i WHERE i.Id = d.Id)
+          AND NOT EXISTS (SELECT 1 FROM #TRCD_i i WHERE i.Id = d.Id)
     )
     BEGIN
         THROW 50005, N'Видалити колонку опублікованої або виведеної з обігу версії заборонено [ECR-TMPL-0409 structurallyFrozen]. Використайте CloneFrom (ФВ-7.1).', 1;
@@ -101,8 +121,8 @@ BEGIN
     -- UPDATE: структурні поля; таблиця береться і СТАРА, і НОВА (перенесення).
     IF EXISTS (
         SELECT 1
-        FROM inserted i
-        JOIN deleted  d ON d.Id = i.Id
+        FROM #TRCD_i i
+        JOIN #TRCD_d d ON d.Id = i.Id
         JOIN cfg.TableDef t ON t.Id IN (d.TableDefId, i.TableDefId)
         JOIN cfg.SheetDef s ON s.Id = t.SheetDefId
         JOIN cfg.TemplateVersion v ON v.Id = s.TemplateVersionId
@@ -135,15 +155,35 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
+    -- ✎ W15z (замір на копії живої бази 23.11): UPDATE 300 колонок ОДНІЄЮ командою йшов 173 с (без тригера — 0,3 с):
+    -- перевірки нижче з'єднують inserted × deleted, а псевдотаблиці не мають індексів і читаються з версійного сховища,
+    -- тож вартість росла квадратично. Через це клон версії писав перев'язки по рядку, а збирач Land — порціями по 200.
+    -- (1) Швидкий вихід: усі перевірки вимагають замороженої версії (Status IN (1, 2)) таблиці рядка, старої чи нової;
+    --     немає такої серед таблиць inserted ∪ deleted — немає чого перевіряти (чернетки: клон, збирач). Один прохід.
+    IF NOT EXISTS (
+        SELECT 1
+        FROM (SELECT TableDefId FROM inserted UNION SELECT TableDefId FROM deleted) x
+        JOIN cfg.TableDef t ON t.Id = x.TableDefId
+        JOIN cfg.SheetDef s ON s.Id = t.SheetDefId
+        JOIN cfg.TemplateVersion v ON v.Id = s.TemplateVersionId
+        WHERE v.Status IN (1, 2)
+    )
+        RETURN;
+
+    -- (2) Інакше — ті самі перевірки над копіями з кластерним індексом за Id (лінійно-логарифмічно, а не квадратично).
+    SELECT * INTO #TRRD_i FROM inserted;
+    SELECT * INTO #TRRD_d FROM deleted;
+    CREATE UNIQUE CLUSTERED INDEX UX_TRRD_i ON #TRRD_i (Id);
+    CREATE UNIQUE CLUSTERED INDEX UX_TRRD_d ON #TRRD_d (Id);
     -- INSERT: новий рядок у замороженій версії.
     IF EXISTS (
         SELECT 1
-        FROM inserted i
+        FROM #TRRD_i i
         JOIN cfg.TableDef t ON t.Id = i.TableDefId
         JOIN cfg.SheetDef s ON s.Id = t.SheetDefId
         JOIN cfg.TemplateVersion v ON v.Id = s.TemplateVersionId
         WHERE v.Status IN (1, 2)
-          AND NOT EXISTS (SELECT 1 FROM deleted d WHERE d.Id = i.Id)
+          AND NOT EXISTS (SELECT 1 FROM #TRRD_d d WHERE d.Id = i.Id)
     )
     BEGIN
         THROW 50004, N'Додати рядок в опубліковану або виведену з обігу версію заборонено [ECR-TMPL-0409 structurallyFrozen] (ФВ-7.1).', 1;
@@ -152,12 +192,12 @@ BEGIN
     -- DELETE: рядок замороженої версії видаляти не можна.
     IF EXISTS (
         SELECT 1
-        FROM deleted d
+        FROM #TRRD_d d
         JOIN cfg.TableDef t ON t.Id = d.TableDefId
         JOIN cfg.SheetDef s ON s.Id = t.SheetDefId
         JOIN cfg.TemplateVersion v ON v.Id = s.TemplateVersionId
         WHERE v.Status IN (1, 2)
-          AND NOT EXISTS (SELECT 1 FROM inserted i WHERE i.Id = d.Id)
+          AND NOT EXISTS (SELECT 1 FROM #TRRD_i i WHERE i.Id = d.Id)
     )
     BEGIN
         THROW 50005, N'Видалити рядок опублікованої або виведеної з обігу версії заборонено [ECR-TMPL-0409 structurallyFrozen] (ФВ-7.1).', 1;
@@ -166,8 +206,8 @@ BEGIN
     -- UPDATE: структурні поля; таблиця береться і СТАРА, і НОВА (перенесення).
     IF EXISTS (
         SELECT 1
-        FROM inserted i
-        JOIN deleted  d ON d.Id = i.Id
+        FROM #TRRD_i i
+        JOIN #TRRD_d d ON d.Id = i.Id
         JOIN cfg.TableDef t ON t.Id IN (d.TableDefId, i.TableDefId)
         JOIN cfg.SheetDef s ON s.Id = t.SheetDefId
         JOIN cfg.TemplateVersion v ON v.Id = s.TemplateVersionId
@@ -190,16 +230,36 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
+    -- ✎ W15z (замір на копії живої бази 23.11): UPDATE 300 колонок ОДНІЄЮ командою йшов 173 с (без тригера — 0,3 с):
+    -- перевірки нижче з'єднують inserted × deleted, а псевдотаблиці не мають індексів і читаються з версійного сховища,
+    -- тож вартість росла квадратично. Через це клон версії писав перев'язки по рядку, а збирач Land — порціями по 200.
+    -- (1) Швидкий вихід: усі перевірки вимагають замороженої версії (Status IN (1, 2)) таблиці рядка, старої чи нової;
+    --     немає такої серед таблиць inserted ∪ deleted — немає чого перевіряти (чернетки: клон, збирач). Один прохід.
+    IF NOT EXISTS (
+        SELECT 1
+        FROM (SELECT TableDefId FROM inserted UNION SELECT TableDefId FROM deleted) x
+        JOIN cfg.TableDef t ON t.Id = x.TableDefId
+        JOIN cfg.SheetDef s ON s.Id = t.SheetDefId
+        JOIN cfg.TemplateVersion v ON v.Id = s.TemplateVersionId
+        WHERE v.Status IN (1, 2)
+    )
+        RETURN;
+
+    -- (2) Інакше — ті самі перевірки над копіями з кластерним індексом за Id (лінійно-логарифмічно, а не квадратично).
+    SELECT * INTO #TRFD_i FROM inserted;
+    SELECT * INTO #TRFD_d FROM deleted;
+    CREATE UNIQUE CLUSTERED INDEX UX_TRFD_i ON #TRFD_i (Id);
+    CREATE UNIQUE CLUSTERED INDEX UX_TRFD_d ON #TRFD_d (Id);
     -- INSERT: нова формула в замороженій версії (повз публікаційні перевірки
     -- й граф залежностей — `cfg.FormulaDependency` про неї не знав би).
     IF EXISTS (
         SELECT 1
-        FROM inserted i
+        FROM #TRFD_i i
         JOIN cfg.TableDef t ON t.Id = i.TableDefId
         JOIN cfg.SheetDef s ON s.Id = t.SheetDefId
         JOIN cfg.TemplateVersion v ON v.Id = s.TemplateVersionId
         WHERE v.Status IN (1, 2)
-          AND NOT EXISTS (SELECT 1 FROM deleted d WHERE d.Id = i.Id)
+          AND NOT EXISTS (SELECT 1 FROM #TRFD_d d WHERE d.Id = i.Id)
     )
     BEGIN
         THROW 50004, N'Додати формулу в опубліковану або виведену з обігу версію заборонено [ECR-TMPL-0409 structurallyFrozen] (ФВ-7.1).', 1;
@@ -208,12 +268,12 @@ BEGIN
     -- DELETE: формулу замороженої версії видаляти не можна (лише м'яке видалення в Draft).
     IF EXISTS (
         SELECT 1
-        FROM deleted d
+        FROM #TRFD_d d
         JOIN cfg.TableDef t ON t.Id = d.TableDefId
         JOIN cfg.SheetDef s ON s.Id = t.SheetDefId
         JOIN cfg.TemplateVersion v ON v.Id = s.TemplateVersionId
         WHERE v.Status IN (1, 2)
-          AND NOT EXISTS (SELECT 1 FROM inserted i WHERE i.Id = d.Id)
+          AND NOT EXISTS (SELECT 1 FROM #TRFD_i i WHERE i.Id = d.Id)
     )
     BEGIN
         THROW 50003, N'Зміна або видалення формули в опублікованій або виведеній з обігу версії заборонені [ECR-TMPL-0409 structurallyFrozen] (ФВ-7.1).', 1;
@@ -226,8 +286,8 @@ BEGIN
     -- явний — усе, крім цього прапорця. Вираз порівнюється БІНАРНО: зміна лише регістру — теж зміна.
     IF EXISTS (
         SELECT 1
-        FROM inserted i
-        JOIN deleted  d ON d.Id = i.Id
+        FROM #TRFD_i i
+        JOIN #TRFD_d d ON d.Id = i.Id
         JOIN cfg.TableDef t ON t.Id IN (d.TableDefId, i.TableDefId)
         JOIN cfg.SheetDef s ON s.Id = t.SheetDefId
         JOIN cfg.TemplateVersion v ON v.Id = s.TemplateVersionId
