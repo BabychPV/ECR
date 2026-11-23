@@ -373,7 +373,8 @@ public sealed class RecalculationFanOutLimitDbTests(SqlServerFixture sql) : DbJo
     /// <c>AvailableAt</c> щойно поставленої задачі, — наступна постановка тесту отримує строго пізніший момент.
     /// </summary>
     /// <remarks>
-    /// ⛔ FIFO черги — <c>ORDER BY AvailableAt, JobId</c>, а <c>AvailableAt</c> — <c>datetime2(3)</c>: дві постановки в одну
+    /// ✎ JQ-FIFO (b10): нічию тепер розв'язує порядок вставки (<c>EnqueueSeq</c>, <c>DbJobQueueFifoTests</c>); очікування лишається —
+    /// воно не шкодить і тримає тест незалежним від розв'язання нічиї. Доти: ⛔ FIFO черги — <c>ORDER BY AvailableAt, JobId</c>, а <c>AvailableAt</c> — <c>datetime2(3)</c>: дві постановки в одну
     /// мілісекунду СУБД рівні за моментом, і між ними порядок — за випадковим <c>JobId</c> (GUID), не за приходом. На
     /// швидкому CI (Linux, SQL Server у контейнері) постановки підряд потрапляли в одну мілісекунду, і
     /// <c>Місце_дитини_звільнилось…</c> брав замість <c>children[Cap]</c> дитину з тієї самої мілісекунди з меншим GUID

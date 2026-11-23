@@ -24,6 +24,8 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
             modelBuilder.HasSequence("CalculationResultSeq", "calc");
 
+            modelBuilder.HasSequence("JobProgressEnqueueSeq", "itg");
+
             modelBuilder.HasSequence("RegistryEntryCodeSeq", "dic");
 
             modelBuilder.HasSequence("TableInstanceSeq", "doc");
@@ -5918,6 +5920,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<long?>("DocumentId")
                         .HasColumnType("bigint");
 
+                    b.Property<long?>("EnqueueSeq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValueSql("NEXT VALUE FOR itg.JobProgressEnqueueSeq");
+
                     b.Property<string>("Error")
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)")
@@ -5990,10 +5997,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.HasIndex("State", "HeartbeatAt")
                         .HasDatabaseName("IX_JobProgress_Stale");
 
-                    b.HasIndex(new[] { "Lane", "State", "AvailableAt" }, "IX_JobProgress_Claim")
+                    b.HasIndex(new[] { "Lane", "State", "AvailableAt", "EnqueueSeq" }, "IX_JobProgress_Claim")
                         .HasFilter("[Lane] IS NOT NULL AND [State] IN ('Queued', 'Running')");
 
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "Lane", "State", "AvailableAt" }, "IX_JobProgress_Claim"), new[] { "TargetKey", "LeaseUntil", "Attempt", "ReclaimCount" });
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "Lane", "State", "AvailableAt", "EnqueueSeq" }, "IX_JobProgress_Claim"), new[] { "TargetKey", "LeaseUntil", "Attempt", "ReclaimCount" });
 
                     b.HasIndex(new[] { "CreatedByUserId", "UpdatedAt" }, "IX_JobProgress_CreatedBy_UpdatedAt")
                         .IsDescending(false, true);
@@ -6016,7 +6023,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.HasIndex(new[] { "Lane", "State", "CreatedByUserId" }, "IX_JobProgress_User_Active")
                         .HasFilter("[Lane] IS NOT NULL AND [State] IN ('Queued', 'Running')");
 
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "Lane", "State", "CreatedByUserId" }, "IX_JobProgress_User_Active"), new[] { "AvailableAt", "FanOutParentJobId" });
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "Lane", "State", "CreatedByUserId" }, "IX_JobProgress_User_Active"), new[] { "AvailableAt", "FanOutParentJobId", "EnqueueSeq" });
 
                     b.HasIndex(new[] { "TargetKey" }, "UX_JobProgress_Target_Queued")
                         .IsUnique()
