@@ -40,6 +40,7 @@
 .PARAMETER Sample          Скільки версій перевірити паритетом через API у Verify.
 .PARAMETER CopyAsUser      РЕПЕТИЦІЯ на копії: замість API — команди інструмента apply/switch (ті самі обробники) від імені користувача
                            копії з цим Id; інструмент сам відмовляє на базі, що не схожа на копію.
+.PARAMETER ConfirmCopy     Разом із -CopyAsUser: база — копія, хоч ім'я на копію не схоже (EcrLandBld); передає інструменту --i-know-this-is-a-copy.
 .PARAMETER Exclude         Apply: версії «КОД ВЕРСІЯ», які свідомо лишаються на Formulas (з причиною у звіті вікна) і не йдуть у пакет;
                            будь-яка ІНША відмова сухого прогону зупиняє фазу.
 #>
@@ -56,7 +57,8 @@ param(
     [string[]]$Exclude = @(),
     [int]$CopyAsUser = 0,
     [string]$ReferenceDatabase = 'ECR',
-    [string]$ReviewerCredentialFile
+    [string]$ReviewerCredentialFile,
+    [switch]$ConfirmCopy
 )
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
@@ -76,6 +78,7 @@ function Write-Phase([string]$what, $data) {
 function Stop-Phase([string]$why, $data) { Write-Phase "STOP: $why" $data; throw "MS phase $Stage stopped: $why" }
 function Invoke-Tool([string[]]$toolArgs) {
     if (-not (Test-Path -LiteralPath $ToolDll)) { Stop-Phase "tool not built: $ToolDll" $null }
+    if ($ConfirmCopy -and $CopyAsUser -gt 0 -and $toolArgs[0] -in 'apply', 'switch', 'golden-versions') { $toolArgs = @($toolArgs) + @('--i-know-this-is-a-copy') }
     & dotnet $ToolDll @toolArgs | ForEach-Object { Write-Host "  $_" }
     return $LASTEXITCODE
 }
@@ -129,13 +132,16 @@ switch ($Stage) {
         # чого шаблон / константа чинної версії ще не мають (факти — з бази, рішення — Get-MsUnitsStillNeeded).
         $unitsCfg = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\..\land\land-script-units.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         $facts = @{ ColumnUnits = @{}; ArgumentColumns = @{}; ConstantUnits = @{} }
+        # Лише таблиці ЖИВОЇ (останньої опублікованої) версії шаблону — як звірка 0438 (D-400): прив'язки старих версій шаблону лишаються
+        # активними, і їхні колонки (одиниця 'one', без мосту) інакше назавжди тримали б накладку (репетиція на 1.0.20.0, EcrLandBld).
+        $live = "b.TableDefId IN (SELECT td.Id FROM cfg.TableDef td JOIN cfg.SheetDef s ON s.Id = td.SheetDefId JOIN cfg.TemplateVersion tv ON tv.Id = s.TemplateVersionId WHERE tv.Id = (SELECT TOP 1 t2.Id FROM cfg.TemplateVersion t2 WHERE t2.TemplateId = tv.TemplateId AND t2.Status = 1 ORDER BY t2.PublishedAt DESC, t2.Id DESC))"
         foreach ($m in $unitsCfg.methodologies.PSObject.Properties) {
             $mc = $m.Name.Replace("'", "''")
             $cur = @(Invoke-Sql "SELECT TOP 1 v.Id FROM calc.MethodologyVersion v JOIN calc.Methodology m ON m.Id = v.MethodologyId WHERE m.Code = '$mc' AND v.Status = 1 ORDER BY v.EffectiveFrom DESC, v.Id DESC")
             $sec = $m.Value.PSObject.Properties['arguments']
             if ($sec) { foreach ($a in $sec.Value.PSObject.Properties) {
                 # Колонка з кодом аргументу АБО місячні колонки його псевдоніма (річний шаблон, cfg.MonthInputAlias).
-                $facts.ColumnUnits["$($m.Name)|$($a.Name)"] = @(Invoke-Sql "SELECT ISNULL(u.Code, '-') FROM cfg.CalculationBinding b JOIN calc.Methodology m ON m.Id = b.MethodologyId JOIN cfg.ColumnDef c ON c.TableDefId = b.TableDefId AND c.IsDeleted = 0 AND (c.Code = '$($a.Name)' OR c.Id IN (SELECT ma.ColumnDefId FROM cfg.MonthInputAlias ma WHERE ma.TableDefId = b.TableDefId AND ma.Alias = '$($a.Name)')) LEFT JOIN uom.Unit u ON u.Id = c.UnitId WHERE m.Code = '$mc' AND b.IsActive = 1")
+                $facts.ColumnUnits["$($m.Name)|$($a.Name)"] = @(Invoke-Sql "SELECT ISNULL(u.Code, '-') FROM cfg.CalculationBinding b JOIN calc.Methodology m ON m.Id = b.MethodologyId JOIN cfg.ColumnDef c ON c.TableDefId = b.TableDefId AND c.IsDeleted = 0 AND (c.Code = '$($a.Name)' OR c.Id IN (SELECT ma.ColumnDefId FROM cfg.MonthInputAlias ma WHERE ma.TableDefId = b.TableDefId AND ma.Alias = '$($a.Name)')) LEFT JOIN uom.Unit u ON u.Id = c.UnitId WHERE m.Code = '$mc' AND b.IsActive = 1 AND $live")
             } }
             $sec = $m.Value.PSObject.Properties['constants']
             if ($sec -and $cur.Count -gt 0) { foreach ($k in $sec.Value.PSObject.Properties) {
@@ -144,7 +150,7 @@ switch ($Stage) {
             $sec = $m.Value.PSObject.Properties['argumentSources']
             if ($sec) { foreach ($s in $sec.Value.PSObject.Properties) {
                 $alt = [string]$s.Value.alternative
-                $gap = @(Invoke-Sql "SELECT COUNT(DISTINCT q.TableDefId), COUNT(DISTINCT CASE WHEN q.HasArg = 0 THEN q.TableDefId END) FROM (SELECT b.TableDefId, CASE WHEN EXISTS (SELECT 1 FROM cfg.ColumnDef a WHERE a.TableDefId = b.TableDefId AND a.Code = '$($s.Name)' AND a.IsDeleted = 0) OR EXISTS (SELECT 1 FROM cfg.MonthInputAlias ma WHERE ma.TableDefId = b.TableDefId AND ma.Alias = '$($s.Name)') THEN 1 ELSE 0 END AS HasArg FROM cfg.CalculationBinding b JOIN calc.Methodology m ON m.Id = b.MethodologyId WHERE m.Code = '$mc' AND b.IsActive = 1 AND (EXISTS (SELECT 1 FROM cfg.ColumnDef x WHERE x.TableDefId = b.TableDefId AND x.Code = '$alt' AND x.IsDeleted = 0) OR EXISTS (SELECT 1 FROM cfg.MonthInputAlias xa WHERE xa.TableDefId = b.TableDefId AND xa.Alias = '$alt'))) q")[0] -split '\|'
+                $gap = @(Invoke-Sql "SELECT COUNT(DISTINCT q.TableDefId), COUNT(DISTINCT CASE WHEN q.HasArg = 0 THEN q.TableDefId END) FROM (SELECT b.TableDefId, CASE WHEN EXISTS (SELECT 1 FROM cfg.ColumnDef a WHERE a.TableDefId = b.TableDefId AND a.Code = '$($s.Name)' AND a.IsDeleted = 0) OR EXISTS (SELECT 1 FROM cfg.MonthInputAlias ma WHERE ma.TableDefId = b.TableDefId AND ma.Alias = '$($s.Name)') THEN 1 ELSE 0 END AS HasArg FROM cfg.CalculationBinding b JOIN calc.Methodology m ON m.Id = b.MethodologyId WHERE m.Code = '$mc' AND b.IsActive = 1 AND $live AND (EXISTS (SELECT 1 FROM cfg.ColumnDef x WHERE x.TableDefId = b.TableDefId AND x.Code = '$alt' AND x.IsDeleted = 0) OR EXISTS (SELECT 1 FROM cfg.MonthInputAlias xa WHERE xa.TableDefId = b.TableDefId AND xa.Alias = '$alt'))) q")[0] -split '\|'
                 $facts.ArgumentColumns["$($m.Name)|$($s.Name)"] = ([int]$gap[0] -gt 0 -and [int]$gap[1] -eq 0)
             } }
         }
