@@ -197,6 +197,11 @@ public sealed partial class DocumentVersionMigrationTests
     private sealed class PausingMigrationStore(IDocumentVersionMigrationStore inner, ApplyPause pause)
         : IDocumentVersionMigrationStore
     {
+        public Task<VersionMigrationTemplatePair?> ReadTemplatePairAsync(long documentId, CancellationToken ct)
+            => inner.ReadTemplatePairAsync(documentId, ct);
+
+        public void UseTemplate(int templateId, bool isPrimary) => inner.UseTemplate(templateId, isPrimary);
+
         public Task<int?> LockProjectVersionAsync(int projectId, CancellationToken ct)
             => inner.LockProjectVersionAsync(projectId, ct);
 

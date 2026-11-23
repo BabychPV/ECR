@@ -113,13 +113,51 @@ public sealed record ExtendedMappingRemap(
 /// <param name="Overflow">Користувачів більше за стелю: перелік неповний, скидати треба ВЕСЬ кеш.</param>
 public sealed record GrantedUsers(IReadOnlyList<int> Ids, bool Overflow);
 
+/// <summary>
+/// ✎ B74 P3 (D-576): пара (проєкт, шаблон) документа, з якого відкрили перенос, і її чинна версія. Нова версія шаблону
+/// переносить разом усі документи ЦЬОГО шаблону в проєкті; інші шаблони проєкту незалежні.
+/// </summary>
+/// <param name="ProjectId">Проєкт.</param>
+/// <param name="TemplateId">Шаблон документа (<c>Document.TemplateId</c>; <c>NULL</c> — основний шаблон проєкту).</param>
+/// <param name="IsPrimary">Шаблон — основний (шаблон <c>Project.TemplateVersionId</c>; до P6 його версію дублює проєкт).</param>
+/// <param name="CurrentVersionId">
+/// Чинна версія пари: <c>doc.ProjectTemplate.CurrentTemplateVersionId</c>; для основного шаблону без рядка пари —
+/// <c>Project.TemplateVersionId</c>.
+/// </param>
+public sealed record VersionMigrationTemplatePair(int ProjectId, int TemplateId, bool IsPrimary, int CurrentVersionId);
+
 /// <summary>Сховище переносу документів проєкту на нову версію шаблону (ФВ-7.5).</summary>
+/// <remarks>
+/// ✎ B74 P3 (D-576): після <see cref="UseTemplate"/> кожен виклик із <c>projectId</c> бачить лише документи шаблону пари
+/// (і блок/версію — версію пари). Без нього — увесь проєкт (основний шаблон), як до B74: так працюють прямі виклики
+/// сховища в тестах. Обробник ставить шаблон до першого звернення — тим самим прийомом налаштування екземпляра,
+/// що й <c>BackupConfirmation</c>/<c>Range</c> обробника (сховище — scoped, один перенос на екземпляр).
+/// </remarks>
 public interface IDocumentVersionMigrationStore
 {
+    /// <summary>
+    /// ✎ B74 P3 (D-576): пара (проєкт, шаблон) документа і її чинна версія; <c>null</c> — документа (чи пари) немає.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<VersionMigrationTemplatePair?> ReadTemplatePairAsync(long documentId, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ B74 P3 (D-576): обмежує подальші виклики документами шаблону <paramref name="templateId"/>
+    /// (<c>Document.TemplateId = templateId</c>, а для основного шаблону — і <c>NULL</c>).
+    /// </summary>
+    /// <param name="templateId">Шаблон пари.</param>
+    /// <param name="isPrimary">Шаблон — основний шаблон проєкту.</param>
+    public void UseTemplate(int templateId, bool isPrimary);
+
     /// <summary>
     /// Блокує рядок проєкту до кінця транзакції й повертає його поточну версію
     /// шаблону; <c>null</c> — проєкту немає.
     /// </summary>
+    /// <remarks>
+    /// ✎ B74 P3 (D-576): блок — той самий рядок <c>doc.Project</c> (як і створення документа), а «поточна» — версія ПАРИ
+    /// (<see cref="UseTemplate"/>), прочитана під цим блоком.
+    /// </remarks>
     /// <remarks>
     /// ⚠ Лише всередині транзакції: без неї блок знімається одразу, і два
     /// переноси того самого проєкту розійшлися б з планом, який перевіряли.

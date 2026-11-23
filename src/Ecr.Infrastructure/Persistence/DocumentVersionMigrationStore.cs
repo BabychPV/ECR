@@ -25,6 +25,9 @@ public sealed record MigrationRangeStat(string Stage, string Kind, int Index, in
 /// перемиканням версії, в одній транзакції: документ, чиї комірки вже
 /// посилаються на колонки нової версії, а проєкт — ще на стару, відкрився б
 /// без жодного значення.
+/// ✎ B74 P3 (D-576): з кількома шаблонами в проєкті «весь проєкт» — це всі документи ШАБЛОНУ пари
+/// (<see cref="UseTemplate"/>): кожен оператор, що міг би зачепити документи іншого шаблону, обмежено цим набором
+/// (<c>@docs</c> прелюдії, <c>PairDocuments</c>); версія — версія пари; <c>Project.TemplateVersionId</c> — лише для основного.
 ///
 /// ⚠ Кожен запит до <c>doc.TableRow</c>/<c>doc.CellValue</c>/<c>doc.TableInstance</c>
 /// несе <c>PeriodKey</c> із періодів проєкту — таблиці партиціоновані
@@ -93,6 +96,86 @@ public sealed partial class DocumentVersionMigrationStore(
     private static partial void LogApplyDone(
         Microsoft.Extensions.Logging.ILogger logger, int projectId, long batches, long rows, double seconds, long maxMs);
 
+    // ✎ B74 P3 (D-576): шаблон пари (UseTemplate). null — увесь проєкт (основний шаблон), як до B74.
+    private int? _templateId;
+    private bool _isPrimary = true;
+
+    /// <inheritdoc />
+    public void UseTemplate(int templateId, bool isPrimary)
+    {
+        _templateId = templateId;
+        _isPrimary = isPrimary;
+    }
+
+    /// <summary>
+    /// ✎ B74 P3 (D-576): основний шаблон проєкту й чинна версія пари під блоком рядка проєкту (той самий блок
+    /// <c>UPDLOCK, HOLDLOCK</c>, що й створення документа). <c>@templateId</c> NULL — без пари (увесь проєкт, як до B74):
+    /// версія проєкту. Пара без рядка <c>doc.ProjectTemplate</c> — лише для основного шаблону: версія проєкту.
+    /// </summary>
+    /// <remarks>
+    /// Блок (<c>/*LOCK*/</c> → <see cref="PairLockSql"/>) — лише під транзакцією переносу; розв'язання пари в обробнику
+    /// (сухий прогін, перелік цілей, постановка) читає без блоку: інакше чекало б чужу відкриту транзакцію переносу.
+    /// </remarks>
+    private const string PairSql = """
+        SELECT pv.TemplateId AS PrimaryTemplateId,
+               CASE WHEN @templateId IS NULL THEN x.PrimaryVersionId
+                    ELSE COALESCE(pt.CurrentTemplateVersionId,
+                                  CASE WHEN @templateId = pv.TemplateId THEN x.PrimaryVersionId END) END AS CurrentVersionId
+        FROM   (SELECT Id, TemplateVersionId AS PrimaryVersionId
+                FROM   doc.Project /*LOCK*/
+                WHERE  Id = @projectId) x
+        JOIN   cfg.TemplateVersion pv ON pv.Id = x.PrimaryVersionId
+        LEFT JOIN doc.ProjectTemplate pt ON pt.ProjectId = x.Id AND pt.TemplateId = @templateId
+        """;
+
+    /// <summary><see cref="PairSql"/> під блоком рядка проєкту (той самий текст, статична заміна).</summary>
+    private static readonly string PairLockSql =
+        PairSql.Replace("/*LOCK*/", "WITH (UPDLOCK, HOLDLOCK, ROWLOCK)", StringComparison.Ordinal);
+
+    /// <summary>Рядок <see cref="PairSql"/>.</summary>
+    private sealed record PairRow(int PrimaryTemplateId, int? CurrentVersionId);
+
+    private async Task<PairRow?> ReadPairAsync(int projectId, int? templateId, bool locked, CancellationToken ct)
+    {
+        var rows = await db.Database
+            .SqlQueryRaw<PairRow>(
+                locked ? PairLockSql : PairSql,
+                new SqlParameter("@projectId", projectId),
+                new SqlParameter("@templateId", System.Data.SqlDbType.Int) { Value = (object?)templateId ?? DBNull.Value })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows.Count == 0 ? null : rows[0];
+    }
+
+    /// <inheritdoc />
+    public async Task<VersionMigrationTemplatePair?> ReadTemplatePairAsync(long documentId, CancellationToken ct)
+    {
+        var document = await db.Documents
+            .AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Select(d => new { d.ProjectId, d.TemplateId })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (document is null)
+        {
+            return null;
+        }
+
+        // Шаблон документа — його TemplateId; NULL — основний шаблон проєкту (його дає той самий запит).
+        var primary = await ReadPairAsync(document.ProjectId, null, locked: false, ct).ConfigureAwait(false);
+        if (primary is null)
+        {
+            return null;
+        }
+
+        var templateId = document.TemplateId ?? primary.PrimaryTemplateId;
+        var pair = await ReadPairAsync(document.ProjectId, templateId, locked: false, ct).ConfigureAwait(false);
+        return pair?.CurrentVersionId is { } current
+            ? new VersionMigrationTemplatePair(document.ProjectId, templateId, templateId == primary.PrimaryTemplateId, current)
+            : null;
+    }
+
     /// <inheritdoc />
     public async Task<int?> LockProjectVersionAsync(int projectId, CancellationToken ct)
     {
@@ -100,16 +183,8 @@ public sealed partial class DocumentVersionMigrationStore(
             ?? throw new InvalidOperationException(
                 "LockProjectVersionAsync викликано поза транзакцією: блок рядка проєкту звільнився б одразу.");
 
-        var versions = await db.Database
-            .SqlQuery<int>($"""
-                SELECT TemplateVersionId AS Value
-                FROM   doc.Project WITH (UPDLOCK, HOLDLOCK, ROWLOCK)
-                WHERE  Id = {projectId}
-                """)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        return versions.Count == 0 ? null : versions[0];
+        // ✎ B74 P3 (D-576): блок рядка проєкту, «поточна» — версія пари (без пари — версія проєкту, як до B74).
+        return (await ReadPairAsync(projectId, _templateId, locked: true, ct).ConfigureAwait(false))?.CurrentVersionId;
     }
 
     /// <inheritdoc />
@@ -122,11 +197,39 @@ public sealed partial class DocumentVersionMigrationStore(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+    /// <summary>
+    /// ✎ B74 P3 (D-576): документи проєкту, які переносить ця пара: шаблон пари, а для основного — і <c>TemplateId NULL</c>.
+    /// Без пари — усі документи проєкту.
+    /// </summary>
+    private IQueryable<Domain.Entities.Documents.Document> PairDocuments(int projectId)
+    {
+        var templateId = _templateId;
+        var isPrimary = _isPrimary;
+        return db.Documents.Where(d => d.ProjectId == projectId
+                                       && (templateId == null
+                                           || d.TemplateId == templateId
+                                           || (isPrimary && d.TemplateId == null)));
+    }
+
+    /// <summary>
+    /// ✎ B74 P3 (D-576): параметри предиката пари для інтерпольованого SQL —
+    /// <c>({all} = 1 OR d.TemplateId = {template} OR (d.TemplateId IS NULL AND {primary} = 1))</c>.
+    /// </summary>
+    private (int All, int Template, int Primary) PairFilter()
+        => (_templateId is null ? 1 : 0, _templateId ?? 0, _templateId is null || _isPrimary ? 1 : 0);
+
+    /// <summary>✎ B74 P3: <c>@templateId</c> прелюдії (<c>NULL</c> — увесь проєкт); свіжий на кожну команду.</summary>
+    private SqlParameter TemplateParameter()
+        => new("@templateId", System.Data.SqlDbType.Int) { Value = (object?)_templateId ?? DBNull.Value };
+
+    /// <summary>✎ B74 P3: <c>@isPrimary</c> прелюдії і <see cref="FinishSql"/> (без пари — 1, як до B74).</summary>
+    private SqlParameter PrimaryParameter()
+        => new("@isPrimary", System.Data.SqlDbType.Bit) { Value = _templateId is null || _isPrimary };
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<long>> ListDocumentIdsAsync(int projectId, CancellationToken ct)
-        => await db.Documents
+        => await PairDocuments(projectId)
             .AsNoTracking()
-            .Where(d => d.ProjectId == projectId)
             .OrderBy(d => d.Id)
             .Select(d => d.Id)
             .ToListAsync(ct)
@@ -143,6 +246,7 @@ public sealed partial class DocumentVersionMigrationStore(
         using var timeout = ExtendTimeout();
 
         var documentIds = await ListDocumentIdsAsync(projectId, ct).ConfigureAwait(false);
+        var (all, template, primary) = PairFilter();
 
         var cells = await db.Database
             .SqlQuery<CellUsageRow>($"""
@@ -154,6 +258,7 @@ public sealed partial class DocumentVersionMigrationStore(
                 JOIN   doc.CellValue cv     ON cv.PeriodKey = r.PeriodKey AND cv.TableRowId = r.Id
                 WHERE  p.ProjectId = {projectId}
                   AND  p.PeriodKey >= {fromPeriodKey}
+                  AND  ({all} = 1 OR d.TemplateId = {template} OR (d.TemplateId IS NULL AND {primary} = 1))
                   AND  r.IsDeleted = 0
                   AND  cv.IsEmpty = 0
                 GROUP BY cv.ColumnDefId, r.RowDefId
@@ -167,6 +272,7 @@ public sealed partial class DocumentVersionMigrationStore(
                 FROM   doc.DocumentHeaderValue h
                 JOIN   doc.Document d ON d.Id = h.DocumentId
                 WHERE  d.ProjectId = {projectId}
+                  AND  ({all} = 1 OR d.TemplateId = {template} OR (d.TemplateId IS NULL AND {primary} = 1))
                   AND  h.IsEmpty = 0
                 GROUP BY h.HeaderFieldDefId
                 """)
@@ -178,7 +284,7 @@ public sealed partial class DocumentVersionMigrationStore(
             .Where(a => (a.Status == DocumentStatus.Submitted || a.Status == DocumentStatus.Approved)
                         && a.PeriodKey >= fromPeriodKey)
             .Join(
-                db.Documents.Where(d => d.ProjectId == projectId),
+                PairDocuments(projectId),
                 a => a.DocumentId,
                 d => d.Id,
                 (a, _) => new { a.DocumentId, a.SheetDefId, a.PeriodKey, a.Status })
@@ -207,8 +313,8 @@ public sealed partial class DocumentVersionMigrationStore(
         var fieldIds = headerFieldDefIds.ToList();
         var rows = await (
                 from h in db.DocumentHeaderValues.AsNoTracking()
-                join d in db.Documents.AsNoTracking() on h.DocumentId equals d.Id
-                where d.ProjectId == projectId && !h.IsEmpty && fieldIds.Contains(h.HeaderFieldDefId)
+                join d in PairDocuments(projectId).AsNoTracking() on h.DocumentId equals d.Id
+                where !h.IsEmpty && fieldIds.Contains(h.HeaderFieldDefId)
                 orderby h.DocumentId, h.HeaderFieldDefId
                 select new HeaderLookupValueRow(
                     h.DocumentId,
@@ -385,11 +491,13 @@ public sealed partial class DocumentVersionMigrationStore(
         if (chatRenames.Count > 0)
         {
             var json = JsonSerializer.Serialize(chatRenames);
+            var (all, template, primary) = PairFilter();
             await db.Database.ExecuteSqlAsync($"""
                 DECLARE @r TABLE (f nvarchar(64) PRIMARY KEY, t nvarchar(64) NOT NULL);
                 INSERT @r (f, t) SELECT f, t FROM OPENJSON({json}) WITH (f nvarchar(64), t nvarchar(64));
                 DECLARE @d TABLE (Id bigint PRIMARY KEY);
-                INSERT @d (Id) SELECT Id FROM doc.Document WHERE ProjectId = {projectId};
+                INSERT @d (Id) SELECT Id FROM doc.Document WHERE ProjectId = {projectId}
+                    AND ({all} = 1 OR TemplateId = {template} OR (TemplateId IS NULL AND {primary} = 1));
 
                 UPDATE m SET m.TableDefCode = r.t
                   FROM doc.TableDiscussionMessage m JOIN @r r ON r.f = m.TableDefCode JOIN @d d ON d.Id = m.DocumentId;
@@ -515,6 +623,8 @@ public sealed partial class DocumentVersionMigrationStore(
             command.Parameters.AddRange(new SqlParameter[]
             {
                 new("@projectId", projectId),
+                TemplateParameter(),
+                PrimaryParameter(),
                 new("@fromPeriod", plan.FromPeriodKey),
                 new("@sheets", System.Data.SqlDbType.NVarChar, -1) { Value = JsonSerializer.Serialize(plan.Sheets.Select(p => new { o = p.Key, n = p.Value })) },
                 new("@tables", System.Data.SqlDbType.NVarChar, -1) { Value = JsonSerializer.Serialize(plan.Tables.Select(p => new { o = p.Key, n = p.Value })) },
@@ -641,11 +751,12 @@ public sealed partial class DocumentVersionMigrationStore(
     {
         var sheetCodes = renames.Select(r => r.Sheet).Distinct().ToList();
         var fromCodes = renames.Select(r => r.From).Distinct().ToList();
+        var documents = PairDocuments(projectId);
         return db.EditAssignments
             .Where(a => a.SheetCode != null && sheetCodes.Contains(a.SheetCode)
                         && a.TableCode != null && fromCodes.Contains(a.TableCode)
                         && (a.PeriodKeyValue == null || a.PeriodKeyValue >= fromPeriod)
-                        && db.Documents.Any(d => d.Id == a.DocumentId && d.ProjectId == projectId));
+                        && documents.Any(d => d.Id == a.DocumentId));
     }
 
     /// <summary>Новий код таблиці для точної пари «аркуш + таблиця»; <c>null</c> — пари в мапі немає.</summary>
@@ -762,6 +873,8 @@ public sealed partial class DocumentVersionMigrationStore(
             List<SqlParameter> list =
             [
                 new("@projectId", projectId),
+                TemplateParameter(),
+                PrimaryParameter(),
                 new("@fromPeriod", plan.FromPeriodKey),
                 new("@renames", System.Data.SqlDbType.NVarChar, -1)
                 {
@@ -1434,8 +1547,8 @@ public sealed partial class DocumentVersionMigrationStore(
 
         var ids = sheetDefIds.Distinct().ToList();
         return await (from s in db.DocumentSheets.AsNoTracking()
-                      join d in db.Documents.AsNoTracking() on s.DocumentId equals d.Id
-                      where d.ProjectId == projectId && s.CopyOfId != null && ids.Contains(s.SheetDefId)
+                      join d in PairDocuments(projectId).AsNoTracking() on s.DocumentId equals d.Id
+                      where s.CopyOfId != null && ids.Contains(s.SheetDefId)
                       select s.Id)
             .CountAsync(ct)
             .ConfigureAwait(false);
@@ -1568,8 +1681,17 @@ public sealed partial class DocumentVersionMigrationStore(
     public async Task<ProjectsOnVersion> CountOtherProjectsOnVersionAsync(
         int projectId, int versionId, CancellationToken ct)
     {
+        // ✎ B74 P3 (D-576): «на версії» — пара (проєкт, шаблон версії): рядок doc.ProjectTemplate з цією чинною версією,
+        // або основний шаблон проєкту на ній (Project.TemplateVersionId; рядка пари в старих даних може не бути). Документи —
+        // лише документи цього шаблону (TemplateId = шаблон; NULL — коли шаблон основний), а не всі документи проєкту.
+        var templateId = await db.TemplateVersions.AsNoTracking()
+            .Where(v => v.Id == versionId).Select(v => v.TemplateId).FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        var pairs = db.ProjectTemplates.AsNoTracking()
+            .Where(t => t.TemplateId == templateId && t.CurrentTemplateVersionId == versionId);
+
         var projects = await db.Projects.AsNoTracking()
-            .CountAsync(p => p.TemplateVersionId == versionId && p.Id != projectId, ct)
+            .CountAsync(p => p.Id != projectId
+                             && (p.TemplateVersionId == versionId || pairs.Any(t => t.ProjectId == p.Id)), ct)
             .ConfigureAwait(false);
         if (projects == 0)
         {
@@ -1579,7 +1701,9 @@ public sealed partial class DocumentVersionMigrationStore(
         var documents = await (
                 from d in db.Documents.AsNoTracking()
                 join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
-                where p.TemplateVersionId == versionId && p.Id != projectId
+                where p.Id != projectId
+                      && ((p.TemplateVersionId == versionId && (d.TemplateId == null || d.TemplateId == templateId))
+                          || (d.TemplateId == templateId && pairs.Any(t => t.ProjectId == p.Id)))
                 select d.Id)
             .CountAsync(ct)
             .ConfigureAwait(false);
@@ -1916,8 +2040,12 @@ public sealed partial class DocumentVersionMigrationStore(
     private const string Prelude = """
         SET XACT_ABORT ON;
 
+        -- ✎ B74 P3 (D-576): лише документи шаблону пари (@templateId; основний — і TemplateId NULL). Кожен оператор
+        -- переносу йде через @docs/@instances, тож документи інших шаблонів проєкту не зачіпаються. NULL — увесь проєкт.
         DECLARE @docs TABLE (Id bigint PRIMARY KEY);
-        INSERT @docs (Id) SELECT Id FROM doc.Document WHERE ProjectId = @projectId;
+        INSERT @docs (Id) SELECT Id FROM doc.Document
+        WHERE  ProjectId = @projectId
+          AND  (@templateId IS NULL OR TemplateId = @templateId OR (TemplateId IS NULL AND @isPrimary = 1));
 
         DECLARE @periods TABLE (PeriodKey int PRIMARY KEY);
         INSERT @periods (PeriodKey) SELECT PeriodKey FROM doc.Period WHERE ProjectId = @projectId AND PeriodKey >= @fromPeriod;
@@ -2897,10 +3025,16 @@ public sealed partial class DocumentVersionMigrationStore(
         -- його немає; далі рядки з ефективного початку й пізніші замінюються одним (X, нова). Увесь проєкт (@fromPeriod = 0)
         -- лишає ОДИН рядок - нову версію з першого періоду.
         DECLARE @firstPeriod int = (SELECT MIN(PeriodKey) FROM doc.Period WHERE ProjectId = @projectId);
-        DECLARE @oldVersion int = (SELECT TemplateVersionId FROM doc.Project WHERE Id = @projectId);
         -- ✎ B74 PT01: шкала на пару (проєкт, шаблон). Перенос лише в межах шаблону (обробник відмовляє іншому шаблону),
         -- тож шаблон старої і нової версії один.
         DECLARE @targetTemplate int = (SELECT TemplateId FROM cfg.TemplateVersion WHERE Id = @targetVersionId);
+        -- ✎ B74 P3 (D-576): стара версія — версія ПАРИ (doc.ProjectTemplate, до оновлення нижче); версія проєкту — лише
+        -- для основного шаблону (рядка пари в старих даних може не бути) і для переносу без пари (@templateId NULL).
+        DECLARE @oldVersion int = (SELECT TemplateVersionId FROM doc.Project WHERE Id = @projectId AND @isPrimary = 1);
+        IF @templateId IS NOT NULL
+            SET @oldVersion = COALESCE(
+                (SELECT CurrentTemplateVersionId FROM doc.ProjectTemplate WHERE ProjectId = @projectId AND TemplateId = @targetTemplate),
+                @oldVersion);
         IF @firstPeriod IS NOT NULL
         BEGIN
             IF @fromPeriod = 0 OR @fromPeriod <= @firstPeriod
@@ -2928,12 +3062,15 @@ public sealed partial class DocumentVersionMigrationStore(
             INSERT doc.ProjectTemplate (ProjectId, TemplateId, CurrentTemplateVersionId)
             VALUES (@projectId, @targetTemplate, @targetVersionId);
 
-        -- 7. Нарешті — версія проєкту.
-        -- ⛔ Маркер «міграція в процесі» (`migratingTo`) знімається ТІЄЮ САМОЮ командою, що перемикає версію: інакше
-        -- проєкт опинився б на новій версії з маркером (усе заблоковано) або на старій без нього (напівстан видно).
+        -- 7. Нарешті — версія проєкту: ✎ B74 P3 (D-576) лише коли шаблон пари основний (до P6 версію основного дублює
+        -- проєкт); перенос приєднаного шаблону версію проєкту не чіпає.
+        UPDATE doc.Project SET TemplateVersionId = @targetVersionId WHERE Id = @projectId AND @isPrimary = 1;
+
+        -- ⛔ Маркер «міграція в процесі» (`migratingTo`) знімається ТІЄЮ САМОЮ транзакцією (тим самим пакетом), що перемикає
+        -- версію: інакше проєкт опинився б на новій версії з маркером (усе заблоковано) або на старій без нього.
+        -- ✎ B74 P3: маркер — на ПРОЄКТІ, не на парі: поки йде перенос одного шаблону, писарі всіх шаблонів проєкту чекають.
         UPDATE doc.Project
-        SET    TemplateVersionId = @targetVersionId,
-               ExternalSettingsJson =
+        SET    ExternalSettingsJson =
                    CASE WHEN ISJSON(ExternalSettingsJson) = 1 AND JSON_VALUE(ExternalSettingsJson, '$.migratingTo') IS NOT NULL
                         THEN NULLIF(
                                  JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(

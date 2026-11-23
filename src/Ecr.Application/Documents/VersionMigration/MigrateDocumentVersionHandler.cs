@@ -272,6 +272,9 @@ public sealed record DocumentVersionMigrationTargetsDto(
 /// версія розійшлася з версією проєкту, відкривається без аркушів (V-11).
 /// Тому перенос, відкритий із документа, переносить УСІ документи його
 /// проєкту однією транзакцією, і звіт це прямо каже (<c>DocumentCount</c>).
+/// ✎ B74 P3 (D-576, рішення людини 13.11): проєкт має кілька шаблонів — версія живе на ПАРІ (проєкт, шаблон документа).
+/// Нова версія шаблону переносить разом усі документи ЦЬОГО шаблону в проєкті; інші шаблони проєкту незалежні
+/// (їхні документи, версія пари й шкала не змінюються). <c>Project.TemplateVersionId</c> оновлюється лише для основного.
 ///
 /// ⚠ Відповідність — за кодами, як у <c>DiffTemplateVersionsHandler</c>:
 /// ідентифікатори в кожної версії свої.
@@ -694,7 +697,7 @@ public sealed class MigrateDocumentVersionHandler(
 
         var jobId = await jobs
             .EnqueueCoalescedAsync<IMigrateDocumentVersionJob>(
-                TargetOf(request.ProjectId),
+                request.IsPrimary ? TargetOf(request.ProjectId) : TargetOf(request.ProjectId, request.TemplateId),
                 new MigrateDocumentVersionTask(
                     documentId, targetVersionId, mode.ToString(), actor,
                     renames is { Count: > 0 } ? renames : null,
@@ -735,6 +738,17 @@ public sealed class MigrateDocumentVersionHandler(
     /// <returns>Ключ цілі для злиття постановок.</returns>
     public static string TargetOf(int projectId)
         => string.Create(CultureInfo.InvariantCulture, $"migrate-project{projectId}");
+
+    /// <summary>
+    /// ✎ B74 P3 (D-576): ціль задачі переносу ПРИЄДНАНОГО шаблону — пара (проєкт, шаблон): постановка переносу шаблону B
+    /// не зливається з переносом основного шаблону того самого проєкту (злиття віддало б <c>jobId</c> чужого переносу).
+    /// Одночасно їх однаково не виконати: маркер переносу — на проєкті (другий отримає 409).
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="templateId">Приєднаний шаблон.</param>
+    /// <returns>Ключ цілі для злиття постановок.</returns>
+    public static string TargetOf(int projectId, int templateId)
+        => string.Create(CultureInfo.InvariantCulture, $"migrate-project{projectId}-template{templateId}");
 
     /// <summary>
     /// Виконує перенос у задачі черги — від імені автора (<c>JobActorScope</c>), з прогресом.
@@ -862,9 +876,22 @@ public sealed class MigrateDocumentVersionHandler(
     private const int StoreFloorPercent = 15;
     private const int StoreCeilingPercent = 97;
 
-    /// <summary>Що з'ясовують швидкі перевірки до плану: профіль, проєкт, ціль.</summary>
+    /// <summary>Що з'ясовують швидкі перевірки до плану: профіль, проєкт, ціль; ✎ B74 P3 — шаблон пари.</summary>
     private sealed record Resolved(
-        AccessProfile Profile, int ProjectId, int SourceVersionId, TemplateVersion Target, bool Archived);
+        AccessProfile Profile, int ProjectId, int SourceVersionId, TemplateVersion Target, bool Archived,
+        int TemplateId = 0, bool IsPrimary = true);
+
+    /// <summary>
+    /// ✎ B74 P3 (D-576): пара (проєкт, шаблон) документа — її версія вихідна, і сховище відтепер бачить лише документи
+    /// цього шаблону. Нова версія шаблону переносить разом усі документи ЦЬОГО шаблону в проєкті; інші шаблони — незалежні.
+    /// </summary>
+    private async Task<VersionMigrationTemplatePair> UsePairAsync(long documentId, CancellationToken ct)
+    {
+        var pair = await store.ReadTemplatePairAsync(documentId, ct).ConfigureAwait(false)
+                   ?? throw DocumentVisibility.NotFound(documentId);
+        store.UseTemplate(pair.TemplateId, pair.IsPrimary);
+        return pair;
+    }
 
     private async Task<Resolved> ResolveAsync(long documentId, int targetVersionId, bool tolerateSame, CancellationToken ct)
     {
@@ -877,7 +904,10 @@ public sealed class MigrateDocumentVersionHandler(
                       ?? throw DocumentVisibility.NotFound(documentId);
         RequireProjectManage(profile, projectId);
 
-        var target = await RequireTargetAsync(project.TemplateVersionId, targetVersionId, tolerateSame, ct).ConfigureAwait(false);
+        // ⛔ Ціль — версія ТОГО САМОГО шаблону, що й документ (версія пари); версія іншого шаблону проєкту — та сама
+        // відмова migrateOtherTemplate, що й чужого шаблону.
+        var pair = await UsePairAsync(documentId, ct).ConfigureAwait(false);
+        var target = await RequireTargetAsync(pair.CurrentVersionId, targetVersionId, tolerateSame, ct).ConfigureAwait(false);
         var archived = project.Status == ProjectStatus.Archived || project.IsArchiving;
 
         // ⛔ D-474 (4): річний проєкт не переїжджає на версію з розкладкою «копія на місяць» — у нього один період на рік.
@@ -893,7 +923,7 @@ public sealed class MigrateDocumentVersionHandler(
                 });
         }
 
-        return new Resolved(profile, projectId, project.TemplateVersionId, target, archived);
+        return new Resolved(profile, projectId, pair.CurrentVersionId, target, archived, pair.TemplateId, pair.IsPrimary);
     }
 
     /// <summary>Незавершена задача переносу будь-якого документа цього проєкту; <c>null</c> — немає.</summary>
@@ -997,6 +1027,7 @@ public sealed class MigrateDocumentVersionHandler(
             }
 
             // Маркер іншого переносу (на іншу ціль) не перекриваємо; на ту саму ціль — це відновлення після обриву.
+            // ✎ B74 P3 (D-576): маркер — на ПРОЄКТІ (не на парі): перенос одного шаблону зупиняє писарів усіх шаблонів проєкту.
             if (await store.ReadMigrationMarkerAsync(projectId, innerCt).ConfigureAwait(false) is { } marked && marked != target.Id)
             {
                 throw MigrationInProgress(projectId);
@@ -1284,7 +1315,11 @@ public sealed class MigrateDocumentVersionHandler(
 
         var to = await metadata.GetAsync(targetVersionId, ct).ConfigureAwait(false);
         // ✎ RPT-STABLE B2: перенос «з місяця» не чіпає періодів до X - їхні ручні значення лишаються на старій версії.
-        var marks = InScope(await formulaOverrides.ReadProjectAsync(projectId, ct).ConfigureAwait(false), fromPeriodKey);
+        // ⛔ B74 P3 (D-576): лише позначки документів пари — колонки інших шаблонів проєкту не належать цільовій версії, і
+        // без фільтра їхні ручні значення «втратились» би (знято позначку) переносом чужого шаблону.
+        var documents = (await store.ListDocumentIdsAsync(projectId, ct).ConfigureAwait(false)).ToHashSet();
+        var marks = OfDocuments(
+            InScope(await formulaOverrides.ReadProjectAsync(projectId, ct).ConfigureAwait(false), fromPeriodKey), documents);
         Func<int, int?> targetColumnOf = column => to.ColumnsById.ContainsKey(column) ? column : null;
         var lost = FormulaOverrideMigration.Lost(marks, targetColumnOf, to);
 
@@ -1382,11 +1417,13 @@ public sealed class MigrateDocumentVersionHandler(
 
         var projectId = await access.DocumentProjectIdAsync(documentId, ct).ConfigureAwait(false)
                         ?? throw DocumentVisibility.NotFound(documentId);
-        var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
-                      ?? throw DocumentVisibility.NotFound(documentId);
+        _ = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
+            ?? throw DocumentVisibility.NotFound(documentId);
         RequireProjectManage(profile, projectId);
 
-        var current = await versions.GetAsync(project.TemplateVersionId, ct).ConfigureAwait(false);
+        // ✎ B74 P3 (D-576): чинна версія — версія пари документа; цілі — версії ЙОГО шаблону.
+        var pair = await UsePairAsync(documentId, ct).ConfigureAwait(false);
+        var current = await versions.GetAsync(pair.CurrentVersionId, ct).ConfigureAwait(false);
         var all = await templates
             .ListVersionsForTemplatesAsync([current.TemplateId], MaxTargets, ct)
             .ConfigureAwait(false);
@@ -1430,7 +1467,8 @@ public sealed class MigrateDocumentVersionHandler(
         timeline?.Invalidate(projectId);   // план читає шкалу свіжо: вона може змінитись іншим вузлом
         var entries = timeline is null
             ? []
-            : await timeline.GetAsync(projectId, ct).ConfigureAwait(false);
+            : await OfTemplateAsync(await timeline.GetAsync(projectId, ct).ConfigureAwait(false), target.TemplateId, ct)
+                .ConfigureAwait(false);
         int? first = periodKeys.Count == 0 ? null : periodKeys[0];
 
         if (Range == VersionMigrationRange.WholeProject)
@@ -1482,6 +1520,32 @@ public sealed class MigrateDocumentVersionHandler(
 
         // Початок = перший період проєкту дорівнює «увесь проєкт» для сховища (нема періодів до X).
         return new RangeInfo(effective <= periodKeys[0] ? 0 : effective, effective, warnings);
+    }
+
+    /// <summary>
+    /// ✎ B74 P3 (D-576): шкала проєкту несе рядки ВСІХ його шаблонів (<c>doc.ProjectTemplateVersion</c> ключується парою);
+    /// перенос дивиться лише на сегменти шаблону пари — інакше рядок іншого шаблону робив би «кілька версій».
+    /// </summary>
+    private async Task<IReadOnlyList<Ecr.Domain.ValueObjects.TimelineEntry>> OfTemplateAsync(
+        IReadOnlyList<Ecr.Domain.ValueObjects.TimelineEntry> entries, int templateId, CancellationToken ct)
+    {
+        if (entries.Count == 0)
+        {
+            return entries;
+        }
+
+        var own = new HashSet<int>();
+        foreach (var versionId in entries.Select(e => e.TemplateVersionId).Distinct())
+        {
+            if ((await versions.FindAsync(versionId, ct).ConfigureAwait(false))?.TemplateId == templateId)
+            {
+                own.Add(versionId);
+            }
+        }
+
+        return own.Count == entries.Select(e => e.TemplateVersionId).Distinct().Count()
+            ? entries
+            : [.. entries.Where(e => own.Contains(e.TemplateVersionId))];
     }
 
     /// <summary>
@@ -1561,6 +1625,11 @@ public sealed class MigrateDocumentVersionHandler(
     private static IReadOnlyList<ProjectFormulaOverride> InScope(IReadOnlyList<ProjectFormulaOverride> marks, int fromPeriodKey)
         => fromPeriodKey == 0 ? marks : [.. marks.Where(m => m.Address.PeriodKey.Value >= fromPeriodKey)];
 
+    /// <summary>✎ B74 P3 (D-576): позначки лише документів пари (документи інших шаблонів проєкту перенос не чіпає).</summary>
+    private static IReadOnlyList<ProjectFormulaOverride> OfDocuments(
+        IReadOnlyList<ProjectFormulaOverride> marks, HashSet<long> documentIds)
+        => marks.All(m => documentIds.Contains(m.DocumentId)) ? marks : [.. marks.Where(m => documentIds.Contains(m.DocumentId))];
+
     /// <summary>План переносу разом зі звітом, мапінгами й значеннями шапки, які читав аудит мап Lookup.</summary>
     private sealed record PlannedMigration(
         DocumentVersionMigrationDto Dto,
@@ -1623,7 +1692,9 @@ public sealed class MigrateDocumentVersionHandler(
         var lostOverrides = formulaOverrides is null
             ? []
             : LostOverrides(
-                InScope(await formulaOverrides.ReadProjectAsync(projectId, ct).ConfigureAwait(false), range.FromPeriodKey),
+                OfDocuments(
+                    InScope(await formulaOverrides.ReadProjectAsync(projectId, ct).ConfigureAwait(false), range.FromPeriodKey),
+                    scope.DocumentIds.ToHashSet()),
                 overrideMap, plan.MonthColumns, to);
         if (lostOverrides.Count > 0)
         {
