@@ -80,7 +80,10 @@ function causeTitle(cause: IssueCause): string {
     case 'sourceNotApproved':
       return t('document.calcIssues.source.notApproved.title', { months: namesOf(cause.subjects, 4) });
     case 'sourceChanged':
-      return t('document.calcIssues.source.changed.title', { months: namesOf(cause.subjects, 4) });
+      // ✎ F5-R (D-570): зв'язка Any — змінено ДАНІ джерела (не його затвердження).
+      return (cause.source?.sourceChangedAt ?? null) !== null
+        ? t('document.calcIssues.source.changedData.title', { months: namesOf(cause.subjects, 4) })
+        : t('document.calcIssues.source.changed.title', { months: namesOf(cause.subjects, 4) });
     case 'sourceOther':
       return t('document.calcIssues.source.other.title', { months: namesOf(cause.subjects, 4) });
     case 'hse400':
@@ -262,7 +265,19 @@ export function CalculationIssuesPanel({
                         {' · '}
                       </>
                     )}
+                    {source.sourceChangedAt !== null && (
+                      <>
+                        {t('document.calcIssues.source.sourceChangedAt')} <Timestamp value={source.sourceChangedAt} />
+                        {' · '}
+                      </>
+                    )}
                     {t('document.calcIssues.source.approvedAt')} <Timestamp value={source.approvedAt} />
+                  </Text>
+                )}
+                {/* ✎ F5-R (D-570, P-1122-4): що робити — переглянути, повернути в роботу чи перерахувати «з затвердженими» (B80 N5). */}
+                {cause.kind === 'sourceChanged' && (
+                  <Text size="xs" data-testid="document-calc-issue-source-hint">
+                    {t('document.calcIssues.source.changed.hint')}
                   </Text>
                 )}
                 {cause.kind === 'hse400' && hse400State === 'notFound' && (

@@ -132,6 +132,28 @@ public sealed class SubmissionSourceGateTests
         Assert.All(months, m => Assert.Null(m.UnapprovedSourcePeriodKey));
     }
 
+    /// <summary>
+    /// ✎ F5-R (D-570): рядок Any («дані джерела змінено після затвердження», <c>SourceChangedAt</c>, без
+    /// <c>SourceApprovedAt</c>) воріт подання не стосується — Submit/Approve не вимикаються. Мутація: прибрати
+    /// <c>SourceChangedAt is null</c> з відбору — червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Decision", "D-570")]
+    public async Task Рядок_Any_змінене_джерело_не_блокує_подання()
+    {
+        var changed = new DateTime(2026, 11, 22, 12, 0, 0, DateTimeKind.Utc);
+        var reader = Reader(
+            Row(ISourceIssueReader.SourceChangedAfterApproval, Feb, Feb, null) with { SourceChangedAt = changed },
+            Row(ISourceIssueReader.SourceChangedAfterApproval, Mar, Mar, null) with { SourceChangedAt = changed });
+
+        var (periods, months, anchor) = await SubmissionSourceGate.ApplyAsync(reader, Document, Periods, Months, Mar, CancellationToken.None);
+
+        Assert.All(periods, p => Assert.Null(p.UnapprovedSourcePeriodKey));
+        Assert.All(months, m => Assert.Null(m.UnapprovedSourcePeriodKey));
+        Assert.Null(anchor);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Decision", "D-559")]

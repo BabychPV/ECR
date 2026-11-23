@@ -41,3 +41,34 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
 OPTION (RECOMPILE);
 GO
 -- B80:calc-issues-source ── кінець секції ──
+-- B80:source-changed-any ── ru/kz F5-R (D-570, P-1122-4): «джерело змінено після затвердження» і за зв'язки Any — панель і перелік; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.calcIssues.source.changedData.title', N'ru', N'Данные HSE400 {months} изменены после утверждения этого месяца — числа месяца могут быть устаревшими'),
+    (N'document.calcIssues.source.changedData.title', N'kz', N'HSE400 {months} деректері осы ай бекітілгеннен кейін өзгерді — айдың сандары ескірген болуы мүмкін'),
+    (N'document.calcIssues.source.sourceChangedAt', N'ru', N'Источник изменён:'),
+    (N'document.calcIssues.source.sourceChangedAt', N'kz', N'Дереккөз өзгерді:'),
+    (N'document.calcIssues.source.changed.hint', N'ru', N'Утверждённый месяц автоматически не пересчитывается. Проверьте числа; чтобы применить данные источника, верните месяц в работу и пересчитайте его или попросите администратора пересчитать зависимые документы вместе с утверждёнными.'),
+    (N'document.calcIssues.source.changed.hint', N'kz', N'Бекітілген ай автоматты түрде қайта есептелмейді. Сандарды тексеріңіз; дереккөз деректерін қолдану үшін айды жұмысқа қайтарып, қайта есептеңіз немесе әкімшіден тәуелді құжаттарды бекітілгендерімен бірге қайта есептеуді сұраңыз.'),
+    (N'documents.sourceChanged', N'ru', N'Источник изменён'),
+    (N'documents.sourceChanged', N'kz', N'Дереккөз өзгерді'),
+    (N'documents.sourceChangedHint', N'ru', N'Документ-источник (HSE400) изменился после утверждения: {months}. Утверждённые месяцы автоматически не пересчитываются — проверьте их; верните в работу и пересчитайте или пересчитайте зависимые вместе с утверждёнными.'),
+    (N'documents.sourceChangedHint', N'kz', N'Бастапқы құжат (HSE400) бекітуден кейін өзгерді: {months}. Бекітілген айлар автоматты түрде қайта есептелмейді — оларды тексеріңіз; жұмысқа қайтарып қайта есептеңіз немесе тәуелділерді бекітілгендерімен бірге қайта есептеңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- B80:source-changed-any ── кінець секції ──
+-- B80:source-changed-any ── F5-R (D-570): en; ru/kz — порцією B80:source-changed-any вище ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'document.calcIssues.source.changedData.title', N'en', N'HSE400 {months} data changed after this month was approved — the numbers of this month may be outdated', 1),
+    (N'document.calcIssues.source.sourceChangedAt', N'en', N'Source changed:', 1),
+    (N'document.calcIssues.source.changed.hint', N'en', N'An approved month is not recalculated automatically. Review the numbers; to apply the source data, reopen this month and recalculate it, or ask an administrator to recalculate the dependent documents including approved ones.', 1),
+    (N'documents.sourceChanged', N'en', N'Source changed', 1),
+    (N'documents.sourceChangedHint', N'en', N'The source document (HSE400) changed after approval: {months}. Approved months are not recalculated automatically — review them; reopen and recalculate, or recalculate the dependents including approved ones.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- B80:source-changed-any ── кінець секції ──

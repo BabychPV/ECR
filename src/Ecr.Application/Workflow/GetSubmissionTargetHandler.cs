@@ -193,8 +193,10 @@ public static class SubmissionSourceGate
         }
 
         var rows = await reader.ListSourceIssuesAsync(documentId, keys, ct).ConfigureAwait(false);
+        // ✎ F5-R (D-570): рядок Any («дані джерела змінено після затвердження», SourceChangedAt) воріт не стосується —
+        // за Any подання від затвердження джерела не залежить.
         var blocked = rows
-            .Where(r => r.SourceApprovedAt is null)
+            .Where(r => r.SourceApprovedAt is null && r.SourceChangedAt is null)
             .GroupBy(r => r.PeriodKey)
             .ToDictionary(g => g.Key, g => g.Min(r => r.SourcePeriodKey));
         if (blocked.Count == 0)
