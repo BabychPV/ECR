@@ -8,6 +8,7 @@ using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Ecr.Infrastructure.Tests.Reporting;
 
@@ -26,7 +27,7 @@ namespace Ecr.Infrastructure.Tests.Reporting;
 /// розкладки) - тест 2 червоний; версійний бюджет <c>IF @limCols + @limText + 24 &gt; 1024</c> -> <c>IF 1 = 0</c> - тест 4 червоний.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql) : IAsyncLifetime
+public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql, ITestOutputHelper output) : IAsyncLifetime
 {
     /// <summary>
     /// Широкі таблиці цього класу - сотні Calculated/Formula колонок без прив'язок і формул у ОПУБЛІКОВАНИХ версіях. Лишені в
@@ -40,28 +41,37 @@ public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql) : IAsyncLi
 
     public async Task DisposeAsync()
     {
-        await using var db = GeneratorContext();
+        await using var db = GeneratorContext(SetupTimeoutSeconds);
         foreach (var tableId in _wideTables)
         {
+            // Порціями по 200: тригер cfg.ColumnDef звіряє inserted/deleted без індексу - одне UPDATE на 2200 рядків ішло > 120 с.
             await db.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE cfg.ColumnDef SET IsDeleted = 1, DeletedAt = SYSUTCDATETIME() WHERE TableDefId = {tableId} AND IsDeleted = 0");
+                $"WHILE 1 = 1 BEGIN UPDATE TOP (200) cfg.ColumnDef SET IsDeleted = 1, DeletedAt = SYSUTCDATETIME() WHERE TableDefId = {tableId} AND IsDeleted = 0; IF @@ROWCOUNT = 0 BREAK; END");
         }
     }
 
     /// <summary>
-    /// Контекст із стелею команди 300 с для генерації вʼюх ШИРОКИХ таблиць (1035 колонок).
+    /// Стеля однієї команди генерації вʼюх ШИРОКОЇ таблиці (1035 колонок), секунди.
     /// </summary>
     /// <remarks>
-    /// ⛔ 20.11: стабільна вʼюха на таблицю з 1035 колонками рахується ~16-25 с (цикл по колонках у <c>rpt.usp_GenerateStableViews</c>
-    /// квадратичний по змінних-таблицях) проти типових 30 с команди: поодинці тест був на межі, під навантаженням повного прогону
-    /// (інші агенти на тому самому SQL Server) команда падала по таймауту (SqlException.Number = -2) замість 50422 — і саме це
-    /// червоніло `Table_over_1024_columns_fails_with_50422…`. Предмет тесту — номер помилки й що решта таблиць згенерована, а не
-    /// швидкість; стеля команди — як у генерації версії з маршрутизацією (<see cref="ReportViewGenerator.RoutedGenerationTimeoutSeconds"/>).
+    /// ✎ PERF 23.11 (борг HANDOVER-MS-1120 §3): до фіксу стабільна вʼюха на 1035 колонок рахувалась 16,6 с (дописування до
+    /// nvarchar(max) у циклі по колонках і запити до змінних-таблиць на кожну колонку - квадратично; 20.11 стелю підняли до 300 с,
+    /// код не змінювали). Після фіксу - 1,5 с тепла / 2,8 с холодна без навантаження і до ~9 с під 100 % CPU інших сесій на тому
+    /// самому SQL Server; стеля - ~3x навантаженого виміру (нижче продової стелі команди 60 с). Повернення квадратичного циклу
+    /// ловить тест <see cref="Generation_time_grows_linearly_with_the_column_count"/>.
     /// </remarks>
-    private EcrDbContext GeneratorContext()
+    private const int WideGenerationTimeoutSeconds = 30;
+
+    /// <summary>Стеля підготовки й прибирання (тисячі рядків cfg.ColumnDef із тригерами) - не предмет тесту, секунди.</summary>
+    private const int SetupTimeoutSeconds = 120;
+
+    /// <summary>Стеля команди тесту лінійності (до 2200 колонок, удвічі більше за 1035): 3x стелі широкої таблиці.</summary>
+    private const int LinearGuardTimeoutSeconds = 3 * WideGenerationTimeoutSeconds;
+
+    private EcrDbContext GeneratorContext(int timeoutSeconds = WideGenerationTimeoutSeconds)
     {
         var db = sql.CreateContext();
-        db.Database.SetCommandTimeout(ReportViewGenerator.RoutedGenerationTimeoutSeconds);
+        db.Database.SetCommandTimeout(timeoutSeconds);
         return db;
     }
 
@@ -81,7 +91,7 @@ public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql) : IAsyncLi
         var doc = await builder.BuildAsync(202601, columnCount: 2, rowCount: 1, layoutKind: TableLayoutKind.MonthsInColumns, monthColumns: 12);
         _wideTables.Add(doc.TableDefId);
 
-        await using var db = GeneratorContext();
+        await using var db = GeneratorContext(SetupTimeoutSeconds);
         var formula = new ColumnDef(doc.TableDefId, EcrCode.Create("FRM" + Guid.NewGuid().ToString("N")[..8]),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Formula" }), 9999, CellDataType.Formula);
         db.ColumnDefs.Add(formula);
@@ -248,6 +258,59 @@ public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql) : IAsyncLi
         await new ReportViewGenerator(db).GenerateStableViewsAsync(b.TemplateId, b.Doc.TemplateVersionId, CancellationToken.None);
 
         AssertNoMonthText(await ColumnsAsync(b.WideStable), b, "стабільна");
+    }
+
+    /// <summary>
+    /// ✎ PERF 23.11: час генерації росте ЛІНІЙНО з кількістю колонок - стабільна вʼюха (цикл іде по всіх кодах і лише потім дає
+    /// 50422: 1100 і 2200 колонок) і версійна (до бюджету 1024: 400 і 800). Подвоєння колонок - не більше ніж утричі довше
+    /// (лінійно ~2x; квадратично ~4x; до фіксу 2072 дописування до nvarchar(max) - у 90 разів довше за 1036).
+    /// </summary>
+    /// <remarks>
+    /// Мутація: у <c>rpt.usp_GenerateStableViews</c> повернути дописування в цикл (<c>SET @select = @select + …</c> замість рядка
+    /// <c>@acc</c>) - 2200 колонок перевищують стелю команди або відношення &gt; 3 - червоний. Вимір - мінімум із трьох прогонів
+    /// (перший компілює план; решта гасять шум сусідніх сесій).
+    /// </remarks>
+    [Fact]
+    public async Task Generation_time_grows_linearly_with_the_column_count()
+    {
+        var stable1 = await BuildAsync(monthCalculated: 0, plainNonMonth: 1100);
+        var stable2 = await BuildAsync(monthCalculated: 0, plainNonMonth: 2200);
+        var version1 = await BuildAsync(monthCalculated: 0, plainNonMonth: 400);
+        var version2 = await BuildAsync(monthCalculated: 0, plainNonMonth: 800);
+
+        var s1 = await MinTimeAsync(g => ExpectBudgetFailureAsync(g.GenerateStableViewsAsync(stable1.TemplateId, stable1.Doc.TemplateVersionId, CancellationToken.None)));
+        var s2 = await MinTimeAsync(g => ExpectBudgetFailureAsync(g.GenerateStableViewsAsync(stable2.TemplateId, stable2.Doc.TemplateVersionId, CancellationToken.None)));
+        var v1 = await MinTimeAsync(g => g.GenerateVersionViewsAsync(version1.Doc.TemplateVersionId, CancellationToken.None));
+        var v2 = await MinTimeAsync(g => g.GenerateVersionViewsAsync(version2.Doc.TemplateVersionId, CancellationToken.None));
+
+        output.WriteLine($"stable 1100: {s1.TotalMilliseconds:F0} ms, 2200: {s2.TotalMilliseconds:F0} ms; version 400: {v1.TotalMilliseconds:F0} ms, 800: {v2.TotalMilliseconds:F0} ms");
+        Assert.True(s2 < 3 * s1, $"стабільна: 2200 колонок {s2.TotalMilliseconds:F0} мс проти 1100 - {s1.TotalMilliseconds:F0} мс (> 3x)");
+        // Версійна вʼюха СТВОРЮЄТЬСЯ (CREATE VIEW на 800 колонок - компіляція сервера, не наш цикл), тож на малих часах шум
+        // більший: запас 2 с поверх 3x (23.11 під 100 % CPU інших сесій: 480 мс проти 1904 мс).
+        Assert.True(v2 < 3 * v1 + TimeSpan.FromSeconds(2), $"версійна: 800 колонок {v2.TotalMilliseconds:F0} мс проти 400 - {v1.TotalMilliseconds:F0} мс (> 3x + 2 с)");
+        Assert.NotEmpty(await ColumnsAsync(version2.WideView));          // версійна вʼюха на 800 колонок створена
+    }
+
+    private async Task<TimeSpan> MinTimeAsync(Func<ReportViewGenerator, Task> run)
+    {
+        var best = TimeSpan.MaxValue;
+        for (var i = 0; i < 3; i++)
+        {
+            await using var db = GeneratorContext(LinearGuardTimeoutSeconds);
+            var generator = new ReportViewGenerator(db);
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            await run(generator);
+            watch.Stop();
+            best = watch.Elapsed < best ? watch.Elapsed : best;
+        }
+
+        return best;
+    }
+
+    private static async Task ExpectBudgetFailureAsync(Task generation)
+    {
+        var ex = await Assert.ThrowsAsync<SqlException>(() => generation);
+        Assert.Equal(50422, ex.Number);                                  // цикл пройшов усі колонки, таймауту (-2) немає
     }
 
     [Fact]
