@@ -1462,7 +1462,7 @@ public sealed partial class DocumentVersionMigrationStore(
                 join table in db.TableDefs.AsNoTracking() on column.TableDefId equals table.Id
                 join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
                 where sheet.TemplateVersionId == sourceVersionId && !column.IsDeleted
-                select new { binding.ColumnDefId, binding.MethodologyId, binding.OutputCode })
+                select new { binding.ColumnDefId, binding.MethodologyId, binding.OutputCode, column.DataType })
             .ToListAsync(ct)
             .ConfigureAwait(false);
         if (source.Count == 0)
@@ -1483,6 +1483,39 @@ public sealed partial class DocumentVersionMigrationStore(
             .Select(b => (b.ColumnDefId, b.MethodologyId, Output: b.OutputCode.ToUpperInvariant()))
             .ToHashSet();
 
+        // ✎ P-1123-4 (вода T7b_00): вихід методології (Calculated у вихідній версії), який у цільовій рахує ФОРМУЛА ТАБЛИЦІ
+        // (Formula з живою формулою), не лишається порожнім без прив'язки — методологію свідомо замінено формулою. Такий
+        // перехід не «втрата прив'язки». Ціль без формули чи джерело не Calculated (прив'язка формульної колонки) — як і раніше відмова.
+        // ⚠ Лише цілі прив'язок, які НЕ перенесено (зазвичай нуль або одиниці): усі цілі плану — це тисячі колонок, і
+        // перевірка формули на кожній (копія живої бази 23.11) не вкладалась у таймаут команди.
+        var uncovered = new HashSet<int>();
+        foreach (var b in source.Where(b => b.DataType == Domain.Enums.CellDataType.Calculated))
+        {
+            var output = b.OutputCode.ToUpperInvariant();
+            IEnumerable<int> targets = monthColumnMap.TryGetValue(b.ColumnDefId, out var ms) && ms.Count > 0
+                ? ms
+                : columnMap.TryGetValue(b.ColumnDefId, out var one) ? [one] : [];
+            uncovered.UnionWith(targets.Where(n => !carried.Contains((n, b.MethodologyId, output))));
+        }
+
+        var uncoveredIds = uncovered.ToList();
+        HashSet<int> formulaTargets = uncoveredIds.Count == 0
+            ? []
+            : (await db.FormulaDefs
+                    .AsNoTracking()
+                    .Where(f => !f.IsDeleted && f.ColumnDefId != null && uncoveredIds.Contains(f.ColumnDefId.Value))
+                    .Select(f => f.ColumnDefId!.Value)
+                    .Distinct()
+                    .Join(
+                        db.ColumnDefs.AsNoTracking().Where(c => !c.IsDeleted && c.DataType == Domain.Enums.CellDataType.Formula),
+                        id => id, c => c.Id, (id, c) => c.Id)
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false))
+                .ToHashSet();
+
+        bool Covered(int column, int methodologyId, string output, bool sourceCalculated)
+            => (sourceCalculated && formulaTargets.Contains(column)) || carried.Contains((column, methodologyId, output));
+
         // ✎ LAND-YEAR L3 (D-13): прив'язка немісячної колонки перенесена, коли КОЖНА з її місячних колонок має прив'язку
         // того самого виходу (12 прив'язок на одну стару — так їх кладе будівник Land, етап YearMonths).
         return source.Count(b =>
@@ -1490,10 +1523,11 @@ public sealed partial class DocumentVersionMigrationStore(
             var output = b.OutputCode.ToUpperInvariant();
             if (monthColumnMap.TryGetValue(b.ColumnDefId, out var months) && months.Count > 0)
             {
-                return !months.All(n => carried.Contains((n, b.MethodologyId, output)));
+                return !months.All(n => Covered(n, b.MethodologyId, output, b.DataType == Domain.Enums.CellDataType.Calculated));
             }
 
-            return !columnMap.TryGetValue(b.ColumnDefId, out var target) || !carried.Contains((target, b.MethodologyId, output));
+            return !columnMap.TryGetValue(b.ColumnDefId, out var target)
+                   || !Covered(target, b.MethodologyId, output, b.DataType == Domain.Enums.CellDataType.Calculated);
         });
     }
 
