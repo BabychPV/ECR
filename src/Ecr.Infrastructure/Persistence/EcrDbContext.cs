@@ -411,6 +411,13 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
             // «Invalid object name 'calc.CalculationResultSeq'» — уже після
             // того, як усі числа пораховані.
             modelBuilder.HasSequence<long>("CalculationResultSeq", "calc").StartsAt(1).IncrementsBy(1);
+
+            // ✎ JQ-FIFO (b10): порядок вставки рядка черги — розв'язує рівність AvailableAt у claim (DbJobQueue). DEFAULT ставить
+            // база: і сирий INSERT черги, і дзеркало Quartz (EF) отримують значення, не називаючи стовпця.
+            modelBuilder.HasSequence<long>("JobProgressEnqueueSeq", "itg").StartsAt(1).IncrementsBy(1);
+            modelBuilder.Entity<Domain.Entities.Integration.JobProgress>()
+                .Property(x => x.EnqueueSeq)
+                .HasDefaultValueSql("NEXT VALUE FOR itg.JobProgressEnqueueSeq");
         }
     }
 

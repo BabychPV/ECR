@@ -557,8 +557,10 @@ public sealed class JobProgressConfiguration : IEntityTypeConfiguration<JobProgr
                .HasFilter("[State] = 'Running' AND [TargetKey] IS NOT NULL");
 
         // Claim: WHERE Lane IN (…) AND State = … AND AvailableAt <= now ORDER BY
-        // AvailableAt, JobId. Фільтр відсікає історію задач і дзеркало Quartz.
-        builder.HasIndex(x => new { x.Lane, x.State, x.AvailableAt }, "IX_JobProgress_Claim")
+        // AvailableAt, EnqueueSeq, JobId (✎ JQ-FIFO). Фільтр відсікає історію задач і дзеркало Quartz.
+        // ✎ JQ-FIFO (b10): EnqueueSeq — у КЛЮЧІ після AvailableAt, той самий порядок, що ORDER BY claim (рівність AvailableAt
+        // розв'язує порядок вставки, а не випадковий GUID у JobId); TOP(1) лишається впорядкованим пошуком.
+        builder.HasIndex(x => new { x.Lane, x.State, x.AvailableAt, x.EnqueueSeq }, "IX_JobProgress_Claim")
                .IncludeProperties(x => new { x.TargetKey, x.LeaseUntil, x.Attempt, x.ReclaimCount })
                .HasFilter("[Lane] IS NOT NULL AND [State] IN ('Queued', 'Running')");
 
@@ -574,7 +576,7 @@ public sealed class JobProgressConfiguration : IEntityTypeConfiguration<JobProgr
         // (`DbJobQueue.FairRankSql`) — пошуком за (Lane, State, CreatedByUserId), без читання Payload. Будує міграція
         // `PERF564FairQueueAndRunWatermark` сирим SQL (ONLINE, де він є); модель — той самий індекс.
         builder.HasIndex(x => new { x.Lane, x.State, x.CreatedByUserId }, "IX_JobProgress_User_Active")
-               .IncludeProperties(x => new { x.AvailableAt, x.FanOutParentJobId })
+               .IncludeProperties(x => new { x.AvailableAt, x.FanOutParentJobId, x.EnqueueSeq })
                .HasFilter("[Lane] IS NOT NULL AND [State] IN ('Queued', 'Running')");
     }
 }

@@ -3213,6 +3213,9 @@ CREATE TABLE itg.JobProgress
     TargetKey         nvarchar(200)    NULL,  -- «{ТипМаркера}~{ціль}»; NULL — без коалесценції
     CancelRequestedAt datetime2(3)     NULL,  -- запит скасування Running
     ReclaimCount      int              NULL,  -- переклейми після втраченої оренди, окремо від Attempt
+    -- ✎ JQ-FIFO: порядок вставки (DEFAULT NEXT VALUE FOR itg.JobProgressEnqueueSeq) — розв'язує нічию
+    -- AvailableAt у claim замість випадкового GUID у JobId. Міграція JQFifoEnqueueSeq; NULL — рядок до неї.
+    EnqueueSeq        bigint           NULL,
     CONSTRAINT PK_JobProgress PRIMARY KEY (JobId),
     CONSTRAINT CK_JobProgress_QueueShape CHECK (Lane IS NULL OR AvailableAt IS NOT NULL)
 );
@@ -3226,9 +3229,9 @@ CREATE UNIQUE INDEX UX_JobProgress_Target_Queued
     ON itg.JobProgress (TargetKey) WHERE State = 'Queued' AND TargetKey IS NOT NULL;
 CREATE UNIQUE INDEX UX_JobProgress_Target_Running
     ON itg.JobProgress (TargetKey) WHERE State = 'Running' AND TargetKey IS NOT NULL;
--- Claim: WHERE Lane IN (…) AND State … AND AvailableAt <= now ORDER BY AvailableAt, JobId.
+-- Claim: WHERE Lane IN (…) AND State … AND AvailableAt <= now ORDER BY AvailableAt, EnqueueSeq, JobId.
 CREATE INDEX IX_JobProgress_Claim
-    ON itg.JobProgress (Lane, State, AvailableAt)
+    ON itg.JobProgress (Lane, State, AvailableAt, EnqueueSeq)
     INCLUDE (TargetKey, LeaseUntil, Attempt, ReclaimCount)
     WHERE Lane IS NOT NULL AND State IN ('Queued', 'Running');
 GO

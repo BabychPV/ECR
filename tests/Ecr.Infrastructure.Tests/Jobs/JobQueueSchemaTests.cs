@@ -61,7 +61,7 @@ public sealed class JobQueueSchemaTests(SqlServerFixture sql)
     [InlineData("UX_JobProgress_Target_Queued", "TargetKey", "", true, "([State]='Queued' AND [TargetKey] IS NOT NULL)")]
     [InlineData("UX_JobProgress_Target_Running", "TargetKey", "", true, "([State]='Running' AND [TargetKey] IS NOT NULL)")]
     [InlineData(
-        "IX_JobProgress_Claim", "Lane,State,AvailableAt", "Attempt,LeaseUntil,ReclaimCount,TargetKey", false,
+        "IX_JobProgress_Claim", "Lane,State,AvailableAt,EnqueueSeq", "Attempt,LeaseUntil,ReclaimCount,TargetKey", false,
         "([Lane] IS NOT NULL AND ([State] IN ('Queued', 'Running')))")]
     public async Task Індекс_черги_має_ключ_INCLUDE_унікальність_і_фільтр(
         string index, string keys, string includes, bool unique, string filter)

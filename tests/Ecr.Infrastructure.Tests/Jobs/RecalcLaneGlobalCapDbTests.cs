@@ -114,11 +114,12 @@ public sealed class RecalcLaneGlobalCapDbTests(SqlServerFixture sql) : DbJobQueu
 
     /// <summary>
     /// ✎ CI 22.11: усі задачі поставлено в ту саму мілісекунду (рівний <c>AvailableAt</c>). Гарантія та сама — людина з одним
-    /// натисканням серед перших двох, а не одинадцята; рівність вирішує унікальний <c>JobId</c> однаково в claim, у виборі
-    /// «черги людей» і в місці в черзі: порядок claim = порядок місць, задачі A — за <c>JobId</c>.
+    /// натисканням серед перших двох, а не одинадцята; ✎ JQ-FIFO (b10): рівність вирішує порядок ВСТАВКИ (<c>EnqueueSeq</c>), а не
+    /// випадковий GUID у <c>JobId</c>, однаково в claim, у виборі «черги людей» і в місці в черзі: порядок claim = порядок місць =
+    /// порядок постановки.
     /// </summary>
     [Fact]
-    public async Task Рівний_час_постановки_порядок_за_JobId_людина_серед_перших_двох()
+    public async Task Рівний_час_постановки_порядок_вставки_людина_серед_перших_двох()
     {
         var a = new List<string>();
         for (var i = 0; i < 10; i++)
@@ -150,9 +151,8 @@ public sealed class RecalcLaneGlobalCapDbTests(SqlServerFixture sql) : DbJobQueu
             order.Add((await host.Queue.ClaimAsync([JobLanes.Recalc], "test/tie", JobQueueLimits.DefaultLease, CancellationToken.None))!.Claim.JobId);
         }
 
-        var byJobId = a.Order(StringComparer.Ordinal).ToList();
-        Assert.Equal(new[] { byJobId[0], b }.Order(StringComparer.Ordinal), order.Take(2).Order(StringComparer.Ordinal));
-        Assert.Equal(byJobId.Skip(1), order.Skip(2));
+        Assert.Equal([a[0], b], order.Take(2));
+        Assert.Equal(a.Skip(1), order.Skip(2));
         Assert.Equal(Enumerable.Range(1, 11), positions.Values.Order());
         Assert.Equal(positions.OrderBy(p => p.Value).Select(p => p.Key), order);
     }

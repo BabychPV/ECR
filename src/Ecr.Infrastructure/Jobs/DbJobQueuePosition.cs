@@ -15,7 +15,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// <para>
 /// Місце — той самий порядок, що claim лейна (<see cref="DbJobQueue"/>): спершу ручні (задача людини) — по черзі людей
 /// (<see cref="DbJobQueue.FairRankSql"/>: скільки задач тієї самої людини виконується чи стоїть попереду), далі решта FIFO
-/// (<c>AvailableAt, JobId</c>). Запарковані (їх робота — в іншій задачі) і невідомі — без місця. Виключення документа, що
+/// (<c>AvailableAt, EnqueueSeq, JobId</c> — ✎ JQ-FIFO). Запарковані (їх робота — в іншій задачі) і невідомі — без місця. Виключення документа, що
 /// вже рахується, і межа дітей розкладу місце не змінюють — оцінка, а не обіцянка.
 /// </para>
 /// <para>
@@ -43,8 +43,8 @@ public sealed class DbJobQueuePosition(EcrDbContext db, Domain.Abstractions.IClo
     internal static readonly string PositionSql = $$"""
         /* ecr:jobqueue-position */
         SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON;
-        DECLARE @state nvarchar(32), @laneOf varchar(32), @at datetime2(3), @manual bit = 0, @rank int = 0;
-        SELECT @state = q.[State], @laneOf = q.Lane, @at = q.AvailableAt,
+        DECLARE @state nvarchar(32), @laneOf varchar(32), @at datetime2(3), @seq bigint, @manual bit = 0, @rank int = 0;
+        SELECT @state = q.[State], @laneOf = q.Lane, @at = q.AvailableAt, @seq = ISNULL(q.EnqueueSeq, 0),
                @manual = CASE WHEN 1 = 1 {{DbJobQueue.ManualFilter}} THEN 1 ELSE 0 END
         FROM itg.JobProgress AS q WHERE q.JobId = @id;
         IF @state = 'Queued' AND @laneOf = @lane AND @at <> {{DbJobQueue.ParkedAt}}
@@ -56,7 +56,7 @@ public sealed class DbJobQueuePosition(EcrDbContext db, Domain.Abstractions.IClo
             BEGIN
                 SELECT @rank = {{DbJobQueue.FairRankSql}} FROM itg.JobProgress AS q WHERE q.JobId = @id;
                 SELECT @manualAhead = COUNT(*), @stepsAhead = ISNULL(SUM(m.Steps), 0)
-                  FROM (SELECT q.JobId, q.AvailableAt, {{DbJobQueue.FairRankSql}} AS Rk,
+                  FROM (SELECT q.JobId, q.AvailableAt, ISNULL(q.EnqueueSeq, 0) AS Seq, {{DbJobQueue.FairRankSql}} AS Rk,
                                CASE WHEN ISJSON(q.Payload) = 1 AND TRY_CAST(JSON_VALUE(q.Payload, '$.chainTotal') AS int) IS NOT NULL
                                       AND (TRY_CAST(JSON_VALUE(q.Payload, '$.chainTotal') AS int)
                                           - CASE WHEN ISNULL(JSON_QUERY(q.Payload, '$.chainDone'), N'[]') = N'[]' THEN 0
@@ -70,7 +70,7 @@ public sealed class DbJobQueuePosition(EcrDbContext db, Domain.Abstractions.IClo
                           FROM itg.JobProgress AS q WITH (INDEX(IX_JobProgress_Claim))
                          WHERE q.Lane = @lane AND q.Lane IS NOT NULL AND q.[State] = 'Queued' AND q.AvailableAt <> {{DbJobQueue.ParkedAt}}
                            AND q.JobId <> @id {{DbJobQueue.ManualFilter}}) AS m
-                 WHERE m.Rk < @rank OR (m.Rk = @rank AND (m.AvailableAt < @at OR (m.AvailableAt = @at AND m.JobId < @id)));
+                 WHERE m.Rk < @rank OR (m.Rk = @rank AND (m.AvailableAt < @at OR (m.AvailableAt = @at AND (m.Seq < @seq OR (m.Seq = @seq AND m.JobId < @id)))));
             END
             ELSE
             BEGIN
@@ -99,7 +99,7 @@ public sealed class DbJobQueuePosition(EcrDbContext db, Domain.Abstractions.IClo
                                      ELSE 1 END), 0)
                   FROM itg.JobProgress AS q WITH (INDEX(IX_JobProgress_Claim))
                  WHERE q.Lane = @lane AND q.Lane IS NOT NULL AND q.[State] = 'Queued' AND q.AvailableAt <> {{DbJobQueue.ParkedAt}}
-                   AND (q.AvailableAt < @at OR (q.AvailableAt = @at AND q.JobId < @id))
+                   AND (q.AvailableAt < @at OR (q.AvailableAt = @at AND (ISNULL(q.EnqueueSeq, 0) < @seq OR (ISNULL(q.EnqueueSeq, 0) = @seq AND q.JobId < @id))))
                    AND NOT (q.CreatedByUserId IS NOT NULL AND q.FanOutParentJobId IS NULL
                             AND ISNULL(CASE WHEN ISJSON(q.Payload) = 1 THEN JSON_VALUE(q.Payload, '$.foreignOwnerPass') END, N'false') <> N'true');
             END

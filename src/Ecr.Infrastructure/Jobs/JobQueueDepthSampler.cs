@@ -50,7 +50,7 @@ public interface IJobQueueDepthSource
 /// <summary>Один агрегат по <c>itg.JobProgress</c> (<c>Lane IS NOT NULL</c>, стани <c>Queued</c>/<c>Running</c>).</summary>
 /// <remarks>
 /// ⚠ Звичайне читання (за RCSI черги — без блокувань, без NOLOCK, як і решта читань черги);
-/// відбір іде по префіксу індексу (Lane, State, AvailableAt, JobId).
+/// відбір іде по префіксу індексу (Lane, State, AvailableAt, EnqueueSeq, JobId).
 /// </remarks>
 public sealed class DbJobQueueDepthSource(IServiceScopeFactory scopes) : IJobQueueDepthSource
 {
