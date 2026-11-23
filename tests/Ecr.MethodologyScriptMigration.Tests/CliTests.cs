@@ -126,4 +126,44 @@ public sealed class CliTests
     [InlineData("EcrLegacyProd", false)]
     public void D571_ім_я_копії_для_apply_switch(string database, bool copy)
         => Assert.Equal(copy, CopyHandlerCommands.LooksLikeCopy(database));
+
+    [Theory]
+    [InlineData(new[] { "V1", "V2", "test" }, "V3")]
+    [InlineData(new[] { "V1", "V6", "V10" }, "V11")]
+    [InlineData(new[] { "test", "1.0.1.0" }, "V1")]
+    public void D571_номер_нової_версії_з_еталоном(string[] existing, string expected)
+        => Assert.Equal(expected, GoldenVersionsCommand.NextVersionNumber(existing));
+
+    [Theory]
+    [InlineData("{}", true)]
+    [InlineData(" { \n } ", true)]
+    [InlineData("", true)]
+    [InlineData(null, true)]
+    [InlineData("{\"OUT\":1.5}", false)]
+    public void D571_порожні_очікування_золотого_випадку(string? expected, bool empty)
+        => Assert.Equal(empty, GoldenVersionsCommand.IsEmptyExpectation(expected));
+
+    [Fact]
+    public async Task D571_golden_versions_відмовляє_на_базі_що_не_схожа_на_копію()
+    {
+        var file = Path.GetTempFileName();
+        try
+        {
+            var run = await RunAsync("golden-versions", "--connection", ConnectionToNowhere, "--in", file, "--as-user", "1");
+            Assert.Equal(MigrationCli.UsageOrEnvironment, run.Code);
+            Assert.Contains("не схоже на копію", run.Error, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Theory]
+    [InlineData("{\"documentId\":96,\"periodKey\":{\"value\":202609}}", 96L)]
+    [InlineData("{\"periodKey\":{\"value\":202609}}", 0L)]
+    [InlineData("not json", 0L)]
+    [InlineData(null, 0L)]
+    public void D571_документ_золотого_входу(string? input, long expected)
+        => Assert.Equal(expected, GoldenVersionsCommand.DocumentOf(input));
 }

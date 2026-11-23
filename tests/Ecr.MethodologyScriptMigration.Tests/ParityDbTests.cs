@@ -27,7 +27,9 @@ public sealed class ParityDbTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2099, 1, 10, 9, 0, 0, DateTimeKind.Utc);
 
-    private sealed record Scene(string MainCode, string LibraryCode, long DocumentId, int MainVersionId, int LibraryVersionId);
+    private sealed record Scene(
+        string MainCode, string LibraryCode, long DocumentId, int MainVersionId, int LibraryVersionId, string ZoneCode = "", string QtyCode = "",
+        int PeriodKey = 0);
 
     private static LocalizedText Name(string value) => new(new Dictionary<string, string> { ["en"] = value });
 
@@ -248,6 +250,54 @@ public sealed class ParityDbTests(SqlServerFixture sql)
         Assert.False(File.Exists(eligible), "after a mismatch the switch list must not survive");
     }
 
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task D571_parity_cases_доводить_версію_на_рядках_еталона_і_ловить_зміну_тексту()
+    {
+        var scene = await ArrangeAsync(209911);
+        await ShadowAsync(scene);
+        var directory = Path.Combine(Path.GetTempPath(), "ecr-ms-ref-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var cases = Path.Combine(directory, "cases.json");
+        var eligible = Path.Combine(directory, "ref-eligible.json");
+        var golden = Path.Combine(directory, "golden.json");
+        var report = Path.Combine(directory, "ref-parity.json");
+        var periodKey = scene.PeriodKey.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var docId = scene.DocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var versionId = scene.MainVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        await File.WriteAllTextAsync(cases, $$"""
+            {"referenceDatabase":"ECR","documentId":{{docId}},"periodKey":{{periodKey}},"versions":[{"versionId":{{versionId}},"methodologyCode":"{{scene.MainCode}}","version":"V1","cases":[
+              {"key":"REF001","table":"T","arguments":[{"argumentCode":"{{scene.ZoneCode}}","valueString":"North"},{"argumentCode":"{{scene.QtyCode}}","value":10}]},
+              {"key":"REF002","table":"T","arguments":[{"argumentCode":"{{scene.ZoneCode}}","valueString":"South"},{"argumentCode":"{{scene.QtyCode}}","value":4}]},
+              {"key":"REF003","table":"T","arguments":[{"argumentCode":"{{scene.ZoneCode}}","valueString":"North"}]}]}]}
+            """);
+
+        var ok = await CliAsync("parity-cases", "--connection", sql.ConnectionString, "--in", cases, "--out", report,
+            "--eligible-out", eligible, "--golden-out", golden);
+
+        Assert.True(ok.Code == MigrationCli.Ok, ok.Output + ok.Error);
+        Assert.Contains("розбіжностей 0", ok.Output, StringComparison.Ordinal);
+        var proven = await File.ReadAllTextAsync(eligible);
+        Assert.Contains("\"source\": \"reference:ECR\"", proven, StringComparison.Ordinal);
+        Assert.Contains("\"versionId\": " + versionId, proven, StringComparison.Ordinal);
+        Assert.Contains("Emission@", await File.ReadAllTextAsync(golden), StringComparison.Ordinal);
+
+        await using (var db = MigrationCli.CreateContext(sql.ConnectionString, readOnly: false))
+        {
+            var version = await db.MethodologyVersions.SingleAsync(v => v.Id == scene.MainVersionId);
+            var changed = version.ScriptText!.Replace("\"0301\": 0.5,", "\"0301\": 0.51,", StringComparison.Ordinal);
+            Assert.NotEqual(version.ScriptText, changed);
+            version.SetScript(changed, ScriptCompiler.Hash(changed));
+            await db.SaveChangesAsync();
+        }
+
+        var failed = await CliAsync("parity-cases", "--connection", sql.ConnectionString, "--in", cases, "--out", report, "--eligible-out", eligible);
+
+        Assert.Equal(MigrationCli.Failures, failed.Code);
+        Assert.Contains("value.number", failed.Output, StringComparison.Ordinal);
+        Assert.False(File.Exists(eligible), "a mismatch must leave no switch list");
+    }
+
     // ───── стенд ─────
 
     private async Task<ParityRunReport> RunAsync(Scene scene)
@@ -406,7 +456,7 @@ public sealed class ParityDbTests(SqlServerFixture sql)
         mainVersion.Publish(1, "seed", new DateOnly(2099, 1, 1), true, Now);
         await db.SaveChangesAsync();
 
-        return new Scene(mainCode, libraryCode, document.DocumentId, mainVersion.Id, libVersion.Id);
+        return new Scene(mainCode, libraryCode, document.DocumentId, mainVersion.Id, libVersion.Id, zone.Code, qty.Code, periodKey);
     }
 
     private static void AddConstant(
