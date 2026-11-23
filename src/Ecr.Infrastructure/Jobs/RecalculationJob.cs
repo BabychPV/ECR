@@ -440,14 +440,15 @@ public sealed partial class RecalculationJob(
                 // ✎ LAND-YEAR B24 (D-NEW-3): закритий якір річної розкладки у відкритому році — НЕ відмова, а прогін лише
                 // не-місячних цілей під агрегатом року (ключ — якір, значення — місяці року); методологій за ним немає.
                 var annualOnly = new Dictionary<int, IReadOnlyList<int>>();
-                var refused = await RefusedPeriodsAsync(docRequest, ct, annualOnly).ConfigureAwait(false);
+                var awaitingOpen = new HashSet<int>();
+                var refused = await RefusedPeriodsAsync(docRequest, ct, annualOnly, awaitingOpen).ConfigureAwait(false);
 
                 // Названий період, створений наперед (вище), — закритий якір: прогону методологій за ним не буде, а
                 // завершити його означало б зробити порожній прогін актуальним і сховати результати закритого місяця.
                 // Свіжий прогін без жодного результату прибирається (кілька документів — він міг бути вже спільним).
+                // ✎ D-575: так само не відкритий місяць — стан періоду спільний для всіх документів проєкту, тож і за кількох.
                 if (request.PeriodKey is { } namedAnchor
-                    && documentIds.Count == 1
-                    && annualOnly.ContainsKey(namedAnchor)
+                    && ((documentIds.Count == 1 && annualOnly.ContainsKey(namedAnchor)) || awaitingOpen.Contains(namedAnchor))
                     && periodRuns.TryGetValue(namedAnchor, out var unusedRun))
                 {
                     periodRuns.Remove(namedAnchor);
@@ -516,7 +517,8 @@ public sealed partial class RecalculationJob(
                     if (await ParkCoveredAsync(request, step, ct).ConfigureAwait(false) > 0)
                     {
                         annualOnly.Clear();
-                        refused = await RefusedPeriodsAsync(docRequest, ct, annualOnly).ConfigureAwait(false);
+                        awaitingOpen.Clear();
+                        refused = await RefusedPeriodsAsync(docRequest, ct, annualOnly, awaitingOpen).ConfigureAwait(false);
                         periods = await ScopePeriodsAsync(docRequest, refused, ct).ConfigureAwait(false);
                         openPeriods = periods;
                         periods = Planned(periods, chainDecision!);
@@ -655,8 +657,9 @@ public sealed partial class RecalculationJob(
                 // не існує за визначенням — там єдине джерело правди про
                 // періоди це екземпляри таблиць. Підставити туди нуль і був
                 // початковий дефект.
+                // ✎ D-575: названий не відкритий місяць — без прогону методологій (як закритий якір).
                 var methodologyPeriods = request.PeriodKey is { } namedPeriod
-                    ? (annualOnly.ContainsKey(namedPeriod) ? [] : (IReadOnlyList<int>)[namedPeriod])
+                    ? (annualOnly.ContainsKey(namedPeriod) || awaitingOpen.Contains(namedPeriod) ? [] : (IReadOnlyList<int>)[namedPeriod])
                     : methodologyScope;
                 scopeByDocument[documentId] = [.. methodologyScope.Union(methodologyPeriods)];
 
@@ -3083,8 +3086,14 @@ public sealed partial class RecalculationJob(
     /// вони НЕ відмовляють і не вилучаються, а рахуються лише не-місячними цілями під агрегатом року
     /// (<see cref="AnnualOnlyAnchorsAsync"/>); <c>null</c> — не збирати (рішення те саме).
     /// </param>
+    /// <param name="awaitingOpen">
+    /// ✎ D-575: куди скласти періоди, які ще не відкрито (<c>Scheduled</c> активного проєкту), — вони вилучаються зі скоупу
+    /// (ні формул, ні прогону методологій, ні <c>calc.CalculationRun</c>/<c>CalculationResult</c>), і названий такий період
+    /// теж не відмовляє, а просто нічого не рахує; <c>null</c> — не збирати (рішення те саме).
+    /// </param>
     private async Task<IReadOnlySet<int>> RefusedPeriodsAsync(
-        RecalculationRequest request, CancellationToken ct, Dictionary<int, IReadOnlyList<int>>? annualOnly = null)
+        RecalculationRequest request, CancellationToken ct, Dictionary<int, IReadOnlyList<int>>? annualOnly = null,
+        HashSet<int>? awaitingOpen = null)
     {
         // ⛔ B69: архівований (чи той, що архівується) проєкт — відмова цілим прогоном, і роком, і названим періодом. Нижче
         // виняток «місяць відкрито для документа» піднімає закритий місяць до Grace; виняток, що пережив архівацію,
@@ -3174,6 +3183,16 @@ public sealed partial class RecalculationJob(
 
         foreach (var period in states)
         {
+            // ⛔ D-575 (рішення людини 23.11, P-1123-9): місяць, якого ще не відкрито, не рахується НІЧИМ — ні формулами, ні
+            // методологіями. Одна точка для всіх шляхів задачі (рік, період, нічний розклад, перерахунок після міграції,
+            // F9/«Перерахувати», каскад): поза скоупом — ні прогону, ні результатів. Наявні рядки не чіпаються.
+            if (period.AwaitingOpen)
+            {
+                refused.Add(period.PeriodKeyValue);
+                awaitingOpen?.Add(period.PeriodKeyValue);
+                continue;
+            }
+
             if (anchors.TryGetValue(period.PeriodKeyValue, out var yearKeys))
             {
                 annualOnly?.TryAdd(period.PeriodKeyValue, yearKeys);
@@ -3705,7 +3724,10 @@ public sealed partial class RecalculationJob(
     private sealed record PeriodBindingRow(int PeriodKeyValue, CalculationBindingRef Binding);
 
     /// <summary>Стан одного періоду — для гейту запису.</summary>
-    private sealed record PeriodStateRow(int PeriodKeyValue, Domain.Enums.PeriodState State);
+    /// <param name="PeriodKeyValue">Період.</param>
+    /// <param name="State">Ефективний стан.</param>
+    /// <param name="AwaitingOpen">✎ D-575: <c>Scheduled</c> АКТИВНОГО проєкту — ще не відкрито (у чернетці — ні).</param>
+    private sealed record PeriodStateRow(int PeriodKeyValue, Domain.Enums.PeriodState State, bool AwaitingOpen = false);
 
     /// <summary>
     /// Стеля вибірки періодів для гейту стану: проєкт — один рік, тобто щонайбільше 12 періодів
@@ -3739,15 +3761,20 @@ public sealed partial class RecalculationJob(
             .ConfigureAwait(false);
 
         var now = clock.UtcNow;
-        return [.. rows.Select(r => new PeriodStateRow(
-            r.Period.PeriodKeyValue,
-            r.Status == Domain.Enums.ProjectStatus.Active
+        return [.. rows.Select(r =>
+        {
+            var active = r.Status == Domain.Enums.ProjectStatus.Active;
+            var state = active
                 ? PeriodStates.Effective(
                     r.Period,
                     now,
                     Domain.Services.YearGraceWindow.For(
                         r.PeriodEnd, r.YearGraceOffsetDays, SiteTimeZone.Create(r.TimeZoneId).ToTimeZoneInfo()))
-                : r.Period.State))];
+                : r.Period.State;
+
+            // ✎ D-575: те саме правило, що PeriodStore.FindEvaluationStateAsync (формули) — тут для методологій.
+            return new PeriodStateRow(r.Period.PeriodKeyValue, state, active && state == Domain.Enums.PeriodState.Scheduled);
+        })];
     }
 
     /// <summary>
