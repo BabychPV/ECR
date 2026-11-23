@@ -35,7 +35,7 @@ public sealed partial class ProjectTemplateVersionReadGuardTests
         ["src/Ecr.Infrastructure/Persistence/ProjectVersionTimelineService.cs"] = (1, Kind.Current),
 
         // Автор/виконавець переносу: джерело переносу = чинна версія; запис нової чинної версії.
-        ["src/Ecr.Application/Documents/VersionMigration/MigrateDocumentVersionHandler.cs"] = (3, Kind.Current),
+        // ✎ B74 P3 (D-576): обробник бере версію пари (проєкт, шаблон) зі сховища - читань у ньому немає.
         ["src/Ecr.Infrastructure/Persistence/DocumentVersionMigrationStore.cs"] = (2, Kind.Current),
 
         // Нові документи/періоди й аудит - за чинною версією.
