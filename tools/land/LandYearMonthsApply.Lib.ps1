@@ -22,10 +22,11 @@ function Get-LandYearMonthsVersionPlan {
         (рядок або число) для версій, які треба знати (остання опублікована і, якщо вона є, цільова).
     .OUTPUTS
         Action:
-          Clone           - клон останньої опублікованої (SourceId/SourceVersion, розкладка PerMonthCopies) у NewVersion;
+          Clone           - клон останньої опублікованої (SourceId/SourceVersion/SourceLayout: PerMonthCopies або, з W15z,
+                            YearWithMonthColumns - річна -> річна за явним -YearMonthsTargetVersion) у NewVersion;
           ResumeDraft     - чернетка цільової версії вже є (DraftId): продовжуємо в ній, нового клону немає;
           TargetPublished - цільова версія вже опублікована з YearWithMonthColumns (PublishedId): структуру не чіпати.
-        Відмова (throw): немає опублікованої; джерело не PerMonthCopies; ціль опублікована з іншою розкладкою; ціль в
+        Відмова (throw): немає опублікованої; джерело з невідомою розкладкою; ціль опублікована з іншою розкладкою; ціль в
         іншому стані; дві версії з одним номером; новіша за цільову чернетка (Apply-ContractHeader опублікував би її).
     .PARAMETER TargetVersion
         Явна цільова версія (-YearMonthsTargetVersion). Порожньо - остання опублікована, якщо вона вже річна (повтор),
@@ -72,11 +73,18 @@ function Get-LandYearMonthsVersionPlan {
             default { throw "YearMonths: цільова версія $target (id $($t.id)) у стані $($t.status) - ні продовжити, ні клонувати в неї не можна. Відмова." }
         }
     }
-    if ($latestLayout -ne 'PerMonthCopies') {
-        throw "YearMonths: джерело клону - остання опублікована $($latest.version) (id $($latest.id)) - має розкладку $latestLayout, а не PerMonthCopies; план YearMonths будується лише з місячної версії. Відмова."
+    # W15z 23.11: річна -> річна (1.0.19.0 -> 1.0.20.0) - прямий клон останньої опублікованої, без зовнішнього API-клону.
+    # Структуру річного клону план не ламає: прибирати нічого (Get-LandYearMonthsRemovals - 0), бракуючі _Mnn/мости
+    # Fill-StructureSql додає, Ordinal - лише різниці. Інша розкладка - відмова, як і раніше.
+    if ($latestLayout -notin 'PerMonthCopies', 'YearWithMonthColumns') {
+        throw "YearMonths: джерело клону - остання опублікована $($latest.version) (id $($latest.id)) - має розкладку $latestLayout, а не PerMonthCopies чи YearWithMonthColumns. Відмова."
     }
-    return [pscustomobject]@{ Action = 'Clone'; SourceId = [int]$latest.id; SourceVersion = [string]$latest.version; NewVersion = $target; Why = $why
-        SkippedDrafts = @($all | Where-Object { [string]$_.status -eq 'Draft' } | ForEach-Object { "$($_.version) (id $($_.id))" }) }
+    # Наявні чернетки інших номерів не чіпаються (лише в журнал): новий клон отримує найбільший id, і публікація шапкою
+    # (-UseExistingDraft бере найновішу чернетку) бере саме його - як на живій LAND_UI з давньою чернеткою 1.1.1.9999.
+    $drafts = @($all | Where-Object { [string]$_.status -eq 'Draft' })
+    return [pscustomobject]@{ Action = 'Clone'; SourceId = [int]$latest.id; SourceVersion = [string]$latest.version; SourceLayout = $latestLayout
+        NewVersion = $target; Why = $why
+        SkippedDrafts = @($drafts | ForEach-Object { "$($_.version) (id $($_.id))" }) }
 }
 
 function Get-LandMonthInputAliasItems {
@@ -298,9 +306,9 @@ function Write-LandYearMonthsPlanReport {
         foreach ($i in @($arr | Select-Object -First $First)) { & $Log "      $i" }
         if ($arr.Count -gt $First) { & $Log "      ... ще $($arr.Count - $First)" }
     }
-    $tv = if ($TargetVersion) { $TargetVersion } else { 'наступна після останньої опублікованої (PerMonthCopies)' }
+    $tv = if ($TargetVersion) { $TargetVersion } else { 'наступна після останньої опублікованої (PerMonthCopies) або сама остання опублікована, якщо вона вже річна' }
     & $Log "DryRun YearMonths: план застосування (з моделі; стенд не читається)"
-    & $Log "  [1 версія] клон останньої опублікованої PerMonthCopies -> $tv; наявна чернетка цієї версії - продовження; опублікована з іншою розкладкою - відмова"
+    & $Log "  [1 версія] клон останньої опублікованої (PerMonthCopies; YearWithMonthColumns - лише з явним -YearMonthsTargetVersion) -> $tv; наявна чернетка цієї версії - продовження; опублікована з іншою розкладкою - відмова"
     & $show '2 колонки +' $added 'додати (місячні _Mnn)'
     & $show '2 колонки +' $totals 'додати (річні підсумки xlsm)'
     & $show '2 формули' $varying 'формул колонок для нових змінних _Mnn'

@@ -60,11 +60,11 @@ Describe 'Build-LandTemplate -Stage YearMonths: застосування пла�
         if ($p.Action -ne 'Clone' -or $p.NewVersion -ne '1.0.19.0' -or @($p.SkippedDrafts).Count -ne 1) { throw "чужа чернетка: $($p.Action) $($p.NewVersion)" }
     }
 
-    It 'вибір версії: відмови - джерело не PerMonthCopies, ціль опублікована з іншою розкладкою, новіша чернетка, немає опублікованої' {
+    It 'вибір версії: відмови - джерело невідомої розкладки, ціль опублікована з іншою розкладкою, новіша чернетка, немає опублікованої' {
         $msg = { param($sb) try { & $sb; 'NO THROW' } catch { $_.Exception.Message } }
         $vers = @((V 11 '1.0.18.0' 'Published'))
-        $m1 = & $msg { Get-LandYearMonthsVersionPlan -Versions $vers -Layouts @{ 11 = 'YearWithMonthColumns' } -TargetVersion '1.0.20.0' }
-        if ($m1 -notlike '*не PerMonthCopies*') { throw "джерело річне: $m1" }
+        $m1 = & $msg { Get-LandYearMonthsVersionPlan -Versions $vers -Layouts @{ 11 = 2 } -TargetVersion '1.0.20.0' }
+        if ($m1 -notlike '*а не PerMonthCopies чи YearWithMonthColumns*') { throw "джерело невідомої розкладки: $m1" }
         $m2 = & $msg { Get-LandYearMonthsVersionPlan -Versions @((V 11 '1.0.18.0' 'Published'), (V 12 '1.0.19.0' 'Published')) -Layouts @{ 12 = 'PerMonthCopies' } -TargetVersion '1.0.19.0' }
         if ($m2 -notlike '*уже опублікована*PerMonthCopies*') { throw "ціль опублікована місячною: $m2" }
         $m3 = & $msg { Get-LandYearMonthsVersionPlan -Versions @((V 11 '1.0.18.0' 'Published'), (V 13 '1.0.19.0' 'Draft'), (V 14 '1.1.0.0' 'Draft')) -Layouts @{ 11 = 'PerMonthCopies' } }
@@ -76,6 +76,48 @@ Describe 'Build-LandTemplate -Stage YearMonths: застосування пла�
         if ($p.Action -ne 'TargetPublished' -or $p.PublishedId -ne 12) { throw "повтор: $($p.Action)" }
     }
 
+    It 'W15z: річна -> річна (1.0.19.0 YearWithMonthColumns -> 1.0.20.0) - прямий клон; повтор - продовження/без змін; давня чернетка не заважає' {
+        $msg = { param($sb) try { & $sb; 'NO THROW' } catch { $_.Exception.Message } }
+        $base = @((V 21 '1.0.18.0' 'Published'), (V 22 '1.0.19.0' 'Published'))
+        $lay = @{ 21 = 0; 22 = 1 }
+        $p = Get-LandYearMonthsVersionPlan -Versions $base -Layouts $lay -TargetVersion '1.0.20.0'
+        if ($p.Action -ne 'Clone' -or $p.SourceId -ne 22 -or $p.SourceLayout -ne 'YearWithMonthColumns' -or $p.NewVersion -ne '1.0.20.0') { throw "річна -> річна: $($p.Action) $($p.SourceId) $($p.SourceLayout) $($p.NewVersion)" }
+        # ідемпотентність: чернетка цілі вже є -> продовження без нового клону; ціль опублікована річною -> 0 змін
+        $p = Get-LandYearMonthsVersionPlan -Versions ($base + @(V 23 '1.0.20.0' 'Draft')) -Layouts $lay -TargetVersion '1.0.20.0'
+        if ($p.Action -ne 'ResumeDraft' -or $p.DraftId -ne 23) { throw "повтор із чернеткою: $($p.Action) $($p.DraftId)" }
+        $p = Get-LandYearMonthsVersionPlan -Versions ($base + @(V 23 '1.0.20.0' 'Published')) -Layouts @{ 21 = 0; 22 = 1; 23 = 1 } -TargetVersion '1.0.20.0'
+        if ($p.Action -ne 'TargetPublished' -or $p.PublishedId -ne 23) { throw "повтор після публікації: $($p.Action)" }
+        # без явної цілі остання річна - це і є ціль (повтор), клону немає
+        $p = Get-LandYearMonthsVersionPlan -Versions $base -Layouts $lay
+        if ($p.Action -ne 'TargetPublished' -or $p.PublishedId -ne 22) { throw "без цілі: $($p.Action)" }
+        # давня чернетка іншого номера (жива LAND_UI: 1.1.1.9999, id 7) не чіпається: лише в журнал, клон стане найновішою
+        $p = Get-LandYearMonthsVersionPlan -Versions ($base + @(V 7 '1.1.1.9999' 'Draft')) -Layouts $lay -TargetVersion '1.0.20.0'
+        if ($p.Action -ne 'Clone' -or $p.SourceId -ne 22 -or @($p.SkippedDrafts).Count -ne 1) { throw "чужа чернетка: $($p.Action) $(@($p.SkippedDrafts).Count)" }
+        # новіша за ціль чернетка поруч із чернеткою цілі - відмова, як і раніше
+        $m = & $msg { Get-LandYearMonthsVersionPlan -Versions ($base + @((V 23 '1.0.20.0' 'Draft'), (V 30 '1.1.0.0' 'Draft'))) -Layouts $lay -TargetVersion '1.0.20.0' }
+        if ($m -notlike '*новіша чернетка*') { throw "новіша чернетка: $m" }
+        # опублікована ціль з місячною розкладкою - відмова, як і раніше
+        $m = & $msg { Get-LandYearMonthsVersionPlan -Versions ($base + @(V 23 '1.0.20.0' 'Published')) -Layouts @{ 21 = 0; 22 = 1; 23 = 0 } -TargetVersion '1.0.20.0' }
+        if ($m -notlike '*уже опублікована*PerMonthCopies*') { throw "ціль місячна: $m" }
+        # етап Template: один POST clone 22 -> 1.0.20.0, без зовнішнього API-клону
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $land 'Build-LandTemplate.ps1'), [ref]$null, [ref]$null)
+        $fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Select-LandYearMonthsDraft' }, $true)
+        . ([scriptblock]::Create($fn.Extent.Text))
+        $script:Calls = New-Object System.Collections.ArrayList
+        function Log([string]$m) { }
+        function Invoke-Ecr {
+            param([string]$Method, [string]$Path, $Body = $null, [hashtable]$Headers = @{})
+            [void]$script:Calls.Add("$Method $Path $(if ($Body) { $Body.newVersion })")
+            if ($Path -like '*/22/structure') { return [pscustomobject]@{ Status = 200; Json = [pscustomobject]@{ layout = 'YearWithMonthColumns' }; Text = ''; Headers = @{} } }
+            if ($Method -eq 'POST') { return [pscustomobject]@{ Status = 201; Json = [pscustomobject]@{ versionId = 23 }; Text = ''; Headers = @{} } }
+            throw "неочікуваний виклик $Method $Path"
+        }
+        function Api { param([string]$Method, [string]$Path, $Payload = $null) return (Invoke-Ecr -Method $Method -Path $Path -Body $Payload) }
+        $S = @{}; $YearMonthsTargetVersion = '1.0.20.0'
+        $id = Select-LandYearMonthsDraft $base
+        $posts = @($script:Calls | Where-Object { $_ -like 'POST*' })
+        if ($id -ne 23 -or ($posts -join ';') -ne 'POST /api/v1/template-versions/22/clone 1.0.20.0') { throw "клон річної: $id $($script:Calls -join ';')" }
+    }
     It 'продовження: наявна чернетка 1.0.19 береться, клону (POST) немає; свіжий випадок - один POST clone 1.0.18 -> 1.0.19' {
         $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $land 'Build-LandTemplate.ps1'), [ref]$null, [ref]$null)
         $fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Select-LandYearMonthsDraft' }, $true)

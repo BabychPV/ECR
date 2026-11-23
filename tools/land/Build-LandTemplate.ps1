@@ -1238,7 +1238,7 @@ function Select-LandYearMonthsDraft($vers) {
         default {
             foreach ($sk in @($yp.SkippedDrafts)) { Log "  наявну чернетку $sk пропущено (не змінюється й не видаляється)" }
             $id = New-LandTemplateCloneDraft -Plan $yp
-            Log "  клон опублікованої $($yp.SourceVersion) (id $($yp.SourceId), PerMonthCopies) -> чернетка $($yp.NewVersion) (id $id)"
+            Log "  клон опублікованої $($yp.SourceVersion) (id $($yp.SourceId), $($yp.SourceLayout)) -> чернетка $($yp.NewVersion) (id $id)"
             return [int]$id
         }
     }
