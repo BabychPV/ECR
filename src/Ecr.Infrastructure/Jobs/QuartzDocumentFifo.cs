@@ -61,7 +61,9 @@ public static class QuartzDocumentFifo
 
     private static readonly Dictionary<(string Scheduler, long Document), SortedDictionary<long, string>> Index = [];
 
-    private static readonly Dictionary<(string Scheduler, string JobId), (long Document, long Sequence)> ByJob = [];
+    private static readonly Dictionary<(string Scheduler, string JobId), (long Document, long Sequence, long Generation, bool Scheduling)> ByJob = [];
+
+    private static long generations;
 
     /// <summary>Скільки задач у індексі (тести).</summary>
     internal static int IndexedCount
@@ -78,12 +80,18 @@ public static class QuartzDocumentFifo
     /// <summary>Задача стала в чергу (постановка чи ручний перезапуск).</summary>
     /// <param name="scheduler">Ім'я планувальника.</param>
     /// <param name="detail">Деталь задачі з документом і номером (<see cref="DocumentKey"/>, <see cref="SequenceKey"/>).</param>
-    public static void Track(string scheduler, IJobDetail detail)
+    /// <returns>
+    /// ✎ Огляд b11-2 (E): покоління запису (кожен <see cref="Track"/> — нове); <c>0</c> — задача поза порядком. Перевірка, що
+    /// викидає «мертву» голову, знімає лише ТЕ покоління, яке бачила, — перезапуск, що встиг повернути задачу, не губиться.
+    /// </returns>
+    /// <remarks>⛔ Кличеться ДО <c>ScheduleJob</c> (постановка, перезапуск): інакше пізніша задача могла стартувати раніше, ніж
+    /// раніша потрапила в індекс. Збій планування — <see cref="Forget"/>.</remarks>
+    public static long Track(string scheduler, IJobDetail detail)
     {
         ArgumentNullException.ThrowIfNull(detail);
         if (!TryRead(detail.JobDataMap, out var document, out var sequence))
         {
-            return;
+            return 0;
         }
 
         lock (IndexGate)
@@ -93,8 +101,46 @@ public static class QuartzDocumentFifo
                 Index[(scheduler, document)] = queue = [];
             }
 
+            var generation = ++generations;
             queue[sequence] = detail.Key.Name;
-            ByJob[(scheduler, detail.Key.Name)] = (document, sequence);
+            ByJob[(scheduler, detail.Key.Name)] = (document, sequence, generation, true);
+            return generation;
+        }
+    }
+
+    /// <summary>
+    /// Планування покоління <paramref name="generation"/> завершено (<c>ScheduleJob</c> повернувся): до цього запис вважається
+    /// таким, що чекає, і перевірка голови його не викидає (триґера ще може не бути).
+    /// </summary>
+    public static void Scheduled(string scheduler, string jobId, long generation)
+    {
+        lock (IndexGate)
+        {
+            if (ByJob.TryGetValue((scheduler, jobId), out var entry) && entry.Generation == generation)
+            {
+                ByJob[(scheduler, jobId)] = entry with { Scheduling = false };
+            }
+        }
+    }
+
+    /// <summary>Покоління запису задачі; <c>0</c> — немає (тести й перевірка голови).</summary>
+    internal static long GenerationOf(string scheduler, string jobId)
+    {
+        lock (IndexGate)
+        {
+            return ByJob.TryGetValue((scheduler, jobId), out var entry) ? entry.Generation : 0;
+        }
+    }
+
+    /// <summary>Знімає запис задачі, лише якщо його покоління — <paramref name="generation"/> (не перезаписаний новим Track).</summary>
+    internal static void ForgetIfGeneration(string scheduler, string jobId, long generation)
+    {
+        lock (IndexGate)
+        {
+            if (ByJob.TryGetValue((scheduler, jobId), out var entry) && entry.Generation == generation)
+            {
+                ForgetLocked(scheduler, jobId);
+            }
         }
     }
 
@@ -104,6 +150,13 @@ public static class QuartzDocumentFifo
     public static void Forget(string scheduler, string jobId)
     {
         lock (IndexGate)
+        {
+            ForgetLocked(scheduler, jobId);
+        }
+    }
+
+    private static void ForgetLocked(string scheduler, string jobId)
+    {
         {
             if (!ByJob.Remove((scheduler, jobId), out var entry))
             {
@@ -148,6 +201,8 @@ public static class QuartzDocumentFifo
         while (true)
         {
             string? head = null;
+            long generation = 0;
+            var scheduling = false;
             lock (IndexGate)
             {
                 if (Index.TryGetValue((name, documentId), out var queue))
@@ -162,6 +217,11 @@ public static class QuartzDocumentFifo
                         if (!string.Equals(jobId, detail.Key.Name, StringComparison.Ordinal))
                         {
                             head = jobId;
+                            if (ByJob.TryGetValue((name, jobId), out var entry))
+                            {
+                                generation = entry.Generation;
+                                scheduling = entry.Scheduling;
+                            }
                             break;
                         }
                     }
@@ -173,6 +233,12 @@ public static class QuartzDocumentFifo
                 return null;
             }
 
+            // Постановка чи перезапуск ще в процесі (триґера може не бути) — раніша задача чекає.
+            if (scheduling)
+            {
+                return head;
+            }
+
             var key = new JobKey(head);
             if ((await scheduler.GetTriggersOfJob(key, ct).ConfigureAwait(false)).Count > 0
                 || (await scheduler.GetCurrentlyExecutingJobs(ct).ConfigureAwait(false)).Any(c => c.JobDetail.Key.Equals(key)))
@@ -180,7 +246,13 @@ public static class QuartzDocumentFifo
                 return head;
             }
 
-            Forget(name, head);
+            // Лише те покоління, яке бачили: перезапуск, що повернув задачу за цей час, лишається в індексі.
+            if (GenerationOf(name, head) != generation)
+            {
+                continue;
+            }
+
+            ForgetIfGeneration(name, head, generation);
         }
     }
     private static bool TryRead(JobDataMap map, out long documentId, out long sequence)

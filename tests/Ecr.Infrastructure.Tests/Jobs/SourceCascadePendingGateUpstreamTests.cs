@@ -157,6 +157,67 @@ public sealed class SourceCascadePendingGateUpstreamTests(SqlServerFixture sql)
         Assert.False(SourceChangeKey.TryParse("registry-impact-r1-y2026", out _, out _, out _, out _));
     }
 
+    /// <summary>
+    /// ✎ Огляд b11-2 (B), ланцюжок X→A→B: споживач B чекає, поки жива БУДЬ-ЯКА задача документа-предка A (каскад року A,
+    /// залежні A, натискання — черга в базі й дзеркало Quartz) чи задача впливу зв'язки X→A; інший рік — ні.
+    /// </summary>
+    /// <remarks>
+    /// Мутації: (1) предки — лише прямі джерела (одна ланка) — червоний «документ X»; (2) документні ланки — лише
+    /// <c>-auto</c>/формули (як доти) — червоні «каскад року A» і «Quartz залежні A».
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "F5")]
+    public async Task Ланцюжок_двох_ланок_тримає_кінцевого_споживача_поки_жива_задача_предка()
+    {
+        var w = await ArrangeAsync();
+        var x = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(w.Consumer.PeriodKey.Value);
+        var xTemplate = await TemplateOfAsync(x);
+        var xToA = Interlocked.Decrement(ref _binding);
+        var aToB = w.BindingId;
+        IReadOnlyList<TemplateDependency> edges =
+        [
+            new(xTemplate, w.SourceTemplateId, xToA, 1, PeriodScope.Month, true, false),
+            new(w.SourceTemplateId, w.ConsumerTemplateId, aToB, 1, PeriodScope.Month, true, false),
+        ];
+        IReadOnlyCollection<int> auto = [xToA, aToB];
+        var a = w.Source.DocumentId.ToString(CultureInfo.InvariantCulture);
+
+        Assert.False(await PendingAsync(w, w.Consumer, auto, edges));
+
+        // Задача впливу X→A (споживач A — предок B).
+        var impact = Impact(RegistryImpactRecalculationTarget.ForSourceChange(xToA, w.Year, 3));
+        await InsertAsync(impact, "Queued", documentId: null, payload: "{}");
+        Assert.True(await PendingAsync(w, w.Consumer, auto, edges));
+        Assert.False(await PendingAsync(w, w.Other, auto, edges));
+        await SetStateAsync(impact, "Succeeded");
+
+        // Каскад року A (черга в базі) — той самий рік тримає, інший — ні.
+        var cascade = DbBackgroundJobScheduler.TargetKeyOf<IRecalculationJob>($"doc{a}-y{w.Year.ToString(CultureInfo.InvariantCulture)}-dependents");
+        await InsertAsync(cascade, "Running", w.Source.DocumentId, $$"""{"documentId":{{a}},"year":{{w.Year}}}""");
+        Assert.True(await PendingAsync(w, w.Consumer, auto, edges));
+        await SetStateAsync(cascade, "Succeeded");
+
+        var otherYear = DbBackgroundJobScheduler.TargetKeyOf<IRecalculationJob>($"doc{a}-y{(w.Year + 1).ToString(CultureInfo.InvariantCulture)}-dependents");
+        await InsertAsync(otherYear, "Queued", w.Source.DocumentId, $$"""{"documentId":{{a}},"year":{{w.Year + 1}}}""");
+        Assert.False(await PendingAsync(w, w.Consumer, auto, edges));
+        await SetStateAsync(otherYear, "Succeeded");
+
+        // Документ X (предок через дві ланки): будь-яка задача — теж тримає B.
+        var xAuto = DbBackgroundJobScheduler.TargetKeyOf<IRecalculationJob>(
+            $"doc{x.DocumentId.ToString(CultureInfo.InvariantCulture)}-p{x.PeriodKey.Value.ToString(CultureInfo.InvariantCulture)}-auto");
+        await InsertAsync(xAuto, "Queued", x.DocumentId, $$"""{"documentId":{{x.DocumentId}},"periodKey":{{x.PeriodKey.Value}}}""");
+        Assert.True(await PendingAsync(w, w.Consumer, auto, edges));
+        await SetStateAsync(xAuto, "Succeeded");
+
+        // Дзеркало Quartz: залежні A за період (ціль — з JobId, без TargetKey і payload).
+        var period = w.Source.PeriodKey.Value.ToString(CultureInfo.InvariantCulture);
+        var quartzId = $"{nameof(IRecalculationJob)}~doc{a}-p{period}-dependents~{Guid.NewGuid():N}";
+        await InsertQuartzAsync(quartzId, w.Source.DocumentId);
+        Assert.True(await PendingAsync(w, w.Consumer, auto, edges));
+        await SetQuartzStateAsync(quartzId, "Succeeded");
+        Assert.False(await PendingAsync(w, w.Consumer, auto, edges));
+    }
     // ───────────────────────────── допоміжне ─────────────────────────────
 
     /// <summary>Ціль задачі впливу так, як її пише черга в базі (`IRegistryImpactRecalculationJob~…`, огляд b9).</summary>
@@ -232,6 +293,34 @@ public sealed class SourceCascadePendingGateUpstreamTests(SqlServerFixture sql)
         command.Parameters.AddWithValue("@doc", (object?)documentId ?? DBNull.Value);
         command.Parameters.AddWithValue("@target", target);
         command.Parameters.AddWithValue("@payload", payload);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>Рядок-дзеркало Quartz: без TargetKey, Lane і payload; ціль — у JobId.</summary>
+    private async Task InsertQuartzAsync(string jobId, long documentId)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO itg.JobProgress
+                (JobId, JobCode, [State], [Percent], StartedAt, UpdatedAt, HeartbeatAt, CreatedAt, DocumentId)
+            VALUES (@id, @code, N'Queued', 0, SYSUTCDATETIME(), SYSUTCDATETIME(), SYSUTCDATETIME(), SYSUTCDATETIME(), @doc);
+            """;
+        command.Parameters.AddWithValue("@id", jobId);
+        command.Parameters.AddWithValue("@code", JobListKinds.RecalculationJobCode);
+        command.Parameters.AddWithValue("@doc", documentId);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private async Task SetQuartzStateAsync(string jobId, string state)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE itg.JobProgress SET [State] = @state WHERE JobId = @id;";
+        command.Parameters.AddWithValue("@state", state);
+        command.Parameters.AddWithValue("@id", jobId);
         await command.ExecuteNonQueryAsync();
     }
 

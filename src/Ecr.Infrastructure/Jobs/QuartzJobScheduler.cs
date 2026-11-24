@@ -247,10 +247,20 @@ public sealed partial class QuartzJobScheduler(
         // інакше злиття з нею під час виконання не знало б, що вона жива.
         CoalescedRequeueListener.Of(instance, logger);
 
-        await instance.ScheduleJob(detail, trigger, ct).ConfigureAwait(false);
+        // ✎ Огляд b11 (MEDIUM-3) / b11-2 (E): індекс черги документа (QuartzDocumentFifo) — ДО планування: інакше пізніша задача
+        // могла стартувати раніше, ніж раніша потрапила в індекс. Збій планування — запис знімається.
+        var generation = QuartzDocumentFifo.Track(instance.SchedulerName, detail);
+        try
+        {
+            await instance.ScheduleJob(detail, trigger, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            QuartzDocumentFifo.ForgetIfGeneration(instance.SchedulerName, jobId, generation);
+            throw;
+        }
 
-        // ✎ Огляд b11 (MEDIUM-3): індекс черги документа (QuartzDocumentFifo) — замість перебору всіх ключів на старті.
-        QuartzDocumentFifo.Track(instance.SchedulerName, detail);
+        QuartzDocumentFifo.Scheduled(instance.SchedulerName, jobId, generation);
 
         return jobId;
     }
@@ -655,6 +665,30 @@ public sealed partial class QuartzJobScheduler(
             }
         }
 
+        /// <summary>✎ Огляд b11-2 (H): перепостановка, що чекає завершення задачі; <c>null</c> — задача не брудна.</summary>
+        public Func<string, CancellationToken, Task<string>>? PeekDirty(string jobId)
+        {
+            lock (gate)
+            {
+                return dirty.GetValueOrDefault(jobId);
+            }
+        }
+
+        /// <summary>Знімає позначку, якщо це та сама перепостановка (нове злиття за цей час лишається).</summary>
+        public void ClearDirty(string jobId, Func<string, CancellationToken, Task<string>> requeue)
+        {
+            lock (gate)
+            {
+                if (dirty.TryGetValue(jobId, out var current) && ReferenceEquals(current, requeue))
+                {
+                    dirty.Remove(jobId);
+                }
+            }
+        }
+
+        /// <summary>Журнал слухача.</summary>
+        public Microsoft.Extensions.Logging.ILogger? Log => log;
+
         /// <summary>Позначає виконувану задачу брудною; <c>false</c> — слухач її не бачить живою.</summary>
         public bool MarkDirty(string jobId, Func<string, CancellationToken, Task<string>> requeue, bool adoptRunning)
         {
@@ -735,6 +769,38 @@ public sealed partial class QuartzJobScheduler(
                     System.Diagnostics.Trace.TraceError(
                         "Перепостановка після злиття для задачі {0} не вдалася: {1}", jobId, ex.Message);
                 }
+            }
+        }
+    }
+
+    /// <summary>
+    /// ✎ Огляд b11-2 (H): перепостановка злитої під час прогону роботи — ДО того, як адаптер запише задачі кінцевий стан
+    /// (<c>Succeeded</c>/<c>Cancelled</c>/<c>Failed</c>). Доти її ставив слухач ПІСЛЯ запису стану — мілісекунди без жодної живої
+    /// задачі документа, і ворота F5 відпускали рік. Збій — позначка лишається, слухач спробує знову після прогону.
+    /// </summary>
+    /// <param name="instance">Планувальник задачі.</param>
+    /// <param name="jobId">Задача, що завершується.</param>
+    internal static async Task RequeueDirtyBeforeFinishAsync(IScheduler instance, string jobId)
+    {
+        ArgumentNullException.ThrowIfNull(instance);
+        var listener = CoalescedRequeueListener.Of(instance, null);
+        if (listener.PeekDirty(jobId) is not { } requeue)
+        {
+            return;
+        }
+
+        try
+        {
+            await requeue(jobId, CancellationToken.None).ConfigureAwait(false);
+            listener.ClearDirty(jobId, requeue);
+        }
+#pragma warning disable CA1031 // Слухач повторить перепостановку після прогону (RequeueWithRetryAsync).
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            if (listener.Log is { } log)
+            {
+                LogCoalescedRequeueRetry(log, jobId, 0, ex);
             }
         }
     }
@@ -1101,11 +1167,21 @@ public sealed partial class QuartzJobScheduler(
             .StartNow()
             .Build();
 
-        await instance.ScheduleJob(trigger, ct).ConfigureAwait(false);
-        if (await instance.GetJobDetail(jobKey, ct).ConfigureAwait(false) is { } restarted)
+        // ✎ Огляд b11-2 (E): у індекс — ДО триґера, нове покоління (перевірка голови не викине повернену задачу).
+        var generation = await instance.GetJobDetail(jobKey, ct).ConfigureAwait(false) is { } restarted
+            ? QuartzDocumentFifo.Track(instance.SchedulerName, restarted)
+            : 0;
+        try
         {
-            QuartzDocumentFifo.Track(instance.SchedulerName, restarted);
+            await instance.ScheduleJob(trigger, ct).ConfigureAwait(false);
         }
+        catch
+        {
+            QuartzDocumentFifo.ForgetIfGeneration(instance.SchedulerName, jobId, generation);
+            throw;
+        }
+
+        QuartzDocumentFifo.Scheduled(instance.SchedulerName, jobId, generation);
 
         if (progress is not null && clock is not null)
         {

@@ -155,7 +155,7 @@ public sealed class QuartzDocumentFifoTests : IAsyncLifetime
         var me = Detail("IRecalculationJob-me", 3);
         foreach (var detail in new[] { dead, alive, me })
         {
-            QuartzDocumentFifo.Track(scheduler.SchedulerName, detail);
+            QuartzDocumentFifo.Scheduled(scheduler.SchedulerName, detail.Key.Name, QuartzDocumentFifo.Track(scheduler.SchedulerName, detail));
         }
 
         scheduler.GetTriggersOfJob(dead.Key, Arg.Any<CancellationToken>()).Returns(Array.Empty<ITrigger>());
@@ -173,6 +173,68 @@ public sealed class QuartzDocumentFifoTests : IAsyncLifetime
         Assert.Null(await QuartzDocumentFifo.EarlierPendingAsync(scheduler, me, CancellationToken.None).WaitAsync(Safety));
         QuartzDocumentFifo.Forget(scheduler.SchedulerName, me.Key.Name);
     }
+    /// <summary>
+    /// ✎ Огляд b11-2 (E): (1) задача в індексі ДО <c>ScheduleJob</c> (пізніша не обжене ранішу, що ще не в індексі); збій
+    /// планування — запис знято; (2) запис, що планується (триґера ще немає), голова не викидає; (3) перевірка, що бачила старе
+    /// покоління, не знімає запису, поверненого перезапуском.
+    /// </summary>
+    /// <remarks>Мутації: Track після ScheduleJob — червоний (1); без позначки «планується» — червоний (2); Forget без покоління — червоний (3).</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "M11")]
+    public async Task Індекс_до_планування_і_покоління_перезапуску()
+    {
+        var scheduler = Substitute.For<IScheduler>();
+        var name = $"ecr-fifo-gen-{Guid.NewGuid():N}";
+        scheduler.SchedulerName.Returns(name);
+        scheduler.GetCurrentlyExecutingJobs(Arg.Any<CancellationToken>()).Returns(Array.Empty<IJobExecutionContext>());
+        scheduler.GetTriggersOfJob(Arg.Any<JobKey>(), Arg.Any<CancellationToken>()).Returns(Array.Empty<ITrigger>());
+        var factory = Substitute.For<ISchedulerFactory>();
+        factory.GetScheduler(Arg.Any<CancellationToken>()).Returns(scheduler);
+
+        // (1) Під час ScheduleJob задача вже в індексі; збій планування — запису немає.
+        long seenDuringSchedule = -1;
+        scheduler.ScheduleJob(Arg.Any<IJobDetail>(), Arg.Any<ITrigger>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                seenDuringSchedule = QuartzDocumentFifo.GenerationOf(name, ci.Arg<IJobDetail>().Key.Name);
+                return DateTimeOffset.UtcNow;
+            });
+        var jobs = new QuartzJobScheduler(factory);
+        var document = Random.Shared.NextInt64(1_000_000, 9_000_000);
+        var first = await jobs.EnqueueAsync<IRecalculationJob>(new { documentId = document, periodKey = 202610 }, CancellationToken.None);
+        Assert.True(seenDuringSchedule > 0);
+
+        scheduler.ScheduleJob(Arg.Any<IJobDetail>(), Arg.Any<ITrigger>(), Arg.Any<CancellationToken>())
+            .Returns<DateTimeOffset>(_ => throw new SchedulerException("boom"));
+        await Assert.ThrowsAsync<SchedulerException>(
+            () => jobs.EnqueueAsync<IRecalculationJob>(new { documentId = document, periodKey = 202611 }, CancellationToken.None));
+        Assert.Equal(1, IndexedFor(name, first));
+
+        // (2) Запис, що ще планується (Track без Scheduled), — голова, навіть без триґера.
+        var pending = Detail("IRecalculationJob-pending", document, 1);
+        var me = Detail("IRecalculationJob-me2", document, long.MaxValue - 1);
+        var pendingGeneration = QuartzDocumentFifo.Track(name, pending);
+        Assert.Equal(pending.Key.Name, await QuartzDocumentFifo.EarlierPendingAsync(scheduler, me, CancellationToken.None).WaitAsync(Safety));
+
+        // (3) Перевірка бачила покоління 1; перезапуск повернув задачу (покоління 2) — старе зняття її не викидає.
+        QuartzDocumentFifo.Scheduled(name, pending.Key.Name, pendingGeneration);
+        var restarted = QuartzDocumentFifo.Track(name, pending);
+        QuartzDocumentFifo.ForgetIfGeneration(name, pending.Key.Name, pendingGeneration);
+        Assert.Equal(restarted, QuartzDocumentFifo.GenerationOf(name, pending.Key.Name));
+
+        QuartzDocumentFifo.Forget(name, pending.Key.Name);
+        QuartzDocumentFifo.Forget(name, first);
+    }
+
+    private static int IndexedFor(string scheduler, string jobId) => QuartzDocumentFifo.GenerationOf(scheduler, jobId) > 0 ? 1 : 0;
+
+    private static IJobDetail Detail(string id, long document, long sequence) => JobBuilder.Create<QuartzJobAdapter>()
+        .WithIdentity(id)
+        .UsingJobData(QuartzDocumentFifo.DocumentKey, document)
+        .UsingJobData(QuartzDocumentFifo.SequenceKey, sequence)
+        .StoreDurably()
+        .Build();
     private async Task<(ServiceProvider Provider, QuartzJobScheduler Jobs)> StartAsync(LockingRecalculationJob job, TimeSpan? fifoDelay = null)
     {
         var factory = new StdSchedulerFactory(new System.Collections.Specialized.NameValueCollection

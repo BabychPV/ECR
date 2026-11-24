@@ -69,6 +69,44 @@ public sealed class DocumentSourceIssuesAnyTests(SqlServerFixture sql)
         Assert.Equal(expected, (await ListAsync(w.World.Land.DocumentId)).Count == 1);
     }
 
+    /// <summary>
+    /// ✎ W15z M7 (репетиція b11 @dc1b38cba): затверджено → правка джерела (T) → повернути → F9 (прогін споживача стартував після T)
+    /// → подати й затвердити через ~65 с після T. Правка в межах запасу ДО повторного затвердження, але її вже порахував чинний
+    /// прогін — позначку знято (і в панелі, і в переліку документів). Контроль: прогону після правки немає — названо (гонитва D-567 (6б)).
+    /// </summary>
+    /// <remarks>Мутація: не перевіряти чинний прогін споживача — червоний «прогін після правки».</remarks>
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Повторне_затвердження_після_перерахунку_знімає_позначку_в_межах_запасу(bool runAfterChange, bool expected)
+    {
+        var w = await ArrangeAsync();
+        await ApproveLandAsync(w);
+        var change = Approved.AddHours(1);
+        await ChangeAsync(w.World.Source.DocumentId, w.BoundColumnId, change);
+        Assert.Single(await ListAsync(w.World.Land.DocumentId));
+
+        // F9: чинний прогін споживача за період (після правки чи — контроль — до неї), далі повторне затвердження через 65 с.
+        await using (var db = sql.CreateContext())
+        {
+            var run = new Ecr.Domain.Entities.Calculations.CalculationRun(
+                w.World.Land.ProjectId, March, 5, runAfterChange ? change.AddSeconds(8) : change.AddSeconds(-30), w.World.Land.DocumentId);
+            db.CalculationRuns.Add(run);
+            await db.SaveChangesAsync();
+            run.Complete(Ecr.Domain.Entities.Calculations.CalculationRun.CurrentStatus, change.AddSeconds(53), null, null);
+            await db.SaveChangesAsync();
+            await db.ApprovalStates.Where(s => s.DocumentId == w.World.Land.DocumentId && s.PeriodKey == March)
+                .ExecuteUpdateAsync(s => s.SetProperty(a => a.ApprovedAt, change.AddSeconds(65)));
+        }
+
+        Assert.Equal(expected, (await ListAsync(w.World.Land.DocumentId)).Count == 1);
+
+        await using var check = sql.CreateContext();
+        var gate = new DocumentSourceMonthGate(check, readOverride: null, DependencyGraphTestKit.Provider(check));
+        var changed = await gate.ListSourceChangedPeriodsAsync(
+            new Dictionary<long, IReadOnlyList<int>> { [w.World.Land.DocumentId] = [March] }, CancellationToken.None);
+        Assert.Equal(expected, changed.ContainsKey(w.World.Land.DocumentId));
+    }
     [Fact]
     public async Task Правка_чужої_таблиці_джерела_і_позначка_помилки_формули_не_зміна()
     {
