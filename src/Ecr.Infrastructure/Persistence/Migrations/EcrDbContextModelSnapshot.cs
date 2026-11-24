@@ -232,6 +232,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("RegistryAsOfUtc")
                         .HasColumnType("datetime2(3)");
 
+                    b.Property<string>("SourceStateJson")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<DateTime>("StartedAt")
                         .HasColumnType("datetime2(3)");
 
