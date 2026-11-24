@@ -28,6 +28,7 @@ const methodology = {
     {
       id: 10,
       versionNumber: 1,
+      engine: 'Script',
       level: 'Standard',
       status: 'Draft',
       effectiveFrom: null,
@@ -95,5 +96,29 @@ describe('MethodologiesPage: публікація — лише на екрані
     expect(screen.getByRole('button', { name: '⟦methodologies.simulate⟧' })).toBeTruthy();
 
     expect(screen.queryByRole('button', { name: '⟦methodologies.publish⟧' })).toBeNull();
+
+    // ✎ P-1124-1: головний вхід — редактор версії-скрипта.
+    const editor = screen.getByRole('link', { name: '⟦methodologyScript.versions.openEditor⟧' });
+    expect(editor.getAttribute('href')).toBe('/admin/methodologies/1/versions/10/script');
+  });
+
+  it('формульна версія в переліку не показується і в редактор не веде (P-1124-1)', async () => {
+    methodology.versions[0] = { ...methodology.versions[0]!, engine: 'Formulas', versionNumber: 7 };
+    mockFetch();
+
+    render(
+      <MantineProvider theme={testTheme}>
+        <MemoryRouter>
+          <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+            <MethodologiesPage />
+          </QueryClientProvider>
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+
+    await screen.findByRole('link', { name: '⟦methodologies.versionsTitle⟧' });
+    expect(screen.queryByRole('link', { name: '⟦methodologyScript.versions.openEditor⟧' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '⟦methodologies.simulate⟧' })).toBeNull();
+    expect(screen.queryByText(/^7 ·/)).toBeNull();
   });
 });

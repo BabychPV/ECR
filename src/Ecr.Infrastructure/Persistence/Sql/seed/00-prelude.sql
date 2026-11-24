@@ -957,12 +957,6 @@ UPDATE t
     -- kz-ru-quality 2026-10-01: єдині терміни (docs/i18n/glossary-ru-kz.md):
     -- ru «столбец» замість «колонка»; kz «нобай» (draft, не «жоба» = проєкт),
     -- «үлгі» (template) замість «шаблон», «константа» замість «тұрақты мән».
-    (N'methodologies.importHint', N'kz', N'Алдымен пакетті тексеріңіз: тексеру ештеңе жазбайды. Импорт тек жоба нұсқаларын жасайды; жариялау басқа адамның жеке қадамы болып қалады.',
-                                                N'Алдымен пакетті тексеріңіз: тексеру ештеңе жазбайды. Импорт тек нобай нұсқаларын жасайды; жариялау басқа адамның жеке қадамы болып қалады.'),
-    (N'methodologies.importTotals', N'kz', N'Жаңа әдістемелер: {methodologies}; жаңа жоба нұсқалары: {versions}; өзгеріссіз нұсқалар: {unchanged}; формулалар: {formulas}; тұрақты мәндер: {constants}; әдістемелер арасындағы импорттар: {imports}.',
-                                                N'Жаңа әдістемелер: {methodologies}; жаңа нобай нұсқалары: {versions}; өзгеріссіз нұсқалар: {unchanged}; формулалар: {formulas}; константалар: {constants}; әдістемелер арасындағы импорттар: {imports}.'),
-    (N'methodologies.importDone', N'kz', N'Пакет импортталды: жасалған жоба нұсқалары — {versions}.',
-                                                N'Пакет импортталды: жасалған нобай нұсқалары — {versions}.'),
     (N'conditionalFormat.readOnly', N'kz', N'Ережелерді тек жоба нұсқасында және үлгілерді өңдеу құқығымен ғана өзгертуге болады.',
                                                 N'Ережелерді тек нобай нұсқасында және үлгілерді өңдеу құқығымен ғана өзгертуге болады.'),
     (N'err.ECR-DOC-0409.migrateProjectArchived', N'kz', N'Жоба мұрағатталған: мұрағаттағы жобаның құжаттары шаблонның басқа нұсқасына көшірілмейді.',
@@ -1455,6 +1449,8 @@ DELETE t
     (N'approvalRoutes.restartSheetCopy', N'ru', N'Проект {project}, документ {document}, лист {sheet} (копия {copy}), {period}'),
     (N'approvalRoutes.restartSheetCopy', N'kz', N'Жоба {project}, құжат {document}, парақ {sheet} (көшірме {copy}), {period}'),
     -- MS only-editor (24.11): формульні панелі методології прибрано з інтерфейсу (рішення людини «має бути тільки наш
+    (N'methodologies.importHint', N'kz', N'Алдымен пакетті тексеріңіз: тексеру ештеңе жазбайды. Импорт тек жоба нұсқаларын жасайды; жариялау басқа адамның жеке қадамы болып қалады.'),
+    (N'methodologies.importDone', N'kz', N'Пакет импортталды: жасалған жоба нұсқалары — {versions}.'),
     -- новий редактор»): конфігуратор формул, константи, виходи, правила, правило категорії, золотий набір формул, покриття,
     -- довідка синтаксису, категорії констант, імпорт пакета; підказка сторінки «версія — скрипт» (сторінка тепер лише про скрипти).
     (N'methodologies.addConstant', N'en', N'Add constant'),
@@ -1734,6 +1730,7 @@ DELETE t
     (N'methodologies.importTitle', N'kz', N'Әдістемелер пакетін импорттау'),
     (N'methodologies.importTitle', N'ru', N'Импорт пакета методик'),
     (N'methodologies.importTotals', N'en', N'New methodologies: {methodologies}; new draft versions: {versions}; unchanged versions: {unchanged}; formulas: {formulas}; constant values: {constants}; imports between methodologies: {imports}.'),
+    (N'methodologies.importTotals', N'kz', N'Жаңа әдістемелер: {methodologies}; жаңа жоба нұсқалары: {versions}; өзгеріссіз нұсқалар: {unchanged}; формулалар: {formulas}; тұрақты мәндер: {constants}; әдістемелер арасындағы импорттар: {imports}.'),
     (N'methodologies.importTotals', N'kz', N'Жаңа әдістемелер: {methodologies}; жаңа нобай нұсқалары: {versions}; өзгеріссіз нұсқалар: {unchanged}; формулалар: {formulas}; константалар: {constants}; әдістемелер арасындағы импорттар: {imports}.'),
     (N'methodologies.importTotals', N'ru', N'Новых методик: {methodologies}; новых черновых версий: {versions}; версий без изменений: {unchanged}; формул: {formulas}; значений констант: {constants}; импортов между методиками: {imports}.'),
     (N'methodologies.importWarnings', N'en', N'Warnings'),

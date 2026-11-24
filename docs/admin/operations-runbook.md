@@ -387,6 +387,7 @@ IF @@ROWCOUNT = 0
 | `Cache:MetadataSlidingMinutes` | ні | `240` | Ціле число, не менше 1. |
 | `Cache:SchemaName` | ні | `dbo` | Значення на старті не перевіряється. |
 | `Cache:TableName` | ні | `Cache` | Значення на старті не перевіряється. |
+| `Calculations:FormulaEngineAuthoring:Enabled` | ні | `false` | Значення на старті не перевіряється. |
 | `Calculations:FullYearWarnSeconds` | ні | `600` | Ціле число, не менше 1. |
 | `Calculations:MaxInputCellsPerBinding` | ні | `300000` | Ціле число, не менше 1. |
 | `Calculations:MaxParallelism` | ні | `4` | Ціле число, не менше 1. |
