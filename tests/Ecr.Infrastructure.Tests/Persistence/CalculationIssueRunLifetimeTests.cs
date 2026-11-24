@@ -178,7 +178,6 @@ public sealed class CalculationIssueRunLifetimeTests(SqlServerFixture sql)
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
             clock,
-            Substitute.For<IAuditWriter>(),
             issues: new CalculationIssueStore(db, clock));
 
         await handler.CompleteAsync(runId, new ModuleProfile(), CancellationToken.None);
