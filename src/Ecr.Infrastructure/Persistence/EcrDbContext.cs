@@ -243,7 +243,6 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<EntityFieldMap> EntityFieldMaps => Set<EntityFieldMap>();
     public DbSet<CollectionSchedule> CollectionSchedules => Set<CollectionSchedule>();
     public DbSet<RawDataPoint> RawDataPoints => Set<RawDataPoint>();
-    public DbSet<ConsistencyRule> ConsistencyRules => Set<ConsistencyRule>();
     public DbSet<LegacySheetMapping> LegacySheetMappings => Set<LegacySheetMapping>();
     public DbSet<LegacyTableMapping> LegacyTableMappings => Set<LegacyTableMapping>();
     public DbSet<LegacyRowMapping> LegacyRowMappings => Set<LegacyRowMapping>();

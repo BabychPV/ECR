@@ -4805,44 +4805,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.ToTable("CollectionSchedule", "ext");
                 });
 
-            modelBuilder.Entity("Ecr.Domain.Entities.External.ConsistencyRule", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("Expression")
-                        .IsRequired()
-                        .HasMaxLength(2000)
-                        .HasColumnType("nvarchar(2000)");
-
-                    b.Property<bool>("IsActive")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
-                    b.Property<byte>("Severity")
-                        .HasColumnType("tinyint");
-
-                    b.Property<int?>("SourceEntityId")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Code")
-                        .IsUnique()
-                        .HasDatabaseName("UQ_ConsistencyRule");
-
-                    b.ToTable("ConsistencyRule", "ext");
-                });
-
             modelBuilder.Entity("Ecr.Domain.Entities.External.DataSource", b =>
                 {
                     b.Property<int>("Id")
