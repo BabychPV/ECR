@@ -149,6 +149,8 @@ export function cellCoordinateOf(
 interface RevoGridNavigable {
   componentOnReady?: () => Promise<unknown>;
   scrollToCoordinate?: (cell: { x?: number; y?: number }) => Promise<void>;
+  /** Прокрутка до колонки за ІНДЕКСОМ в'юпорту `rgCol` (`scrollToCoordinate` — у пікселях). */
+  scrollToColumnIndex?: (coordinate?: number) => Promise<void>;
   setCellsFocus?: (start?: GridCellCoordinate, end?: GridCellCoordinate, colType?: string) => Promise<void>;
 }
 
@@ -182,7 +184,12 @@ export async function revealGridCell(
     await grid.setCellsFocus?.(local, local, 'colPinStart');
   } else {
     await grid.scrollToCoordinate?.(local);
+    // ✎ Огляд M4 (4): `scrollToCoordinate` RevoGrid приймає ПІКСЕЛІ (`viewport.scrollToCell` → `proxyScroll`), не
+    // індекс колонки, тож колонка за межами вікна (M10 із 12 місячних) не прокручувалась — фокус ставав, комірки не було
+    // видно (e2e-stand 45310768143). Колонку за індексом прокручує `scrollToColumnIndex` (індекс → позиція в'юпорту).
+    await grid.scrollToColumnIndex?.(local.x);
     await grid.setCellsFocus?.(local, local);
+    if (grid.scrollToColumnIndex !== undefined && local.x > 0) await keepColumnScrolled(grid, local.x);
   }
 
   // ✎ fg6 F13: рядок, до якого перейшли, — у верхній третині вікна, а не на нижньому краї (людина: банер і сітка
@@ -192,6 +199,23 @@ export async function revealGridCell(
   keepInUpperThird(() => visibleTargetOf(grid));
 
   return true;
+}
+
+const ColumnScrollChecks = 8;
+const ColumnScrollCheckMs = 120;
+
+/**
+ * ✎ Огляд M4 (4): RevoGrid скидає горизонтальну прокрутку в'юпорту `rgCol` на 0, коли сітка одразу після переходу
+ * перемальовує колонки (підсвітка цілі — `cellProperties` колонок; e2e-stand: `scrollLeft` 0 через 300 мс після
+ * переходу, хоча ручний `scrollToColumnIndex(9)` прокручує). Кілька коротких перевірок: скинуто — прокрутити знову.
+ */
+async function keepColumnScrolled(grid: Element & RevoGridNavigable, column: number): Promise<void> {
+  for (let attempt = 0; attempt < ColumnScrollChecks; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, ColumnScrollCheckMs));
+    const viewport = grid.querySelector('revogr-viewport-scroll.rgCol');
+    if (viewport === null) return;
+    if (viewport.scrollLeft === 0) await grid.scrollToColumnIndex?.(column);
+  }
 }
 
 /** Перший видимий (з ненульовим прямокутником) кандидат на «рядок переходу»; інакше — сама сітка. */
