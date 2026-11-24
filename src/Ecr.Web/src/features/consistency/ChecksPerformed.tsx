@@ -43,7 +43,8 @@ export function ChecksPerformed({ checks, active, onSelect }: ChecksPerformedPro
                 aria-pressed={selected}
                 w="100%"
                 px="xs"
-                bg={selected ? 'var(--mantine-color-default-hover)' : 'transparent'}
+                bg={selected ? 'var(--mantine-primary-color-light)' : 'transparent'}
+                fw={selected ? 600 : 400}
               >
                 <Group gap="xs" wrap="nowrap" justify="space-between">
                   <Text size="sm" lineClamp={2}>

@@ -2,8 +2,8 @@
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'consistency.description', N'ru', N'Каждую ночь и по запросу ECR проверяет целостность данных и результаты расчётов по фиксированным правилам: нарушенные ссылки, целостность архива, колонки без источника значения, результаты не той версии методологии, что действует, и пропуски расчёта. Каждая находка называет правило и ведёт к затронутой записи.'),
-    (N'consistency.description', N'kz', N'ECR әр түнде және сұраныс бойынша деректердің тұтастығын және есептеу нәтижелерін тұрақты ережелер бойынша тексереді: бұзылған сілтемелер, мұрағаттың тұтастығы, мән көзі жоқ бағандар, қолданыстағы әдістеме нұсқасынан емес нәтижелер және есептеудегі олқылықтар. Әр табылған жағдай ережені атайды және қозғалған жазбаға апарады.'),
+    (N'consistency.description', N'ru', N'Каждую ночь и по запросу ECR проверяет целостность данных и результаты расчётов по правилам, перечисленным ниже. Каждая находка называет своё правило и ведёт к затронутой записи.'),
+    (N'consistency.description', N'kz', N'ECR әр түнде және сұраныс бойынша деректердің тұтастығын және есептеу нәтижелерін төменде аталған ережелер бойынша тексереді. Әр табылған жағдай өз ережесін атайды және қозғалған жазбаға апарады.'),
     (N'consistency.statsLabel', N'ru', N'Неразрешённые находки по важности'),
     (N'consistency.statsLabel', N'kz', N'Маңыздылығы бойынша шешілмеген жағдайлар'),
     (N'consistency.statErrors', N'ru', N'ошибок'),
@@ -22,7 +22,7 @@ GO
 INSERT INTO #UiEn ([Key], Lang, Val, Scope)
 SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
-    (N'consistency.description', N'en', N'Every night, and on demand, ECR checks data integrity and calculation results against fixed rules: broken references, archive integrity, columns without a value source, results that do not come from the methodology version in effect, and calculation gaps. Each finding names the rule and links to the record it affects.', 1),
+    (N'consistency.description', N'en', N'Every night and on demand, ECR checks data integrity and calculation results against the rules listed below. Each finding names its rule and links to the affected record.', 1),
     (N'consistency.statsLabel', N'en', N'Unresolved findings by severity', 1),
     (N'consistency.statErrors', N'en', N'errors', 1),
     (N'consistency.statWarnings', N'en', N'warnings', 1),

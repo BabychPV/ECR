@@ -159,6 +159,10 @@ export function ConsistencyIssuesPage(): JSX.Element {
   const filtered = severityFilter !== null || appliedRule.length > 0;
   // Правила останнього завершеного прогону (сервер, `lastRun.checks`); прогону ще не було — блоку немає.
   const checks = summary.data?.lastRun?.checks ?? [];
+  // ⚠ Момент знімка — кінець того самого прогону, чиї правила показано в блоці (журнал обслуговування); стан задач
+  // (`useLastConsistencyCheck`) — запасний шлях, поки сервер не віддав підсумку. Інакше «Last check» і блок могли б
+  // говорити про різні прогони (знайдено на копії live 24.11).
+  const checkedAt = summary.data?.lastRun?.finishedAt ?? lastCheck;
 
   const openIssue = items?.find((issue) => issuePanelId(issue.id) === panel);
 
@@ -182,6 +186,7 @@ export function ConsistencyIssuesPage(): JSX.Element {
       label: t('consistency.what'),
       sortable: false,
       render: (issue) => (
+        <>
         <TwoLine
           primary={
             <UnstyledButton
@@ -201,11 +206,13 @@ export function ConsistencyIssuesPage(): JSX.Element {
               <span>{ruleLabel(issue.ruleCode)}</span>
               {' · '}
               <span data-allow-dotted>{issue.ruleCode}</span>
-              <FindingLinks message={issue.message} />
             </>
           }
           mono
         />
+        {/* Посилання — звичайним шрифтом під рядком коду, а не в моноширинному другому рядку. */}
+        <FindingLinks message={issue.message} />
+        </>
       ),
     },
     {
@@ -270,9 +277,9 @@ export function ConsistencyIssuesPage(): JSX.Element {
           <ErrorAlert error={run.startError} />
           <RunStatus run={run} />
           {/* Знімок — на який момент (рішення людини 12.11). Немає успішного прогону в записах — рядка немає. */}
-          {lastCheck !== null && (
+          {checkedAt !== null && (
             <Text size="xs" c="dimmed" mb="xs" data-last-check>
-              {t('consistency.lastCheck')} <Timestamp value={lastCheck} />
+              {t('consistency.lastCheck')} <Timestamp value={checkedAt} />
             </Text>
           )}
           {checks.length > 0 && (
