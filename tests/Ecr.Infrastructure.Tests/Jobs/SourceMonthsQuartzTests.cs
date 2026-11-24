@@ -7,6 +7,7 @@ using Ecr.Application.Calculations;
 using Ecr.Application.DocumentDependencies;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Expressions.Binding;
@@ -118,6 +119,52 @@ public sealed class SourceMonthsQuartzTests(SqlServerFixture sql) : IAsyncLifeti
         Assert.Equal("5,7", MonthsOf(second));
     }
 
+    /// <summary>
+    /// ✎ Огляд b11-2 (H): злита під час прогону робота стає в чергу (рядок прогресу <c>Queued</c>) ДО того, як задача, що
+    /// виконувалась, отримає <c>Succeeded</c> — без шпарини, у якій документ не має жодної живої задачі (F5 відпустив би рік).
+    /// </summary>
+    /// <remarks>Мутація: адаптер не кличе <c>RequeueDirtyBeforeFinishAsync</c> — червоний (Succeeded раніше за постановку).</remarks>
+    [Fact]
+    public async Task Перепостановка_злитої_роботи_видима_до_завершення_задачі()
+    {
+        var job = new RecordingRecalculationJob();
+        var events = new ConcurrentQueue<string>();
+        var progress = Substitute.For<IJobProgressStore>();
+        progress.When(p => p.QueueAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>(), Arg.Any<int?>(),
+                Arg.Any<string?>(), Arg.Any<long?>(), Arg.Any<string?>()))
+            .Do(c => events.Enqueue("queue:" + c.ArgAt<string>(0)));
+        progress.When(p => p.FinishAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>(), Arg.Any<string?>()))
+            .Do(c => events.Enqueue("finish:" + c.ArgAt<string>(0) + ":" + c.ArgAt<string>(1)));
+
+        var factory = Factory();
+        quartz = await factory.GetScheduler();
+        var services = new ServiceCollection();
+        services.AddSingleton<Ecr.Domain.Abstractions.IClock, SystemClock>();
+        services.AddSingleton<IRecalculationJob>(job);
+        services.AddSingleton(progress);
+        await using var provider = services.BuildServiceProvider();
+        quartz.JobFactory = new AdapterFactory(provider);
+        await quartz.Start();
+
+        var jobs = new QuartzJobScheduler(factory, progress, new SystemClock());
+        var document = Random.Shared.NextInt64(1_000_000_000, 9_000_000_000);
+        var target = CalculationTrigger.AutoTargetOf(document, new PeriodKey(YearKey));
+
+        var running = await jobs.EnqueueCoalescedAsync<IRecalculationJob>(target, Auto(document, [3]), CancellationToken.None);
+        await job.FirstStarted.Task.WaitAsync(Safety);
+        Assert.Equal(running, await jobs.EnqueueCoalescedAsync<IRecalculationJob>(target, Auto(document, [5]), CancellationToken.None));
+
+        job.Release.TrySetResult();
+        await job.SecondPayload.Task.WaitAsync(Safety);
+
+        var order = events.ToList();
+        var finished = order.IndexOf($"finish:{running}:Succeeded");
+        var requeued = order.FindIndex(e => e.StartsWith("queue:", StringComparison.Ordinal) && e != $"queue:{running}");
+        Assert.True(finished >= 0 && requeued >= 0, string.Join(" | ", order));
+        Assert.True(requeued < finished, string.Join(" | ", order));
+    }
     /// <summary>
     /// Повний шлях Quartz: правка місяця 10 річного джерела → <c>-auto</c> з місяцями [10] → доведені місяці → задача зв'язки
     /// <c>-m10</c> → залежні споживача лише за період 10. Контролі: місяці невідомі (правка не-місячної колонки) і читання
@@ -268,6 +315,93 @@ public sealed class SourceMonthsQuartzTests(SqlServerFixture sql) : IAsyncLifeti
         var other = await store.ListTemplateConsumersRoutedAsync(
             [w.Consumer.TemplateId], first, first + 99, null, 10, new HashSet<int> { -1 }, CancellationToken.None);
         Assert.Equal(12, other.Count);
+    }
+    /// <summary>
+    /// ✎ Огляд b11-2 (A), Quartz: будь-яка жива задача документа тримає рік — постановка БЕЗ цілі (дзеркало без цілі й payload),
+    /// власний перерахунок <c>-auto</c>, задача формул людини; знята — рік вільний.
+    /// </summary>
+    /// <remarks>Мутація: ворота беруть лише задачі з ціллю каскаду — червоні «без цілі» й «-auto».</remarks>
+    [Theory]
+    [InlineData("plain")]
+    [InlineData("auto")]
+    [InlineData("user-formula")]
+    public async Task F5_Quartz_будь_яка_задача_документа_тримає_рік(string kind)
+    {
+        var w = await ArrangeAsync(misplaced: false);
+        var (jobs, _) = await StandbyAsync();
+        var doc = w.Consumer.DocumentId;
+        var april = SourceDependencyWorld.Period(4);
+
+        var id = kind switch
+        {
+            "plain" => await jobs.EnqueueAsync<IRecalculationJob>(new { DocumentId = doc, PeriodKey = april }, CancellationToken.None),
+            "auto" => await jobs.EnqueueCoalescedAsync<IRecalculationJob>(
+                CalculationTrigger.AutoTargetOf(doc, new PeriodKey(april)), new { DocumentId = doc, PeriodKey = april }, CancellationToken.None),
+            _ => await jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                FormulaRecalculationTarget.Of(doc, april, createdByUserId: 5),
+                new { DocumentId = doc, TableInstanceId = 0L, PeriodKey = april, Cells = Array.Empty<object>() },
+                CancellationToken.None),
+        };
+
+        Assert.True(await PendingAsync(w, 1));
+        Assert.True(await PendingAsync(w, 12));
+
+        await jobs.CancelAsync(id, CancellationToken.None);
+        Assert.False(await PendingAsync(w, 1));
+    }
+    /// <summary>
+    /// ✎ Огляд b11-2: звуження до власника місяця не діє — увесь рік — коли (C) версія має аркуш, що копіюється, чи документ має
+    /// копії аркушів у році (маршрутизація копій не віддає власнику), (D) період-власник місяця на іншій версії (змішані версії року).
+    /// </summary>
+    /// <remarks>Мутації: не перевіряти аркуші, що копіюються / копії / версію власника — червоні відповідні рядки.</remarks>
+    [Theory]
+    [InlineData("copyable")]
+    [InlineData("copy-instance")]
+    [InlineData("owner-other-version")]
+    public async Task Копії_аркушів_і_власник_на_іншій_версії_будять_увесь_рік(string arrangement)
+    {
+        var w = await ArrangeAsync(misplaced: false);
+        await using (var db = Context())
+        {
+            switch (arrangement)
+            {
+                case "copyable":
+                    await db.SheetDefs.Where(s => s.Id == w.Consumer.SheetDefId).ExecuteUpdateAsync(s => s.SetProperty(x => x.IsCopyable, true));
+                    break;
+                case "copy-instance":
+                {
+                    var original = new DocumentSheet(w.Consumer.DocumentId, w.Consumer.SheetDefId);
+                    db.DocumentSheets.Add(original);
+                    await db.SaveChangesAsync();
+                    db.DocumentSheets.Add(original.CreateCopy(2));
+                    await db.SaveChangesAsync();
+                    await new RowStore(db, new BulkCellLoader(sql.ConnectionString, 1000), new TestClock(Now))
+                        .EnsureTableInstancesAsync(w.Consumer.DocumentId, new PeriodKey(SourceDependencyWorld.Period(3)), CancellationToken.None);
+                    Assert.True(await db.TableInstances.AnyAsync(i => i.DocumentId == w.Consumer.DocumentId && i.SheetCopyId != null));
+                    break;
+                }
+
+                default:
+                {
+                    var other = new TemplateVersion(w.Consumer.TemplateId, $"0.8.0.{Guid.NewGuid():N}"[..20], 1, Now);
+                    db.TemplateVersions.Add(other);
+                    await db.SaveChangesAsync();
+                    await db.Database.ExecuteSqlInterpolatedAsync($"""
+                        INSERT INTO doc.ProjectTemplateVersion (ProjectId, FromPeriodKey, TemplateVersionId, TemplateId)
+                        VALUES ({w.Consumer.ProjectId}, {SourceDependencyWorld.Period(1)}, {w.Consumer.TemplateVersionId}, {w.Consumer.TemplateId}),
+                               ({w.Consumer.ProjectId}, {SourceDependencyWorld.Period(10)}, {other.Id}, {w.Consumer.TemplateId});
+                        """);
+                    break;
+                }
+            }
+        }
+
+        await using var check = Context();
+        var first = SourceDependencyWorld.Period(1) / 100 * 100;
+        var rows = await new RegistryImpactStore(check).ListTemplateConsumersRoutedAsync(
+            [w.Consumer.TemplateId], first, first + 99, null, 10, new HashSet<int> { w.Consumer.TemplateVersionId }, CancellationToken.None);
+        Assert.True(rows.Count > 1, $"{arrangement}: звужено до {string.Join(",", rows.Select(r => r.PeriodKey))}");
+        Assert.Contains(rows, r => r.PeriodKey == SourceDependencyWorld.Period(1));
     }
     /// <summary>✎ Огляд b11 (HIGH-1): ланка джерела з місяцем у масці тримає ВЕСЬ рік споживача, зокрема раніші місяці й якір.</summary>
     [Theory]

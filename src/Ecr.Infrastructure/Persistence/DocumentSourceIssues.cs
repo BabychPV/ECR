@@ -46,6 +46,7 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
     private readonly Dictionary<(int BindingId, int Year), SourceYear?> years = [];
     private readonly Dictionary<long, (string ProjectCode, string DocumentKey)> sources = [];
     private readonly Dictionary<(long DocumentId, int PeriodKey, DateTime Since), DateTime?> changes = [];
+    private readonly Dictionary<(long DocumentId, int PeriodKey), DateTime?> runs = [];
     private (bool ApprovedOnly, bool Any)? kindsCache;
 
     /// <summary>✎ F5-R (D-570): причина <c>SourceChangedAfterApproval</c> за <c>Any</c> — дані місяця джерела змінено після затвердження.</summary>
@@ -152,6 +153,18 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
                     if (binding.State == DocumentSourceState.Any)
                     {
                         changedAt = await SourceChangedAtAsync(source, year, month, approvedAt!.Value, ct).ConfigureAwait(false);
+
+                        // ✎ W15z M7 (огляд b11-2): правка в межах запасу ДО затвердження, яку вже порахував прогін споживача
+                        // (чинний прогін періоду стартував після неї), — не «змінено після»: числа, що затверджено, її містять.
+                        // Доти повторне затвердження протягом 5 хв після правки джерела (повернути → F9 → подати → затвердити,
+                        // ~1 хв на звуженому каскаді) лишалося позначеним назавжди.
+                        if (changedAt is { } at && at <= approvedAt.Value
+                            && await ConsumerRunStartedAsync(documentId, periodKey, ct).ConfigureAwait(false) is { } runStarted
+                            && runStarted >= at)
+                        {
+                            changedAt = null;
+                        }
+
                         (kind, reason) = changedAt is null
                             ? (null, null)
                             : (ISourceIssueReader.SourceChangedAfterApproval, ReasonChanged);
@@ -227,6 +240,24 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
 
         var result = found.FirstOrDefault() is { } at ? DateTime.SpecifyKind(at, DateTimeKind.Utc) : (DateTime?)null;
         changes[(source.DocumentId, owner, since)] = result;
+        return result;
+    }
+
+    /// <summary>Старт чинного прогону методологій документа-споживача за період; <c>null</c> — прогону немає. Кеш на екземпляр.</summary>
+    private async Task<DateTime?> ConsumerRunStartedAsync(long documentId, int periodKey, CancellationToken ct)
+    {
+        if (runs.TryGetValue((documentId, periodKey), out var cached))
+        {
+            return cached;
+        }
+
+        var started = await db.CalculationRuns.AsNoTracking()
+            .Where(r => r.DocumentId == documentId && r.PeriodKey == periodKey && r.Status == Ecr.Domain.Entities.Calculations.CalculationRun.CurrentStatus)
+            .Select(r => (DateTime?)r.StartedAt)
+            .MaxAsync(ct)
+            .ConfigureAwait(false);
+        var result = started is { } s ? DateTime.SpecifyKind(s, DateTimeKind.Utc) : (DateTime?)null;
+        runs[(documentId, periodKey)] = result;
         return result;
     }
 

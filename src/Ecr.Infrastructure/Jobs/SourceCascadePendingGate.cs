@@ -79,54 +79,66 @@ public sealed class SourceCascadePendingGate(
                                    THEN LEFT(q.JobId, LEN(q.JobId) - 33) END) AS Tk) AS e
         """;
 
-    // `Q` — рядок Quartz: payload немає, тож він чекає завжди (і прохід читача, і натискання «Перерахувати» місяця —
-    // різниці без payload не видно; сумнів — у бік «чекати», D-567 (3)).
+    // ✎ Огляд b11-2 (A, урок 498: звужуємо лише БУДІННЯ, ТРИМАННЯ — завжди консервативне): УСІ живі задачі перерахунку й
+    // формул документа — будь-яка ціль (каскад, залежні, натискання, -auto, -dependents-approved, прохід читача, задача формул
+    // людини -formula-u{id}) і без цілі (постановка без цілі в Quartz): кожна з них переписує обчислені числа і будить читачів
+    // в інших періодах року (якір із річними підсумками, [Period:#k]). `R` — перерахунок, `F` — формули.
     private const string CascadeSql = """
         /* ecr:f5-cascade-gate */
-        SELECT CASE WHEN q.TargetKey IS NULL THEN N'Q' ELSE N'C' END AS Kind, e.Tk AS TargetKey, q.[State] AS State,
-               q.Payload AS Payload,
+        SELECT CASE WHEN q.JobCode = @formulaCode OR e.Tk LIKE @formulaLike THEN N'F' ELSE N'R' END AS Kind,
+               e.Tk AS TargetKey, q.[State] AS State, q.Payload AS Payload,
                CAST(NULL AS int) AS ConsumerTemplateId, CAST(NULL AS int) AS ConsumerPeriodKind,
                CAST(NULL AS int) AS SourceTemplateId, CAST(NULL AS int) AS SourcePeriodKind
           FROM itg.JobProgress AS q WITH (INDEX(IX_JobProgress_Document_Active))
         """ + "\n" + EffectiveTarget + "\n" + """
          WHERE q.DocumentId = @doc AND q.DocumentId IS NOT NULL AND q.[State] IN ('Queued', 'Running')
-           AND (e.Tk LIKE @recalcLike OR e.Tk = @formulaTarget)
+           AND (q.JobCode IN (@recalcCode, @formulaCode) OR e.Tk LIKE @recalcLike OR e.Tk LIKE @formulaLike)
         """;
 
-    // ⛔ Огляд b9: ціль у черзі в базі — `{тип задачі}~{ціль}` (DbBackgroundJobScheduler.TargetKeyOf). Доти ворота порівнювали
-    // голі цілі (`doc…`, `source-change-b…`) і в Production не бачили жодної задачі — лише рядки, вставлені тестами руками.
-    private static readonly string AutoLike = DbBackgroundJobScheduler.TargetKeyOf<IRecalculationJob>("doc") + "%-auto";
-    private static readonly string FormulaLike = DbBackgroundJobScheduler.TargetKeyOf<IFormulaRecalculationJob>("doc") + "%-formula%";
+    // ⛔ Огляд b9: ціль у черзі в базі — `{тип задачі}~{ціль}` (DbBackgroundJobScheduler.TargetKeyOf).
+    private static readonly string AnyRecalcLike = DbBackgroundJobScheduler.TargetKeyOf<IRecalculationJob>("doc") + "%";
+    private static readonly string AnyFormulaLike = DbBackgroundJobScheduler.TargetKeyOf<IFormulaRecalculationJob>("doc") + "%-formula%";
     private static readonly string SourceChangeLike =
         DbBackgroundJobScheduler.TargetKeyOf<IRegistryImpactRecalculationJob>("source-change-b") + "%";
 
-    // Ланки джерел — лише живі рядки (фільтровані індекси цілі); документні — з шаблоном і періодичністю документа-джерела.
-    // ✎ D-567 (4), b10: `{2}` — відбір рядків: черга в базі (TargetKey, фільтровані індекси цілі) чи дзеркало Quartz
-    // (TargetKey/Lane NULL, ціль — з JobId, `EffectiveTarget`). Період документної ланки — з payload; у Quartz payload
-    // немає: `-auto` несе період у цілі (`doc{id}-p{yyyyMM}-auto`), задача формул — невідомий (увесь рік, як доти), а шаблон
-    // документа-джерела тоді — за періодом споживача (той самий рік).
-    private static readonly string UpstreamSql = """
-        SELECT N'U', e.Tk, q.[State], CAST(k.Pk AS nvarchar(20)),
-               @t, CAST(@kind AS int), COALESCE(sd.TemplateId, sv.TemplateId), CAST(sp.PeriodKind AS int)
+    // Задачі впливу зв'язок — лише живі рядки (фільтровані індекси цілі; дзеркало Quartz — ціль з JobId).
+    private static readonly string SourceChangeSql = """
+        SELECT N'S', e.Tk, q.[State], CAST(NULL AS nvarchar(20)), @t, CAST(@kind AS int), CAST(NULL AS int), CAST(NULL AS int)
           FROM itg.JobProgress AS q WITH (INDEX({0}))
         {effective}
-          CROSS APPLY (SELECT CASE WHEN (e.Tk LIKE N'{auto}' OR e.Tk LIKE N'{formula}') AND ISJSON(q.Payload) = 1
-                                   THEN TRY_CAST(JSON_VALUE(q.Payload, '$.periodKey') AS int)
-                                   WHEN e.Tk LIKE N'{auto}' AND q.Payload IS NULL AND CHARINDEX(N'-p', e.Tk) > 0
-                                   THEN TRY_CAST(SUBSTRING(e.Tk, CHARINDEX(N'-p', e.Tk) + 2, 6) AS int) END AS Pk) AS k
-          LEFT JOIN doc.Document AS sd ON (e.Tk LIKE N'{auto}' OR e.Tk LIKE N'{formula}') AND sd.Id = q.DocumentId
-          LEFT JOIN doc.Project AS sp ON sp.Id = sd.ProjectId
-          LEFT JOIN cfg.TemplateVersion AS sv ON sv.Id = CASE WHEN sd.TemplateId IS NULL THEN doc.fn_VersionOf(sd.ProjectId, COALESCE(k.Pk, @period)) ELSE doc.fn_TemplateVersionOf(sd.ProjectId, sd.TemplateId, COALESCE(k.Pk, @period)) END
-         WHERE {2} AND @t IS NOT NULL
-           AND (e.Tk LIKE N'{source}' OR e.Tk LIKE N'{auto}' OR e.Tk LIKE N'{formula}')
+         WHERE {2} AND @t IS NOT NULL AND e.Tk LIKE N'{source}'
         """
         .Replace("{effective}", EffectiveTarget, StringComparison.Ordinal)
-        .Replace("{auto}", AutoLike, StringComparison.Ordinal)
-        .Replace("{formula}", FormulaLike, StringComparison.Ordinal)
         .Replace("{source}", SourceChangeLike, StringComparison.Ordinal);
 
-    private static string UpstreamPart(string index, string where)
-        => UpstreamSql.Replace("{0}", index, StringComparison.Ordinal).Replace("{2}", where, StringComparison.Ordinal);
+    private static string SourceChangePart(string index, string where)
+        => SourceChangeSql.Replace("{0}", index, StringComparison.Ordinal).Replace("{2}", where, StringComparison.Ordinal);
+
+    // ✎ Огляд b11-2 (B): живі задачі перерахунку й формул ІНШИХ документів (будь-якої ланки ланцюжка джерел X→A→B) — з шаблоном
+    // документа й роком (період з payload чи цілі, рік з payload чи цілі `-y{рік}`); формули — рік не визначається (будь-який).
+    // Одним проходом фільтрованого IX_JobProgress_Document_Active (живих рядків одиниці–сотні); що з них — предки споживача,
+    // вирішує граф (`AncestorsOf`).
+    private static readonly string DocumentLinksSql = """
+        SELECT N'U', e.Tk, q.[State],
+               CASE WHEN q.JobCode = @formulaCode OR e.Tk LIKE N'{formula}' THEN NULL ELSE CAST(y.Yr AS nvarchar(20)) END,
+               @t, CAST(@kind AS int), COALESCE(sd.TemplateId, sv.TemplateId),
+               CASE WHEN q.JobCode = @formulaCode OR e.Tk LIKE N'{formula}' THEN 1 ELSE 0 END
+          FROM itg.JobProgress AS q WITH (INDEX(IX_JobProgress_Document_Active))
+        {effective}
+          CROSS APPLY (SELECT CASE WHEN ISJSON(q.Payload) = 1 THEN TRY_CAST(JSON_VALUE(q.Payload, '$.periodKey') AS int) END AS JsonPk,
+                              CASE WHEN ISJSON(q.Payload) = 1 THEN TRY_CAST(JSON_VALUE(q.Payload, '$.year') AS int) END AS JsonYear,
+                              CASE WHEN CHARINDEX(N'-p', e.Tk) > 0 THEN TRY_CAST(SUBSTRING(e.Tk, CHARINDEX(N'-p', e.Tk) + 2, 6) AS int) END AS TkPk,
+                              CASE WHEN CHARINDEX(N'-y', e.Tk) > 0 THEN TRY_CAST(SUBSTRING(e.Tk, CHARINDEX(N'-y', e.Tk) + 2, 4) AS int) END AS TkYear) AS k
+          CROSS APPLY (SELECT COALESCE(NULLIF(k.JsonPk, 0) / 100, k.JsonYear, k.TkPk / 100, k.TkYear) AS Yr,
+                              COALESCE(NULLIF(k.JsonPk, 0), k.TkPk) AS Pk) AS y
+          JOIN doc.Document AS sd ON sd.Id = q.DocumentId
+          LEFT JOIN cfg.TemplateVersion AS sv ON sv.Id = CASE WHEN sd.TemplateId IS NULL THEN doc.fn_VersionOf(sd.ProjectId, COALESCE(y.Pk, @period)) ELSE doc.fn_TemplateVersionOf(sd.ProjectId, sd.TemplateId, COALESCE(y.Pk, @period)) END
+         WHERE q.DocumentId IS NOT NULL AND q.[State] IN ('Queued', 'Running') AND q.DocumentId <> @doc AND @t IS NOT NULL
+           AND (q.JobCode IN (@recalcCode, @formulaCode) OR e.Tk LIKE N'{recalc}' OR e.Tk LIKE N'{formula}')
+        """
+        .Replace("{effective}", EffectiveTarget, StringComparison.Ordinal)
+        .Replace("{recalc}", AnyRecalcLike, StringComparison.Ordinal)
+        .Replace("{formula}", AnyFormulaLike, StringComparison.Ordinal);
 
     private static readonly string ExtendedSql =
         """
@@ -139,14 +151,15 @@ public sealed class SourceCascadePendingGate(
          WHERE d.Id = @doc;
         """
         + "\n" + CascadeSql + "\nUNION ALL\n"
-        + UpstreamPart("UX_JobProgress_Target_Queued", "q.[State] = 'Queued' AND q.TargetKey IS NOT NULL")
+        + SourceChangePart("UX_JobProgress_Target_Queued", "q.[State] = 'Queued' AND q.TargetKey IS NOT NULL")
         + "\nUNION ALL\n"
-        + UpstreamPart("UX_JobProgress_Target_Running", "q.[State] = 'Running' AND q.TargetKey IS NOT NULL")
+        + SourceChangePart("UX_JobProgress_Target_Running", "q.[State] = 'Running' AND q.TargetKey IS NOT NULL")
         + "\nUNION ALL\n"
         // Дзеркало Quartz: живі рядки без цілі й лейна — пошук за (State, UpdatedAt), живих рядків одиниці.
-        + UpstreamPart(
+        + SourceChangePart(
             "IX_JobProgress_State_UpdatedAt",
             "q.[State] IN ('Queued', 'Running') AND q.TargetKey IS NULL AND q.Lane IS NULL AND e.Tk IS NOT NULL")
+        + "\nUNION ALL\n" + DocumentLinksSql
         + "\nUNION ALL\nSELECT N'T', NULL, NULL, NULL, @t, CAST(@kind AS int), NULL, NULL;";
 
     /// <inheritdoc />
@@ -154,9 +167,6 @@ public sealed class SourceCascadePendingGate(
     {
         var year = periodKey / 100;
         var documentPrefix = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"doc{documentId}-");
-        var recalcLike = QueueKey(documentPrefix) + "%";
-        var formulaTarget = DbBackgroundJobScheduler.TargetKeyOf<IFormulaRecalculationJob>(
-            FormulaRecalculationTarget.OfDocument(documentId, createdByUserId: null));
 
         // Ребра «джерело → споживач» графа (будь-який стан зв'язки) і зв'язки, чиї документні ланки ведуть до каскаду.
         var upstream = await UpstreamAsync(ct).ConfigureAwait(false);
@@ -166,13 +176,15 @@ public sealed class SourceCascadePendingGate(
                 upstream is null ? CascadeSql : ExtendedSql,
                 new SqlParameter("@doc", documentId),
                 new SqlParameter("@period", periodKey),
-                new SqlParameter("@recalcLike", recalcLike),
-                new SqlParameter("@formulaTarget", formulaTarget))
+                new SqlParameter("@recalcCode", JobListKinds.RecalculationJobCode),
+                new SqlParameter("@formulaCode", typeof(IFormulaRecalculationJob).FullName!),
+                new SqlParameter("@recalcLike", QueueKey(documentPrefix) + "%"),
+                new SqlParameter("@formulaLike", DbBackgroundJobScheduler.TargetKeyOf<IFormulaRecalculationJob>(documentPrefix) + "formula%"))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        // ✎ Огляд b11: будь-яка жива задача документа, що ще може змінити числа року, — чекає ввесь рік.
-        if (rows.Exists(r => r.Kind is "Q" or "C" && HoldsYear(r, documentPrefix, formulaTarget, year)))
+        // ✎ Огляд b11/b11-2: будь-яка жива задача перерахунку чи формул документа, що може змінити числа року, — чекає ввесь рік.
+        if (rows.Exists(r => r.Kind is "R" or "F" && HoldsYear(r, documentPrefix, year)))
         {
             return true;
         }
@@ -183,60 +195,65 @@ public sealed class SourceCascadePendingGate(
         }
 
         var consumerKind = (PeriodKind)(self.ConsumerPeriodKind ?? 0);
-        return rows.Exists(r => r.Kind == "U" && UpstreamPends(upstream, r, consumer, consumerKind, periodKey));
+        var ancestors = AncestorsOf(upstream, consumer);
+        return rows.Exists(r => r.Kind is "S" or "U" && UpstreamPends(upstream, ancestors, r, consumer, consumerKind, periodKey));
     }
 
     /// <summary>
-    /// ✎ Огляд b11 (HIGH-1/2): чи жива задача документа <paramref name="row"/> тримає рік <paramref name="year"/>.
+    /// ✎ Огляд b11/b11-2 (A): чи жива задача документа <paramref name="row"/> тримає рік <paramref name="year"/>. Тримає КОЖНА
+    /// задача перерахунку й формул документа, крім тих, чий рік відомо інший: ціль <c>p{рік}MM…</c>/<c>y{рік}…</c>, задача
+    /// формул — комірки чи тіло лише іншого року. Рік невідомий (без цілі й payload, тіло не читається) — тримає.
     /// </summary>
-    /// <remarks>
-    /// Тримають: каскад року (<c>y{рік}-dependents</c>); залежні будь-якого місяця року (<c>p{рік}MM-dependents</c>); ціль
-    /// місяця року (<c>p{рік}MM</c>) — у Quartz завжди (payload немає), у черзі в базі — прохід читача (<see cref="IsReaderPass"/>,
-    /// звичайне натискання «Перерахувати» — ні); системна задача формул документа (<c>doc{id}-formula</c>: читачі fan-out) —
-    /// якщо в її комірках є період року або payload не читається. Не тримають: <c>-auto</c>, <c>-dependents-approved</c>
-    /// (переписує й затверджені), задачі формул людини (<c>-formula-u{id}</c>), інший рік.
-    /// </remarks>
-    private static bool HoldsYear(GateRow row, string documentPrefix, string formulaTarget, int year)
+    private static bool HoldsYear(GateRow row, string documentPrefix, int year)
     {
         ArgumentNullException.ThrowIfNull(row);
-        if (row.TargetKey is not { } key)
+        if (row.Kind == "F")
         {
-            return false;
+            return FormulaTouchesYear(row.Payload, year);
         }
 
-        if (string.Equals(key, formulaTarget, StringComparison.Ordinal))
+        if (row.TargetKey is { } key && BareTarget(key) is var bare && bare.StartsWith(documentPrefix, StringComparison.Ordinal))
         {
-            return row.Kind == "Q" || FormulaTouchesYear(row.Payload, year);
+            var rest = bare[documentPrefix.Length..];
+            if (rest.Length >= 5 && rest[0] is 'p' or 'y'
+                && int.TryParse(rest.AsSpan(1, 4), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var targetYear))
+            {
+                return targetYear == year;
+            }
         }
 
-        var bare = BareTarget(key);
-        if (!bare.StartsWith(documentPrefix, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        var rest = bare[documentPrefix.Length..];
-        var yearText = year.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        if (string.Equals(rest, $"y{yearText}-dependents", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        if (rest.Length < 7 || rest[0] != 'p' || !rest.AsSpan(1, 4).SequenceEqual(yearText)
-            || !int.TryParse(rest.AsSpan(5, 2), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out _))
-        {
-            return false;
-        }
-
-        var suffix = rest[7..];
-        return suffix switch
-        {
-            "-dependents" => true,
-            "" => row.Kind == "Q" || IsReaderPass(row.Payload),
-            _ => false,
-        };
+        return PayloadYear(row.Payload) is not { } payloadYear || payloadYear == year;
     }
 
+    /// <summary>Рік тіла перерахунку (<c>periodKey</c> чи <c>year</c>); <c>null</c> — невідомо.</summary>
+    private static int? PayloadYear(string? payload)
+    {
+        if (string.IsNullOrEmpty(payload))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var json = JsonDocument.Parse(payload);
+            var root = json.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            if (root.TryGetProperty("periodKey", out var period) && period.ValueKind == JsonValueKind.Number && period.GetInt32() > 0)
+            {
+                return period.GetInt32() / 100;
+            }
+
+            return root.TryGetProperty("year", out var y) && y.ValueKind == JsonValueKind.Number ? y.GetInt32() : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
     /// <summary>Чи системна задача формул торкається року: період комірки (<c>cells[].periodKey</c>) чи тіла в році; сумнів — так.</summary>
     private static bool FormulaTouchesYear(string? payload, int year)
     {
@@ -257,7 +274,7 @@ public sealed class SourceCascadePendingGate(
             var fallback = root.TryGetProperty("periodKey", out var body) && body.ValueKind == JsonValueKind.Number
                 ? body.GetInt32()
                 : (int?)null;
-            if (!root.TryGetProperty("cells", out var cells) || cells.ValueKind != JsonValueKind.Array)
+            if (!root.TryGetProperty("cells", out var cells) || cells.ValueKind != JsonValueKind.Array || cells.GetArrayLength() == 0)
             {
                 return fallback is not { } only || only / 100 == year;
             }
@@ -312,48 +329,78 @@ public sealed class SourceCascadePendingGate(
     /// <summary>Тести: зв'язки, документні ланки яких ведуть до каскаду (замість знімка <see cref="SourceBindingGateCache"/>).</summary>
     internal Func<CancellationToken, Task<IReadOnlyCollection<int>>>? AutoBindingsProbe { get; init; }
 
-    /// <summary>Чи жива ланка джерела <paramref name="row"/> доведе каскад до періоду споживача.</summary>
-    private static bool UpstreamPends(
-        Upstream upstream, GateRow row, int consumerTemplateId, PeriodKind consumerKind, int periodKey)
+    /// <summary>
+    /// ✎ Огляд b11-2 (B): шаблони-ПРЕДКИ споживача — усі, з яких ланцюжок зв'язок (документні ланки ведуть до каскаду,
+    /// <see cref="Upstream.AutoBindings"/>) доходить до нього, до <see cref="RegistryImpactRecalculationRequest.MaxHops"/> ланок,
+    /// без зациклення (відвідані). <c>AnyAll</c> — на шляху є ребро обсягу «усе» (рік не звужує).
+    /// </summary>
+    private static (HashSet<int> Templates, bool AnyAll) AncestorsOf(Upstream upstream, int consumerTemplateId)
     {
-        var edges = upstream.Edges.Where(e => e.ConsumerTemplateId == consumerTemplateId).ToList();
-        if (edges.Count == 0 || row.TargetKey is null)
+        var bySink = upstream.Edges.Where(e => upstream.AutoBindings.Contains(e.BindingId)).ToLookup(e => e.ConsumerTemplateId);
+        var seen = new HashSet<int>();
+        var anyAll = false;
+        var frontier = new List<int> { consumerTemplateId };
+        for (var hop = 0; hop < RegistryImpactRecalculationRequest.MaxHops && frontier.Count > 0; hop++)
         {
-            return false;
+            var next = new List<int>();
+            foreach (var edge in frontier.SelectMany(t => bySink[t]))
+            {
+                anyAll |= edge.Scope.Kind == PeriodScopeKind.All;
+                if (edge.SourceTemplateId != consumerTemplateId && seen.Add(edge.SourceTemplateId))
+                {
+                    next.Add(edge.SourceTemplateId);
+                }
+            }
+
+            frontier = next;
         }
 
-        if (SourceChangeKey.TryParse(BareTarget(row.TargetKey), out var bindingId, out var year, out var month, out var approved))
-        {
-            // «З затвердженими» перераховує й затверджені аркуші — затвердження не закріпить старих чисел.
-            var byBinding = edges.Where(e => e.BindingId == bindingId).ToList();
-            return !approved
-                   && ScopeOf(byBinding) is { } scope
-                   && Affects(scope, year, month, periodKey, consumerKind);
-
-        }
-
-        // Документна ланка (задача формул чи -auto) документа-джерела зв'язки, що ставить каскад з -auto (стан Any).
-        if (row.SourceTemplateId is not { } sourceTemplate)
-        {
-            return false;
-        }
-
-        var bySource = edges.Where(e => e.SourceTemplateId == sourceTemplate && upstream.AutoBindings.Contains(e.BindingId));
-        if (ScopeOf(bySource) is not { } sourceScope)
-        {
-            return false;
-        }
-
-        // Період джерела з payload; задача формул несе комірки кількох періодів — місяць невідомий (увесь рік).
-        int? sourcePeriod = int.TryParse(row.Payload, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var p)
-            ? p
-            : null;
-        var isAuto = row.TargetKey.EndsWith("-auto", StringComparison.Ordinal);
-        int? sourceMonth = isAuto && sourcePeriod is { } sp && row.SourcePeriodKind == (int)PeriodKind.Monthly ? sp % 100 : null;
-        var sourceYear = sourcePeriod is { } sy ? sy / 100 : periodKey / 100;
-        return Affects(sourceScope, sourceYear, sourceMonth, periodKey, consumerKind);
+        return (seen, anyAll);
     }
 
+    /// <summary>Чи жива ланка (задача впливу зв'язки чи задача документа-предка) доведе каскад до періоду споживача.</summary>
+    private static bool UpstreamPends(
+        Upstream upstream, (HashSet<int> Templates, bool AnyAll) ancestors, GateRow row, int consumerTemplateId,
+        PeriodKind consumerKind, int periodKey)
+    {
+        var consumerYear = periodKey / 100;
+        if (row.Kind == "S")
+        {
+            if (row.TargetKey is null
+                || !SourceChangeKey.TryParse(BareTarget(row.TargetKey), out var bindingId, out var year, out var month, out var approved)
+                || approved)
+            {
+                // «З затвердженими» перераховує й затверджені аркуші — затвердження не закріпить старих чисел.
+                return false;
+            }
+
+            var byBinding = upstream.Edges.Where(e => e.BindingId == bindingId).ToList();
+
+            // Пряма зв'язка до споживача — відображення обсягу ребра (той самий рік, маска літеральних місяців).
+            var direct = byBinding.Where(e => e.ConsumerTemplateId == consumerTemplateId).ToList();
+            if (ScopeOf(direct) is { } scope && Affects(scope, year, month, periodKey, consumerKind))
+            {
+                return true;
+            }
+
+            // Через проміжного споживача-предка — рік збігається (чи на шляху «усе»).
+            return byBinding.Exists(e => ancestors.Templates.Contains(e.ConsumerTemplateId))
+                   && (ancestors.AnyAll || AnyAllScope(byBinding) || year == consumerYear);
+        }
+
+        // Документ-предок: будь-яка жива задача перерахунку чи формул — рік збігається, невідомий чи на шляху «усе».
+        if (row.SourceTemplateId is not { } template || !ancestors.Templates.Contains(template))
+        {
+            return false;
+        }
+
+        int? rowYear = int.TryParse(row.Payload, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var y)
+            ? y
+            : null;
+        return ancestors.AnyAll || rowYear is not { } known || known == consumerYear;
+
+        static bool AnyAllScope(List<TemplateDependency> edges) => edges.Exists(e => e.Scope.Kind == PeriodScopeKind.All);
+    }
     private static PeriodScope? ScopeOf(IEnumerable<TemplateDependency> edges)
     {
         PeriodScope? scope = null;

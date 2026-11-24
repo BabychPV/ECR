@@ -141,12 +141,63 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
                 .ConfigureAwait(false);
         }
 
+        // ✎ Огляд b11-2 (C): копії аркушів маршрутизація не віддає власнику місяця (MonthColumnRouter — лише оригінали): документ із
+        // копіями в діапазоні чи версія з аркушем, що копіюється, — увесь рік. (D): власник місяця — на версії, що звужує (рік
+        // зі змішаними версіями — інакше увесь рік).
+        HashSet<long> wholeYear = [];
+        Dictionary<long, int?> ownerVersion = [];
+        if (routedMonth is { } routed && routedVersions is { Count: > 0 })
+        {
+            var versions = routedVersions.ToList();
+            var copyable = await db.SheetDefs.AsNoTracking()
+                .Where(s => versions.Contains(s.TemplateVersionId) && s.IsCopyable)
+                .Select(s => s.TemplateVersionId)
+                .Distinct()
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            routedVersions = routedVersions.Except(copyable).ToHashSet();
+
+            var docs = rows.Select(r => r.Id).Distinct().ToList();
+            wholeYear = [.. await db.TableInstances.AsNoTracking()
+                .Where(i => docs.Contains(i.DocumentId) && i.SheetCopyId != null
+                            && i.PeriodKeyValue >= firstPeriod && i.PeriodKeyValue <= lastPeriod)
+                .Select(i => i.DocumentId)
+                .Distinct()
+                .ToListAsync(ct)
+                .ConfigureAwait(false)];
+
+            foreach (var ownerKey in rows.Select(r => (r.PeriodKey / 100 * 100) + routed).Distinct().ToList())
+            {
+                var found = await db.Documents.AsNoTracking()
+                    .Where(d => docs.Contains(d.Id))
+                    .Select(d => new
+                    {
+                        d.Id,
+                        Version = d.TemplateId == null
+                            ? EcrDbContext.VersionOf(d.ProjectId, ownerKey)
+                            : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, ownerKey),
+                    })
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+                foreach (var f in found)
+                {
+                    ownerVersion[(f.Id * 1_000_000) + ownerKey] = f.Version;
+                }
+            }
+        }
+
+        bool OwnerOnRoutedVersion(long documentId, int ownerKey)
+            => ownerVersion.TryGetValue((documentId * 1_000_000) + ownerKey, out var v) && v is { } version
+               && routedVersions!.Contains(version);
+
         // B179 L2: обсяг «місяць» — лише період, що володіє місяцем (те саме правило, що ворота затверджених місяців).
         return [.. rows
             .Where(r => month is not { } m || DocumentSourceGate.OwnedMonths(r.PeriodKind, r.PeriodKey % 100).Contains(m))
             .Where(r => routedMonth is not { } owned
                         || routedVersions is null
                         || !routedVersions.Contains(r.VersionId)
+                        || wholeYear.Contains(r.Id)
+                        || !OwnerOnRoutedVersion(r.Id, (r.PeriodKey / 100 * 100) + owned)
                         || !MonthOwnerRouting.Narrows(r.PeriodKind, owners.Contains((r.ProjectId, (r.PeriodKey / 100 * 100) + owned)))
                         || r.PeriodKey % 100 == owned)
             .Select(r => new RegistryImpactRow(r.Id, r.BusinessKey, r.ProjectId, r.PeriodKey, r.State, string.Empty))];

@@ -88,12 +88,13 @@ public sealed class SourceCascadePendingGateTests(SqlServerFixture sql)
     }
 
     /// <summary>
-    /// Поперіодна задача залежних тримає ВЕСЬ рік документа; «з затвердженими» (окремий документ) — нічого (переписує й затверджені).
+    /// Поперіодна задача залежних тримає ВЕСЬ рік документа; ✎ огляд b11-2 (A): «з затвердженими» — теж (її прогін будить читачів
+    /// в інших періодах, а прохід читача пропускає затверджені аркуші).
     /// </summary>
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "F5")]
-    public async Task Поперіодна_задача_залежних_тримає_рік_з_затвердженими_не_тримає()
+    public async Task Поперіодна_задача_залежних_і_з_затвердженими_тримають_рік()
     {
         var doc = NextDocument();
         await InsertAsync(
@@ -108,13 +109,42 @@ public sealed class SourceCascadePendingGateTests(SqlServerFixture sql)
         await InsertAsync(
             approvedOnly, Key(CalculationTrigger.DependentsApprovedTargetOf(approvedOnly, new PeriodKey(202608))), "Queued",
             $$"""{"projectId":0,"documentId":{{approvedOnly}},"periodKey":202608,"includeApproved":true}""");
-        Assert.False(await PendingAsync(approvedOnly, 202608));
-        Assert.False(await PendingAsync(approvedOnly, 202601));
+        Assert.True(await PendingAsync(approvedOnly, 202608));
+        Assert.True(await PendingAsync(approvedOnly, 202601));
+        Assert.False(await PendingAsync(approvedOnly, 202701));
+    }
+
+    /// <summary>
+    /// ✎ Огляд b11-2 (A, урок 498): БУДЬ-ЯКА жива задача перерахунку чи формул документа тримає рік своєї цілі — власний перерахунок
+    /// (<c>-auto</c>), натискання «Перерахувати» місяця, задача формул людини (<c>-formula-u{id}</c>); інший рік — ні.
+    /// </summary>
+    /// <remarks>Мутація: <c>HoldsYear</c> повертає «не тримає» для <c>-auto</c>/натискання/формул людини — червоні рядки.</remarks>
+    [Theory]
+    [InlineData("auto")]
+    [InlineData("press")]
+    [InlineData("user-formula")]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "F5")]
+    public async Task Будь_яка_задача_документа_тримає_рік(string kind)
+    {
+        var doc = NextDocument();
+        var (target, payload) = kind switch
+        {
+            "auto" => (Key($"doc{doc}-p202604-auto"), $$"""{"projectId":0,"documentId":{{doc}},"periodKey":202604}"""),
+            "press" => (Key($"doc{doc}-p202604"), $$"""{"projectId":0,"documentId":{{doc}},"periodKey":202604,"triggeredByUserId":5}"""),
+            _ => (DbBackgroundJobScheduler.TargetKeyOf<IFormulaRecalculationJob>(FormulaRecalculationTarget.OfDocument(doc, 5)),
+                $$"""{"documentId":{{doc}},"tableInstanceId":0,"periodKey":202604,"cells":[{"rowId":1,"columnDefId":1,"tableDefId":1,"periodKey":202604}]}"""),
+        };
+        await InsertAsync(doc, target, "Queued", payload);
+
+        Assert.True(await PendingAsync(doc, 202601));
+        Assert.True(await PendingAsync(doc, 202612));
+        Assert.False(await PendingAsync(doc, 202701));
     }
 
     /// <summary>
     /// ✎ Огляд b11 (HIGH-2): системна задача формул документа (читачі <c>CrossPeriodFanOut</c> після прогону власника) тримає рік
-    /// своїх комірок — пізніший місяць і якір; комірки іншого року — ні; задача формул людини (<c>-formula-u{id}</c>) — ні.
+    /// своїх комірок — пізніший місяць і якір; комірки іншого року — ні; ✎ b11-2: задача формул людини — теж тримає.
     /// </summary>
     /// <remarks>Мутація: <c>CascadeSql</c> без цілі задачі формул — червоний.</remarks>
     [Fact]
@@ -138,11 +168,13 @@ public sealed class SourceCascadePendingGateTests(SqlServerFixture sql)
         Assert.False(await PendingAsync(other, 202611));
         Assert.True(await PendingAsync(other, 202711));
 
+        // ✎ Огляд b11-2 (A): задача формул ЛЮДИНИ теж тримає рік своїх комірок.
         var user = NextDocument();
         await InsertAsync(
             user, DbBackgroundJobScheduler.TargetKeyOf<IFormulaRecalculationJob>(FormulaRecalculationTarget.OfDocument(user, 5)), "Queued",
-            $$"""{"documentId":{{user}},"tableInstanceId":0,"periodKey":202611,"cells":[]}""");
-        Assert.False(await PendingAsync(user, 202611));
+            $$"""{"documentId":{{user}},"tableInstanceId":0,"periodKey":202611,"cells":[{"rowId":1,"columnDefId":1,"tableDefId":1,"periodKey":202611}]}""");
+        Assert.True(await PendingAsync(user, 202611));
+        Assert.True(await PendingAsync(user, 202601));
     }
     // ───────────────────────────── допоміжне ─────────────────────────────
 

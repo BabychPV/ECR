@@ -207,6 +207,8 @@ public sealed partial class QuartzJobAdapter(
                 new StoreJobProgress(progress, jobId, clock),
                 jobCancel.Token).ConfigureAwait(false);
 
+            // ✎ Огляд b11-2 (H): злита під час прогону робота — у чергу ДО кінцевого стану (без шпарини для F5).
+            await QuartzJobScheduler.RequeueDirtyBeforeFinishAsync(context.Scheduler, jobId).ConfigureAwait(false);
             await FinishAsync(progress, jobId, "Succeeded", null, clock, context.CancellationToken)
                 .ConfigureAwait(false);
 
@@ -231,6 +233,7 @@ public sealed partial class QuartzJobAdapter(
         {
             // Скасування — не провал: його попросили. Але й не успіх, і стан
             // мусить це розрізняти.
+            await QuartzJobScheduler.RequeueDirtyBeforeFinishAsync(context.Scheduler, jobId).ConfigureAwait(false);
             await FinishAsync(progress, jobId, CancelledState, null, clock, CancellationToken.None)
                 .ConfigureAwait(false);
 
@@ -326,6 +329,8 @@ public sealed partial class QuartzJobAdapter(
                 QuartzPayloadMerges.Reopen(jobId);
                 return;
             }
+
+            await QuartzJobScheduler.RequeueDirtyBeforeFinishAsync(context.Scheduler, jobId).ConfigureAwait(false);
 
             // ⚠ Текст помилки в прогрес — БЕЗ стека (ФВ-6.11, D-11): стек
             // виносить назовні шляхи, імена і подекуди значення.
