@@ -147,7 +147,7 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
                     if (binding.State == DocumentSourceState.Any
                         && await VanishedSourceAsync(binding.Id, year, documentId, periodKey, ct).ConfigureAwait(false) is { } vanished)
                     {
-                        var gone = await SourceFactsAsync(vanished, ct).ConfigureAwait(false);
+                        var gone = vanished > 0 ? await SourceFactsAsync(vanished, ct).ConfigureAwait(false) : (ProjectCode: string.Empty, DocumentKey: string.Empty);
                         findings.AddRange(DocumentSourceGate.OwnedMonths(binding.PeriodKind, periodKey % 100).Select(month =>
                             new SourceIssueFinding(
                                 new SourceIssueRow(
@@ -323,14 +323,16 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
 
     /// <summary>
     /// ✎ Огляд b11 №5 (LOW 1): документ-джерело зв'язки за рік, який ЧИТАВ чинний прогін споживача (ключ у відомому стані),
-    /// а тепер не обраний ніякий; <c>null</c> — не читав (чи стан невідомий: тоді й порівнювати нема з чим).
+    /// а тепер не обраний ніякий; <c>null</c> — не читав. ✎ Огляд b11 №5 (залишок): стан невідомий чи прогін до міграції
+    /// (P-1123-21: «змінено») — <c>0</c> (джерело невідоме): той прогін міг читати джерело, яке потім видалили, тож позначка
+    /// (хибна тривога допустима — зникне після прогону документа, що запише стан).
     /// </summary>
     private async Task<long?> VanishedSourceAsync(int bindingId, int year, long consumerId, int consumerPeriod, CancellationToken ct)
     {
         var recorded = await RecordedAsync(consumerId, consumerPeriod, ct).ConfigureAwait(false);
         if (recorded.Known is null)
         {
-            return null;
+            return !recorded.Legacy || LegacyStateMeansChanged ? 0L : null;
         }
 
         var prefix = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{bindingId}:");

@@ -150,18 +150,34 @@ public sealed class DocumentSourceStateTests(SqlServerFixture sql)
     /// ✎ Огляд b11 №5 (LOW 1): джерело, яке читав чинний прогін споживача (ключ у стані), видалено — обраного документа за рік
     /// більше немає: позначка (числа змінилися), а не «джерела нема — проблем нема». Контроль — джерела не було й у стані.
     /// </summary>
-    /// <remarks>Мутація: <c>VanishedSourceAsync</c> → <c>null</c> — червоний.</remarks>
+    /// <remarks>
+    /// ✎ Огляд b11 №5 (залишок): і стан прогону до міграції (P-1123-21) чи невідомий — позначка, хоч джерела зараз немає (той
+    /// прогін міг читати видалене джерело). Мутації: <c>VanishedSourceAsync</c> → <c>null</c> — червоний «known»; невідомий /
+    /// до міграції → <c>null</c> — червоні «legacy», «unknown».
+    /// </remarks>
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task Видалене_джерело_яке_читав_прогін_позначає(bool hadSource)
+    [InlineData("known", true)]
+    [InlineData("none-recorded", false)]
+    [InlineData("legacy", true)]
+    [InlineData("unknown", true)]
+    public async Task Видалене_джерело_яке_читав_прогін_позначає(string recorded, bool expected)
     {
         var w = await ArrangeAsync();
+        var hadSource = recorded == "known";
         await using (var db = sql.CreateContext())
         {
-            if (!hadSource)
+            var land = w.World.Land.DocumentId;
+            switch (recorded)
             {
-                await db.Database.ExecuteSqlAsync($"UPDATE calc.CalculationRun SET SourceStateJson = N'{{}}' WHERE DocumentId = {w.World.Land.DocumentId} AND Status = N'Current'");
+                case "none-recorded":
+                    await db.Database.ExecuteSqlAsync($"UPDATE calc.CalculationRun SET SourceStateJson = N'{{}}' WHERE DocumentId = {land} AND Status = N'Current'");
+                    break;
+                case "legacy":
+                    await db.Database.ExecuteSqlAsync($"UPDATE calc.CalculationRun SET SourceStateJson = NULL WHERE DocumentId = {land} AND Status = N'Current'");
+                    break;
+                case "unknown":
+                    await db.Database.ExecuteSqlAsync($"UPDATE calc.CalculationRun SET SourceStateJson = {DocumentSourceIssues.UnknownState} WHERE DocumentId = {land} AND Status = N'Current'");
+                    break;
             }
 
             await db.Database.ExecuteSqlAsync($"DELETE FROM doc.TableRow WHERE TableInstanceId = {w.InstanceId} AND PeriodKey = {March}");
@@ -169,7 +185,7 @@ public sealed class DocumentSourceStateTests(SqlServerFixture sql)
         }
 
         var issues = await ListAsync(w);
-        Assert.Equal(hadSource, issues.Count == 1);
+        Assert.Equal(expected, issues.Count == 1);
         if (hadSource)
         {
             Assert.Equal(w.World.Source.DocumentId, issues[0].SourceDocumentId);
