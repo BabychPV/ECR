@@ -84,6 +84,8 @@ internal static class ScriptTestKit
             });
         store.FindSubstanceEntryIdsAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyDictionary<string, long>>(new Dictionary<string, long>()));
+        store.GetSubstanceCodesAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyDictionary<long, string>>(new Dictionary<long, string>()));
         store.GetColumnResultBindingsAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<ColumnResultBinding>>([]));
         store.GetMethodologyDependenciesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())

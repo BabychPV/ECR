@@ -77,9 +77,7 @@ public sealed class ScriptMaterializer(
 
         var found = script.Substances.Count == 0
             ? new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
-            : new Dictionary<string, long>(
-                await methodologies.FindSubstanceEntryIdsAsync(script.Substances, ct).ConfigureAwait(false),
-                StringComparer.OrdinalIgnoreCase);
+            : await ResolveSubstancesAsync(versionId, script.Substances, ct).ConfigureAwait(false);
         await methodologies
             .ReplaceScriptSubstancesAsync(
                 versionId, [.. script.Substances.Where(found.ContainsKey).Select(c => found[c])], ct)
@@ -117,6 +115,41 @@ public sealed class ScriptMaterializer(
         await ReplaceRegistryUsesAsync(versionId, script, ct).ConfigureAwait(false);
 
         return new ScriptMaterialization(added, bound, dependencies);
+    }
+
+    /// <summary>
+    /// Код речовини скрипта → запис довідника: спершу речовини, які версія ВЖЕ має (клон джерела чи попереднє збереження), лише
+    /// решта — глобальним пошуком <see cref="IMethodologyStore.FindSubstanceEntryIdsAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ c11-10: той самий код буває в кількох довідниках речовин (LAND_HSE400_SUBSTANCE «C333» і LAND_AIR_SUBSTANCE «E333» мають
+    /// SUBSTANCE_CODE 333), а глобальний пошук бере запис із меншим Id. Без переваги наявних збереження тексту клону мігрованої
+    /// версії пересаджувало її речовини на чужий довідник: виходи писались би з іншими SubstanceEntryId, золотий набір
+    /// (очікування за E333…) червонів «виходу не було», а звіти за речовиною лишались би порожніми.
+    /// </remarks>
+    private async Task<Dictionary<string, long>> ResolveSubstancesAsync(
+        int versionId, IReadOnlyCollection<string> codes, CancellationToken ct)
+    {
+        var found = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        var current = await methodologies.GetSubstanceCodesAsync(versionId, ct).ConfigureAwait(false);
+        foreach (var (entryId, code) in current.OrderBy(c => c.Key))
+        {
+            if (!string.IsNullOrWhiteSpace(code))
+            {
+                found.TryAdd(code.Trim(), entryId);
+            }
+        }
+
+        var missing = codes.Where(c => !found.ContainsKey(c)).ToList();
+        if (missing.Count > 0)
+        {
+            foreach (var (code, entryId) in await methodologies.FindSubstanceEntryIdsAsync(missing, ct).ConfigureAwait(false))
+            {
+                found.TryAdd(code, entryId);
+            }
+        }
+
+        return found;
     }
 
     /// <summary>
