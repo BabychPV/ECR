@@ -712,9 +712,12 @@ public sealed partial class PatchCellsTests
     /// </param>
     /// <param name="matchJson">Предикат єдиного правила; типово <c>{}</c> («вся таблиця»).</param>
     /// <param name="requiredColumnId">Колонка єдиної вимоги; типово <c>Category</c> (12).</param>
+    /// <param name="engine">Рушій версії (P-1124-1: версія-скрипт без правил).</param>
+    /// <param name="withRule"><c>false</c> — версія без правил відбору.</param>
     private int WithMethodology(
         RequiredInputSeverity severity, CellDataType categoryType = CellDataType.String,
-        int documentCategoryColumnId = 12, string matchJson = "{}", int requiredColumnId = 12)
+        int documentCategoryColumnId = 12, string matchJson = "{}", int requiredColumnId = 12,
+        MethodologyEngine engine = MethodologyEngine.Formulas, bool withRule = true)
     {
         var volume = new ColumnDef(
             tableDefId: 3, EcrCode.Create("Volume"),
@@ -748,8 +751,8 @@ public sealed partial class PatchCellsTests
 
         var methodology = new Methodology(EcrCode.Create("ECW_TEST"), new LocalizedText(
             new Dictionary<string, string> { ["en"] = "Test methodology" }));
-        var version = new MethodologyVersion(MethodologyId, "1.0", CalculationLevel.Configuration, 1, Now);
-        var rule = version.AddRule(EcrCode.Create("all"), matchJson, 100);
+        var version = new MethodologyVersion(MethodologyId, "1.0", CalculationLevel.Configuration, 1, Now, engine);
+        IReadOnlyList<MethodologyRule> rules = withRule ? [version.AddRule(EcrCode.Create("all"), matchJson, 100)] : [];
         var requiredInput = version.AddRequiredInput(requiredColumnId, severity, hint: null);
         version.Publish(publishedByUserId: 2, "тестова публікація", new DateOnly(2026, 1, 1), testsPassed: true, Now);
 
@@ -761,7 +764,7 @@ public sealed partial class PatchCellsTests
                       .Returns(Task.FromResult<IReadOnlyList<MethodologyVersion>>([version]));
         _methodologies.GetRulesOfVersionsAsync(
                           Arg.Is<IReadOnlyCollection<int>>(ids => ids.Contains(version.Id)), Arg.Any<CancellationToken>())
-                      .Returns(Task.FromResult<IReadOnlyList<MethodologyRule>>([rule]));
+                      .Returns(Task.FromResult(rules));
         _methodologies.GetRequiredInputsOfVersionsAsync(
                           Arg.Is<IReadOnlyCollection<int>>(ids => ids.Contains(version.Id)), Arg.Any<CancellationToken>())
                       .Returns(Task.FromResult<IReadOnlyList<MethodologyRequiredInput>>([requiredInput]));
