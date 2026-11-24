@@ -103,6 +103,12 @@ export function useCellNavigation(): CellNavigationRequest | null {
   return useSyncExternalStore(subscribeCellNavigation, currentCellNavigation, currentCellNavigation);
 }
 
+/**
+ * ✎ Огляд M4 (4): «перший рядок зрізу» — перехід до КОЛОНКИ без конкретного рядка (посилання на місяць річного
+ * документа: колонка місяця). Ключ рядка з сервера такого вигляду мати не може (керівний символ).
+ */
+export const FirstRowKey = '\u0000first-row';
+
 /** Координати комірки в ВІДРЕНДЕРЕНИХ колонках сітки (`x`) і рядках (`y`). */
 export interface GridCellCoordinate {
   readonly x: number;
@@ -130,7 +136,7 @@ export function cellCoordinateOf(
   rowKey: string,
   columnCode: string | null,
 ): GridCellCoordinate | null {
-  const y = slice.rows.findIndex((row) => row.rowKey === rowKey);
+  const y = rowKey === FirstRowKey ? (slice.rows.length > 0 ? 0 : -1) : slice.rows.findIndex((row) => row.rowKey === rowKey);
   if (y < 0) return null;
 
   const column = columnCode === null ? -1 : slice.columns.findIndex((c) => c.code === columnCode);

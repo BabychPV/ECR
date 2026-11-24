@@ -26,6 +26,11 @@ export interface UnmatchedRows {
   readonly formulaErrorTotal?: number;
   /** ✎ B80 N4: місяці джерела HSE400, не затверджені чи змінені після затвердження (документ, не копія); без — немає. */
   readonly sourceIssues?: readonly SourceIssue[];
+  /**
+   * ✎ Огляд M4 (2): документ «рік» — записи групи «Помилки формул» цього місяця могли бути відкинуті стелею відповіді року
+   * (лічильники — нижня межа, «N+»). Без поля — рішення за `formulaErrorTotal` (один період).
+   */
+  readonly truncatedFormulaErrors?: boolean;
 }
 
 const Empty: readonly CalculationIssue[] = [];
@@ -109,6 +114,25 @@ export interface MonthUnmatchedRows {
   readonly rows: UnmatchedRows;
 }
 
+/** Скільки комірок покривають записи групи «Помилки формул» (власна — 1 + залежні; «не оновлено» — залежні, ≥ 1). */
+export function representedFormulaCells(errors: readonly FormulaErrorIssue[]): number {
+  return errors.reduce(
+    (sum, error) => sum + (error.kind === 'Error' ? 1 + error.dependentCount : Math.max(1, error.dependentCount)),
+    0,
+  );
+}
+
+/**
+ * ✎ Огляд M4 (2): перший місяць (`yyyyMM`), чиї записи «Помилок формул» могли бути відкинуті стелею відповіді року;
+ * `null` — відповідь повна. Сервер бере записи місяців ПО ПОРЯДКУ до стелі, тож зріз — у останньому місяці з записами.
+ */
+function truncatedFrom(response: CalculationIssues | undefined, monthOf: (m: number | null | undefined) => number): number | null {
+  const errors = response?.formulaErrors ?? [];
+  if ((response?.formulaErrorTotal ?? 0) <= representedFormulaCells(errors)) return null;
+
+  return errors.length === 0 ? null : Math.max(...errors.map((error) => monthOf(error.monthNumber)));
+}
+
 /** Чи є в місяці що показати на панелі. */
 export function hasCalculationIssues(rows: UnmatchedRows): boolean {
   return rows.formulaErrors.length > 0 || rows.issues.length > 0 || (rows.sourceIssues?.length ?? 0) > 0;
@@ -149,6 +173,11 @@ export function splitIssuesByMonth(
   for (const source of originals?.sourceIssues ?? []) bucket(monthOf(source.monthNumber)).sourceIssues.push(source);
 
   const hints = own(originals?.tables, copy?.tables);
+  // ✎ Огляд M4 (2): місяць зрізу й пізніші — лічильники нижня межа («N+»); раніші — повні.
+  const cuts = [truncatedFrom(originals, monthOf), activeCopyId === null ? null : truncatedFrom(copy, monthOf)].filter(
+    (cut): cut is number => cut !== null,
+  );
+  const cutFrom = cuts.length === 0 ? null : Math.min(...cuts);
 
   return [...months.entries()]
     .sort(([a], [b]) => a - b)
@@ -161,6 +190,7 @@ export function splitIssuesByMonth(
         formulaErrors: month.formulaErrors,
         formulaErrorTotal: month.formulaErrors.length,
         sourceIssues: month.sourceIssues,
+        truncatedFormulaErrors: cutFrom !== null && periodKey >= cutFrom,
       },
     }))
     .filter((month) => hasCalculationIssues(month.rows));
@@ -179,12 +209,22 @@ export function useYearUnmatchedRows(
   activeCopyId: number | null,
   enabled: boolean,
   anchorFinishedAt: string | null,
-): readonly MonthUnmatchedRows[] {
+): YearUnmatchedRows {
   const originals = useYearCalculationIssues(documentId, anchorPeriodKey, null, enabled);
   const copy = useYearCalculationIssues(documentId, anchorPeriodKey, activeCopyId, enabled);
-
-  return useMemo(
+  const months = useMemo(
     () => (enabled ? splitIssuesByMonth(anchorPeriodKey, originals.data, copy.data, activeCopyId, anchorFinishedAt) : []),
     [enabled, anchorPeriodKey, originals.data, copy.data, activeCopyId, anchorFinishedAt],
   );
+
+  // ✎ Огляд M4 (1): відмова запиту року — сторінка повертається до панелі одного періоду (не ховає проблем).
+  // Збій фонового перезапиту (дані вже є) — не відмова: лишаємо панелі місяців.
+  const failedQuery = (query: typeof originals): boolean => query.isError && query.data === undefined;
+  return { months, failed: enabled && (failedQuery(originals) || (activeCopyId !== null && failedQuery(copy))) };
+}
+
+/** ✎ W15z M4: місяці з проблемами документа «рік»; `failed` — запит року відмовив (без даних). */
+export interface YearUnmatchedRows {
+  readonly months: readonly MonthUnmatchedRows[];
+  readonly failed: boolean;
 }
