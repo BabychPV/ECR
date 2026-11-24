@@ -175,5 +175,24 @@ public sealed record ConsistencyIssuePage(
 /// <param name="Errors">Знахідок ваги 3 (помилка).</param>
 /// <param name="Total">Усього (інша вага, якщо така з'явиться, потрапляє лише сюди).</param>
 /// <param name="LastDetectedAt">Момент найновішої знахідки в UTC; <c>null</c> — журнал порожній.</param>
+/// <param name="LastRun">
+/// ✎ 24.11: останній ЗАВЕРШЕНИЙ прогін перевірки з переліком правил і кількістю знахідок кожного — екран показує,
+/// ЩО перевірено, а не лише «0 знахідок»; <c>null</c> — завершених прогонів ще не було.
+/// </param>
 public sealed record ConsistencySummary(
-    int Info, int Warnings, int Errors, int Total, DateTime? LastDetectedAt);
+    int Info, int Warnings, int Errors, int Total, DateTime? LastDetectedAt, ConsistencyLastRun? LastRun = null);
+
+/// <summary>Останній завершений прогін перевірки узгодженості (<c>itg.MaintenanceRun</c>, <c>consistency-check</c>).</summary>
+/// <param name="StartedAt">Старт, UTC.</param>
+/// <param name="FinishedAt">Кінець, UTC.</param>
+/// <param name="Status"><c>Succeeded</c> (знахідок немає), <c>Degraded</c> (є знахідки) або <c>Failed</c>.</param>
+/// <param name="Checks">Правила прогону в порядку показу; порожньо — прогін до 24.11 (деталі без переліку) або збій.</param>
+public sealed record ConsistencyLastRun(
+    DateTime StartedAt, DateTime FinishedAt, string Status, IReadOnlyList<ConsistencyCheckTally> Checks);
+
+/// <summary>Одне правило прогону.</summary>
+/// <param name="RuleCode">Код правила.</param>
+/// <param name="Found">Знахідок цього прогону.</param>
+/// <param name="Complete">Перевірено повністю (D-480); <c>false</c> — уперлося в стелю, старі знахідки правила лишились.</param>
+/// <param name="Skipped">Не виконувалось (умова вимкнена, напр. прибирання витіснених прогонів).</param>
+public sealed record ConsistencyCheckTally(string RuleCode, int Found, bool Complete, bool Skipped);
