@@ -2083,95 +2083,13 @@ GO
 <a id="rpt"></a>
 ## 8. `rpt` — звітність
 
-> **Зріз без логіки.** Агрегації виконує сервіс при побудові; вʼюха лише
-> проєктує. Індексовані вʼюхи з обчисленнями неприпустимі (ФВ-0.3).
-
-```sql
-CREATE TABLE rpt.ReportDef
-(
-    Id       int           IDENTITY(1,1) NOT NULL,
-    Code     nvarchar(64)  NOT NULL,
-    NameL10n nvarchar(max) NOT NULL,
-    IsRegulatory bit       NOT NULL CONSTRAINT DF_RepDef_Reg DEFAULT(0),
-    IsActive bit           NOT NULL CONSTRAINT DF_RepDef_Act DEFAULT(1),
-    CONSTRAINT PK_ReportDef PRIMARY KEY (Id),
-    CONSTRAINT UQ_ReportDef UNIQUE (Code)
-);
-GO
-
-CREATE TABLE rpt.ReportVersion
-(
-    Id           int           IDENTITY(1,1) NOT NULL,
-    ReportDefId  int           NOT NULL,
-    Version      nvarchar(20)  NOT NULL,
-    Status       tinyint       NOT NULL,
-    ColumnsJson  nvarchar(max) NOT NULL,
-    RulesJson    nvarchar(max) NOT NULL,
-    CreatedAt    datetime2(3)  NOT NULL,
-    CONSTRAINT PK_ReportVersion PRIMARY KEY (Id),
-    CONSTRAINT UQ_ReportVersion UNIQUE (ReportDefId, Version),
-    CONSTRAINT FK_RV_Def FOREIGN KEY (ReportDefId) REFERENCES rpt.ReportDef (Id)
-);
-GO
-
-CREATE TABLE rpt.ReportSnapshot
-(
-    Id               bigint        IDENTITY(1,1) NOT NULL,
-    ReportVersionId  int           NOT NULL,
-    ProjectId        int           NOT NULL,
-    PeriodKey        int           NULL,
-    ParametersJson   nvarchar(max) NULL,
-    CalculationRunId bigint        NULL,
-    -- Статус успадковується від даних (D-65): регуляторні вʼюхи віддають
-    -- лише Approved і Submitted.
-    Status           tinyint       NOT NULL CONSTRAINT DF_Snap_Status DEFAULT(0),
-    IsCurrent        bit           NOT NULL CONSTRAINT DF_Snap_Current DEFAULT(0),
-    RowCount         int           NOT NULL CONSTRAINT DF_Snap_Rows DEFAULT(0),
-    ContentHash      varbinary(32) NULL,
-    BuiltAt          datetime2(3)  NOT NULL,
-    BuiltByUserId    int           NULL,
-    CONSTRAINT PK_ReportSnapshot PRIMARY KEY (Id),
-    CONSTRAINT FK_Snap_Version FOREIGN KEY (ReportVersionId) REFERENCES rpt.ReportVersion (Id),
-    CONSTRAINT FK_Snap_Project FOREIGN KEY (ProjectId)       REFERENCES doc.Project (Id)
-);
-GO
-
-CREATE UNIQUE INDEX UX_ReportSnapshot_Current
-    ON rpt.ReportSnapshot (ReportVersionId, ProjectId, PeriodKey) WHERE IsCurrent = 1;
-GO
-
-CREATE TABLE rpt.ReportRow
-(
-    SnapshotId   bigint         NOT NULL,
-    RowNo        int            NOT NULL,
-    ColumnCode   nvarchar(64)   NOT NULL,
-    ValueString  nvarchar(1000) NULL,
-    ValueNumeric decimal(34,16) NULL,
-    ValueDate    datetime2(3)   NULL,
-    CONSTRAINT PK_ReportRow PRIMARY KEY CLUSTERED (SnapshotId, RowNo, ColumnCode),
-    CONSTRAINT FK_RepRow_Snap FOREIGN KEY (SnapshotId) REFERENCES rpt.ReportSnapshot (Id)
-);
-GO
-```
-
-```sql
--- src/Ecr.Infrastructure/Persistence/Sql/05-rpt-views.sql
--- Генерується під кожен звіт. ФІЛЬТР ЗА СТАТУСОМ — У ВʼЮСІ, не в RDL (D-65):
--- інакше його одного дня забудуть поставити.
-CREATE OR ALTER VIEW rpt.v_WaterReport_v1
-AS
-SELECT s.ProjectId, s.PeriodKey, r.RowNo, r.ColumnCode,
-       r.ValueString, r.ValueNumeric, r.ValueDate,
-       s.BuiltAt, s.Status
-FROM rpt.ReportSnapshot s
-JOIN rpt.ReportRow      r ON r.SnapshotId = s.Id
-JOIN rpt.ReportVersion  v ON v.Id = s.ReportVersionId
-JOIN rpt.ReportDef      d ON d.Id = v.ReportDefId
-WHERE d.Code = N'WaterReport'
-  AND s.IsCurrent = 1
-  AND s.Status IN (1, 2);   -- Approved, Submitted
-GO
-```
+> ✎ **2026-11-24, P-1124-3 (`D-NEW`, `D-53`; слово людини 24.11):** таблиці зрізів `rpt.ReportDef`, `rpt.ReportVersion`,
+> `rpt.ReportSnapshot`, `rpt.ReportRow` і вʼюху `rpt.v_WaterReport_v1` прибрано міграцією `P1124RemoveReportSnapshots`:
+> конструктора звітів і зрізів у застосунку більше немає. Схема `rpt` містить лише **вʼюхи** сирого шару для SSRS
+> (`src/Ecr.Infrastructure/Persistence/Sql/05-rpt-views.sql`): комірки документів (`rpt.v_DocumentCells`, широкі
+> `rpt.v_<Шаблон>_…`), дозволи, розшифровки Id і — з 24.11 — результати й проблеми розрахунку, методології, проєкти,
+> періоди й документи (`rpt.v_CalculationResult`, `rpt.v_CalculationIssue`, `rpt.v_MethodologyVersion`,
+> `rpt.v_MethodologyOutput`, `rpt.v_Project`, `rpt.v_Period`, `rpt.v_Document`). Таблиць у схемі `rpt` немає.
 
 ---
 
