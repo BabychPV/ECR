@@ -1,3 +1,5 @@
+import { mkdirSync } from 'node:fs';
+import path from 'node:path';
 import { expect, test, type APIResponse, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { signIn } from './multiSheet';
 
@@ -35,6 +37,8 @@ const EditorPermissions = [
   'Calculation.View',
   'Calculation.EditFormula',
   'Calculation.EditRule',
+  // ✎ P-1124-1 UI-прохід: вкладка «Required columns» (додати вимогу) — окреме право.
+  'Calculation.ManageRequiredInputs',
   'Calculation.Publish',
   'Calculation.Recalculate',
   'Template.View',
@@ -282,6 +286,17 @@ async function recalculate(page: Page, arranged: Arranged): Promise<void> {
     .toBe('Succeeded');
 }
 
+/** Знімок для UI-проходу: вкладення тесту, а за `ECR_E2E_SHOTS_DIR` — ще й файл. */
+async function shot(page: Page, name: string): Promise<void> {
+  const body = await page.screenshot({ fullPage: false });
+  await test.info().attach(name, { body, contentType: 'image/png' });
+  const dir = process.env['ECR_E2E_SHOTS_DIR'] ?? '';
+  if (dir !== '') {
+    mkdirSync(dir, { recursive: true });
+    await page.screenshot({ path: path.join(dir, `${name}.png`) });
+  }
+}
+
 /** Замінює весь текст редактора скрипта (Monaco): вставка без клавіш — без спливаючих підказок. */
 async function typeScript(page: Page, text: string): Promise<void> {
   const editor = page.getByTestId('script-editor');
@@ -326,11 +341,15 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
 
     const ui = await context.newPage();
     await ui.setViewportSize({ width: 1440, height: 900 });
+    // ✎ P-1124-1 UI-прохід: час відкриття / збереження / перевірки — в анотацію тесту й журнал (>1 с — розбирати).
+    const timings: string[] = [];
+    const opened = Date.now();
     await ui.goto(`/admin/methodologies/${String(arranged.methodologyId)}/versions/${String(arranged.versionId)}/script`);
 
     // 1. Нова версія-скрипт відкрилась у редакторі зі стартовою заготовкою; кнопка «Save» ще вимкнена (нічого не змінено).
     const save = ui.getByRole('button', { name: 'Save', exact: true });
-    await expect(ui.getByTestId('script-editor')).toBeVisible({ timeout: 60_000 });
+    await expect(ui.getByTestId('script-editor').locator('.monaco-editor').first()).toBeVisible({ timeout: 60_000 });
+    timings.push(`editor open ${String(Date.now() - opened)} ms`);
     await expect(save).toBeDisabled();
 
     // 2. Скрипт із помилкою: невідома колонка → діагностика в «Problems» за ~0,5 с, текст ще не збережено.
@@ -377,6 +396,60 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
     await expect(ui.getByTestId('script-tests')).toContainText('TEST_1', { timeout: 30_000 });
     await expect(ui.getByTestId('script-tests')).toContainText(`${OutputCode} = 8`);
 
+    // 5a. ✎ P-1124-1 UI-прохід (24.11): «Inputs & outputs» показує вхід A і вихід OUT.
+    await ui.getByRole('tab', { name: 'Inputs & outputs' }).click();
+    const io = ui.getByRole('tabpanel', { name: 'Inputs & outputs' });
+    await expect(io).toContainText(OutputCode, { timeout: 30_000 });
+    await shot(ui, 'ms-ui-io-light');
+
+    // 5b. «Required columns»: додати вимогу A (Block) — підпис колонки без повтору коду («A (A) · …» — дефект).
+    await ui.getByRole('tab', { name: 'Required columns' }).click();
+    const required = ui.getByRole('tabpanel', { name: 'Required columns' });
+    await required.getByRole('button', { name: 'Add required input' }).click();
+    const requiredDialog = ui.getByRole('dialog');
+    const columnField = requiredDialog.getByRole('textbox', { name: 'Column' });
+    await columnField.click();
+    await columnField.fill('A');
+    const option = ui.getByRole('option', { name: new RegExp(`· S1/${TableCode}$`) }).first();
+    await expect(option).toBeVisible({ timeout: 30_000 });
+    await expect(ui.getByRole('option', { name: /\(A\)/ })).toHaveCount(0);
+    await option.click();
+    await requiredDialog.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(requiredDialog).toBeHidden({ timeout: 30_000 });
+    await expect(required.getByRole('table')).toContainText('A', { timeout: 30_000 });
+    await shot(ui, 'ms-ui-required-light');
+
+    // 5c. Код на весь екран: незбережена правка, курсор і «Problems» переживають вхід/вихід; Ctrl+S працює всередині.
+    await ui.getByRole('tab', { name: /Problems/ }).click();
+    const pane = ui.getByTestId('script-editor-pane');
+    await ui.getByTestId('script-editor').locator('.view-lines').first().click();
+    await ui.keyboard.press('ControlOrMeta+End');
+    await ui.keyboard.insertText(' ');
+    await expect(ui.getByTestId('script-unsaved')).toBeVisible();
+    const toggle = ui.getByTestId('script-fullscreen-toggle');
+    let started = Date.now();
+    await toggle.click();
+    await expect(pane).toHaveAttribute('data-fullscreen', 'true');
+    timings.push(`fullscreen enter ${String(Date.now() - started)} ms`);
+    await expect(ui.getByTestId('script-unsaved')).toBeVisible();
+    await expect(ui.getByTestId('script-status')).toBeVisible();
+    const box = await ui.getByTestId('script-editor').boundingBox();
+    expect(box?.height ?? 0, 'Monaco перерозкладено на висоту вікна').toBeGreaterThan(600);
+    await shot(ui, 'ms-ui-fullscreen-light');
+    await ui.keyboard.press('Escape');
+    await expect(pane).toHaveAttribute('data-fullscreen', 'false');
+    await expect(toggle, 'фокус повертається на кнопку').toBeFocused();
+    await expect(ui.getByTestId('script-unsaved')).toBeVisible();
+    await ui.keyboard.press('ControlOrMeta+Shift+F');
+    await expect(pane).toHaveAttribute('data-fullscreen', 'true');
+    await ui.getByTestId('script-editor').locator('.view-lines').first().click();
+    started = Date.now();
+    await ui.keyboard.press('ControlOrMeta+S');
+    await expect(ui.getByTestId('script-unsaved')).toBeHidden({ timeout: 30_000 });
+    timings.push(`save ${String(Date.now() - started)} ms`);
+    await ui.keyboard.press('Escape');
+    await expect(pane).toHaveAttribute('data-fullscreen', 'false');
+
     // 6. Публікація: причина й дата чинності раніше за період (версію добирають за датою періоду).
     await ui.getByRole('button', { name: 'Publish', exact: true }).click();
     const publish = ui.getByRole('dialog', { name: /Publish/ });
@@ -406,6 +479,83 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
     const index = await gridColumn(ui, OutputCode);
     const cell = ui.locator(`revo-grid revogr-data[type="rgRow"] .rgCell[data-rgrow="0"][aria-colindex="${index}"]`);
     await expect(cell, 'у колонці OUT має бути 8 після перерахунку').toHaveText(/^\s*8([.,]0+)?\s*$/, { timeout: 60_000 });
+
+    // 8. ✎ P-1124-1: вимога A (Block) опублікованої версії-скрипта (без правил відбору) справді блокує запис рядка
+    //    без A у документі — ECR-CALC-0437 (до фіксу gate мовчки пропускав версію без правил).
+    const documentUrl = `/api/v1/documents/${String(arranged.documentId)}`;
+    const tables = await ok<{ tableInstanceId: number; tableCode: string }[]>(
+      await page.request.get(`${documentUrl}/tables?periodKey=${String(arranged.periodKey)}`),
+      'таблиці документа',
+    );
+    const tableInstanceId = tables.find((item) => item.tableCode === TableCode)?.tableInstanceId ?? 0;
+    const before = await ok<{ rows: { rowKey: string }[] }>(
+      await page.request.get(`${documentUrl}/tables/${String(tableInstanceId)}`),
+      'зріз таблиці до рядка',
+    );
+    await ok(await page.request.post(`${documentUrl}/rows`, { data: { tableInstanceId, rowKey: null } }), 'другий рядок');
+    const slice = await ok<{ rows: { rowKey: string; rowVersion: string }[] }>(
+      await page.request.get(`${documentUrl}/tables/${String(tableInstanceId)}`),
+      'зріз таблиці',
+    );
+    const second = slice.rows.find((row) => !before.rows.some((old) => old.rowKey === row.rowKey));
+    expect(second, 'має бути другий рядок').toBeDefined();
+    const refused = await page.request.patch(`${documentUrl}/cells`, {
+      data: {
+        tableInstanceId,
+        periodKey: arranged.periodKey,
+        origin: 'UserEdit',
+        rows: [{ rowKey: second?.rowKey, baseVersion: second?.rowVersion, cells: [{ columnCode: 'KIND', value: 'Gas', isEmpty: false }] }],
+      },
+    });
+    const refusedBody = await refused.text();
+    expect(refused.status(), `рядок без обов'язкового A: ${refusedBody}`).toBeGreaterThanOrEqual(400);
+    expect(refusedBody).toContain('ECR-CALC-0437');
+
+    // 9. Нова версія з переліку версій: свіжа чернетка зі стартової заготовки — 0 проблем; «Compare» відкривається.
+    started = Date.now();
+    await ui.goto(`/admin/methodologies/${String(arranged.methodologyId)}/versions`);
+    await expect(ui.getByTestId('current-script-version')).toBeVisible({ timeout: 60_000 });
+    timings.push(`versions page ${String(Date.now() - started)} ms`);
+    await ui.getByRole('button', { name: 'New version', exact: true }).click();
+    const newVersion = ui.getByRole('dialog', { name: 'New draft version' });
+    await newVersion.getByLabel('Version number').fill('2.0');
+    await newVersion.getByRole('button', { name: 'Create draft' }).click();
+    started = Date.now();
+    await ui.waitForURL(/\/versions\/\d+\/script$/, { timeout: 60_000 });
+    await expect(ui.getByTestId('script-editor').locator('.monaco-editor').first()).toBeVisible({ timeout: 60_000 });
+    await expect(ui.getByTestId('script-status')).toHaveText('No problems found.', { timeout: 30_000 });
+    timings.push(`new draft open+validate ${String(Date.now() - started)} ms`);
+    await ui.getByRole('tab', { name: /Problems/ }).click();
+    await expect(ui.getByRole('tabpanel', { name: /Problems/ }).getByText('No problems found.')).toBeVisible();
+    await shot(ui, 'ms-ui-new-draft-light');
+
+    await ui.getByRole('button', { name: 'Compare with version…' }).click();
+    const compare = ui.getByRole('dialog');
+    await expect(compare).toBeVisible({ timeout: 30_000 });
+    await shot(ui, 'ms-ui-compare-light');
+    await ui.keyboard.press('Escape');
+    await expect(compare).toBeHidden({ timeout: 10_000 });
+
+    // «Edit constant as table» без константи під курсором — пояснення, а не тиша.
+    await ui.getByRole('button', { name: 'Edit constant as table' }).click();
+    await expect(ui.getByText('Place the cursor inside a constant map { … } to edit it as a table.').first()).toBeVisible({ timeout: 10_000 });
+
+    // 10. Темна тема: той самий редактор і код на весь екран.
+    await ok(
+      await ui.request.put('/api/v1/me/preferences/theme', { headers: { 'Content-Type': 'application/json' }, data: JSON.stringify('dark') }),
+      'темна тема',
+    );
+    await ui.reload();
+    await expect(ui.getByTestId('script-editor').locator('.monaco-editor').first()).toBeVisible({ timeout: 60_000 });
+    await shot(ui, 'ms-ui-editor-dark');
+    await ui.getByTestId('script-fullscreen-toggle').click();
+    await expect(ui.getByTestId('script-editor-pane')).toHaveAttribute('data-fullscreen', 'true');
+    await shot(ui, 'ms-ui-fullscreen-dark');
+    await ui.keyboard.press('Escape');
+    await ui.request.put('/api/v1/me/preferences/theme', { headers: { 'Content-Type': 'application/json' }, data: JSON.stringify('light') });
+
+    test.info().annotations.push({ type: 'timings', description: timings.join('; ') });
+    console.log(`[ms-ui-pass] timings: ${timings.join('; ')}`);
   } finally {
     await context.close();
   }
