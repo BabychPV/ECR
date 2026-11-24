@@ -42,3 +42,102 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
 OPTION (RECOMPILE);
 GO
 -- CONS:calc-checks ── кінець секції ──
+
+-- CONS:calc-checks-ui ── ru/kz: екран /admin/consistency-issues — назви правил, блок «Перевірки останнього прогону», порожній стан, посилання (аудит 24.11) ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'consistency.rule.ORPHANED_CELL', N'ru', N'Ячейка ссылается на отсутствующую запись справочника'),
+    (N'consistency.rule.BROKEN_FK', N'ru', N'Строка ссылается на отсутствующий экземпляр таблицы'),
+    (N'consistency.rule.ARCHIVE_CHECKSUM', N'ru', N'Архив не совпадает с контрольными суммами'),
+    (N'consistency.rule.UNBOUND_CALCULATED_COLUMN', N'ru', N'Расчётная колонка без источника значения'),
+    (N'consistency.rule.UNSOURCED_FORMULA_COLUMN', N'ru', N'Формульная колонка без формулы и привязки'),
+    (N'consistency.rule.NON_CURRENT_RUN_ROWS', N'ru', N'Остались строки неактуальных прогонов расчёта'),
+    (N'consistency.rule.STALE_APPROVED_DEPENDENT', N'ru', N'Утверждённый месяц, источник которого изменился'),
+    (N'consistency.rule.CALC_RESULT_VERSION_NOT_EFFECTIVE', N'ru', N'Результаты не действующей версии методологии'),
+    (N'consistency.rule.EFFECTIVE_VERSION_FORMULAS', N'ru', N'Действующая версия методологии ещё на формулах'),
+    (N'consistency.rule.ROW_INPUTS_COMPLETE_NO_RESULT', N'ru', N'Строка со всеми входами, но без результата'),
+    (N'consistency.rule.CURRENT_RUN_NO_RESULTS_WITH_BINDINGS', N'ru', N'Текущий расчёт ничего не дал'),
+    (N'consistency.rule.CALC_ISSUE_WITHOUT_RUN', N'ru', N'Проблемы расчёта удалённого прогона'),
+    (N'consistency.rule.OUTPUT_WITHOUT_BINDING', N'ru', N'Выход методологии нигде не показан'),
+    (N'consistency.rule.BINDING_DEAD_COLUMN', N'ru', N'Привязка к удалённой колонке'),
+    (N'consistency.checks.title', N'ru', N'Проверки последнего запуска ({count})'),
+    (N'consistency.checks.skipped', N'ru', N'Не выполнялась'),
+    (N'consistency.checks.partial', N'ru', N'Проверено частично'),
+    (N'consistency.checks.found', N'ru', N'Находок: {count}'),
+    (N'consistency.emptyChecked', N'ru', N'Последняя проверка выполнила проверок: {count} — находок нет'),
+    (N'consistency.openDocument', N'ru', N'Открыть документ {documentId}, период {period}'),
+    (N'consistency.openMethodology', N'ru', N'Открыть методологию {methodology}'),
+    (N'consistency.rule.ORPHANED_CELL', N'kz', N'Ұяшық жоқ анықтамалық жазбасына сілтейді'),
+    (N'consistency.rule.BROKEN_FK', N'kz', N'Жол жоқ кесте данасына сілтейді'),
+    (N'consistency.rule.ARCHIVE_CHECKSUM', N'kz', N'Мұрағат бақылау сомаларына сәйкес келмейді'),
+    (N'consistency.rule.UNBOUND_CALCULATED_COLUMN', N'kz', N'Мән көзі жоқ есептелетін баған'),
+    (N'consistency.rule.UNSOURCED_FORMULA_COLUMN', N'kz', N'Формуласы да, байланысы да жоқ формулалық баған'),
+    (N'consistency.rule.NON_CURRENT_RUN_ROWS', N'kz', N'Өзекті емес есептеу іске қосылымдарының жолдары қалды'),
+    (N'consistency.rule.STALE_APPROVED_DEPENDENT', N'kz', N'Дереккөзі өзгерген бекітілген ай'),
+    (N'consistency.rule.CALC_RESULT_VERSION_NOT_EFFECTIVE', N'kz', N'Нәтижелер қолданыстағы әдістеме нұсқасынан емес'),
+    (N'consistency.rule.EFFECTIVE_VERSION_FORMULAS', N'kz', N'Қолданыстағы әдістеме нұсқасы әлі формулаларда'),
+    (N'consistency.rule.ROW_INPUTS_COMPLETE_NO_RESULT', N'kz', N'Барлық кірістері бар, бірақ нәтижесі жоқ жол'),
+    (N'consistency.rule.CURRENT_RUN_NO_RESULTS_WITH_BINDINGS', N'kz', N'Ағымдағы есептеу ештеңе бермеді'),
+    (N'consistency.rule.CALC_ISSUE_WITHOUT_RUN', N'kz', N'Жойылған іске қосылымның есептеу мәселелері'),
+    (N'consistency.rule.OUTPUT_WITHOUT_BINDING', N'kz', N'Әдістеме шығысы еш жерде көрсетілмейді'),
+    (N'consistency.rule.BINDING_DEAD_COLUMN', N'kz', N'Жойылған бағанға байланыс'),
+    (N'consistency.checks.title', N'kz', N'Соңғы іске қосудың тексерулері ({count})'),
+    (N'consistency.checks.skipped', N'kz', N'Орындалмады'),
+    (N'consistency.checks.partial', N'kz', N'Ішінара тексерілді'),
+    (N'consistency.checks.found', N'kz', N'Табылғандар: {count}'),
+    (N'consistency.emptyChecked', N'kz', N'Соңғы тексеру орындаған тексерулер: {count} — табылған жоқ'),
+    (N'consistency.openDocument', N'kz', N'{documentId} құжатын ашу, {period} кезеңі'),
+    (N'consistency.openMethodology', N'kz', N'{methodology} әдістемесін ашу')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- CONS:calc-checks-ui ── кінець секції ──
+
+-- CONS:calc-checks-ui ── en (область 1 — адмінський екран /admin/consistency-issues); ru/kz — порцією вище ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'consistency.rule.ORPHANED_CELL', N'en', N'Cell refers to a missing registry entry', 1),
+    (N'consistency.rule.BROKEN_FK', N'en', N'Row refers to a missing table instance', 1),
+    (N'consistency.rule.ARCHIVE_CHECKSUM', N'en', N'Archive does not match its checksums', 1),
+    (N'consistency.rule.UNBOUND_CALCULATED_COLUMN', N'en', N'Calculated column without a value source', 1),
+    (N'consistency.rule.UNSOURCED_FORMULA_COLUMN', N'en', N'Formula column without a formula or binding', 1),
+    (N'consistency.rule.NON_CURRENT_RUN_ROWS', N'en', N'Rows of outdated calculation runs left', 1),
+    (N'consistency.rule.STALE_APPROVED_DEPENDENT', N'en', N'Approved month whose source changed', 1),
+    (N'consistency.rule.CALC_RESULT_VERSION_NOT_EFFECTIVE', N'en', N'Results not from the methodology version in effect', 1),
+    (N'consistency.rule.EFFECTIVE_VERSION_FORMULAS', N'en', N'Methodology version in effect still on formulas', 1),
+    (N'consistency.rule.ROW_INPUTS_COMPLETE_NO_RESULT', N'en', N'Row with all inputs but no result', 1),
+    (N'consistency.rule.CURRENT_RUN_NO_RESULTS_WITH_BINDINGS', N'en', N'Current calculation produced nothing', 1),
+    (N'consistency.rule.CALC_ISSUE_WITHOUT_RUN', N'en', N'Calculation problems of a deleted run', 1),
+    (N'consistency.rule.OUTPUT_WITHOUT_BINDING', N'en', N'Methodology output shown nowhere', 1),
+    (N'consistency.rule.BINDING_DEAD_COLUMN', N'en', N'Binding to a deleted column', 1),
+    (N'consistency.checks.title', N'en', N'Checks in the last run ({count})', 1),
+    (N'consistency.checks.skipped', N'en', N'Not run', 1),
+    (N'consistency.checks.partial', N'en', N'Partly checked', 1),
+    (N'consistency.checks.found', N'en', N'Findings: {count}', 1),
+    (N'consistency.emptyChecked', N'en', N'The last check ran {count} checks — no findings', 1),
+    (N'consistency.openDocument', N'en', N'Open document {documentId}, period {period}', 1),
+    (N'consistency.openMethodology', N'en', N'Open methodology {methodology}', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- CONS:calc-checks-ui ── кінець секції ──
+
+-- CONS:calc-checks-ui-text ── опис сторінки більше не обіцяє «звіряти числа між документами» (жодне правило цього не робить);
+-- фільтр правила — перелік, тож підказка поля — «Усі правила». Змінені тексти наявних ключів: нові бази беруть нове значення
+-- з COLL-ui20consistency / CATALOG-en-base / 00-prelude; епілог оновлює наявні бази, лише поки там стоїть САМЕ старе
+-- значення (правку адміністратора з /admin/ui-strings не затирає).
+INSERT INTO #UiChanged ([Key], Lang, OldVal, NewVal)
+SELECT v.[Key], v.Lang, v.OldVal, v.NewVal
+  FROM (VALUES
+    (N'consistency.description', N'en', N'Every night ECR compares numbers that must agree with each other across documents, tables and registries. Each finding names the rule that failed and the record it affects.', N'Every night, and on demand, ECR checks data integrity and calculation results against fixed rules: broken references, archive integrity, columns without a value source, results that do not come from the methodology version in effect, and calculation gaps. Each finding names the rule and links to the record it affects.'),
+    (N'consistency.description', N'ru', N'Каждую ночь ECR сверяет числа, которые должны совпадать между документами, таблицами и справочниками. Каждая находка называет нарушенное правило и затронутую запись.', N'Каждую ночь и по запросу ECR проверяет целостность данных и результаты расчётов по фиксированным правилам: нарушенные ссылки, целостность архива, колонки без источника значения, результаты не той версии методологии, что действует, и пропуски расчёта. Каждая находка называет правило и ведёт к затронутой записи.'),
+    (N'consistency.description', N'kz', N'ECR әр түнде құжаттар, кестелер мен анықтамалықтар арасында сәйкес болуға тиіс сандарды салыстырады. Әр табылған жағдай бұзылған ережені және қозғалған жазбаны атайды.', N'ECR әр түнде және сұраныс бойынша деректердің тұтастығын және есептеу нәтижелерін тұрақты ережелер бойынша тексереді: бұзылған сілтемелер, мұрағаттың тұтастығы, мән көзі жоқ бағандар, қолданыстағы әдістеме нұсқасынан емес нәтижелер және есептеудегі олқылықтар. Әр табылған жағдай ережені атайды және қозғалған жазбаға апарады.'),
+    (N'consistency.ruleHint', N'en', N'Leave empty for every rule.', N'All rules'),
+    (N'consistency.ruleHint', N'ru', N'Оставьте пустым для всех правил.', N'Все правила'),
+    (N'consistency.ruleHint', N'kz', N'Барлық ереже үшін бос қалдырыңыз.', N'Барлық ережелер')
+       ) AS v ([Key], Lang, OldVal, NewVal)
+OPTION (RECOMPILE);
+GO
+-- CONS:calc-checks-ui-text ── кінець секції ──

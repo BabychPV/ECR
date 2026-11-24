@@ -2592,7 +2592,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'nav.consistency',                 N'en', N'Consistency issues', 1),
     (N'consistency.title',               N'en', N'Consistency issues', 1),
     (N'consistency.rule',                N'en', N'Rule', 1),
-    (N'consistency.ruleHint',            N'en', N'Leave empty for every rule.', 1),
+    (N'consistency.ruleHint',            N'en', N'All rules', 1),
     (N'consistency.openOnly',            N'en', N'Unresolved only', 1),
     (N'consistency.when',                N'en', N'Detected at', 1),
     (N'consistency.severity',            N'en', N'Severity', 1),
