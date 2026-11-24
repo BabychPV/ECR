@@ -183,7 +183,10 @@ export function ProjectTemplatesSection({
                   return (
                     <Table.Tr key={row.templateId} data-project-template={row.templateCode} data-primary={row.isPrimary}>
                       <Table.Td>
-                        <Group gap="xs" wrap="nowrap">
+                        {/* ⚠ `wrap`, not `nowrap`: Mantine `Code` has `overflow: auto`, so in a nowrap flex row at 375 px it
+                            shrinks below its text and becomes a scroll region without focus (axe
+                            scrollable-region-focusable). Wrapping moves «Primary» under the code instead. */}
+                        <Group gap="xs" wrap="wrap">
                           <CodeText>{row.templateCode}</CodeText>
                           {row.isPrimary && (
                             <Badge variant="light" data-testid="project-template-primary">
