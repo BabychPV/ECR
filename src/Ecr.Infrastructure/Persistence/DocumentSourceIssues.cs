@@ -46,6 +46,8 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
     private readonly Dictionary<(int BindingId, int Year), SourceYear?> years = [];
     private readonly Dictionary<long, (string ProjectCode, string DocumentKey)> sources = [];
     private readonly Dictionary<(long DocumentId, int PeriodKey, DateTime Since, long ConsumerId, int ConsumerPeriod), DateTime?> changes = [];
+    private readonly Dictionary<(long DocumentId, int PeriodKey), Dictionary<string, string>?> seen = [];
+    private readonly Dictionary<(long DocumentId, int PeriodKey), string> now = [];
     private (bool ApprovedOnly, bool Any)? kindsCache;
 
     /// <summary>✎ F5-R (D-570): причина <c>SourceChangedAfterApproval</c> за <c>Any</c> — дані місяця джерела змінено після затвердження.</summary>
@@ -159,7 +161,13 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
                         // перерахував затверджене (перенесення, пропуск), межі не піднімає — і копії аркушів теж.
                         changedAt = await SourceChangedAtAsync(source, year, month, approvedAt!.Value, documentId, periodKey, ct).ConfigureAwait(false);
 
-                        (kind, reason) = changedAt is null
+                        // ✎ P-1123-20: зміни джерела БЕЗ aud.CellChange (видалення рядка подією чи людиною, новий актуальний
+                        // прогін джерела з іншими F_<X>) — стан джерела зараз ≠ стану, який бачив чинний прогін споживача.
+                        // Стану не записано (прогін до міграції, невідомо) — як доти: лише журнал комірок.
+                        var changed = changedAt is not null
+                                      || await SourceStateChangedAsync(source, year, month, documentId, periodKey, ct).ConfigureAwait(false);
+
+                        (kind, reason) = !changed
                             ? (null, null)
                             : (ISourceIssueReader.SourceChangedAfterApproval, ReasonChanged);
                     }
@@ -188,6 +196,151 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
 
         return [.. findings.DistinctBy(f => (f.Row.Kind, f.Row.PeriodKey, f.Row.MonthNumber))];
     }
+
+    /// <summary>
+    /// ✎ P-1123-20: стан джерел документа-споживача <paramref name="documentId"/> за роки <paramref name="years"/> — те, що
+    /// записує прогін споживача на старті (<c>CalculationRun.SourceStateJson</c>): для кожної зв'язки <c>Any</c> з читанням із
+    /// документа — обраний документ-джерело року і відбиток кожного його періоду-власника місяця (<see cref="SourceStatesAsync(SourceYear, IReadOnlyCollection{int}, CancellationToken)"/>).
+    /// </summary>
+    /// <param name="documentId">Документ-споживач.</param>
+    /// <param name="years">Роки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>JSON <c>{"{документ}:{період}": "{відбиток}"}</c> (порожній об'єкт — джерел немає).</returns>
+    /// <remarks>
+    /// ⛔ Що читає споживач (<see cref="Hse400CompositionSnapshotLoader"/>): лише екземпляри ОРИГІНАЛУ таблиць зв'язки обраного
+    /// документа (<c>SheetCopyId = NULL</c>) — комірки рядків і розрахункові <c>F_&lt;X&gt;</c> актуальних прогонів; ні
+    /// копій аркушів, ні полів шапки (інших відображень зв'язки, ніж склад HSE400, немає — <c>MappingKind</c>). Тому
+    /// додавання/видалення копії й шапка в стан не входять — числа споживача від них не залежать.
+    /// </remarks>
+    internal async Task<string> SourceStatesJsonAsync(long documentId, IReadOnlyCollection<int> years, CancellationToken ct)
+    {
+        var states = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        var periodKeys = years.SelectMany(y => Enumerable.Range(1, 12).Select(m => (y * 100) + m)).ToList();
+        var kinds = await BindingKindsAsync(ct).ConfigureAwait(false);
+        if (kinds.Any && readOverride != false && periodKeys.Count > 0)
+        {
+            var bindingsByPeriod = await DocumentSourceMonthGate
+                .ConsumerBindingsByPeriodAsync(db, graph, documentId, periodKeys, ct, includeAny: true).ConfigureAwait(false);
+            var done = new HashSet<(int Binding, int Year)>();
+            foreach (var (periodKey, bindings) in bindingsByPeriod)
+            {
+                foreach (var binding in bindings.Where(b => b.State == DocumentSourceState.Any && (readOverride ?? b.ReadFromDocument)))
+                {
+                    var year = periodKey / 100;
+                    if (!done.Add((binding.Id, year)) || await SourceYearAsync(binding.Id, year, ct).ConfigureAwait(false) is not { } source)
+                    {
+                        continue;
+                    }
+
+                    var owners = Enumerable.Range(1, 12).Select(m => OwnerPeriod(source.PeriodKind, year, m)).Distinct().ToList();
+                    foreach (var (owner, state) in await SourceStatesAsync(source, owners, ct).ConfigureAwait(false))
+                    {
+                        states[StateKey(source.DocumentId, owner)] = state;
+                    }
+                }
+            }
+        }
+
+        return System.Text.Json.JsonSerializer.Serialize(states);
+    }
+
+    /// <summary>Ключ стану джерела: документ і період-власник.</summary>
+    private static string StateKey(long documentId, int periodKey)
+        => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{documentId}:{periodKey}");
+
+    /// <summary>
+    /// ✎ P-1123-20: чи стан місяця <paramref name="month"/> джерела зараз інший, ніж бачив чинний прогін споживача
+    /// (<c>SourceStateJson</c>). Стану не записано — <c>false</c> (лише журнал комірок, як доти); джерела в записі немає
+    /// (тоді його не було) — так.
+    /// </summary>
+    private async Task<bool> SourceStateChangedAsync(
+        SourceYear source, int year, int month, long consumerId, int consumerPeriod, CancellationToken ct)
+    {
+        if (!seen.TryGetValue((consumerId, consumerPeriod), out var recorded))
+        {
+            var json = (await db.CalculationRuns.AsNoTracking()
+                    .Where(r => r.DocumentId == consumerId && r.PeriodKey == consumerPeriod
+                                && r.Status == Ecr.Domain.Entities.Calculations.CalculationRun.CurrentStatus)
+                    .Select(r => r.SourceStateJson)
+                    .ToListAsync(ct).ConfigureAwait(false))
+                .FirstOrDefault();
+            recorded = json is null ? null : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+            seen[(consumerId, consumerPeriod)] = recorded;
+        }
+
+        if (recorded is null)
+        {
+            return false;
+        }
+
+        var owner = OwnerPeriod(source.PeriodKind, year, month);
+        if (!now.TryGetValue((source.DocumentId, owner), out var current))
+        {
+            current = (await SourceStatesAsync(source, [owner], ct).ConfigureAwait(false)).GetValueOrDefault(owner) ?? string.Empty;
+            now[(source.DocumentId, owner)] = current;
+        }
+
+        return !recorded.TryGetValue(StateKey(source.DocumentId, owner), out var was)
+               || !string.Equals(was, current, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// ✎ P-1123-20: відбиток кожного періоду <paramref name="periodKeys"/> документа-джерела — одним запитом: рядки
+    /// оригіналів таблиць зв'язки (кількість і сума <c>RowVersion</c> невидалених: видалення рядка, вставка, будь-який
+    /// запис) і хеш розрахункових <c>F_&lt;X&gt;</c> (екземпляр, рядок, код, значення) актуальних прогонів документа за
+    /// період (правило <see cref="CurrentRunSelection"/>: власний документний, інакше прогін усього проєкту). Порожній
+    /// перерахунок з тими самими числами хеша не міняє.
+    /// </summary>
+    private async Task<Dictionary<int, string>> SourceStatesAsync(SourceYear source, IReadOnlyCollection<int> periodKeys, CancellationToken ct)
+    {
+        // ⚠ SQL Server 2016 (SqlServer2016FloorTests): без STRING_AGG — рядки F_ повертаються тим самим запитом, хеш — тут.
+        var rows = await db.Database
+            .SqlQueryRaw<SourceStateRow>(
+                """
+                SELECT p.Period AS Period, N'R' AS Kind, CONCAT(rs.Cnt, ':', rs.Sm) AS Value
+                  FROM (SELECT CAST(j.[value] AS int) AS Period FROM OPENJSON(@periods) AS j) AS p
+                 OUTER APPLY (SELECT COUNT_BIG(*) AS Cnt, SUM(CAST(CAST(r.RowVersion AS bigint) AS decimal(38, 0))) AS Sm
+                                FROM doc.TableRow AS r
+                               WHERE r.IsDeleted = 0 AND r.PeriodKey = p.Period
+                                 AND r.TableInstanceId IN (SELECT i.Id FROM doc.TableInstance AS i
+                                                            WHERE i.DocumentId = @doc AND i.SheetCopyId IS NULL
+                                                              AND i.TableDefId IN (SELECT CAST(t.[value] AS int) FROM OPENJSON(@tables) AS t))) AS rs
+                UNION ALL
+                SELECT res.PeriodKey, N'F',
+                       CONCAT(res.TableInstanceId, N'|', res.SourceRowKey, N'|', res.OutputCode, N'|', CONVERT(nvarchar(80), res.[Value]))
+                  FROM calc.CalculationRun AS cr
+                  JOIN calc.CalculationResult AS res ON res.CalculationRunId = cr.Id
+                 WHERE cr.Status = N'Current'
+                   AND res.PeriodKey IN (SELECT CAST(j.[value] AS int) FROM OPENJSON(@periods) AS j)
+                   AND (cr.DocumentId = @doc
+                        OR (cr.DocumentId IS NULL
+                            AND cr.ProjectId = (SELECT d.ProjectId FROM doc.Document AS d WHERE d.Id = @doc)
+                            AND NOT EXISTS (SELECT 1 FROM calc.CalculationRun AS own
+                                             WHERE own.Status = N'Current' AND own.DocumentId = @doc AND own.PeriodKey = res.PeriodKey)))
+                   AND res.DocumentId = @doc AND res.SourceRowKey LIKE N'F[_]%'
+                   AND res.TableInstanceId IN (SELECT i.Id FROM doc.TableInstance AS i
+                                                WHERE i.DocumentId = @doc AND i.SheetCopyId IS NULL
+                                                  AND i.TableDefId IN (SELECT CAST(t.[value] AS int) FROM OPENJSON(@tables) AS t))
+                """,
+                new Microsoft.Data.SqlClient.SqlParameter("@doc", source.DocumentId),
+                new Microsoft.Data.SqlClient.SqlParameter("@periods", System.Text.Json.JsonSerializer.Serialize(periodKeys)),
+                new Microsoft.Data.SqlClient.SqlParameter("@tables", System.Text.Json.JsonSerializer.Serialize(source.TableIds)))
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        var result = new Dictionary<int, string>();
+        foreach (var period in rows.Where(r => r.Kind == "R"))
+        {
+            var results = rows.Where(r => r.Kind == "F" && r.Period == period.Period).Select(r => r.Value).Order(StringComparer.Ordinal);
+            var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(string.Join('\n', results))));
+            result[period.Period] = period.Value + "|" + hash;
+        }
+
+        return result;
+    }
+
+    /// <summary>Рядок відбитка стану джерела: <c>R</c> — штамп рядків періоду, <c>F</c> — один розрахунковий результат.</summary>
+    private sealed record SourceStateRow(int Period, string Kind, string Value);
 
     /// <summary>
     /// ✎ F5-R (D-570): запас перед моментом затвердження споживача. Момент затвердження (<c>ApprovedAt</c>) береться ДО

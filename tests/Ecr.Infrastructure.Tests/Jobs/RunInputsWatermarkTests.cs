@@ -127,6 +127,31 @@ public sealed class RunInputsWatermarkTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// ✎ Огляд b11 №4 (LOW): прогін «з затвердженими» (<c>-dependents-approved</c>, <c>IncludeApproved</c>) ПЕРЕПИСУЄ
+    /// затверджені аркуші (оригінал чи копію) — бере ВЛАСНУ межу, тож правку джерела до нього враховано й позначка F5-R
+    /// знімається. Контроль — той самий прогін без <c>IncludeApproved</c> (<see cref="Затверджений_оригінал_чи_копія_не_піднімає_межу"/>).
+    /// </summary>
+    /// <remarks>Мутація: <c>IncludeApproved</c> знову в <c>partialAll</c> — червоний.</remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Прогін_з_затвердженими_бере_власну_межу(bool copy)
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await builder.BuildAsync(periodKey: January.Value);
+        await RunAsync(document, At);
+        var edit = await CellChangeAsync(document);
+        await ApproveAsync(builder, document, copy);
+
+        await RunAsync(document, At.AddHours(1), includeApproved: true);
+
+        var watermarks = await WatermarksAsync(document);
+        Assert.Equal(2, watermarks.Count);
+        Assert.NotNull(watermarks[1]);
+        Assert.True(watermarks[1] >= edit, $"межа {watermarks[1]} < правка {edit} після прогону з затвердженими");
+    }
+
     [Theory]
     [InlineData(10L, false, 3L, 10L)]
     [InlineData(10L, true, 3L, 3L)]
@@ -144,12 +169,13 @@ public sealed class RunInputsWatermarkTests(SqlServerFixture sql)
 
     // ───────────────────────────── допоміжне ─────────────────────────────
 
-    private async Task RunAsync(TestDocument document, DateTime at)
+    private async Task RunAsync(TestDocument document, DateTime at, bool includeApproved = false)
     {
         await using var db = sql.CreateContext();
         await NightlyJobParts.Job(db, new NoopRunner(), Substitute.For<IBackgroundJobScheduler>(), at)
             .ExecuteAsync(
-                new RecalculationRequest(document.ProjectId, document.DocumentId, January.Value, TriggeredByUserId: null),
+                new RecalculationRequest(
+                    document.ProjectId, document.DocumentId, January.Value, TriggeredByUserId: null, IncludeApproved: includeApproved),
                 Substitute.For<IJobProgress>(),
                 CancellationToken.None);
     }

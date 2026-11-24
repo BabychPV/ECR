@@ -379,7 +379,13 @@ public sealed partial class RecalculationJob(
         long? inputsWatermark = null;
         var fullPeriods = new HashSet<int>();
         var previousInputsWatermarks = new Dictionary<int, long?>();
-        var partialAll = request.SheetDefId is not null || request.IncludeApproved || request.ForeignOwnerPass;
+
+        // ✎ P-1123-20: стан джерел, які бачить прогін (знято на старті разом із межею), і стан попереднього актуального.
+        string? sourceStates = null;
+        var previousSourceStates = new Dictionary<int, string?>();
+        // ✎ Огляд b11 №4 (LOW): IncludeApproved (-dependents-approved) ПЕРЕПИСУЄ затверджені аркуші — не неповний сам по собі;
+        // неповним його робить лише справжній пропуск (перенесення, область аркуша, період без формул).
+        var partialAll = request.SheetDefId is not null || request.ForeignOwnerPass;
 
         async Task<(Domain.Entities.Calculations.CalculationRun Run, ModuleProfile Profile)> RunForAsync(int periodKey)
         {
@@ -387,12 +393,14 @@ public sealed partial class RecalculationJob(
             {
                 if (request.DocumentId > 0)
                 {
-                    previousInputsWatermarks[periodKey] = await db.CalculationRuns.AsNoTracking()
+                    var previous = await db.CalculationRuns.AsNoTracking()
                         .Where(r => r.DocumentId == request.DocumentId && r.PeriodKey == periodKey
                                     && r.Status == Domain.Entities.Calculations.CalculationRun.CurrentStatus)
-                        .Select(r => r.InputsCellChangeWatermark)
+                        .Select(r => new { r.InputsCellChangeWatermark, r.SourceStateJson })
                         .FirstOrDefaultAsync(ct)
                         .ConfigureAwait(false);
+                    previousInputsWatermarks[periodKey] = previous?.InputsCellChangeWatermark;
+                    previousSourceStates[periodKey] = previous?.SourceStateJson;
                 }
 
                 entry = (NewRun(periodKey), new ModuleProfile());
@@ -416,6 +424,7 @@ public sealed partial class RecalculationJob(
             if (request.DocumentId > 0)
             {
                 inputsWatermark = await CellChangeWatermarks.CommittedAsync(db, ct).ConfigureAwait(false);
+                sourceStates = await SourceStatesAsync(request, ct).ConfigureAwait(false);
             }
 
             // ⚠ Названий період — прогін створюється ОДРАЗУ, як і завжди.
@@ -713,7 +722,7 @@ public sealed partial class RecalculationJob(
 
                     var (run, runProfile) = await RunForAsync(period).ConfigureAwait(false);
 
-                    if (periods.Contains(period) && !approvedStatePeriods.Contains(period)
+                    if (periods.Contains(period) && (request.IncludeApproved || !approvedStatePeriods.Contains(period))
                         && !bindingPlan.CarryOver.ContainsKey(period) && !bindingPlan.CarryOverInstances.ContainsKey(period))
                     {
                         fullPeriods.Add(period);
@@ -832,6 +841,17 @@ public sealed partial class RecalculationJob(
                             .ExecuteSqlAsync(
                                 $"UPDATE calc.CalculationRun SET InputsCellChangeWatermark = {value} WHERE Id = {run.Id}",
                                 ct)
+                            .ConfigureAwait(false);
+                    }
+
+                    // ✎ P-1123-20: стан джерел — той самий принцип: неповний період лишає стан попереднього актуального.
+                    var state = partialAll || !fullPeriods.Contains(period)
+                        ? previousSourceStates.GetValueOrDefault(period)
+                        : sourceStates;
+                    if (state is not null)
+                    {
+                        await db.Database
+                            .ExecuteSqlAsync($"UPDATE calc.CalculationRun SET SourceStateJson = {state} WHERE Id = {run.Id}", ct)
                             .ConfigureAwait(false);
                     }
                 }
@@ -3428,6 +3448,37 @@ public sealed partial class RecalculationJob(
         => !partial ? start
             : start is { } own && previous is { } before ? Math.Min(own, before)
             : null;
+
+    /// <summary>
+    /// ✎ P-1123-20: стан джерел документа запиту за його роки (<c>DocumentSourceIssues.SourceStatesJsonAsync</c>) — ДО читання
+    /// входів; <c>null</c> — невідомо (без графа, збій запиту): позначка тоді лише за журналом комірок, як доти.
+    /// </summary>
+    private async Task<string?> SourceStatesAsync(RecalculationRequest request, CancellationToken ct)
+    {
+        if (dependencyGraph is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            IReadOnlyCollection<int> years = request.PeriodKey is { } named ? [named / 100]
+                : request.Year is { } year ? [year]
+                : await db.TableInstances.AsNoTracking()
+                    .Where(i => i.DocumentId == request.DocumentId)
+                    .Select(i => i.PeriodKeyValue / 100)
+                    .Distinct()
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+            return await new DocumentSourceIssues(db, readOverride: null, dependencyGraph)
+                .SourceStatesJsonAsync(request.DocumentId, years, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Microsoft.Data.SqlClient.SqlException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>✎ W15z M7: періоди документа з будь-яким затвердженим станом аркуша (оригінал чи копія).</summary>
     private async Task<HashSet<int>> ApprovedStatePeriodsAsync(long documentId, CancellationToken ct)
