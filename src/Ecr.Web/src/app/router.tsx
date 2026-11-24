@@ -2,7 +2,7 @@
 import { Loader, Center } from '@mantine/core';
 import { createBrowserRouter, Navigate, type RouteObject } from 'react-router-dom';
 import { AdminLayout } from './AdminLayout';
-import { LegacyProjectRedirect, ProjectTab } from './projectRoutes';
+import { LegacyProjectRedirect, LegacyProjectTabRedirect, ProjectTab } from './projectRoutes';
 import { AppLayout } from './AppLayout';
 import { HomeRoute } from './HomeRoute';
 import { RouteErrorPage } from './RouteErrorPage';
@@ -317,7 +317,7 @@ export const router = createBrowserRouter([
         handle: routes.documentResults.handle,
       },
 
-      // ✎ Projects (макет 08.11): перелік проєктів і проєкт із вкладками Periods · Settings · Lifecycle.
+      // ✎ Projects (макет 08.11): перелік проєктів і проєкт із вкладками Periods · Templates · Lifecycle · General (✎ 24.11).
       {
         path: childPath(routes.projects),
         element: guarded(routes.projects.handle, <ProjectsPage />),
@@ -335,15 +335,22 @@ export const router = createBrowserRouter([
             handle: routes.projectPeriods.handle,
           },
           {
-            path: relativePath(routes.projectSettings, 'projects/:id'),
-            element: <ProjectTab tab="settings" />,
-            handle: routes.projectSettings.handle,
+            path: relativePath(routes.projectTemplates, 'projects/:id'),
+            element: <ProjectTab tab="templates" />,
+            handle: routes.projectTemplates.handle,
           },
           {
             path: relativePath(routes.projectLifecycle, 'projects/:id'),
             element: <ProjectTab tab="lifecycle" />,
             handle: routes.projectLifecycle.handle,
           },
+          {
+            path: relativePath(routes.projectGeneral, 'projects/:id'),
+            element: <ProjectTab tab="general" />,
+            handle: routes.projectGeneral.handle,
+          },
+          // ✎ 24.11: колишня вкладка Settings — закладки й посилання ведуть на Templates.
+          { path: 'settings', element: <LegacyProjectTabRedirect tab="templates" /> },
         ],
       },
 
@@ -550,7 +557,7 @@ export const router = createBrowserRouter([
            * крихт у них немає, як і в `/403`.
            */
           { path: 'periods', element: <LegacyProjectRedirect tab="periods" /> },
-          { path: 'projects', element: <LegacyProjectRedirect tab="settings" /> },
+          { path: 'projects', element: <LegacyProjectRedirect tab="templates" /> },
           {
             path: relativePath(routes.adminSources, 'admin'),
             element: guarded(routes.adminSources.handle, <SourcesPage />),

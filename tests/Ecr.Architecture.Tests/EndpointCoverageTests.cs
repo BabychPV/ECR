@@ -769,7 +769,7 @@ public sealed partial class EndpointCoverageTests
         "nav.permits", "permits.types.title", "permits.typeEditor.title", "permits.lists.title",
         "permits.bindings.title", "permits.binding.title", "permits.detail.title",
         "nav.piData",
-        "projects.tab.periods", "projects.tab.settings", "projects.tab.lifecycle",
+        "projects.tab.periods", "projects.tab.templates", "projects.tab.lifecycle", "projects.tab.general",
     ];
 
     /// <summary>Підписи груп бічного меню (UI-12, <c>navGroups</c> у <c>routes.ts</c>).</summary>

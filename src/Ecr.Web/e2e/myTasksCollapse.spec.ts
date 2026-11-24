@@ -124,11 +124,12 @@ test.describe('myTasksCollapse: My tasks sections collapse and approval months g
       await page.request.get(`/api/v1/documents/${String(documentId)}?periodKey=${String(periodKey)}`),
       'GET document',
     );
-    // ✎ Projects (08.11): налаштування — вкладка Settings проєкту; клон — на вкладці Lifecycle.
-    await page.goto(`/projects/${String(card.projectId)}/settings`);
+    // ✎ Projects (08.11): налаштування — вкладки проєкту; клон — на вкладці Lifecycle. ✎ 24.11: поточний період і
+    // політика — вкладка General, маршрут погодження — рядок над таблицею шаблонів на вкладці Templates.
+    await page.goto(`/projects/${String(card.projectId)}/general`);
 
     // ✎ UAT project-settings (людина 08.11): повна назва дії + опис поруч, пов'язаний через aria-describedby.
-    for (const name of [/^Pin current period…$/, /^Edit approval route…$/, /^Manage period policies…$/]) {
+    for (const name of [/^Pin current period…$/, /^Manage period policies…$/]) {
       const button = page.getByRole('button', { name });
       await expect(button).toBeVisible();
       const describedBy = (await button.getAttribute('aria-describedby')) ?? '';
@@ -139,5 +140,13 @@ test.describe('myTasksCollapse: My tasks sections collapse and approval months g
 
     // Автоматичний період — «найраніший відкритий місяць», а не «за датою».
     await expect(page.locator('[data-current-period-explain]')).toHaveText(/earliest open month|no month is open/);
+
+    // Маршрут — одним рядком на Templates; опис дії — для читалки (visually hidden), пов'язаний через aria-describedby.
+    await page.goto(`/projects/${String(card.projectId)}/templates`);
+    const route = page.locator('[data-project-route]').getByRole('button', { name: /^Edit approval route…$/ });
+    await expect(route).toBeVisible({ timeout: 60_000 });
+    const routeDescribedBy = (await route.getAttribute('aria-describedby')) ?? '';
+    expect(routeDescribedBy).not.toBe('');
+    expect(((await page.locator(`[id="${routeDescribedBy}"]`).textContent()) ?? '').length).toBeGreaterThan(20);
   });
 });

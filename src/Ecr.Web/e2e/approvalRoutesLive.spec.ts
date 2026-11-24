@@ -163,11 +163,15 @@ test.describe('approvalRoutes: маршрут шаблону на реально
       await expect(reloaded.getByTestId('scoped-approval-route')).toHaveAttribute('data-source', 'own', { timeout: 60_000 });
       await expect(reloaded.getByTestId('approval-route-steps').getByRole('listitem')).toHaveCount(2);
 
-      // ── 4. Налаштування проєкту → «Шаблони — погодження» ────────────────────────────
-      await page.goto(`/projects/${String(projectId)}/settings`);
-      const templateRow = page.getByTestId('project-template-routes').locator(`[data-template-id="${String(templateId)}"]`);
+      // ── 4. Проєкт → вкладка Templates: погодження в тій самій таблиці шаблонів (✎ 24.11) ─────
+      await page.goto(`/projects/${String(projectId)}/templates`);
+      const templateRow = page.getByTestId('project-templates').locator(`[data-project-template="${row.code}"]`);
       await expect(templateRow).toBeVisible({ timeout: 60_000 });
-      await expect(templateRow).toHaveAttribute('data-source', row.effectiveSource === 'own' ? 'own' : 'template');
+      await expect(templateRow.locator('[data-template-route-source]')).toHaveAttribute(
+        'data-template-route-source',
+        row.effectiveSource === 'own' ? 'own' : 'template',
+        { timeout: 60_000 },
+      );
       await expect(templateRow.getByText(row.code, { exact: true })).toBeVisible();
     } finally {
       await admin.close();

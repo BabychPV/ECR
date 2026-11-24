@@ -5,7 +5,6 @@ import { apiFetch } from '@/api/client';
 import type { ChangeProjectTimeZoneRequest, PeriodCalendarDto } from '@/api/types';
 import { hasProjectGrant } from '@/features/documents/projectGrant';
 import { projectsQuery } from '@/features/projects/allProjects';
-import { ApprovalRouteEditor } from '@/features/projects/ApprovalRouteEditor';
 import { CurrentPeriodSetting } from '@/features/projects/CurrentPeriodSetting';
 import { SettingsAction } from '@/features/projects/SettingsAction';
 import { timeZones } from '@/features/projects/timeZones';
@@ -18,15 +17,14 @@ const PeriodPolicyManager = lazy(async () => ({
   default: (await import('@/features/projects/PeriodPolicyManager')).PeriodPolicyManager,
 }));
 
-/* ✎ B155: шаблони проєкту з маршрутом погодження — за `import()` з тієї ж причини (бюджет маршруту). */
-const ProjectTemplateRoutes = lazy(async () => ({
-  default: (await import('@/features/approvalRoutes/ProjectTemplateRoutes')).ProjectTemplateRoutes,
+/* ✎ B74 P4 (D-576) + ✎ 24.11: шаблони проєкту з погодженням однією таблицею — за `import()` з тієї ж причини
+   (бюджет маршруту). */
+const ProjectTemplatesTab = lazy(async () => ({
+  default: (await import('@/features/projects/ProjectTemplatesTab')).ProjectTemplatesTab,
 }));
 
-/* ✎ B74 P4 (D-576): шаблони проєкту «рік · об'єкт» — за `import()` з тієї ж причини (бюджет маршруту). */
-const ProjectTemplatesSection = lazy(async () => ({
-  default: (await import('@/features/projects/ProjectTemplatesSection')).ProjectTemplatesSection,
-}));
+/** Вкладка, яку малює сторінка: Templates (шаблони й погодження) або General (період, політика, часовий пояс). */
+export type ProjectSettingsView = 'templates' | 'general';
 
 /** Розділ вкладки: заголовок `h2` і вміст. */
 function Section({ id, title, children }: { readonly id: string; readonly title: string; readonly children: ReactNode }): JSX.Element {
@@ -41,14 +39,22 @@ function Section({ id, title, children }: { readonly id: string; readonly title:
 }
 
 /**
- * ✎ Projects (макет 08.11, рядок f5): вкладка Settings проєкту — поточний період (Automatic / Pin), політика
- * закриття місяців, маршрут погодження і часовий пояс. Колишня окрема сторінка «Project settings»; життєвий цикл
- * (активація, клон, архів, видалення) — на вкладці Lifecycle.
+ * ✎ Projects (макет 08.11, рядок f5): налаштування проєкту. ✎ 24.11 (рішення людини «Одна таблиця шаблонів»):
+ * колишня вкладка Settings розділена на дві —
+ * - `templates`: маршрут погодження проєкту одним рядком і одна таблиця шаблонів з погодженням (`ProjectTemplatesTab`);
+ * - `general`: поточний період (Automatic / Pin), політика закриття місяців і часовий пояс.
+ * Життєвий цикл (активація, клон, архів, видалення) — на вкладці Lifecycle.
  *
  * ⛔ `F-19`: право каже, ЩО можна, а грант — НАД ЧИМ. Кожна дія над проєктом вимагає ще й гранта Manage на нього —
  * інакше кнопка обіцяла б 403.
  */
-export function ProjectSettingsPage({ projectId }: { readonly projectId: number }): JSX.Element | null {
+export function ProjectSettingsPage({
+  projectId,
+  view = 'general',
+}: {
+  readonly projectId: number;
+  readonly view?: ProjectSettingsView;
+}): JSX.Element | null {
   const queryClient = useQueryClient();
   const session = useSession();
 
@@ -95,13 +101,36 @@ export function ProjectSettingsPage({ projectId }: { readonly projectId: number 
   // Закріплення поточного періоду — `Period.Configure` + грант Manage (`SetCurrentPeriodHandler`), як і на Periods.
   const configures = can(session.data, 'Period.Configure') && managesSelected;
 
+  const archivedNote =
+    selected.status === 'Archived' ? (
+      <Text size="sm" mb="sm" data-settings-readonly="">
+        {t('projects.settings.archivedReadOnly')}
+      </Text>
+    ) : null;
+
+  if (view === 'templates') {
+    return (
+      <>
+        {archivedNote}
+        {/* ✎ B74 P4 (D-576): шаблони проєкту — бачить кожен, хто відкрив вкладку (`Document.View`); додати й від'єднати —
+            `Project.Manage` + грант Manage і не архівний проєкт. ✎ 24.11: погодження (маршрут проєкту, джерело маршруту
+            кожного шаблону, виняток B155) — у тій самій таблиці, з правами маршруту проєкту (`Project.Manage` + Manage). */}
+        <Section id="templates" title={t('projects.templates.title')}>
+          <Suspense fallback={null}>
+            <ProjectTemplatesTab
+              projectId={selected.id}
+              readOnly={selected.status === 'Archived' || !managesProject}
+              managesProject={managesProject}
+            />
+          </Suspense>
+        </Section>
+      </>
+    );
+  }
+
   return (
     <>
-      {selected.status === 'Archived' && (
-        <Text size="sm" mb="sm" data-settings-readonly="">
-          {t('projects.settings.archivedReadOnly')}
-        </Text>
-      )}
+      {archivedNote}
 
       {/* ✎ Period clarity (п. c): режим поточного періоду — Automatic by date / Pinned to <місяць> (`D-77`). */}
       <Section id="current-period" title={t('projectSettings.currentPeriod')}>
@@ -124,38 +153,6 @@ export function ProjectSettingsPage({ projectId }: { readonly projectId: number 
               </Suspense>
             )}
           </SettingsAction>
-        </Section>
-      )}
-
-      {/* ✎ B74 P4 (D-576): шаблони проєкту — бачить кожен, хто відкрив налаштування (`Document.View`); додати й
-          від'єднати — `Project.Manage` + грант Manage і не архівний проєкт (як решта дій вкладки). */}
-      <Section id="templates" title={t('projects.templates.title')}>
-        <Suspense fallback={null}>
-          <ProjectTemplatesSection projectId={selected.id} readOnly={selected.status === 'Archived' || !managesProject} />
-        </Suspense>
-      </Section>
-
-      {/* ⛔ Маршрут погодження (`ФВ-5.17`) — налаштування проєкту, не місяця. */}
-      {managesProject && (
-        <Section id="route" title={t('projects.settings.route')}>
-          <SettingsAction id="route" description={t('projectSettings.routeActionDesc')}>
-            {(describedBy) => (
-              <ApprovalRouteEditor projectId={selected.id} openerLabel={t('projectSettings.routeAction')} describedBy={describedBy} />
-            )}
-          </SettingsAction>
-        </Section>
-      )}
-
-      {/* ✎ B155 (варіант C): маршрут, що діє для кожного шаблону проєкту, і виняток проєкту для шаблону. Права ті
-          самі, що в маршруту проєкту: `Project.Manage` + грант Manage. */}
-      {managesProject && (
-        <Section id="template-routes" title={t('approvalRoutes.projectTemplatesTitle')}>
-          <Text size="sm" c="dimmed">
-            {t('approvalRoutes.projectTemplatesHint')}
-          </Text>
-          <Suspense fallback={null}>
-            <ProjectTemplateRoutes projectId={selected.id} />
-          </Suspense>
         </Section>
       )}
 
