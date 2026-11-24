@@ -138,6 +138,38 @@ public sealed class SourceMonthsQuartzTests(SqlServerFixture sql) : IAsyncLifeti
     }
 
     /// <summary>
+    /// Немає рядка календаря власника місяця 10 (маршрутизація віддає комірку M10 кожному періоду): постановка будить увесь
+    /// рік — і F5 тримає ввесь рік, зокрема РАНІШИЙ місяць (те саме рішення, <c>MonthOwnerRouting</c>), поки жива задача зв'язки
+    /// і поки чекають залежні.
+    /// </summary>
+    /// <remarks>Мутація: ворота звужують без перевірки рядка календаря (<c>Narrows(…, true)</c>) — червоний.</remarks>
+    [Fact]
+    public async Task Без_рядка_календаря_власника_постановка_й_F5_беруть_увесь_рік()
+    {
+        var w = await ArrangeAsync(misplaced: false, skipMonth: 10);
+        var (jobs, _) = await StandbyAsync();
+
+        await RunSourceEditAsync(w, jobs, monthEdit: true, runParents: false);
+        var parents = await KeysAsync($"{nameof(IRegistryImpactRecalculationJob)}~source-change-b{w.BindingId}-");
+        Assert.Single(parents);
+
+        Assert.True(await PendingAsync(w, 9));
+        Assert.True(await PendingAsync(w, 11));
+
+        await RunParentsAsync(w, jobs);
+        Assert.Equal(
+            Enumerable.Range(1, 12).Where(m => m != 10).Select(SourceDependencyWorld.Period),
+            await DependentsPeriodsAsync(w.Consumer));
+
+        foreach (var parent in parents)
+        {
+            await jobs.CancelAsync(parent, CancellationToken.None);
+        }
+
+        Assert.True(await PendingAsync(w, 9));
+    }
+
+    /// <summary>
     /// F5: поки задача зв'язки <c>-m10</c> жива — чекають період 10 і пізніші (їх може дописати прогін власника), раніший — ні;
     /// після неї — лише поставлений період 10.
     /// </summary>
@@ -348,7 +380,7 @@ public sealed class SourceMonthsQuartzTests(SqlServerFixture sql) : IAsyncLifeti
     /// Джерело — річний документ із M1..M12 і зв'язкою; споживач — місячний, версія <c>YearWithMonthColumns</c>, таблиця
     /// «місяці в колонках», обчислювані M1..M12 з <c>REGFIND(код, [Period].Year, m, …)</c> (misplaced — місяць 10 у M11 і навпаки).
     /// </summary>
-    private async Task<World> ArrangeAsync(bool misplaced)
+    private async Task<World> ArrangeAsync(bool misplaced, int? skipMonth = null)
     {
         var world = new SourceDependencyWorld(sql);
         var (registryId, code) = await world.RegistryAsync();
@@ -357,9 +389,13 @@ public sealed class SourceMonthsQuartzTests(SqlServerFixture sql) : IAsyncLifeti
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var consumer = await builder.BuildAsync(
             periodKey: SourceDependencyWorld.Period(1), layoutKind: TableLayoutKind.MonthsInColumns, monthColumns: 12);
+        // skipMonth — місяця немає в календарі проєкту (ні екземпляра, ні рядка періоду).
         for (var month = 2; month <= 12; month++)
         {
-            await builder.AddPeriodInstanceAsync(consumer, new PeriodKey(SourceDependencyWorld.Period(month)));
+            if (month != skipMonth)
+            {
+                await builder.AddPeriodInstanceAsync(consumer, new PeriodKey(SourceDependencyWorld.Period(month)));
+            }
         }
 
         await using (var db = Context())

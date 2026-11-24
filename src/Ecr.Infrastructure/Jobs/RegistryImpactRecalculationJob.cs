@@ -242,7 +242,7 @@ public sealed partial class RegistryImpactRecalculationJob(
             // (TemplateDependency.MonthOwned, без методологій) — зміна місяця m будить у місячному проєкті лише період m.
             // Пізніших читачів його чисел будить прогін цього періоду (CrossPeriodFanOut, RecalculationJob.FormulasAsync).
             var routedMonth = scope.Kind == PeriodScopeKind.Year && scope.MonthMask != 0 && month is { } changed
-                              && consumer.All(e => e.MonthOwned && !e.ViaMethodology)
+                              && Persistence.MonthOwnerRouting.EdgesOwned(consumer)
                 ? changed
                 : (int?)null;
             rows.AddRange(await impact

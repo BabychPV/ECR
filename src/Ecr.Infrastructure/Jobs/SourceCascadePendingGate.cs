@@ -187,7 +187,46 @@ public sealed class SourceCascadePendingGate(
         }
 
         var consumerKind = (PeriodKind)(self.ConsumerPeriodKind ?? 0);
-        return rows.Exists(r => r.Kind == "U" && UpstreamPends(upstream, r, consumer, consumerKind, periodKey));
+        var owners = await OwnerRowsAsync(upstream, rows, consumer, consumerKind, documentId, ct).ConfigureAwait(false);
+        return rows.Exists(r => r.Kind == "U" && UpstreamPends(upstream, r, consumer, consumerKind, periodKey, owners));
+    }
+
+    /// <summary>
+    /// ✎ PERF-06b: ключі періодів-власників (<c>рік·100 + m</c>), які є в календарі проєкту документа, — для живих задач зв'язки
+    /// з місяцем на ребрах «комірка періоду-власника» (<see cref="MonthOwnerRouting"/>, те саме рішення, що постановка).
+    /// Звернень немає, коли таких задач немає чи проєкт не місячний.
+    /// </summary>
+    private async Task<HashSet<int>> OwnerRowsAsync(
+        Upstream upstream, List<GateRow> rows, int consumerTemplateId, PeriodKind consumerKind, long documentId, CancellationToken ct)
+    {
+        if (consumerKind != PeriodKind.Monthly)
+        {
+            return [];
+        }
+
+        var keys = new HashSet<int>();
+        foreach (var row in rows.Where(r => r.Kind == "U" && r.TargetKey is not null))
+        {
+            if (SourceChangeKey.TryParse(BareTarget(row.TargetKey!), out var bindingId, out var year, out var month, out _)
+                && month is { } m
+                && MonthOwnerRouting.EdgesOwned(
+                    upstream.Edges.Where(e => e.ConsumerTemplateId == consumerTemplateId && e.BindingId == bindingId)))
+            {
+                keys.Add((year * 100) + m);
+            }
+        }
+
+        if (keys.Count == 0)
+        {
+            return [];
+        }
+
+        var projectId = await db.Documents.AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Select(d => d.ProjectId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        return [.. (await MonthOwnerRouting.ExistingOwnersAsync(db, [projectId], keys, ct).ConfigureAwait(false)).Select(o => o.PeriodKey)];
     }
 
     /// <summary>Ціль задачі перерахунку так, як її пише черга в базі (<c>IRecalculationJob~{ціль}</c>).</summary>
@@ -222,7 +261,7 @@ public sealed class SourceCascadePendingGate(
 
     /// <summary>Чи жива ланка джерела <paramref name="row"/> доведе каскад до періоду споживача.</summary>
     private static bool UpstreamPends(
-        Upstream upstream, GateRow row, int consumerTemplateId, PeriodKind consumerKind, int periodKey)
+        Upstream upstream, GateRow row, int consumerTemplateId, PeriodKind consumerKind, int periodKey, HashSet<int> owners)
     {
         var edges = upstream.Edges.Where(e => e.ConsumerTemplateId == consumerTemplateId).ToList();
         if (edges.Count == 0 || row.TargetKey is null)
@@ -236,7 +275,11 @@ public sealed class SourceCascadePendingGate(
             var byBinding = edges.Where(e => e.BindingId == bindingId).ToList();
             return !approved
                    && ScopeOf(byBinding) is { } scope
-                   && Affects(scope, year, month, periodKey, consumerKind, byBinding.TrueForAll(e => e.MonthOwned && !e.ViaMethodology));
+                   && Affects(
+                       scope, year, month, periodKey, consumerKind,
+                       MonthOwnerRouting.EdgesOwned(byBinding)
+                       && month is { } m
+                       && MonthOwnerRouting.Narrows(consumerKind, owners.Contains((year * 100) + m)));
         }
 
         // Документна ланка (задача формул чи -auto) документа-джерела зв'язки, що ставить каскад з -auto (стан Any).
