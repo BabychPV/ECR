@@ -730,6 +730,26 @@ public sealed class MethodologyVersion : Entity<int>
         requiredInput.Update(severity, hint);
     }
 
+    /// <summary>Дозволяє прибрати вимогу цієї версії. Лише для чернетки (P-1124-1: «list/edit/remove»).</summary>
+    /// <param name="requiredInput">Запис, який уже належить цій версії.</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0409</c> — версія не чернетка або запис чужий.
+    /// </exception>
+    /// <remarks>
+    /// ⚠ Як <see cref="RemoveFormula"/>: сутність лише ДОЗВОЛЯЄ, видаляє сховище. Вимогу опублікованої версії не
+    /// прибрати — gate запису читає саме її (зміна — новою версією).
+    /// </remarks>
+    public void RemoveRequiredInput(MethodologyRequiredInput requiredInput)
+    {
+        ArgumentNullException.ThrowIfNull(requiredInput);
+
+        RequireDraft("обов'язкові вхідні колонки");
+        RequireOwn(
+            requiredInput.MethodologyVersionId,
+            "Обов'язкову вхідну колонку",
+            requiredInput.ColumnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
     /// <summary>Оголошує вихід версії. Лише для чернетки (ФВ-16.6).</summary>
     /// <param name="code">Код виходу — те, на що посилається прив'язка.</param>
     /// <param name="unitId">Одиниця результату; обов'язкова.</param>

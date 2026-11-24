@@ -3,16 +3,10 @@ using Ecr.Application.Common;
 
 namespace Ecr.Application.Ports;
 
-/// <summary>«Де використовується» константа методики і колонка шаблону (ФВ-8.14).</summary>
+/// <summary>«Де використовується» колонка шаблону (ФВ-8.14).</summary>
+/// <remarks>✎ P-1124-1: «де використовується» формульної константи прибрано разом з формульним UI.</remarks>
 public interface IWhereUsedStore
 {
-    /// <summary>Методологія версії, якщо в ній є константа з таким кодом; інакше <c>null</c>.</summary>
-    public Task<int?> FindConstantMethodologyAsync(int methodologyVersionId, string code, CancellationToken ct);
-
-    /// <summary>Формули версії методики з текстом виразу, впорядковані за ідентифікатором.</summary>
-    public Task<IReadOnlyList<VersionFormulaText>> ListVersionFormulasAsync(
-        int methodologyVersionId, CancellationToken ct);
-
     /// <summary>Чи існує невидалена колонка.</summary>
     public Task<bool> ColumnExistsAsync(int columnDefId, CancellationToken ct);
 
@@ -25,9 +19,6 @@ public interface IWhereUsedStore
     /// </summary>
     public Task<IReadOnlyList<ColumnRuleCandidate>> ListColumnRuleCandidatesAsync(int columnDefId, CancellationToken ct);
 }
-
-/// <summary>Формула методики — рівно те, що потрібно розібрати вираз.</summary>
-public sealed record VersionFormulaText(int Id, string Code, string Expression);
 
 /// <summary>Правило валідації таблиці колонки з готовим рядком переліку.</summary>
 /// <param name="Item">Рядок «де використовується» (вид <see cref="UsageKinds.ValidationRule"/>).</param>

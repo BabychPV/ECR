@@ -150,6 +150,18 @@ export function saveMethodologyRequiredInput(
   );
 }
 
+/** Прибирає обов'язкову вхідну колонку чернетки (✎ P-1124-1: «list/edit/remove»). */
+export function deleteMethodologyRequiredInput(
+  methodologyId: number,
+  versionId: number,
+  columnDefId: number,
+): Promise<void> {
+  return apiFetch<void>(
+    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/required-inputs/${String(columnDefId)}`,
+    { method: 'DELETE' },
+  );
+}
+
 /** Золотий набір версії (`ФВ-13.7`). */
 export function methodologyTestCases(
   methodologyId: number,

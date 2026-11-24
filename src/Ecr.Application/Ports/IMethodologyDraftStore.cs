@@ -248,6 +248,10 @@ public interface IMethodologyDraftStore
     /// <param name="formula">Формула, дозволена <c>MethodologyVersion.RemoveFormula</c>.</param>
     public void Remove(MethodologyFormula formula);
 
+    /// <summary>Ставить вимогу в чергу на видалення; зберігає <c>IUnitOfWork</c>.</summary>
+    /// <param name="requiredInput">Вимога, дозволена <c>MethodologyVersion.RemoveRequiredInput</c>.</param>
+    public void Remove(MethodologyRequiredInput requiredInput);
+
     /// <summary>Ставить у чергу оголошення імпорту; зберігає <c>IUnitOfWork</c>.</summary>
     /// <param name="import">Імпорт версії-чернетки (імпорт пакета методологій).</param>
     public void Add(MethodologyImport import);

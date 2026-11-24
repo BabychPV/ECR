@@ -33,7 +33,6 @@ public sealed class MethodologiesController(
     CreateMethodologyHandler createMethodology,
     ListMethodologyConstantsHandler listConstants,
     SaveMethodologyConstantHandler saveConstant,
-    ConstantUsageHandler constantUsage,
     ListMethodologyRulesHandler listRules,
     SaveMethodologyRuleHandler saveRule,
     GetMethodologyCategoryRuleHandler getCategoryRule,
@@ -41,6 +40,7 @@ public sealed class MethodologiesController(
     DeleteMethodologyCategoryRuleHandler deleteCategoryRule,
     ListMethodologyRequiredInputsHandler listRequiredInputs,
     SaveMethodologyRequiredInputHandler saveRequiredInput,
+    DeleteMethodologyRequiredInputHandler deleteRequiredInput,
     ListMethodologyOutputsHandler listOutputs,
     SaveMethodologyOutputHandler saveOutput,
     ListMethodologyTestCasesHandler listTests,
@@ -312,18 +312,6 @@ public sealed class MethodologiesController(
         return NoContent();
     }
 
-    /// <summary>Формули версії, що посилаються на константу (ФВ-8.14). Право <c>Calculation.View</c>.</summary>
-    /// <param name="id">Методологія.</param>
-    /// <param name="vid">Версія.</param>
-    /// <param name="code">Код константи.</param>
-    /// <param name="ct">Токен скасування.</param>
-    [HttpGet("{id:int}/versions/{vid:int}/constants/{code}/usage")]
-    [ProducesResponseType<UsageResponse>(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<UsageResponse>> ConstantUsage(
-        int id, int vid, string code, CancellationToken ct)
-        => Ok(await constantUsage.HandleAsync(id, vid, code, ct).ConfigureAwait(false));
-
     /// <summary>
     /// Записує константу версії-чернетки. Право <c>Calculation.EditConstant</c>.
     /// </summary>
@@ -589,6 +577,25 @@ public sealed class MethodologiesController(
             .ConfigureAwait(false));
     }
 
+    /// <summary>
+    /// Прибирає обов'язкову вхідну колонку чернетки (✎ P-1124-1). Право <c>Calculation.ManageRequiredInputs</c> —
+    /// те саме, що й запис.
+    /// </summary>
+    /// <param name="id">Методологія.</param>
+    /// <param name="vid">Версія-чернетка.</param>
+    /// <param name="columnDefId">Колонка вимоги.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpDelete("{id:int}/versions/{vid:int}/required-inputs/{columnDefId:int}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteRequiredInput(int id, int vid, int columnDefId, CancellationToken ct)
+    {
+        await scope.RequireAsync(id, vid, DeleteMethodologyRequiredInputHandler.Permission, ct).ConfigureAwait(false);
+        await deleteRequiredInput.HandleAsync(vid, columnDefId, ct).ConfigureAwait(false);
+
+        return NoContent();
+    }
     /// <summary>Оголошені виходи версії. Право <c>Calculation.View</c>.</summary>
     /// <param name="id">Методологія.</param>
     /// <param name="vid">Версія.</param>

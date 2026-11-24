@@ -361,7 +361,6 @@ public static class DependencyInjection
         services.AddScoped<Units.ConvertUnitHandler>();
         services.AddScoped<Units.CreateUnitHandler>();
         services.AddScoped<Units.UnitUsageHandler>();
-        services.AddScoped<Calculations.ConstantUsageHandler>();
         services.AddScoped<Templates.ColumnUsageHandler>();
         services.AddScoped<Units.DeleteUnitHandler>();
         services.AddScoped<Units.GetUnitHandler>();
@@ -506,6 +505,7 @@ public static class DependencyInjection
         services.AddScoped<Calculations.DeleteMethodologyCategoryHandler>();
         services.AddScoped<Calculations.ListMethodologyRequiredInputsHandler>();
         services.AddScoped<Calculations.SaveMethodologyRequiredInputHandler>();
+        services.AddScoped<Calculations.DeleteMethodologyRequiredInputHandler>();
         services.AddScoped<Calculations.ListMethodologyOutputsHandler>();
         services.AddScoped<Calculations.SaveMethodologyOutputHandler>();
         services.AddScoped<Calculations.ListMethodologyTestCasesHandler>();

@@ -641,6 +641,64 @@ public sealed class SaveMethodologyRequiredInputHandler(
     }
 }
 
+/// <summary>
+/// Прибирає обов'язкову вхідну колонку **чернетки** (✎ P-1124-1, UI-прохід редактора скрипта 24.11: вимогу можна
+/// було лише завести й змінити, а помилково заведену — ні).
+/// </summary>
+/// <remarks>
+/// ⚠ Те саме право, що й запис (<see cref="SaveMethodologyRequiredInputHandler.Permission"/>); дозвіл дає домен
+/// (<c>MethodologyVersion.RemoveRequiredInput</c>: лише чернетка, лише свій запис); слід — як у запису вимоги
+/// (журнал структури не пишеться: вимога чернетки нічого не рахує, доки версію не опубліковано).
+/// </remarks>
+public sealed class DeleteMethodologyRequiredInputHandler(
+    IMethodologyDraftStore drafts,
+    IUnitOfWork uow,
+    IAccessDecisionService access,
+    ICurrentUser currentUser)
+{
+    /// <summary>Право — те саме, що й на запис вимоги.</summary>
+    public const string Permission = SaveMethodologyRequiredInputHandler.Permission;
+
+    /// <summary>Видаляє вимогу.</summary>
+    /// <param name="methodologyVersionId">Версія-чернетка.</param>
+    /// <param name="columnDefId">Колонка вимоги.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException">Версії або вимоги для колонки немає.</exception>
+    /// <exception cref="DomainException">Версія не чернетка.</exception>
+    public async Task HandleAsync(int methodologyVersionId, int columnDefId, CancellationToken ct)
+    {
+        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+
+        var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException(
+                "ECR-CALC-0404",
+                $"Версії методології {methodologyVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.version",
+                    ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
+                });
+
+        var existing = await drafts
+            .FindRequiredInputAsync(methodologyVersionId, columnDefId, ct)
+            .ConfigureAwait(false)
+            ?? throw new NotFoundException(
+                "ECR-CALC-0404",
+                $"Обов'язкової вхідної колонки {columnDefId} у версії {methodologyVersionId} немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.requiredInput",
+                    ["columnDefId"] = columnDefId.ToString(CultureInfo.InvariantCulture),
+                    ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
+                });
+
+        version.RemoveRequiredInput(existing);
+        drafts.Remove(existing);
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+}
+
 /// <summary>Оголошені виходи версії (ФВ-16.6).</summary>
 public sealed class ListMethodologyOutputsHandler(
     IMethodologyStore methodologies,
