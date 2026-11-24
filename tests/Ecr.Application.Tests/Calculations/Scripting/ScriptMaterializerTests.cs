@@ -167,6 +167,37 @@ public sealed class ScriptMaterializerTests
         Assert.Equal([9, 77], result.DependencyMethodologyIds);
     }
 
+    /// <summary>
+    /// c11-10: код речовини («333») є в КІЛЬКОХ довідниках речовин (LAND_HSE400_SUBSTANCE C333 і LAND_AIR_SUBSTANCE E333), і
+    /// глобальний пошук бере запис із меншим Id. Клон мігрованої версії вже має речовини свого довідника (E333…), тож збереження
+    /// його тексту не може пересадити їх на чужий довідник: виходи писалися б з іншими SubstanceEntryId (золотий набір V5
+    /// ECW_C11_10 на копії live — «actual null» на кожній речовині, звіти за речовиною — порожні).
+    /// </summary>
+    /// <remarks>Мутація: брати лише глобальний пошук (прибрати перевагу наявних речовин) — червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "MS-T3.1")]
+    public async Task Збереження_тексту_версії_лишає_речовини_її_довідника_а_не_перший_збіг_коду()
+    {
+        _store.GetSubstanceCodesAsync(VersionId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyDictionary<long, string>>(
+                new Dictionary<long, string> { [6044] = "333", [6051] = "415" }));
+        _store.FindSubstanceEntryIdsAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyDictionary<string, long>>(
+                new Dictionary<string, long> { ["333"] = 642, ["415"] = 651, ["416"] = 652 }));
+        var (script, environment) = Prepare(
+            "rows from T1;\nforeach substance S in (\"333\", \"415\", \"416\") {\n output OUT_A per S : t = row.Hours;\n}", Table());
+
+        await Materializer().MaterializeAsync(
+            VersionId, MethodologyId, script, environment, new ScriptMaterializeOptions(Publish: false), default);
+
+        // Наявні коди — з довідника версії; новий код (416) — глобальним пошуком, як і раніше.
+        await _store.Received(1).ReplaceScriptSubstancesAsync(
+            VersionId, Arg.Is<IReadOnlyList<long>>(ids => ids.SequenceEqual(KeptSubstanceIds)), Arg.Any<CancellationToken>());
+    }
+
+    private static readonly long[] KeptSubstanceIds = [6044, 6051, 652];
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait("Requirement", "MS-T3.1")]
