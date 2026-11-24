@@ -24,7 +24,11 @@ public static class ParityHost
 {
     /// <summary>Будує постачальника сервісів для рядка підключення.</summary>
     /// <param name="connectionString">Рядок підключення до копії бази.</param>
-    public static ServiceProvider Build(string connectionString)
+    /// <param name="actingUserId">
+    /// ✎ D-571: від чийого імені діють обробники <c>apply</c>/<c>switch</c> на КОПІЇ (права й журнал — цього користувача);
+    /// <c>null</c> — анонімно (паритет нічого не пише й користувача не потребує).
+    /// </param>
+    public static ServiceProvider Build(string connectionString, int? actingUserId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
@@ -37,16 +41,16 @@ public static class ParityHost
         services.AddEcrInfrastructure(configuration);
         services.AddEcrCalculations();
         services.AddEcrApplication();
-        services.AddSingleton<ICurrentUser, ToolUser>();
+        services.AddSingleton<ICurrentUser>(new ToolUser(actingUserId));
         services.AddScoped<IParityTargetSource, EfParityTargetSource>();
         services.AddScoped<ParityRunner>();
 
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = false, ValidateOnBuild = false });
     }
 
-    private sealed class ToolUser : ICurrentUser
+    private sealed class ToolUser(int? userId) : ICurrentUser
     {
-        public int? UserId => null;
+        public int? UserId => userId;
 
         public string? UserName => "methodology-script-migration";
 

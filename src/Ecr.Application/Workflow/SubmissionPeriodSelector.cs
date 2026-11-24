@@ -110,6 +110,29 @@ public static class SubmissionPeriodSelector
 
         return result;
     }
+
+    /// <summary>
+    /// ✎ W15z M4: місяць кожної місячної колонки аркуша — факт шаблону (<c>IsMonthColumn</c>/<c>MonthNumber</c>), без
+    /// календаря: річний проєкт (HSE400, <c>PeriodKind.Yearly</c>) статусів <see cref="MonthColumns"/> не має, а посилання на
+    /// місяць його річного документа мусить знайти колонку. Схована таблиця (S6) не віддається.
+    /// </summary>
+    /// <param name="sheet">Аркуш шаблону документа.</param>
+    /// <param name="canReadTable">Чи бачить читач таблицю.</param>
+    /// <returns>Місячні колонки видимих таблиць у порядку аркуша.</returns>
+    public static IReadOnlyList<MonthColumnRefDto> MonthColumnCodes(SheetDef sheet, Func<int, bool> canReadTable)
+    {
+        ArgumentNullException.ThrowIfNull(sheet);
+        ArgumentNullException.ThrowIfNull(canReadTable);
+
+        return
+        [
+            .. sheet.Tables
+                .Where(t => !t.IsDeleted && canReadTable(t.Id))
+                .SelectMany(t => t.Columns
+                    .Where(c => !c.IsDeleted && c.IsMonthColumn && c.MonthNumber is >= 1 and <= 12)
+                    .Select(c => new MonthColumnRefDto(t.Id, c.Code, c.MonthNumber!.Value))),
+        ];
+    }
 }
 
 /// <summary>Вибір періоду подання.</summary>

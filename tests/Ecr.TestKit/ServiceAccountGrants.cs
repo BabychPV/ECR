@@ -20,7 +20,7 @@ public static class ServiceAccountGrants
 
     /// <summary>Послідовності (<c>NEXT VALUE FOR</c>, <c>sp_sequence_get_range</c>) — право <c>UPDATE</c>.</summary>
     public static readonly IReadOnlyList<string> Sequences =
-        ["doc.TableInstanceSeq", "doc.TableRowSeq", "calc.CalculationResultSeq", "dic.RegistryEntryCodeSeq"];
+        ["doc.TableInstanceSeq", "doc.TableRowSeq", "calc.CalculationResultSeq", "dic.RegistryEntryCodeSeq", "itg.JobProgressEnqueueSeq"];
 
     /// <summary>Табличні типи (TVP) — право <c>EXECUTE</c>.</summary>
     public static readonly IReadOnlyList<string> TableTypes = ["doc.CellValueTvp", "aud.CellChangeTvp"];

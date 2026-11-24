@@ -22,7 +22,10 @@ public sealed class CreateDocumentHandler(
     IUnitOfWork uow,
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+
+    // ✎ B74 P3 (D-576): шаблони проєкту. `null` (прямий конструктор у тестах) — лише основний шаблон, як доти.
+    IProjectTemplateStore? projectTemplates = null)
 {
     /// <summary>Право на створення документа (`02-contracts.md` §9).</summary>
     public const string Permission = "Document.Create";
@@ -43,8 +46,24 @@ public sealed class CreateDocumentHandler(
     /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Ідентифікатор документа.</returns>
-    public async Task<long> HandleAsync(
+    public Task<long> HandleAsync(
         int projectId, int? templateVersionId, IReadOnlyList<int> sheetDefIds,
+        IReadOnlyDictionary<string, string>? name, CancellationToken ct)
+        => HandleAsync(projectId, templateId: null, templateVersionId, sheetDefIds, name, ct);
+
+    /// <summary>Створює документ обраного шаблону проєкту (B74 P3, D-576).</summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="templateId">
+    /// Шаблон проєкту; <c>null</c> — основний шаблон (як доти). Шаблон поза проєктом —
+    /// <c>422 ECR-DOC-0422 templateNotInProject</c>. Версія документа — чинна версія ЦЬОГО шаблону в проєкті.
+    /// </param>
+    /// <param name="templateVersionId">Якщо задано — мусить збігатися з чинною версією шаблону (<c>versionNotProject</c>).</param>
+    /// <param name="sheetDefIds">Аркуші, які входять у документ.</param>
+    /// <param name="name">Людське ім'я документа; <c>null</c> — не задано.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ідентифікатор документа.</returns>
+    public async Task<long> HandleAsync(
+        int projectId, int? templateId, int? templateVersionId, IReadOnlyList<int> sheetDefIds,
         IReadOnlyDictionary<string, string>? name, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(sheetDefIds);
@@ -78,7 +97,7 @@ public sealed class CreateDocumentHandler(
                          "ECR-AUTH-0401", "Анонімний запит не може створювати документи.",
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
-        var versionId = await ProjectVersionAsync(projectId, templateVersionId, ct).ConfigureAwait(false);
+        var versionId = await ProjectVersionAsync(projectId, templateId, templateVersionId, ct).ConfigureAwait(false);
 
         // ⛔ F-11 (UX-прохід, четвертий раунд): в АРХІВОВАНОМУ проєкті документ
         // не заводиться. Доти `POST /documents` відповідав тут `201`: документ
@@ -179,6 +198,17 @@ public sealed class CreateDocumentHandler(
                     {
                         var locked = await documents
                             .LockProjectTemplateVersionAsync(projectId, innerCt).ConfigureAwait(false);
+
+                        // ✎ B74 P3 (D-576): обраний шаблон — під тим самим блоком перечитується ЙОГО пара: від'єднання
+                        // (той самий блок) або перенос версії цього шаблону, що встигли раніше, дають відмову, а не
+                        // документ на версії, якої в проєкті вже немає.
+                        if (templateId is { } chosen && locked is not null)
+                        {
+                            var pair = await projectTemplates!.FindAsync(projectId, chosen, innerCt).ConfigureAwait(false)
+                                       ?? throw TemplateNotInProject(projectId, chosen);
+                            locked = pair.CurrentTemplateVersionId;
+                        }
+
                         DocumentStructure.EnsureProjectVersionUnchanged(locked, versionId, projectId);
 
                         // BusinessKey складається зі значень колонок IsBusinessKey. До появи
@@ -187,19 +217,25 @@ public sealed class CreateDocumentHandler(
                         // ⚠ Під блоком проєкту два створення в одному проєкті йдуть по черзі, тож
                         // підібраний ключ більше не «знімок, який бачать обоє»; повтор нижче лишається
                         // для ключів, які ставить людина.
-                        var businessKey = await documents
-                            .NextBusinessKeyAsync(projectId, versionId, innerCt).ConfigureAwait(false);
+                        // ✎ B74 P3 (D-576, рішення людини 13.11 №2): у проєкті з кількома шаблонами ключ несе код шаблону
+                        // (`LAND-P1-0001`, `HSE401-P1-0001`) — ключі різних шаблонів не перетинаються; одношаблонний
+                        // (у т. ч. кожен старий) проєкт лишає звичний `P{проєкт}-V{версія}-{номер}`.
+                        var multiTemplate = projectTemplates is not null
+                            && await projectTemplates.CountAsync(projectId, innerCt).ConfigureAwait(false) > 1;
+                        var businessKey = multiTemplate
+                            ? await documents.NextTemplateBusinessKeyAsync(projectId, template.Code, innerCt).ConfigureAwait(false)
+                            : await documents.NextBusinessKeyAsync(projectId, versionId, innerCt).ConfigureAwait(false);
 
                         // ✎ B74 P1: шаблон документа пишеться одразу — з РЯДКА версії (cfg.TemplateVersion.TemplateId,
                         // та сама пара, яку тримають FK шкали), під тим самим блоком проєкту. NULL лише в рядках повз
                         // цей шлях — їх доповнює ремонт 99-epilogue.sql.
-                        var templateId = await documents
+                        var documentTemplateId = await documents
                             .FindTemplateIdOfVersionAsync(versionId, innerCt).ConfigureAwait(false);
 
                         // ⛔ B151 (рішення людини 16.11): шаблон «один документ на проєкт» (HSE400, HSE401) —
                         // другий документ у тому самому проєкті не заводиться. Під блоком рядка проєкту вище два
                         // одночасні створення йдуть по черзі, тож друге бачить перше (409, а не дублікат).
-                        if (templateId is { } tid
+                        if (documentTemplateId is { } tid
                             && await documents.FindDocumentBlockingSingleTemplateAsync(projectId, tid, innerCt)
                                 .ConfigureAwait(false) is { } existingId)
                         {
@@ -207,7 +243,7 @@ public sealed class CreateDocumentHandler(
                                 .ConfigureAwait(false);
                         }
 
-                        document = new Document(projectId, businessKey, userId, now, templateId);
+                        document = new Document(projectId, businessKey, userId, now, documentTemplateId);
 
                         // ⚠ Ім'я — опційне, ПОРУЧ із BusinessKey, не замість нього: механізм
                         // технічного ключа тут не змінюється (директива "людське ім'я
@@ -310,10 +346,18 @@ public sealed class CreateDocumentHandler(
     /// збігатися з версією проєкту — розбіжність не виправляється мовчки, а
     /// називається: клієнт, що її надіслав, помиляється щодо структури.
     /// </remarks>
-    private async Task<int> ProjectVersionAsync(int projectId, int? requested, CancellationToken ct)
+    private async Task<int> ProjectVersionAsync(int projectId, int? templateId, int? requested, CancellationToken ct)
     {
-        var projectVersion = await documents
-            .FindProjectTemplateVersionIdAsync(projectId, ct).ConfigureAwait(false)
+        // ✎ B74 P3 (D-576): обраний шаблон — чинна версія його пари в проєкті (doc.ProjectTemplate).
+        var chosen = templateId is { } tid
+            ? (projectTemplates is null
+                ? null
+                : await projectTemplates.FindAsync(projectId, tid, ct).ConfigureAwait(false))?.CurrentTemplateVersionId
+              ?? await MissingTemplateAsync(projectId, tid, ct).ConfigureAwait(false)
+            : (int?)null;
+
+        var projectVersion = chosen
+            ?? await documents.FindProjectTemplateVersionIdAsync(projectId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 ErrorCodes.ProjectNotFound, $"Проєкт {projectId} не знайдено.",
                 new Dictionary<string, object?>
@@ -337,6 +381,38 @@ public sealed class CreateDocumentHandler(
 
         return projectVersion;
     }
+
+    /// <summary>Шаблону немає в проєкті: проєкту немає — 404, інакше — <c>422 templateNotInProject</c>.</summary>
+    private async Task<int> MissingTemplateAsync(int projectId, int templateId, CancellationToken ct)
+    {
+        if (await documents.FindProjectStatusAsync(projectId, ct).ConfigureAwait(false) is null)
+        {
+            throw new NotFoundException(
+                ErrorCodes.ProjectNotFound, $"Проєкт {projectId} не знайдено.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRJ-0404.project",
+                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        throw TemplateNotInProject(projectId, templateId);
+    }
+
+    /// <summary>
+    /// ✎ B74 P3 (D-576): обраного шаблону немає серед шаблонів проєкту — <c>422 ECR-DOC-0422</c>,
+    /// <c>err.ECR-DOC-0422.templateNotInProject</c> (спільно з <c>GET …/document-template?templateId=</c>).
+    /// </summary>
+    internal static BusinessRuleException TemplateNotInProject(int projectId, int templateId)
+        => new(
+            "ECR-DOC-0422",
+            $"Шаблону {templateId} немає серед шаблонів проєкту {projectId}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-DOC-0422.templateNotInProject",
+                ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["templateId"] = templateId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
 
     /// <summary>
     /// Конфлікт унікального ключа документа — той самий код, що його кидає

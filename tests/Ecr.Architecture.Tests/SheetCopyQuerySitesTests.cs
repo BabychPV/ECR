@@ -54,6 +54,12 @@ public sealed partial class SheetCopyQuerySitesTests
         // ── лише оригінал (Q5: інтеграція, збір, події джерел, дозволи) ──
         ["src/Ecr.Infrastructure/Integration/IntegrationCellPatcher.cs"] = "запис у екземпляр копії відхиляється",
         ["src/Ecr.Infrastructure/Jobs/MaterializationScheduler.cs"] = "OriginalOnly",
+        ["src/Ecr.Infrastructure/Jobs/SourceCascadePendingGate.cs"] =
+            "огляд b11 №3: обраний документ-джерело зв'язки за рік — лише екземпляри оригіналу (SheetCopyId = NULL), як DocumentSourceBindingStore",
+        ["src/Ecr.Infrastructure/Jobs/PeriodStateJob.cs"] =
+            "P-1123-18: лише факт ЗАТВЕРДЖЕНОГО стану в періоді — оригінал чи будь-яка копія однаково знімає період із прибирання",
+        ["src/Ecr.Infrastructure/Jobs/OpenedPeriodRecalculation.cs"] =
+            "D-575: лише DISTINCT DocumentId екземплярів відкритого періоду — перерахунок документа сам рахує оригінал і кожну копію",
         ["src/Ecr.Infrastructure/Persistence/TemplateVersionDiscardStore.cs"] =
             "лише факт існування рядків за аркушем/таблицею версії — і копія, і оригінал однаково блокують відкидання",
         ["src/Ecr.Infrastructure/Jobs/MaterializationTargets.cs"] = "OriginalOnly (адресати й відсутні екземпляри)",
@@ -110,6 +116,8 @@ public sealed partial class SheetCopyQuerySitesTests
         // в роботу будь-якої копії — вхід документа; версії шаблону й документи-джерела — за екземплярами всіх видів.
         ["src/Ecr.Infrastructure/Jobs/RecalculationJob.Nightly.cs"] =
             "версії шаблону документа й документи шаблону-джерела — за екземплярами будь-якого виду (копія тієї ж версії)",
+        ["src/Ecr.Infrastructure/Jobs/RecalculationJob.Selective.cs"] =
+            "✎ PERF-06b (D-572): покривні періоди документа-джерела — за екземплярами ОРИГІНАЛУ (SheetCopyId IS NULL), як завантажувач складу",
         ["src/Ecr.Infrastructure/Jobs/NightlyInputChangeQuery.cs"] =
             "зміни екземплярів і повернення затвердженого — будь-яка копія будить документ (надмножина, «сумніваєшся — рахуй»)",
         ["src/Ecr.Infrastructure/Jobs/CrossPeriodFanOut.cs"] =

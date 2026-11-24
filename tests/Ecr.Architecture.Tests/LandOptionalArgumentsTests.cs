@@ -244,7 +244,8 @@ public sealed class LandOptionalArgumentsTests
             }
         }
 
-        // Рівно клас O з LAND-D8-ARGS (#9-#16) + C11_10/T9_07 (після K1 суфікс C11_11_02 лишив пару [AF-немає])
+        // Рівно клас O з LAND-D8-ARGS (#9-#16); C11_10/T9_07 вийшла з переліку - ✎ P-1123-4 (людина 23.11): міст RENAMES
+        // із SubstanceConsumptionSm3, як у старій системі
         // + #17-#18 (C11_03 RunningHours на T9_05/T9_14): раніше їх тут не було (клас Q, питання Q-D8-2), тепер входять
         // за дефолтом Q-D8-2 «паритет зі старим кодом» - старий код передає RunningHours лише на 9a_17/9_06/9_09/9_13,
         // на T9_05/T9_14 ключа немає, тож null (D-397, нової версії шаблону не треба). Клас K - як і раніше не тут.
@@ -253,7 +254,6 @@ public sealed class LandOptionalArgumentsTests
                 "ECW_C11_03|T9_05|Land_Measure_RunningHours",
                 "ECW_C11_03|T9_14|Land_Measure_RunningHours",
                 "ECW_C11_10|T9_02|Land_Measure_OperatingTime",
-                "ECW_C11_10|T9_07|Land_Measure_SubstanceConsumption",
                 "ECW_C11_10|T9_11|Land_Measure_OperatingTime",
                 "ECW_C11_10|T9a_24|Land_Measure_OperatingTime",
                 "ECW_C11_10|T9a_26|Land_Measure_OperatingTime",

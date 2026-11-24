@@ -352,6 +352,47 @@ public sealed class PeriodPolicyRecomputeTests
             Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// ✎ D-575: політика, що ВІДКРИЛА не відкритий місяць (листопад, <c>Scheduled → Open</c>), ставить перерахунок його
+    /// документів після коміту — формули там досі не обчислювались. Жовтень (вже Open) і грудень (лишився Scheduled) — ні.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація (локально, не комітити): прибрати виклик <c>openedRecalculation.RequestAsync</c> в
+    /// <c>UpdatePeriodPolicyHandler</c> — червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait("Requirement", "D-575")]
+    public async Task Політика_що_відкрила_місяць_ставить_перерахунок_лише_його()
+    {
+        // 09.11 06:00Z. Політика 20/15/45: листопад відкривається 21.11 — поки Scheduled; жовтень Open.
+        var at = new DateTime(2026, 11, 9, 6, 0, 0, DateTimeKind.Utc);
+        _policy.UpdateOffsets(20, 15, 45, 45);
+        var project = ProjectBuilder.Project(PeriodKind.Monthly, ZoneId, AccessBuilder.ProjectId);
+        var oct = Make(202610, 10, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31));
+        oct.AdvanceTo(PeriodState.Open, at.AddDays(-10));
+        var nov = Make(202611, 11, new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 30));
+        var dec = Make(202612, 12, new DateOnly(2026, 12, 1), new DateOnly(2026, 12, 31));
+        ProjectBuilder.Attach(project, [oct, nov, dec]);
+        project.Activate(at.AddDays(-300));
+        _periods.FindProjectAsync(AccessBuilder.ProjectId, Arg.Any<CancellationToken>()).Returns(project);
+        var clock = Substitute.For<Ecr.Domain.Abstractions.IClock>();
+        clock.UtcNow.Returns(at);
+        var opened = Substitute.For<IOpenedPeriodRecalculation>();
+
+        // 0/15/45: листопад відкритий з 01.11.
+        await new UpdatePeriodPolicyHandler(
+                _periods, _access, _user, _uow, Substitute.For<IAuditWriter>(), clock, openedRecalculation: opened)
+            .HandleAsync(PolicyId, 0, 15, 45, 45, CancellationToken.None);
+
+        Assert.Equal(PeriodState.Open, nov.State);
+        Assert.Equal(PeriodState.Scheduled, dec.State);
+        await opened.Received(1).RequestAsync(
+            AccessBuilder.ProjectId,
+            Arg.Is<IReadOnlyCollection<int>>(keys => keys.Count == 1 && keys.Contains(202611)),
+            Arg.Any<CancellationToken>());
+    }
+
     /// <summary>F13 e1: перевідкритий місяць відпущена політика назад не веде — його тримає дедлайн Reopen.</summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]

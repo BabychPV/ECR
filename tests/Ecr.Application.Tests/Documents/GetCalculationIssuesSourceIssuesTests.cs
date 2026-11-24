@@ -95,6 +95,28 @@ public sealed class GetCalculationIssuesSourceIssuesTests
         Assert.DoesNotContain("HSE400-2099", text, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// ✎ F5-R (D-570): рядок Any несе момент зміни даних джерела (<c>sourceChangedAt</c>) — і читачеві без доступу до
+    /// джерела (момент документа-джерела не називає); затвердження джерела — <c>null</c>.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Decision", "D-570")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Рядок_Any_несе_момент_зміни_джерела(bool sourceVisible)
+    {
+        var changedAt = new DateTime(2026, 11, 22, 12, 0, 0, DateTimeKind.Utc);
+        var handler = Arrange([Changed with { SourceApprovedAt = null, SourceChangedAt = changedAt }], sourceVisible, out _);
+
+        var issue = Assert.Single((await handler.HandleAsync(Document, Period, null, CancellationToken.None)).SourceIssues!);
+
+        Assert.Equal(ISourceIssueReader.SourceChangedAfterApproval, issue.Kind);
+        Assert.Equal(changedAt, issue.SourceChangedAt);
+        Assert.Null(issue.SourceApprovedAt);
+        Assert.Equal(sourceVisible ? Source : null, issue.SourceDocumentId);
+    }
+
     /// <summary>Сховищу передається запитаний період; без рядків проблем розрахунку поле все одно рахується.</summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]

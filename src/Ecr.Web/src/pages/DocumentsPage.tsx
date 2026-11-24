@@ -25,6 +25,7 @@ import { DocumentVersionCell, DocumentVersionTh } from '@/features/documents/Doc
 import { parseDocumentsView } from '@/features/documents/documentsBoardModel';
 import '@/features/documents/documentsList.css';
 import { LateEditsMark } from '@/features/documents/LateEditsMark';
+import { SourceChangedMark } from '@/features/documents/SourceChangedMark';
 import { DocumentYearStrip, DocumentYearStripHeader, DocumentYearStripLegend } from '@/features/documents/DocumentYearStrip';
 import { calendarYears, yearsWithProjects } from '@/features/projects/projectYear';
 import { CollapsibleNote } from '@/features/common/CollapsibleNote';
@@ -582,6 +583,8 @@ export function DocumentsPage(): JSX.Element {
                   <Table.Thead>
                     <Table.Tr>
                       <Table.Th>{t('documents.document')}</Table.Th>
+                      {/* ✎ B74 P4 (D-576): у проєкті «рік · об'єкт» документи різних шаблонів — шаблон окремою колонкою. */}
+                      <Table.Th data-column="template">{t('documents.template')}</Table.Th>
                       <Table.Th data-column="owner">{t('documents.owner')}</Table.Th>
                       {/* ✎ Period clarity / g3: смуга 12 місяців — над нею перші літери місяців (макет `.ms.hd`). */}
                       <Table.Th data-column="months">
@@ -635,6 +638,16 @@ export function DocumentsPage(): JSX.Element {
                               </Group>
                             </Box>
                           </Table.Td>
+                          <Table.Td data-column="template" data-document-template={document.templateCode ?? ''}>
+                            {/* `null` — документ без шаблону (до ремонту 99-epilogue): видиме «—», а не порожнеча. */}
+                            {typeof document.templateCode === 'string' && document.templateCode.length > 0 ? (
+                              <Text size="sm" ff="monospace">
+                                {document.templateCode}
+                              </Text>
+                            ) : (
+                              <Text c="dimmed">—</Text>
+                            )}
+                          </Table.Td>
                           <Table.Td data-column="owner">
                             {/* ✎ D-450: власник (автор документа, передається D-443). `null` — людини вже немає або
                                 доступ звужено (сервер ім'я не віддає) — видиме «—», а не порожнеча. */}
@@ -675,6 +688,10 @@ export function DocumentsPage(): JSX.Element {
                                 </Text>
                                 {/* `BE-09b`: пізні правки за період (без періоду — за будь-який). */}
                                 {document.hasLateEdits && <LateEditsMark />}
+                                {/* ✎ F5-R (D-570): джерело змінено після затвердження місяця. */}
+                                {document.sourceChangedPeriods !== undefined && document.sourceChangedPeriods !== null && (
+                                  <SourceChangedMark periods={document.sourceChangedPeriods} />
+                                )}
                                 {/* RC14-D: результати методологій застаріли (лише `true`; `null` — доступ звужено). */}
                                 {document.resultsStale === true && (
                                   <Suspense fallback={null}><StaleResultsMark since={document.resultsStaleSince} /></Suspense>

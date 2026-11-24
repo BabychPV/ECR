@@ -467,6 +467,9 @@ public sealed partial class RecalculationJob
     /// Кеш на шаблон за ніч (<see cref="NightlyContext.SourcesByConsumer"/>): документи одного шаблону — один запит зв'язок;
     /// шаблон без зв'язок — один запит і порожньо. Документи джерела — за екземплярами таблиць версій шаблону-джерела (як у
     /// хуку джерела, <c>SourceDocumentChangeHook</c>); понад стелю — «переповнено», і споживач рахується.
+    /// ✎ B179 L7 (D-574): споживача зв'язки називає граф залежностей (<see cref="IDependencyGraphProvider"/>), як у воротах
+    /// і перевірці <c>STALE_APPROVED_DEPENDENT</c>; ручну таблицю споживачів знято. Без графа (ручна збірка задачі в тесті)
+    /// джерел немає — як у <c>ConsistencyCheckJob</c>; контейнер Api і воркера граф дає завжди (тест складання воркера).
     /// </remarks>
     private async Task<IReadOnlyList<NightlySource>> NightlySourcesOfAsync(
         int consumerTemplateId, NightlyContext context, CancellationToken ct)
@@ -476,11 +479,28 @@ public sealed partial class RecalculationJob
             return cached;
         }
 
+        if (dependencyGraph is null)
+        {
+            context.SourcesByConsumer[consumerTemplateId] = [];
+            return [];
+        }
+
+        var bindingIds = (await dependencyGraph.GetAsync(ct).ConfigureAwait(false)).TemplateDependencies
+            .Where(d => d.ConsumerTemplateId == consumerTemplateId)
+            .Select(d => d.BindingId)
+            .Distinct()
+            .ToList();
+        if (bindingIds.Count == 0)
+        {
+            context.SourcesByConsumer[consumerTemplateId] = [];
+            return [];
+        }
+
         var bindings = await db.DocumentSourceBindings
             .AsNoTracking()
-            .Where(b => b.ReadFromDocument && b.Consumers.Any(c => c.TemplateId == consumerTemplateId))
+            .Where(b => b.ReadFromDocument && bindingIds.Contains(b.Id))
             .OrderBy(b => b.Id)
-            .Select(b => new { b.SourceTemplateId, b.UpdatedAt })
+            .Select(b => new { b.Id, b.SourceTemplateId, b.UpdatedAt })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -506,7 +526,8 @@ public sealed partial class RecalculationJob
             result.Add(new NightlySource(
                 binding.UpdatedAt is { } at ? DateTime.SpecifyKind(at, DateTimeKind.Utc) : null,
                 documents,
-                documents.Count > MaxNightlySourceDocuments));
+                documents.Count > MaxNightlySourceDocuments,
+                binding.Id));
         }
 
         context.SourcesByConsumer[consumerTemplateId] = result;
@@ -673,4 +694,5 @@ internal sealed record NightlyContext(int ProjectId, int Year, bool SkipUnchange
 /// <param name="UpdatedAt">Коли змінено стан чи біти зв'язки.</param>
 /// <param name="DocumentIds">Документи шаблону-джерела.</param>
 /// <param name="Overflow">Документів понад стелю — перелік неповний.</param>
-internal sealed record NightlySource(DateTime? UpdatedAt, IReadOnlyList<long> DocumentIds, bool Overflow);
+/// <param name="BindingId">✎ PERF-06b (<c>D-572</c>): зв'язка (обсяг ребра графа для помісячної гілки джерел детектора кнопки).</param>
+internal sealed record NightlySource(DateTime? UpdatedAt, IReadOnlyList<long> DocumentIds, bool Overflow, int BindingId = 0);

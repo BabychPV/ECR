@@ -16,6 +16,7 @@ public sealed record VersionMigrationColumnRename(string FromColumnCode, string 
 /// <param name="ToTableCode">Код таблиці в цільовій версії; рівний <paramref name="FromTableCode"/> — лише перейменування колонок.</param>
 /// <param name="SheetCode">Код аркуша; <c>null</c> — діє на будь-якому аркуші, де є така таблиця.</param>
 /// <param name="Columns">Перейменування колонок цієї таблиці; <c>null</c> — колонки збігаються за кодами.</param>
+/// <param name="UnitRelabels">✎ P-1123-4: заявлені перепідписання одиниць колонок цієї таблиці (без перерахунку); <c>null</c> — немає.</param>
 /// <remarks>
 /// ⚠ Мапа АДИТИВНА й нічого не змінює без неї: відповідність за кодом лишається першою. Запис, який до цієї
 /// пари версій не стосується (немає таблиці-джерела або таблиці-приймача), мовчки пропускається — тому одну
@@ -26,7 +27,29 @@ public sealed record VersionMigrationTableRename(
     string FromTableCode,
     string ToTableCode,
     string? SheetCode = null,
-    IReadOnlyList<VersionMigrationColumnRename>? Columns = null);
+    IReadOnlyList<VersionMigrationColumnRename>? Columns = null,
+    IReadOnlyList<VersionMigrationUnitRelabel>? UnitRelabels = null);
+
+/// <summary>
+/// ✎ P-1123-4: заявлене ПЕРЕПІДПИСАННЯ одиниці колонки без перерахунку значень («було безрозмірне → стало підтверджена
+/// одиниця»): числа вже в цій одиниці, змінюється лише підпис. Без заяви зміна одиниці колонки зі значеннями лишається
+/// <c>guardedWithData</c>.
+/// </summary>
+/// <param name="ColumnCode">Код колонки у вихідній версії (у таблиці запису мапи).</param>
+/// <param name="FromUnitCode">Одиниця у вихідній версії — лише безрозмірна (розмірність <c>Dimensionless</c>).</param>
+/// <param name="ToUnitCode">Одиниця в цільовій версії.</param>
+public sealed record VersionMigrationUnitRelabel(string ColumnCode, string FromUnitCode, string ToUnitCode);
+
+/// <summary>Заява перепідписання, розв'язана до Id одиниць (ключ словника планувальника — шлях <c>SHEET.TABLE.COLUMN</c>).</summary>
+/// <param name="FromUnitId">Id безрозмірної одиниці вихідної версії.</param>
+/// <param name="ToUnitId">Id підтвердженої одиниці цільової версії.</param>
+/// <param name="FromUnitCode">Її код (для звіту й журналу).</param>
+/// <param name="ToUnitCode">Код цільової (для звіту й журналу).</param>
+public sealed record VersionMigrationResolvedRelabel(int FromUnitId, int ToUnitId, string FromUnitCode, string ToUnitCode)
+{
+    /// <summary>Вид пункту звіту переносу для застосованого перепідписання.</summary>
+    public const string Kind = "UnitRelabeled";
+}
 
 /// <summary>Перевірка форми мапи перейменувань із запиту.</summary>
 public static class VersionMigrationRenames
@@ -68,7 +91,8 @@ public static class VersionMigrationRenames
             }
 
             var onlyColumns = string.Equals(rename.FromTableCode, rename.ToTableCode, StringComparison.Ordinal);
-            if (onlyColumns && (rename.Columns is null || rename.Columns.Count == 0))
+            if (onlyColumns && (rename.Columns is null || rename.Columns.Count == 0)
+                && (rename.UnitRelabels is null || rename.UnitRelabels.Count == 0))
             {
                 throw Invalid($"Запис «{rename.FromTableCode}» не перейменовує нічого: коди таблиці однакові й колонок немає.");
             }
@@ -76,6 +100,30 @@ public static class VersionMigrationRenames
             if (!seen.Add((rename.SheetCode ?? string.Empty, rename.FromTableCode)))
             {
                 throw Invalid($"Таблицю «{rename.FromTableCode}» перейменовано в мапі двічі.");
+            }
+
+            if (rename.UnitRelabels is { } relabels)
+            {
+                if (relabels.Count > MaxColumnRenames)
+                {
+                    throw Invalid(
+                        $"Запис «{rename.FromTableCode}» містить {relabels.Count} перепідписань одиниць; найбільше — {MaxColumnRenames}.");
+                }
+
+                var relabeled = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var relabel in relabels)
+                {
+                    if (relabel is null || !IsCode(relabel.ColumnCode) || !IsCode(relabel.FromUnitCode) || !IsCode(relabel.ToUnitCode)
+                        || string.Equals(relabel.FromUnitCode, relabel.ToUnitCode, StringComparison.Ordinal))
+                    {
+                        throw Invalid($"Запис «{rename.FromTableCode}»: перепідписання одиниці мусить мати колонку й дві різні одиниці.");
+                    }
+
+                    if (!relabeled.Add(relabel.ColumnCode))
+                    {
+                        throw Invalid($"Запис «{rename.FromTableCode}»: одиницю колонки «{relabel.ColumnCode}» перепідписано двічі.");
+                    }
+                }
             }
 
             if (rename.Columns is null)

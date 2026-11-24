@@ -42,6 +42,10 @@ RENAMES = [
     (['ECW_C11_03'], ['T9_13'], 'Land_Measure_RunningHours', 'Land_OperatingTime', 'ECW_C11_03.cs:137-142'),
     (['ECW_C11_10'], ['T9a_24', 'T9a_25', 'T9a_26'], 'Land_Measure_SubstanceConsumption', 'Land_Measure_ReleaseColdVen',
      'ECW_C11_10.cs:143-153'),
+    # P-1123-4 (людина 23.11): C11_10 на 9_07 читає те саме джерело, що й стара система (SubstanceConsumptionSm3) - міст
+    # замість підміни в тексті скрипта (land-script-units.json argumentSources, HANDOVER-MS-1120 §3 C11_10).
+    (['ECW_C11_10'], ['T9_07'], 'Land_Measure_SubstanceConsumption', 'Land_Measure_SubstanceConsumptionSm3',
+     'HANDOVER-MS-1120 §3 C11_10; P-1123-4'),
     (['ECW_C11_11_02'], ['T9_07'], 'Land_Measure_SubstanceConsumption', 'Land_Measure_SubstanceConsumptionSm3',
      'ECW_C11_11_02.cs:75-84'),
     (['ECW_C11_11_02'], ['T9a_19'], 'Land_Measure_SubstanceConsumption', 'Land_Measure_AmountOil',
@@ -339,9 +343,9 @@ OPTIONAL_ARGUMENTS = [
      'AF-атрибута немає'),
     ('ECW_C11_10', 'Land_Measure_OperatingTime', ['T9_02', 'T9_11', 'T9a_24', 'T9a_26'],
      'ECW_C11_10.cs:48-51 (requiredFields OperatingTime лише на T9_07); AF-атрибута немає'),
-    ('ECW_C11_10', 'Land_Measure_SubstanceConsumption', ['T9_07', 'T9a_27', 'T9a_28'],
+    ('ECW_C11_10', 'Land_Measure_SubstanceConsumption', ['T9a_27', 'T9a_28'],
      'ECW_C11_10.cs:143-153 (SubstanceConsumption лише з ReleaseColdVen на 9a_24..26); AF-атрибута немає; '
-     'на T9_07 (K1) колонку SubstanceConsumption читає лише C11_11_02 власним суфіксованим мостом'),
+     'T9_07 - міст RENAMES (P-1123-4)'),
     ('ECW_C11_11_03', 'Land_Measure_MaterialResidence', ['T9_06'],
      'ECW_C11_11_03.cs:41-42 (requiredFields MaterialResidence лише на 9a_17); AF-атрибута немає'),
     ('ECW_C11_16', 'Land_Measure_FlowRateSulfur', ['T9a_23'],

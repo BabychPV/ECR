@@ -68,6 +68,22 @@ public sealed partial class QuartzJobAdapter(
         var progress = provider.GetService<IJobProgressStore>();
         var clock = provider.GetRequiredService<IClock>();
 
+        // ✎ M11 (W15z, JQ-FIFO у Quartz): раніше поставлений перерахунок того самого документа ще чекає чи виконується —
+        // ця задача стає за ним (відкладення без відліку стелі, як очікування місця нижче), а не обганяє його, коли лок
+        // документа звільнився в мить її триґера. Натискання людини не стоїть за системними (прохід «спершу ручні»).
+        if (QuartzDocumentFifo.AppliesTo(typeName)
+            && !RecalculationJob.IsManualPress(job.GetType(), payload)
+            && await QuartzDocumentFifo.EarlierPendingAsync(context.Scheduler, context.JobDetail, context.CancellationToken)
+                .ConfigureAwait(false) is { } ahead)
+        {
+            var fifoDelay = provider.GetService<QuartzDocumentFifoSettings>()?.RetryDelay ?? QuartzDocumentFifo.DefaultRetryDelay;
+            LogDocumentFifoWait(logger, jobId, ahead, fifoDelay);
+            await ScheduleDeferredAsync(context, CorrelationOf(context), clock, fifoDelay, DeferredSince(context))
+                .ConfigureAwait(false);
+            QuartzPayloadMerges.Reopen(jobId);
+            return;
+        }
+
         // ⛔ AN-116 (P1-06): межа за ТИПОМ — експорт/імпорт Excel не більше `Jobs:Excel:MaxConcurrency`
         // одночасно. Понад межу задача не чекає на потоці пулу (тримала б його, як лок у I2), а отримує
         // одноразовий триґер через відступ — і рядок лишається Queued. Перевірка ДО виміру затримки старту:
@@ -161,6 +177,7 @@ public sealed partial class QuartzJobAdapter(
             LogJobSkippedCancelled(logger, jobId, typeName ?? "—");
             await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None).ConfigureAwait(false);
             QuartzPayloadMerges.Forget(jobId);
+            QuartzDocumentFifo.Forget(context.Scheduler.SchedulerName, jobId);
             return;
         }
 
@@ -190,6 +207,8 @@ public sealed partial class QuartzJobAdapter(
                 new StoreJobProgress(progress, jobId, clock),
                 jobCancel.Token).ConfigureAwait(false);
 
+            // ✎ Огляд b11-2 (H): злита під час прогону робота — у чергу ДО кінцевого стану (без шпарини для F5).
+            await QuartzJobScheduler.RequeueDirtyBeforeFinishAsync(context.Scheduler, jobId).ConfigureAwait(false);
             await FinishAsync(progress, jobId, "Succeeded", null, clock, context.CancellationToken)
                 .ConfigureAwait(false);
 
@@ -207,12 +226,14 @@ public sealed partial class QuartzJobAdapter(
                 await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None)
                     .ConfigureAwait(false);
                 QuartzPayloadMerges.Forget(jobId);
+                QuartzDocumentFifo.Forget(context.Scheduler.SchedulerName, jobId);
             }
         }
         catch (OperationCanceledException)
         {
             // Скасування — не провал: його попросили. Але й не успіх, і стан
             // мусить це розрізняти.
+            await QuartzJobScheduler.RequeueDirtyBeforeFinishAsync(context.Scheduler, jobId).ConfigureAwait(false);
             await FinishAsync(progress, jobId, CancelledState, null, clock, CancellationToken.None)
                 .ConfigureAwait(false);
 
@@ -222,6 +243,7 @@ public sealed partial class QuartzJobAdapter(
                 await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None)
                     .ConfigureAwait(false);
                 QuartzPayloadMerges.Forget(jobId);
+                QuartzDocumentFifo.Forget(context.Scheduler.SchedulerName, jobId);
             }
 
             throw;
@@ -244,6 +266,11 @@ public sealed partial class QuartzJobAdapter(
                 LogDeferralExhausted(logger, jobId, typeName ?? "—", deferred.Resource ?? "—", JobDeferral.Format(waited));
                 Observability.InfrastructureMetrics.RecordJobFailed(typeName, "deferral_exhausted");
 
+                // ✎ Огляд b11 №3 (LOW): злиття, що прийшли під час виконання, і комірки самої задачі — у чергу ДО запису
+                // Failed: інакше між Failed і перепостановкою ворота F5 не бачили б живої задачі документа.
+                await QuartzJobScheduler.RequeueDirtyBeforeFinishAsync(context.Scheduler, jobId).ConfigureAwait(false);
+                await RequeueExhaustedAsync(context, jobId, typeName, payload, progress, clock).ConfigureAwait(false);
+
                 if (progress is not null)
                 {
                     await WriteProgressAsync(
@@ -262,8 +289,8 @@ public sealed partial class QuartzJobAdapter(
                         .ConfigureAwait(false);
                 }
 
-                await RequeueExhaustedAsync(context, jobId, typeName, payload, progress, clock).ConfigureAwait(false);
                 QuartzPayloadMerges.MarkFailed(jobId);
+                QuartzDocumentFifo.Forget(context.Scheduler.SchedulerName, jobId);
 
                 // ⚠ Деталь лишається (дурабельна) — для ручного перезапуску, як у провалу нижче.
                 throw new JobExecutionException(deferred, refireImmediately: false);
@@ -307,6 +334,8 @@ public sealed partial class QuartzJobAdapter(
                 return;
             }
 
+            await QuartzJobScheduler.RequeueDirtyBeforeFinishAsync(context.Scheduler, jobId).ConfigureAwait(false);
+
             // ⚠ Текст помилки в прогрес — БЕЗ стека (ФВ-6.11, D-11): стек
             // виносить назовні шляхи, імена і подекуди значення.
             //
@@ -331,6 +360,7 @@ public sealed partial class QuartzJobAdapter(
 
             // Тіло задачі злиття — для ручного перезапуску, але в межах (огляд O1, косметика).
             QuartzPayloadMerges.MarkFailed(jobId);
+            QuartzDocumentFifo.Forget(context.Scheduler.SchedulerName, jobId);
 
             // ⛔ Деталь задачі НЕ видаляється тут. Дурабельна саме на цей
             // випадок (QuartzJobScheduler.EnqueueCoreAsync): без неї
@@ -688,6 +718,9 @@ public sealed partial class QuartzJobAdapter(
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Задача {JobId} ({TypeName}) чекає: уже виконується {Limit} задач цього типу; повтор через {Delay}.")]
     private static partial void LogJobTypeLimitReached(ILogger logger, string jobId, string typeName, int limit, TimeSpan delay);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Задача {JobId} чекає: раніше поставлений перерахунок того самого документа {AheadJobId} ще не завершено; повтор через {Delay}.")]
+    private static partial void LogDocumentFifoWait(ILogger logger, string jobId, string aheadJobId, TimeSpan delay);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Задача {TypeName} ({JobId}) не зареєстрована.")]
     private static partial void LogUnknownJob(ILogger logger, string typeName, string jobId);

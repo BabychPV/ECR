@@ -1,6 +1,6 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
-import { calculationIssuesKey, getCalculationIssues, type CalculationIssues } from './api';
+import { calculationIssuesKey, calculationIssuesYearKey, getCalculationIssues, type CalculationIssues } from './api';
 
 /** Невидимий документ (`404`): проблем для нього не показують зовсім - ні списку, ні помилки. */
 export function isNotFound(error: unknown): boolean {
@@ -22,6 +22,24 @@ export function useCalculationIssues(
   return useQuery({
     queryKey: calculationIssuesKey(documentId, periodKey, sheetCopyId),
     queryFn: () => getCalculationIssues(documentId, periodKey, sheetCopyId),
+    retry: (failures, error) => !isNotFound(error) && failures < 1,
+  });
+}
+
+/**
+ * ✎ W15z M4: проблеми ВСІХ місяців року документа «рік» (`year=true`) — один запит на якорі року; `enabled = false`
+ * (інша розкладка чи адреса ще не на якорі) — запиту немає.
+ */
+export function useYearCalculationIssues(
+  documentId: number,
+  anchorPeriodKey: number,
+  sheetCopyId: number | null,
+  enabled: boolean,
+): UseQueryResult<CalculationIssues> {
+  return useQuery({
+    queryKey: calculationIssuesYearKey(documentId, anchorPeriodKey, sheetCopyId),
+    queryFn: () => getCalculationIssues(documentId, anchorPeriodKey, sheetCopyId, true),
+    enabled,
     retry: (failures, error) => !isNotFound(error) && failures < 1,
   });
 }

@@ -212,6 +212,47 @@ public sealed partial class SaveDataSourceHandler(
     /// <summary>Ключ відмови: адреса Negotiate-джерела змінюється без явного підтвердження.</summary>
     public const string EndpointChangeUnconfirmedKey = "err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed";
 
+    /// <summary>Ключ відмови: адреса Sql / PiSqlClient — не рядок з'єднання (голе ім'я сервера).</summary>
+    public const string NotConnectionStringKey = "err.ECR-REQ-0422.dataSourceEndpointNotConnectionString";
+
+    /// <summary>Ключ відмови: значення в полі, якого транспорт не читає (Sql — запасна адреса, PiSqlClient — каталог).</summary>
+    public const string FieldNotReadKey = "err.ECR-REQ-0422.dataSourceFieldNotRead";
+
+    /// <summary>
+    /// Поле, якого транспорт не читає, мусить бути порожнім: значення, яке ніхто не читає, не зберігається.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Sql не має перемикання на запасну адресу (<c>EndpointFailover</c> — лише PiWebApi і PiSqlClient), а
+    /// PiSqlClient не читає <c>Catalog</c> (база — <c>AF Database</c> у рядку з'єднання). Раніше обидва значення
+    /// мовчки зберігалися, і людина думала, що вони діють. Відмова — і на правці з уже збереженим значенням:
+    /// форма показує його лише для читання з поясненням і кнопкою очищення, тож нічого не зникає мовчки.
+    /// </remarks>
+    private static void RequireReadByTransport(ExternalTransport transport, string? spare, string? catalog, string code)
+    {
+        var field = transport switch
+        {
+            ExternalTransport.Sql when spare is { Length: > 0 } => "secondaryEndpoint",
+            ExternalTransport.PiSqlClient when catalog is { Length: > 0 } => "catalog",
+            _ => null,
+        };
+
+        if (field is null)
+        {
+            return;
+        }
+
+        throw new BusinessRuleException(
+            ErrorCodes.RequestInvalid,
+            $"Транспорт {transport} не читає поле {field} джерела «{code}»: значення не зберігається, очистіть поле.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = FieldNotReadKey,
+                ["field"] = field,
+                ["code"] = code,
+                ["transport"] = transport.ToString(),
+            });
+    }
+
     /// <summary>Заводить джерело; код має бути вільним.</summary>
     /// <remarks>
     /// <c>secretConfirmation</c> — значення секрету середовища під це джерело,
@@ -234,7 +275,7 @@ public sealed partial class SaveDataSourceHandler(
 
         var ecrCode = EcrCode.Create(code ?? string.Empty);
         var parsed = await ValidateAsync(
-            ecrCode.Value, name, transport, endpoint, secondaryEndpoint, maxParallel, exceptId: null, ct)
+            ecrCode.Value, name, transport, endpoint, secondaryEndpoint, catalog, maxParallel, exceptId: null, ct)
             .ConfigureAwait(false);
 
         // ⛔ Створення — теж прив'язка секрету до адреси: ім'я секрету виводиться
@@ -313,7 +354,7 @@ public sealed partial class SaveDataSourceHandler(
         ListDataSourcesHandler.RequireCurrentVersion(source, ifMatch);
 
         var parsed = await ValidateAsync(
-            source.Code, name, transport, endpoint, secondaryEndpoint, maxParallel, id, ct).ConfigureAwait(false);
+            source.Code, name, transport, endpoint, secondaryEndpoint, catalog, maxParallel, id, ct).ConfigureAwait(false);
 
         // ⛔ S3 аудиту безпеки: секрет середовища прив'язаний до ІМЕНІ джерела,
         // а не до адреси, і адаптери чіпляють його до будь-якої адреси, що
@@ -430,6 +471,7 @@ public sealed partial class SaveDataSourceHandler(
         ExternalTransport transport,
         string? endpoint,
         string? secondaryEndpoint,
+        string? catalog,
         int? maxParallel,
         int? exceptId,
         CancellationToken ct)
@@ -459,6 +501,8 @@ public sealed partial class SaveDataSourceHandler(
         // треба в будь-якому разі.
         RequireNoCredentials(address, "endpoint");
         RequireNoCredentials(spare, "secondaryEndpoint");
+
+        RequireReadByTransport(transport, spare, Trim(catalog), code);
 
         if (transport == ExternalTransport.PiWebApi)
         {
@@ -537,6 +581,18 @@ public sealed partial class SaveDataSourceHandler(
 
         if (verdict == EndpointVerdict.Allowed)
         {
+            // ⛔ Голе ім'я сервера (`server`, `host:port`) політика адреси пропускає — вона про хости, і нею ж
+            // перевіряється SMTP-хост. Але адаптери розбирають Endpoint як РЯДОК З'ЄДНАННЯ
+            // (`SqlConnectionStringBuilder`, `OdbcConnectionStringBuilder`), і голе ім'я падало лише під час
+            // збору (`connectionStringBroken`). Тому джерело без жодної пари `ключ=значення` не зберігається.
+            if (!address.Contains('=', StringComparison.Ordinal))
+            {
+                throw new BusinessRuleException(
+                    ErrorCodes.RequestInvalid,
+                    "Адреса джерела Sql / PiSqlClient має бути рядком з'єднання (ключ=значення через «;»), а не голим ім'ям сервера.",
+                    new Dictionary<string, object?> { ["messageKey"] = NotConnectionStringKey, ["field"] = field });
+            }
+
             if (logger is not null && network?.AllowedHosts is { Count: > 0 } allowed
                 && hosts.Any(host => !DataSourceEndpointPolicy.IsHostAllowed(host, allowed)))
             {

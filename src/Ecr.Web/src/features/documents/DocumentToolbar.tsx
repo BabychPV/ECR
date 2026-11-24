@@ -1,4 +1,4 @@
-import { Fragment, type JSX, type ReactNode } from 'react';
+import { Fragment, type CSSProperties, type JSX, type ReactNode } from 'react';
 import { Button, Group, Menu, Skeleton, VisuallyHidden } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import './documentToolbar.css';
@@ -91,11 +91,20 @@ function ActionsPlaceholder(): JSX.Element {
   return (
     <Group gap="xs" wrap="nowrap" role="status" aria-busy="true" data-testid="document-actions-pending">
       <VisuallyHidden>{t('common.loading')}</VisuallyHidden>
-      <Skeleton height={36} width={88} radius="sm" />
-      <Skeleton height={36} width={96} radius="sm" />
-      <Skeleton height={36} width={176} radius="sm" data-testid="document-submit-placeholder" />
+      <Skeleton height={36} radius="sm" style={placeholderSize(88)} />
+      <Skeleton height={36} radius="sm" style={placeholderSize(96)} />
+      <Skeleton height={36} radius="sm" style={placeholderSize(176)} data-testid="document-submit-placeholder" />
     </Group>
   );
+}
+
+/**
+ * ✎ fg5 (b11): ширина заглушки — flex-basis, а не `width`. Фіксована `width` входить у min-content рядка дій (88 + 96 + 176
+ * + проміжки ≈ 380 px), тож на 375 px сторінка на час завантаження прокручувалась убік на ~5 px; основа з `min-width: 0`
+ * дає ту саму ширину на широкому екрані й стискається на вузькому.
+ */
+function placeholderSize(px: number): CSSProperties {
+  return { flex: `0 1 ${String(px)}px`, minWidth: 0 };
 }
 
 /** Остаточні дії: другорядні → «More» → головна. */

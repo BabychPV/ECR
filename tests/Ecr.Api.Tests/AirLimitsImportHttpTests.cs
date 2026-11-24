@@ -411,14 +411,15 @@ public sealed partial class AirLimitsImportHttpTests(SqlServerFixture sql, ITest
     }
 
     /// <remarks>
-    /// F13-p198 P3-3: a re-import with a profile that does NOT map the added columns keeps their values — the replaced row's
-    /// value is carried over by NAE (and NAE/substance) instead of being wiped by the whole-row replace. Mutation (run, red):
-    /// drop the carry branch in <c>InsertAsync</c> — the values are gone after the second import.
+    /// ✎ D-569 (P-1123-1, was F13-p198 P3-3 «keeps their values»): the last uploaded table is the only current one — a re-import
+    /// with a profile that does NOT read the added columns leaves them EMPTY (no carry-over from the replaced rows), and the
+    /// preview says so before the apply (<c>emptiedColumns</c>). Mutation (run locally, red): the carry branch back in
+    /// <c>InsertAsync</c> — the values survive the second import.
     /// </remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task AddedColumns__a_reimport_whose_profile_does_not_map_them_keeps_their_values()
+    public async Task AddedColumns__a_reimport_whose_profile_does_not_read_them_empties_them_and_the_preview_says_so()
     {
         await PrepareAsync();
         using var app = new EcrApiFactory(sql);
@@ -436,6 +437,11 @@ public sealed partial class AirLimitsImportHttpTests(SqlServerFixture sql, ITest
         await ApplyBytesAsync(app, client, permitId, bytes, new { region, area = "OFFSHORE", resolutions, spec = AddedColumnsSpec(pointCopy, ndvYear) });
 
         // The built-in profile (no added fields): the file still has B and AB, the profile just does not read them.
+        var answer = await ReadAsync(app, await PostFileAsync(client, Preview(permitId), bytes, new { region, area = "OFFSHORE" }));
+        var emptied = answer.GetProperty("emptiedColumns").EnumerateArray().Select(c => c.GetProperty("code").GetString()).ToList();
+        Assert.Contains(pointCopy, emptied);
+        Assert.Contains(ndvYear, emptied);
+        Assert.Equal(373, answer.GetProperty("preview").GetProperty("diff").GetProperty("changedParents").GetInt32());
         await ApplyBytesAsync(app, client, permitId, bytes, new { region, area = "OFFSHORE" });
 
         await using var db = new EcrDbContext(Options());
@@ -446,8 +452,8 @@ public sealed partial class AirLimitsImportHttpTests(SqlServerFixture sql, ITest
             return await db.RegistryValues.Where(v => v.RegistryFieldDefId == fieldId && live.Contains(v.RegistryEntryId)).ToListAsync();
         }
 
-        Assert.Equal(373, (await ValuesOf(pointCopy)).Count(v => v.ValueString?.StartsWith("WS-", StringComparison.Ordinal) == true));
-        Assert.True((await ValuesOf(ndvYear)).Count(v => v.ValueNumeric is > 2000m) > 2000, "substance values of the added column kept");
+        Assert.Empty(await ValuesOf(pointCopy));
+        Assert.Empty(await ValuesOf(ndvYear));
     }
 
     /// <remarks>
@@ -795,6 +801,12 @@ public sealed partial class AirLimitsImportHttpTests(SqlServerFixture sql, ITest
         Assert.Equal(373, other.GetProperty("parents").GetInt32());
         Assert.Equal(2624, other.GetProperty("children").GetInt32());
         Assert.False(string.IsNullOrEmpty(other.GetProperty("label").GetString()));
+        // ✎ D-569: the preview lists the other permit's rows it takes (per NAE), labelled with that permit, not as this permit's removals.
+        var theirRows = preview.GetProperty("rows").EnumerateArray()
+            .Where(r => r.TryGetProperty("ownerLabel", out var o) && o.GetString() == other.GetProperty("label").GetString()).ToList();
+        Assert.Equal(373, theirRows.Count(r => r.GetProperty("childKey").ValueKind == JsonValueKind.Null));
+        Assert.All(theirRows, r => Assert.Equal("Removed", r.GetProperty("kind").GetString()));
+        Assert.Equal(0, preview.GetProperty("diff").GetProperty("removedParents").GetInt32());
 
         // Without the confirmation nothing is written.
         var refused = await PostFileAsync(client, Apply(second), Synthetic.Bytes, new { region, area = "OFFSHORE", expectedFingerprint = preview.GetProperty("fingerprint").GetString() });
@@ -1110,7 +1122,7 @@ public sealed partial class AirLimitsImportHttpTests(SqlServerFixture sql, ITest
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Replace__scope_leaves_other_areas_and_other_permits_alone()
+    public async Task Replace__a_reimport_for_one_area_removes_the_permits_rows_of_the_other_area_and_leaves_other_permits_alone()
     {
         await PrepareAsync();
         using var app = new EcrApiFactory(sql);
@@ -1138,7 +1150,6 @@ public sealed partial class AirLimitsImportHttpTests(SqlServerFixture sql, ITest
         var offshore = await ResolveAsync(app, client, permitId, region, "OFFSHORE", small);
         var inOffshore = await ApplyBytesAsync(app, client, permitId, small, new { region, area = "OFFSHORE", resolutions = offshore });
         var onshore = await ResolveAsync(app, client, permitId, region, "ONSHORE", small);
-        await ApplyBytesAsync(app, client, permitId, small, new { region, area = "ONSHORE", resolutions = onshore });
         var otherRegion = NewRegion();
         var theirs = await ResolveAsync(app, client, neighbour, otherRegion, "OFFSHORE", small);
         await ApplyBytesAsync(app, client, neighbour, small, new { region = otherRegion, area = "OFFSHORE", resolutions = theirs });
@@ -1149,15 +1160,21 @@ public sealed partial class AirLimitsImportHttpTests(SqlServerFixture sql, ITest
         var before = await IdsAsync(app, client, permitId, "OFFSHORE");
         Assert.Equal(sources, before.Count(i => i.Kind == "source"));
 
-        // Re-import ONLY the ONSHORE scope: the OFFSHORE rows of the same permit and the other permit's rows survive byte for byte.
-        var replaced = await ApplyBytesAsync(app, client, permitId, small, new { region, area = "ONSHORE" });
+        // ✎ D-569 (P-1123-1, was «the OFFSHORE rows survive»): the last uploaded table is the only current one — re-importing the
+        // ONSHORE file replaces EVERY row of the permit: the OFFSHORE rows are removed (soft-deleted), the other permit's rows stay.
+        var replaced = await ApplyBytesAsync(app, client, permitId, small, new { region, area = "ONSHORE", resolutions = onshore });
         Assert.Equal(sources, replaced.GetProperty("replacedOwn").GetInt32());
 
-        var after = await IdsAsync(app, client, permitId, "OFFSHORE");
-        Assert.Equal(before.Select(b => b.Id).Order(), after.Select(a => a.Id).Order());
+        Assert.Empty(await IdsAsync(app, client, permitId, "OFFSHORE"));
         var cardNow = await CardAsync(app, client, permitId);
-        Assert.Equal(2 * sources, cardNow.GetProperty("sources").GetArrayLength());
-        Assert.Equal(2 * substances, cardNow.GetProperty("substanceRows").GetInt32());
+        Assert.Equal(sources, cardNow.GetProperty("sources").GetArrayLength());
+        Assert.Equal(substances, cardNow.GetProperty("substanceRows").GetInt32());
+        await using (var check = new EcrDbContext(Options()))
+        {
+            var ids = before.Select(b => b.Id).ToList();
+            Assert.Equal(ids.Count, await check.RegistryEntries.CountAsync(e => ids.Contains(e.Id) && e.IsDeleted));
+        }
+
         var neighbourCard = await CardAsync(app, client, neighbour);
         Assert.Equal(sources, neighbourCard.GetProperty("sources").GetArrayLength());
         Assert.Equal(substances, neighbourCard.GetProperty("substanceRows").GetInt32());

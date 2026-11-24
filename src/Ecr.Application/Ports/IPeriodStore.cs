@@ -129,6 +129,28 @@ public interface IPeriodStore
         long documentId, int periodKey, CancellationToken ct);
 
     /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>): те саме, що <see cref="FindPeriodStateAsync"/>, для кількох періодів документа одним зверненням
+    /// (каскад споживача за ребром «рік» — 12 періодів). Ключ є для кожного запитаного періоду; <c>null</c> — періоду немає.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKeys">Ключі періодів.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Стан за ключем періоду.</returns>
+    /// <remarks>Типова реалізація — по одному (тестові заглушки); справжня — <c>PeriodStore</c>, один запит.</remarks>
+    public async Task<IReadOnlyDictionary<int, Ecr.Domain.Enums.PeriodState?>> FindPeriodStatesAsync(
+        long documentId, IReadOnlyCollection<int> periodKeys, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(periodKeys);
+        var states = new Dictionary<int, Ecr.Domain.Enums.PeriodState?>();
+        foreach (var key in periodKeys.Distinct())
+        {
+            states[key] = await FindPeriodStateAsync(documentId, key, ct).ConfigureAwait(false);
+        }
+
+        return states;
+    }
+
+    /// <summary>
     /// Чи є серед аркушів такий, що після <c>Reopen</c> ще не затверджений
     /// знову (ФВ-5.20a, <c>D-70</c> б): <c>ReopenedAt</c> заповнено й немає
     /// <c>Approved</c> пізнішого за нього.
@@ -173,7 +195,28 @@ public interface IPeriodStore
     /// <param name="documentId">Документ.</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<bool> IsDocumentProjectArchivedOrArchivingAsync(long documentId, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ D-575: ефективний стан періоду документа (як <see cref="FindPeriodStateAsync"/>) разом з ознакою «період ще не
+    /// відкрито» — формули такого періоду не обчислюються (<c>RecalculationService</c>).
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns><c>null</c> — періоду немає в календарі проєкту.</returns>
+    /// <remarks>
+    /// ⚠ Один запит — той самий, що <see cref="FindPeriodStateAsync"/>: перерахунок бере звідси і стан для
+    /// <c>IsLateEdit</c>, тож кількість звернень прогону не зростає. ⚠ «Не відкрито» — лише в АКТИВНОМУ проєкті:
+    /// у чернетці всі періоди <c>Scheduled</c> за побудовою (життєвий цикл періодів ще не йде), і формули там
+    /// рахуються, як і доти.
+    /// </remarks>
+    public Task<PeriodEvaluationState?> FindEvaluationStateAsync(long documentId, int periodKey, CancellationToken ct);
 }
+
+/// <summary>✎ D-575: стан періоду для перерахунку формул.</summary>
+/// <param name="State">Ефективний стан (з винятком документа), як <see cref="IPeriodStore.FindPeriodStateAsync"/>.</param>
+/// <param name="AwaitingOpen">Період активного проєкту ще не відкрито (<c>Scheduled</c>): формули не обчислюються.</param>
+public sealed record PeriodEvaluationState(Ecr.Domain.Enums.PeriodState State, bool AwaitingOpen);
 
 /// <summary>Стан одного періоду.</summary>
 /// <param name="PeriodKey">Ключ періоду (R-A6).</param>

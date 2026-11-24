@@ -24,6 +24,8 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
             modelBuilder.HasSequence("CalculationResultSeq", "calc");
 
+            modelBuilder.HasSequence("JobProgressEnqueueSeq", "itg");
+
             modelBuilder.HasSequence("RegistryEntryCodeSeq", "dic");
 
             modelBuilder.HasSequence("TableInstanceSeq", "doc");
@@ -215,6 +217,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("InputsAsOfUtc")
                         .HasColumnType("datetime2(3)");
 
+                    b.Property<long?>("InputsCellChangeWatermark")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("ModulesProfileJson")
                         .HasColumnType("nvarchar(max)");
 
@@ -226,6 +231,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.Property<DateTime?>("RegistryAsOfUtc")
                         .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("SourceStateJson")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime>("StartedAt")
                         .HasColumnType("datetime2(3)");
@@ -1494,23 +1502,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_DocSrcBinding_State", "[SourceState] IN (0, 1)");
                         });
-                });
-
-            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.DocumentSourceBindingConsumer", b =>
-                {
-                    b.Property<int>("BindingId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("TemplateId")
-                        .HasColumnType("int");
-
-                    b.HasKey("BindingId", "TemplateId")
-                        .HasName("PK_DocumentSourceBindingConsumer");
-
-                    b.HasIndex("TemplateId")
-                        .HasDatabaseName("IX_DocSrcBindingConsumer_Template");
-
-                    b.ToTable("DocumentSourceBindingConsumer", "cfg");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.FormulaDef", b =>
@@ -5918,6 +5909,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<long?>("DocumentId")
                         .HasColumnType("bigint");
 
+                    b.Property<long?>("EnqueueSeq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValueSql("NEXT VALUE FOR itg.JobProgressEnqueueSeq");
+
                     b.Property<string>("Error")
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)")
@@ -5990,10 +5986,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.HasIndex("State", "HeartbeatAt")
                         .HasDatabaseName("IX_JobProgress_Stale");
 
-                    b.HasIndex(new[] { "Lane", "State", "AvailableAt" }, "IX_JobProgress_Claim")
+                    b.HasIndex(new[] { "Lane", "State", "AvailableAt", "EnqueueSeq" }, "IX_JobProgress_Claim")
                         .HasFilter("[Lane] IS NOT NULL AND [State] IN ('Queued', 'Running')");
 
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "Lane", "State", "AvailableAt" }, "IX_JobProgress_Claim"), new[] { "TargetKey", "LeaseUntil", "Attempt", "ReclaimCount" });
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "Lane", "State", "AvailableAt", "EnqueueSeq" }, "IX_JobProgress_Claim"), new[] { "TargetKey", "LeaseUntil", "Attempt", "ReclaimCount" });
 
                     b.HasIndex(new[] { "CreatedByUserId", "UpdatedAt" }, "IX_JobProgress_CreatedBy_UpdatedAt")
                         .IsDescending(false, true);
@@ -6016,7 +6012,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.HasIndex(new[] { "Lane", "State", "CreatedByUserId" }, "IX_JobProgress_User_Active")
                         .HasFilter("[Lane] IS NOT NULL AND [State] IN ('Queued', 'Running')");
 
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "Lane", "State", "CreatedByUserId" }, "IX_JobProgress_User_Active"), new[] { "AvailableAt", "FanOutParentJobId" });
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "Lane", "State", "CreatedByUserId" }, "IX_JobProgress_User_Active"), new[] { "AvailableAt", "FanOutParentJobId", "EnqueueSeq" });
 
                     b.HasIndex(new[] { "TargetKey" }, "UX_JobProgress_Target_Queued")
                         .IsUnique()
@@ -7752,23 +7748,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasConstraintName("FK_DocSrcBinding_UpdatedBy");
                 });
 
-            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.DocumentSourceBindingConsumer", b =>
-                {
-                    b.HasOne("Ecr.Domain.Entities.Configuration.DocumentSourceBinding", null)
-                        .WithMany("Consumers")
-                        .HasForeignKey("BindingId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("FK_DocSrcBindingConsumer_Binding");
-
-                    b.HasOne("Ecr.Domain.Entities.Configuration.Template", null)
-                        .WithMany()
-                        .HasForeignKey("TemplateId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("FK_DocSrcBindingConsumer_Template");
-                });
-
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.FormulaDef", b =>
                 {
                     b.HasOne("Ecr.Domain.Entities.Configuration.TableDef", null)
@@ -9391,11 +9370,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.Methodology", b =>
                 {
                     b.Navigation("Versions");
-                });
-
-            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.DocumentSourceBinding", b =>
-                {
-                    b.Navigation("Consumers");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.PermitGroup", b =>

@@ -88,7 +88,10 @@ internal sealed class StaleApprovedDependentCheck(EcrDbContext db, bool? readOve
 
             // Одна знахідка на документ × період (перший місяць періоду з розбіжністю — річний якір має 12).
             foreach (var finding in findings
-                         .Where(f => f.Row.Kind == ISourceIssueReader.SourceChangedAfterApproval && f.StateId is not null)
+                         // ✎ F5-R (D-570): лише причини ApprovedOnly — рядки Any («дані джерела змінено», ReasonChanged)
+                         // показує панель і перелік документів; текст правила — про затвердження джерела.
+                         .Where(f => f.Row.Kind == ISourceIssueReader.SourceChangedAfterApproval && f.StateId is not null
+                                     && f.Reason != DocumentSourceIssues.ReasonChanged)
                          .GroupBy(f => f.Row.PeriodKey)
                          .Select(g => g.First()))
             {

@@ -271,6 +271,20 @@ test.describe('Projects 08.11', () => {
     const { documentId, periodKey } = await ownProject(page);
 
     await page.setViewportSize({ width: 375, height: 900 });
+    // ✎ fg5 (b11): найбільша прокрутка вбік з ПЕРШОГО кадру, а не лише після появи сітки. Скелет рядка дій
+    // (`ActionsPlaceholder`) на час завантаження розпирав сторінку на ~5 px; знімок «після видимої кнопки» ловив його
+    // лише інколи, коли скелет ще стояв. Тепер — кожен кадр до того, як рядок дій набув остаточної форми.
+    await page.addInitScript(() => {
+      const w = window as unknown as { __maxOverflow: number; __watchOverflow: boolean };
+      w.__maxOverflow = 0;
+      w.__watchOverflow = true;
+      const tick = (): void => {
+        const root = document.documentElement;
+        w.__maxOverflow = Math.max(w.__maxOverflow, root.scrollWidth - root.clientWidth);
+        if (w.__watchOverflow) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
     await page.goto(`/documents/${String(documentId)}?periodKey=${String(periodKey)}`);
     const help = page.locator('[data-grid-key-help]').first();
     await expect(help).toBeVisible({ timeout: 60_000 });
@@ -281,7 +295,15 @@ test.describe('Projects 08.11', () => {
       return el.scrollWidth <= el.clientWidth + 1 && box.right <= window.innerWidth + 0.5 && box.left >= -0.5;
     });
     expect(fits, 'кнопка «Keyboard shortcuts» обрізана або виходить за вікно').toBe(true);
+    // Детермінована точка: рядок дій остаточний (скелет зник) — далі ширина сторінки від завантаження не залежить.
+    await expect(page.getByTestId('document-actions-pending')).toHaveCount(0, { timeout: 60_000 });
     expect(await pageOverflow(page), 'горизонтальна прокрутка сторінки документа').toBeLessThanOrEqual(0);
+    const maxOverflow = await page.evaluate(() => {
+      const w = window as unknown as { __maxOverflow: number; __watchOverflow: boolean };
+      w.__watchOverflow = false;
+      return w.__maxOverflow;
+    });
+    expect(maxOverflow, 'горизонтальна прокрутка сторінки документа під час завантаження').toBeLessThanOrEqual(0);
   });
   /*
    * ✎ F13 fg5 (09.11): на живих даних Documents @ 375 px прокручувався вбік на 109 px — смуга лічильників

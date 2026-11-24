@@ -19,7 +19,9 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
                 select new ApprovalQueueProject(
                     p.Id, p.Code, p.TemplateVersionId, t.Code, p.Status, p.IsArchiving,
                     // ✎ RPT-STABLE B2: проєкт має періоди на інших версіях (шкала) - тим самим запитом, без зайвого звернення.
-                    db.ProjectTemplateVersions.Any(x => x.ProjectId == p.Id && x.TemplateVersionId != p.TemplateVersionId)))
+                    db.ProjectTemplateVersions.Any(x => x.ProjectId == p.Id && x.TemplateVersionId != p.TemplateVersionId),
+                    // ✎ B74 P3 (D-576): основний шаблон — документи інших шаблонів беруть версію своєї пари.
+                    v.TemplateId))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -112,6 +114,7 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
             x.a.SheetDefId,
             x.a.SheetCopyId,
             x.a.PeriodKey,
+            DocumentTemplateId = x.d.TemplateId,
             SubmittedAt = x.a.SubmittedAt ?? DateTime.MinValue,
             x.a.SubmittedByUserId,
             x.a.CurrentStepId,
@@ -148,6 +151,7 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
                 x.SubmittedAt,
                 x.SubmittedByUserId,
                 x.CurrentStepId,
+                x.DocumentTemplateId,
                 SubmittedByDisplayName = db.Users
                     .Where(u => u.Id == x.SubmittedByUserId)
                     .Select(u => u.DisplayName)
@@ -171,9 +175,19 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
                 x.CurrentStepId)
             {
                 SheetCopyId = x.SheetCopyId,
+                DocumentTemplateId = x.DocumentTemplateId,
             }),
         ];
     }
+
+    /// <inheritdoc />
+    public async Task<int?> TemplateVersionOfAsync(int projectId, int templateId, int periodKey, CancellationToken ct)
+        => await db.Projects
+            .AsNoTracking()
+            .Where(p => p.Id == projectId)
+            .Select(p => (int?)EcrDbContext.TemplateVersionOf(p.Id, templateId, periodKey))
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
 
     /// <inheritdoc />
     /// <remarks>
@@ -252,6 +266,7 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
             x.a.SheetDefId,
             x.a.SheetCopyId,
             x.a.PeriodKey,
+            DocumentTemplateId = x.d.TemplateId,
             Reopened = x.a.Status == DocumentStatus.Draft,
             ReturnedAt = (x.a.Status == DocumentStatus.Rejected ? x.a.ApprovedAt : x.a.ReopenedAt) ?? DateTime.MinValue,
             ReturnedByUserId = x.a.Status == DocumentStatus.Rejected ? x.a.ApprovedByUserId : x.a.ReopenedByUserId,
@@ -288,6 +303,7 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
                 x.SheetDefId,
                 x.SheetCopyId,
                 x.PeriodKey,
+                x.DocumentTemplateId,
                 x.Reopened,
                 x.ReturnedAt,
                 x.ReturnedByUserId,
@@ -319,6 +335,7 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
                 ReturnedByUserId = x.ReturnedByUserId,
                 Kind = x.Reopened ? ReturnKind.Reopened : ReturnKind.Rejected,
                 SheetCopyId = x.SheetCopyId,
+                DocumentTemplateId = x.DocumentTemplateId,
             }),
         ];
     }

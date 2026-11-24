@@ -156,6 +156,18 @@ namespace Ecr.Application.Ports;
 /// архівованому проєкті. Метадані проєкту не секрет — звуження читача не знімає. Лише картка (<c>GET /documents/{id}</c>);
 /// перелік — <c>null</c>; <c>null</c> і тоді, коли проєкту не знайдено.
 /// </param>
+/// <param name="SourceChangedPeriods">
+/// ✎ F5-R (D-570): ЗАТВЕРДЖЕНІ періоди документа (<c>yyyyMM</c>, за зростанням), чий документ-джерело (склад HSE400, зв'язка
+/// будь-якого стану) змінився після затвердження — затверджений місяць каскад не переписує (D-493/D-510), тож числа можуть
+/// бути застарілими: переглянути, повернути в роботу чи перерахувати «з затвердженими» (B80 N5). Лише перелік: з періодом
+/// — цей період, з роком — затверджені місяці смуги. <c>null</c> — таких немає (чи шлях читання поле не несе); документа-
+/// джерела не розкриває.
+/// </param>
+/// <param name="TemplateCode">
+/// ✎ B74 P3 (D-576): код шаблону документа (<c>Document.TemplateId</c>) — колонка «Template» переліку й картка; у
+/// проєкті «рік · об'єкт» документи різних шаблонів. <c>null</c> — документ без шаблону (до ремонту 99-epilogue).
+/// Метадані шаблону не секрет — звуження читача не знімає.
+/// </param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
@@ -189,7 +201,9 @@ public sealed record DocumentSummary(
     string? TemplateLayout = null,
     string? WorkflowMode = null,
     bool? CanLockRows = null,
-    string? ProjectStatus = null);
+    string? ProjectStatus = null,
+    IReadOnlyList<int>? SourceChangedPeriods = null,
+    string? TemplateCode = null);
 
 /// <summary>
 /// ✎ 10.11 (слово людини через координатора): закритий місяць, відкритий для ЦЬОГО документа
@@ -550,6 +564,13 @@ public interface IDocumentStore
 
     /// <summary>Наступний вільний бізнес-ключ у межах проєкту.</summary>
     public Task<string> NextBusinessKeyAsync(int projectId, int templateVersionId, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ B74 P3 (D-576): наступний вільний ключ документа в багатошаблонному проєкті — <c>{код шаблону}-P{проєкт}-{номер}</c>;
+    /// нумерація на пару проєкт × шаблон, номер лише зростає.
+    /// </summary>
+    public Task<string> NextTemplateBusinessKeyAsync(int projectId, string templateCode, CancellationToken ct)
+        => throw new NotSupportedException("Ключ із кодом шаблону (B74) не реалізовано цим сховищем.");
 
     /// <summary>Чи входить аркуш у СКЛАД цього документа.</summary>
     /// <param name="documentId">Документ.</param>

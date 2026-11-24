@@ -18251,7 +18251,9 @@ export interface paths {
          */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    templateId?: number;
+                };
                 header?: never;
                 path: {
                     id: number;
@@ -18713,6 +18715,217 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** B74 P3 (D-576): шаблони проєкту — основний і приєднані, з чинною версією кожного. Право `Document.View` у
+         *     проєкті; невидимий проєкт — `404`, як неіснуючий (S17). */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Проєкт. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProjectTemplateDto"][];
+                        "text/json": components["schemas"]["ProjectTemplateDto"][];
+                        "text/plain": components["schemas"]["ProjectTemplateDto"][];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * B74 P3 (D-576): приєднує шаблон до проєкту з обраною версією. Право `Project.Manage` у проєкті й грант
+         *     `Manage`.
+         * @description `409 ECR-PRD-0409`: `templateAlreadyAttached`, `projectArchivedTemplates`; `409 ECR-TMPL-0409` —
+         *     архівований шаблон; `422 ECR-TMPL-0422 yearlyProjectNeedsYearLayout` — річний проєкт і версія «копія на
+         *     місяць».
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Проєкт. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["AttachProjectTemplateRequest"];
+                    "application/json": components["schemas"]["AttachProjectTemplateRequest"];
+                    "text/json": components["schemas"]["AttachProjectTemplateRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProjectTemplateDto"];
+                        "text/json": components["schemas"]["ProjectTemplateDto"];
+                        "text/plain": components["schemas"]["ProjectTemplateDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/templates/{templateId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * B74 P3 (D-576): від'єднує шаблон від проєкту. Право — як приєднання.
+         * @description `404 ECR-TMPL-0404 templateNotInProject`; `409 ECR-PRD-0409`: `templateHasDocuments` (кількість у
+         *     `documentCount`), `primaryTemplate`, `templateHasRoute`, `projectArchivedTemplates`.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Проєкт. */
+                    id: number;
+                    /** @description Шаблон. */
+                    templateId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -31224,6 +31437,28 @@ export interface components {
             /** @description Name of the area group node, when the tree has one. */
             name: null | string;
         };
+        /** @description ✎ D-569 (P-1123-1): the permit's current parameters table — the last file applied to it. */
+        AirCurrentTableDto: {
+            /** @description Name of the uploaded file; `null` — not recorded (an import before 23.11). */
+            fileName: null | string;
+            /**
+             * Format: date-time
+             * @description When it was applied, UTC.
+             */
+            importedAt: string;
+            /** @description Display name of the user who applied it. */
+            importedBy: null | string;
+            /**
+             * Format: int32
+             * @description Source rows the import wrote.
+             */
+            sources: number;
+            /**
+             * Format: int32
+             * @description Substance rows the import wrote.
+             */
+            substances: number;
+        };
         /** @description Result of `POST /api/v1/air-limits/import/analyse`: layout of the file, no database. */
         AirLimitsAnalysisDto: {
             /** @description Header block, mapped and unmapped columns, counts, findings. */
@@ -31290,6 +31525,7 @@ export interface components {
         AirLimitsPermitDto: {
             /** @description P1 07.11: columns added to the two tables (sources first, then substances), in table order. */
             addedColumns?: null | components["schemas"]["AirAddedColumnDto"][];
+            currentTable?: null | components["schemas"]["AirCurrentTableDto"];
             /**
              * Format: int64
              * @description Permit.
@@ -31332,6 +31568,9 @@ export interface components {
              * @description Area registry entry; `null` — none.
              */
             areaEntryId?: null | number;
+            /** @description ✎ D-569 (P-1123-1): columns of the two tables no field reads from this file — after the apply they are empty in every row of
+             *     the permit (the last uploaded table is the only current one; nothing is carried over from the replaced rows). */
+            emptiedColumns?: null | components["schemas"]["AirAddedColumnDto"][];
             /**
              * Format: int64
              * @description Permit.
@@ -31842,6 +32081,14 @@ export interface components {
              * @description Кінець дії (включно); `null` — безстроково.
              */
             validTo?: null | string;
+        };
+        /** @description B74 P3 (D-576): приєднання шаблону до проєкту. */
+        AttachProjectTemplateRequest: {
+            /**
+             * Format: int32
+             * @description Версія шаблону — з нею шаблон стає в проєкт (за нею заводяться нові документи).
+             */
+            templateVersionId: number;
         };
         /**
          * @description Порядок сторінок журналів аудиту (вкладки Cell changes / Structure changes / Security events / Workflow events).
@@ -33679,6 +33926,12 @@ export interface components {
             sheetDefIds: number[];
             /**
              * Format: int32
+             * @description ✎ B74 P3 (D-576): шаблон проєкту, за яким заводиться документ; `null` — основний шаблон. Версія — чинна версія
+             *     цього шаблону в проєкті; шаблон поза проєктом — `422 err.ECR-DOC-0422.templateNotInProject`.
+             */
+            templateId?: null | number;
+            /**
+             * Format: int32
              * @description Необов'язкове. ⛔ `V-11`: документ заводиться на версії шаблону ПРОЄКТУ;
              *     поле, якщо задане, мусить із нею збігатися (інакше `422`
              *     `err.ECR-DOC-0422.versionNotProject`). Клієнту його надсилати не треба:
@@ -33879,6 +34132,9 @@ export interface components {
              * @description Версія шаблону, за якою заповнюються документи.
              */
             templateVersionId?: null | number;
+            /** @description ✎ B74 P3 (D-576): версії кількох шаблонів проєкту «рік · об'єкт»; перша (або `TemplateVersionId`) — основний
+             *     шаблон, решта приєднуються тим самим комітом. Кожен шаблон — один раз (`422 ECR-TMPL-0422 duplicateTemplate`). */
+            templateVersionIds?: null | number[];
             /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Atyrau`). Обов'язковий; після
              *     відкриття періоду не змінюється. Windows-ідентифікатор або зсув —
              *     `ECR-CFG-4221`. */
@@ -34920,6 +35176,12 @@ export interface components {
              *     SheetStates лишається як був. `null` — шлях читання
              *     його не несе (сховище заповнює завжди; як і стан — порожньо без періоду). */
             sheets?: null | components["schemas"]["DocumentSheetState"][];
+            /** @description ✎ F5-R (D-570): ЗАТВЕРДЖЕНІ періоди документа (`yyyyMM`, за зростанням), чий документ-джерело (склад HSE400, зв'язка
+             *     будь-якого стану) змінився після затвердження — затверджений місяць каскад не переписує (D-493/D-510), тож числа можуть
+             *     бути застарілими: переглянути, повернути в роботу чи перерахувати «з затвердженими» (B80 N5). Лише перелік: з періодом
+             *     — цей період, з роком — затверджені місяці смуги. `null` — таких немає (чи шлях читання поле не несе); документа-
+             *     джерела не розкриває. */
+            sourceChangedPeriods?: null | number[];
             /** @description AN-59 (варіант C, D-466): відображувані імена (`D-86`) тих, хто МОЖЕ діяти на ПОТОЧНОМУ кроці погодження
              *     кожного поданого (`Submitted`) аркуша документа за запитаний період, копії аркушів включно: об'єднання,
              *     без повторів, за іменем (інваріантна культура), не більше 20. Лише імена: ні id, ні логінів, ні пошти.
@@ -34933,6 +35195,10 @@ export interface components {
              * @default false
              */
             stepApproverNamesTruncated: boolean;
+            /** @description ✎ B74 P3 (D-576): код шаблону документа (`Document.TemplateId`) — колонка «Template» переліку й картка; у
+             *     проєкті «рік · об'єкт» документи різних шаблонів. `null` — документ без шаблону (до ремонту 99-epilogue).
+             *     Метадані шаблону не секрет — звуження читача не знімає. */
+            templateCode?: null | string;
             /** @description D-474: розкладка типової версії шаблону проєкту (`PerMonthCopies` | `YearWithMonthColumns`) — рядком, як
              *     PeriodKind (nullable-enum ламає типи клієнта). `null` — проєкту або версії немає. За
              *     `YearWithMonthColumns` клієнт не показує вибір місяця: документ має одне подання на рік. */
@@ -36344,6 +36610,12 @@ export interface components {
         ImportDiffCounts: {
             /**
              * Format: int32
+             * @description ✎ D-569: child rows in both, different.
+             * @default 0
+             */
+            changedChildren: number;
+            /**
+             * Format: int32
              * @description In both, different.
              */
             changedParents: number;
@@ -36354,9 +36626,21 @@ export interface components {
             children: number;
             /**
              * Format: int32
+             * @description ✎ D-569: child rows in the file only (also those of new parents).
+             * @default 0
+             */
+            newChildren: number;
+            /**
+             * Format: int32
              * @description In the file only.
              */
             newParents: number;
+            /**
+             * Format: int32
+             * @description ✎ D-569: stored child rows of the owner the file no longer has (also those of removed parents).
+             * @default 0
+             */
+            removedChildren: number;
             /**
              * Format: int32
              * @description Stored for the owner in the bucket, not in the file (deleted by the replace).
@@ -36372,6 +36656,15 @@ export interface components {
              * @description In both, equal.
              */
             unchangedParents: number;
+        };
+        /** @description One value that the apply changes. */
+        ImportFieldChange: {
+            /** @description Field name (built-in field or added column code). */
+            field: string;
+            /** @description Value of the file as text; `null` — empty (also a column the file does not have: the last table is the truth). */
+            new: null | string;
+            /** @description Stored value as text; `null` — empty. */
+            old: null | string;
         };
         /** @description One mapped field. */
         ImportFieldSpec: {
@@ -36606,6 +36899,27 @@ export interface components {
             tableInstanceId?: null | number;
             tableNameL10n?: null | components["schemas"]["LocalizedText"];
         };
+        /** @description ✎ D-569 (P-1123-1): one row of the preview's list «what the new table replaces» — a parent (ChildKey is
+         *     `null`) or one child of it. */
+        ImportRowChange: {
+            /** @description Child key (substance); `null` — the row is the parent itself. */
+            childKey: null | string;
+            /** @description Changed values (changed rows only; empty for added and removed). */
+            fields: components["schemas"]["ImportFieldChange"][];
+            /** @description Parent key (NAE). */
+            key: string;
+            /** @description Added, changed or removed. */
+            kind: components["schemas"]["ImportRowChangeKind"];
+            /** @description A removed row of ANOTHER owner for the same key (replaced only with the confirmation): that owner's label; `null` — this owner. */
+            ownerLabel?: null | string;
+            /** @description Bucket of a removed row outside the import's bucket; `null` — the import's bucket. */
+            scope: null | string;
+        };
+        /**
+         * @description What happens to one row.
+         * @enum {unknown}
+         */
+        ImportRowChangeKind: "Added" | "Changed" | "Removed";
         /**
          * @description Issue severity.
          * @enum {unknown}
@@ -37927,6 +38241,21 @@ export interface components {
              * @description First Excel row.
              */
             row: number;
+        };
+        /** @description ✎ W15z M4: місячна колонка таблиці аркуша — код і місяць (без стану). */
+        MonthColumnRefDto: {
+            /** @description Код колонки. */
+            columnCode: string;
+            /**
+             * Format: uint8
+             * @description Місяць колонки 1..12.
+             */
+            monthNumber: number;
+            /**
+             * Format: int32
+             * @description Таблиця.
+             */
+            tableDefId: number;
         };
         /** @description Статус місячної колонки (D-441): стан аркуша за період місяця колонки. */
         MonthColumnStatusDto: {
@@ -40450,6 +40779,39 @@ export interface components {
             /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Atyrau`). */
             timeZoneId: string;
         };
+        /** @description B74 P3 (D-576): шаблон проєкту для вкладки «Templates» і кроку «Template» майстра документа. */
+        ProjectTemplateDto: {
+            /**
+             * Format: int32
+             * @description Чинна версія шаблону в проєкті.
+             */
+            currentTemplateVersionId: number;
+            /**
+             * Format: int32
+             * @description Документів цього шаблону в проєкті; &gt; 0 — від'єднання відмовить.
+             */
+            documentCount: number;
+            /** @description Основний шаблон проєкту: не від'єднується до P6. */
+            isPrimary: boolean;
+            /** @description Розкладка чинної версії. */
+            layout: string;
+            /**
+             * Format: int32
+             * @description Рядок `doc.ProjectTemplate`.
+             */
+            projectTemplateId: number;
+            /** @description Код шаблону (префікс бізнес-ключа в багатошаблонному проєкті). */
+            templateCode: string;
+            /**
+             * Format: int32
+             * @description Шаблон.
+             */
+            templateId: number;
+            /** @description Назва шаблону. */
+            templateNameL10n: components["schemas"]["LocalizedText"];
+            /** @description Позначення чинної версії. */
+            version: string;
+        };
         /** @description ✎ B155 (C-5): шаблон проєкту і маршрут, що для нього діє в цьому проєкті. */
         ProjectTemplateRouteDto: {
             /** @description Код шаблону. */
@@ -41568,6 +41930,12 @@ export interface components {
             issues: components["schemas"]["ImportIssue"][];
             missing: components["schemas"]["MissingReference"][];
             replace: components["schemas"]["ReplaceScope"];
+            rows?: null | components["schemas"]["ImportRowChange"][];
+            /**
+             * Format: int32
+             * @default 0
+             */
+            rowsDropped: number;
             stats: components["schemas"]["ImportStats"];
         };
         /** @description Layout and mapping of an Excel file onto a two-level target (parent rows with child rows),
@@ -45189,6 +45557,13 @@ export interface components {
              */
             sourceApprovedAt: null | string;
             /**
+             * Format: date-time
+             * @description ✎ F5-R (D-570): зв'язка в стані `Any` — коли востаннє змінено дані місяця джерела після затвердження цього місяця
+             *     (UTC; вид `SourceChangedAfterApproval`). Момент не розкриває документа-джерела, тож віддається й читачеві, що його
+             *     не бачить. `null` — рядок `ApprovedOnly`.
+             */
+            sourceChangedAt?: null | string;
+            /**
              * Format: int64
              * @description Документ-джерело; `null` — читач не може відкрити документ-джерело.
              */
@@ -45345,6 +45720,8 @@ export interface components {
              * @description ✎ D-6: аркуш за період запиту поданий (у будь-якому стані періоду, зокрема закритому) — місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить його затвердження; null — перешкоди немає.
              */
             anchorUnapprovedSourcePeriodKey?: null | number;
+            /** @description ✎ W15z M4: місяць кожної місячної колонки аркуша (`IsMonthColumn`/`MonthNumber`) — факт шаблону, незалежно від календаря й розкладки таблиці (річний проєкт HSE400 статусів `MonthColumns` не має): куди вести посилання на місяць річного документа. Схованих таблиць немає; `null` — аркуша немає у версії. */
+            monthColumnCodes?: null | components["schemas"]["MonthColumnRefDto"][];
             /** @description Місячні колонки таблиць `MonthsInColumns` аркуша зі станом свого періоду. */
             monthColumns: components["schemas"]["MonthColumnStatusDto"][];
             /**
@@ -47273,6 +47650,19 @@ export interface components {
             sheetCode?: null | string;
             /** @description Код таблиці в цільовій версії; рівний FromTableCode — лише перейменування колонок. */
             toTableCode: string;
+            /** @description ✎ P-1123-4: заявлені перепідписання одиниць колонок цієї таблиці (без перерахунку); `null` — немає. */
+            unitRelabels?: null | components["schemas"]["VersionMigrationUnitRelabel"][];
+        };
+        /** @description ✎ P-1123-4: заявлене ПЕРЕПІДПИСАННЯ одиниці колонки без перерахунку значень («було безрозмірне → стало підтверджена
+         *     одиниця»): числа вже в цій одиниці, змінюється лише підпис. Без заяви зміна одиниці колонки зі значеннями лишається
+         *     `guardedWithData`. */
+        VersionMigrationUnitRelabel: {
+            /** @description Код колонки у вихідній версії (у таблиці запису мапи). */
+            columnCode: string;
+            /** @description Одиниця у вихідній версії — лише безрозмірна (розмірність `Dimensionless`). */
+            fromUnitCode: string;
+            /** @description Одиниця в цільовій версії. */
+            toUnitCode: string;
         };
         /** @description Попередження переносу (не відмова): зміст для діалогу — ключ повідомлення і, за потреби, період. */
         VersionMigrationWarning: {

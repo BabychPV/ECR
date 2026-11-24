@@ -41,7 +41,7 @@ public sealed partial class WorkflowTransactionTests
             .ConfigureAwait(true);
 
         AssertCascadeRefusal(error);
-        await gate.Received(1).IsPendingAsync(world.DocumentId, PeriodKeyValue, Arg.Any<CancellationToken>());
+        await gate.Received(1).GetPendingReasonAsync(world.DocumentId, PeriodKeyValue, Arg.Any<CancellationToken>());
         Assert.NotEqual(DocumentStatus.Submitted, await StatusAsync(world).ConfigureAwait(true));
         Assert.Equal(0, await SnapshotsAsync(world.DocumentId).ConfigureAwait(true));
     }
@@ -87,7 +87,7 @@ public sealed partial class WorkflowTransactionTests
         await ApproveWithCascadeGateAsync(world, Step(ordinal, next), gate, approved: false, reason: "F5: повернути")
             .ConfigureAwait(true);
         Assert.Equal(DocumentStatus.Rejected, await StatusAsync(world).ConfigureAwait(true));
-        await gate.DidNotReceiveWithAnyArgs().IsPendingAsync(default, default, default);
+        await gate.DidNotReceiveWithAnyArgs().GetPendingReasonAsync(default, default, default);
     }
 
     /// <summary>Контроль: каскаду немає — остаточне затвердження як доти.</summary>
@@ -105,18 +105,46 @@ public sealed partial class WorkflowTransactionTests
         Assert.Equal(DocumentStatus.Approved, await StatusAsync(world).ConfigureAwait(true));
     }
 
+    /// <summary>
+    /// ✎ b11 (огляд координатора 24.11): тримає ВЛАСНА жива задача перерахунку документа — той самий 422 <c>ECR-SUB-4221</c>,
+    /// але ключ <c>ownRecalculationPending</c>, а не текст D-567 про зміну джерела; на затвердженні — так само.
+    /// Мутація: у <c>SourceCascadePendingCheck</c> завжди <c>MessageKey</c> — червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "F5")]
+    public async Task F5_власний_перерахунок_документа_відмовляє_зі_своїм_ключем()
+    {
+        var world = await ArrangeAsync().ConfigureAwait(true);
+        var gate = CascadeGate(CascadePendingReason.OwnRecalculation);
+
+        await using var db = CreateContext();
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+                () => Submit(world, db, Access(), cascadeGate: gate)
+                    .HandleAsync(world.DocumentId, world.SheetDefId, PeriodKeyValue, CancellationToken.None))
+            .ConfigureAwait(true);
+
+        AssertCascadeRefusal(error, "err.ECR-SUB-4221.ownRecalculationPending");
+        Assert.NotEqual(DocumentStatus.Submitted, await StatusAsync(world).ConfigureAwait(true));
+    }
+
     private static ISourceCascadePendingGate CascadeGate(bool pending)
+        => CascadeGate(pending ? CascadePendingReason.SourceCascade : CascadePendingReason.None);
+
+    private static ISourceCascadePendingGate CascadeGate(CascadePendingReason reason)
     {
         var gate = Substitute.For<ISourceCascadePendingGate>();
-        gate.IsPendingAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(pending);
+        gate.GetPendingReasonAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(reason);
+        gate.IsPendingAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(reason != CascadePendingReason.None);
         return gate;
     }
 
-    private static void AssertCascadeRefusal(BusinessRuleException error)
+    private static void AssertCascadeRefusal(BusinessRuleException error, string messageKey = "err.ECR-SUB-4221.sourceCascadePending")
     {
         Assert.Equal(ErrorCodes.SubmitBlocked, error.ErrorCode);
         var details = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(error.Details);
-        Assert.Equal("err.ECR-SUB-4221.sourceCascadePending", details["messageKey"]);
+        Assert.Equal(messageKey, details["messageKey"]);
         Assert.Equal(PeriodKeyValue.ToString(System.Globalization.CultureInfo.InvariantCulture), details["periodKey"]);
     }
 

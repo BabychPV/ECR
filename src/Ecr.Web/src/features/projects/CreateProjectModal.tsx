@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Button, Group, Modal, NumberInput, Select, TextInput } from '@mantine/core';
+import { Button, Group, Modal, MultiSelect, NumberInput, Select, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { templatesListQuery } from '@/features/templates/templateQueries';
@@ -45,8 +45,16 @@ export function createProjectBody(form: {
   versionId: string | null;
   policyId: string | null;
   customPeriodCount?: number | null;
+  /** ✎ B74 P4 (D-576): версії ДОДАТКОВИХ шаблонів проєкту «рік · об'єкт»; основний — `versionId`. */
+  extraVersionIds?: readonly string[] | undefined;
 }): CreateProjectRequest {
+  // ⚠ Основна версія серед додаткових — повтор шаблону (`422 duplicateTemplate`); відкидається тут.
+  const extras = (form.extraVersionIds ?? []).filter((id) => id !== form.versionId);
+
   return {
+    // ✎ B74 P4: кілька шаблонів — `templateVersionIds`, ПЕРША — основна (та сама, що й `templateVersionId`); без
+    // додаткових поле не надсилається зовсім — тіло одношаблонного проєкту не змінюється.
+    ...(extras.length > 0 ? { templateVersionIds: [Number(form.versionId), ...extras.map(Number)] } : {}),
     code: form.code.trim(),
     nameL10n: form.name,
     periodKind: form.periodKind,
@@ -86,6 +94,46 @@ export function latestPublishedVersionId(
     }
   }
   return best === null ? null : String(best.id);
+}
+
+/** Опублікована версія шаблону як пункт вибору — з шаблоном, якому вона належить. */
+export interface TemplateVersionOption {
+  readonly value: string;
+  readonly label: string;
+  readonly templateId: number;
+}
+
+/**
+ * ✎ B74 P4 (D-576): що пропонувати в «Project templates» (додаткові шаблони) і що з уже обраного лишається чинним.
+ *
+ * ⛔ Кожен шаблон у проєкті — ОДИН раз (`422 ECR-TMPL-0422 duplicateTemplate`): шаблон основної версії не
+ * пропонується, а з версій уже обраного додаткового шаблону лишається лише обрана. Обраний додатковий, чий шаблон
+ * став основним, випадає з `chosen` — інакше форма надіслала б запит, який гарантовано відмовлять.
+ */
+export function extraTemplateChoices(
+  options: readonly TemplateVersionOption[],
+  primaryVersionId: string | null,
+  extraVersionIds: readonly string[],
+): { available: TemplateVersionOption[]; chosen: string[] } {
+  const templateOf = new Map(options.map((option) => [option.value, option.templateId]));
+  const primaryTemplateId = primaryVersionId === null ? undefined : templateOf.get(primaryVersionId);
+
+  const chosen: string[] = [];
+  const chosenTemplates = new Set<number>();
+  for (const id of extraVersionIds) {
+    const templateId = templateOf.get(id);
+    if (templateId === undefined || templateId === primaryTemplateId || chosenTemplates.has(templateId)) continue;
+    chosen.push(id);
+    chosenTemplates.add(templateId);
+  }
+
+  const available = options.filter(
+    (option) =>
+      option.templateId !== primaryTemplateId &&
+      (chosen.includes(option.value) || !chosenTemplates.has(option.templateId)),
+  );
+
+  return { available, chosen };
 }
 
 /** Поле форми створення проєкту, якого може бракувати для надсилання. */
@@ -233,14 +281,19 @@ export function CreateProjectModal({
   });
 
   /** Опубліковані версії всіх шаблонів, підписані кодом шаблону. */
-  const publishedVersions = templateItems.flatMap((template, index) =>
+  const publishedVersions: TemplateVersionOption[] = templateItems.flatMap((template, index) =>
     (versionsOfAll.data?.[index]?.items ?? [])
       .filter((version) => version.status === 'Published')
       .map((version) => ({
         value: String(version.id),
         label: `${template.code} · ${version.version}`,
+        templateId: template.id,
       })),
   );
+
+  // ✎ B74 P4 (D-576): додаткові шаблони проєкту «рік · об'єкт»; основний — поле версії вище.
+  const [extraVersionIds, setExtraVersionIds] = useState<string[]>([]);
+  const extras = extraTemplateChoices(publishedVersions, versionId, extraVersionIds);
 
   // Початкове значення — остання опублікована версія; щойно людина сама
   // торкнулася поля (чи вже отримала значення), форма його більше не чіпає.
@@ -261,6 +314,7 @@ export function CreateProjectModal({
           // обрано (`incomplete` нижче).
           createProjectBody({
             code, name, periodKind, timeZoneId: timeZoneId ?? '', versionId, policyId, customPeriodCount,
+            extraVersionIds: extras.chosen,
           }),
         ),
       }),
@@ -269,6 +323,7 @@ export function CreateProjectModal({
       setName({});
       setTimeZoneId(null);
       setVersionId(null);
+      setExtraVersionIds([]);
       versionTouched.current = false;
       setPolicyId(null);
       setCustomPeriodCount(null);
@@ -413,6 +468,20 @@ export function CreateProjectModal({
           versionTouched.current = true;
           setVersionId(value);
         }}
+      />
+
+      {/* ✎ B74 P4 (D-576, рішення людини 13.11): проєкт «рік · об'єкт» — документи кількох шаблонів. Основний —
+          поле вище (перший у `templateVersionIds`); тут — решта, по одній версії на шаблон. Необов'язкове: шаблони
+          можна додати й пізніше, у налаштуваннях проєкту. */}
+      <MultiSelect
+        mt="sm"
+        searchable
+        label={t('projects.create.templates')}
+        description={t('projects.create.templatesHint')}
+        data={extras.available.map(({ value, label }) => ({ value, label }))}
+        value={extras.chosen}
+        onChange={setExtraVersionIds}
+        disabled={versionId === null}
       />
 
       <Select

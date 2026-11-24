@@ -31,6 +31,16 @@ function mockServer(): void {
         });
       }
 
+      // ✎ B74 P4: єдиний шаблон проєкту — майстер обирає його сам.
+      if (url.includes('/api/v1/projects/1/templates')) {
+        return json([
+          {
+            projectTemplateId: 1, templateId: 4, templateCode: 'GEN-UPSTREAM', templateNameL10n: { values: {} },
+            currentTemplateVersionId: 5, version: '2.3.0', layout: 'PerMonthCopies', isPrimary: true, documentCount: 0,
+          },
+        ]);
+      }
+
       if (url.includes('/projects/1/periods')) {
         return json({ projectId: 1, currentPeriodMode: 'Auto', periodKind: 'Monthly', periods: [{ id: 3, periodKey: 202610, state: 'Open', isCurrent: true }] });
       }
@@ -54,7 +64,11 @@ async function toSheetsStep(): Promise<void> {
   fireEvent.click(await screen.findByLabelText(/documents\.project/, { selector: 'input' }));
   fireEvent.click(await screen.findByRole('option', { name: 'P07131100' }));
   await waitFor(() => expect((next() as HTMLButtonElement).disabled).toBe(false));
-  // ✎ Period clarity: кроку Period немає — одразу Sheets.
+  // ✎ B74 P4: крок Template (єдиний шаблон обраний сам).
+  fireEvent.click(next());
+  await screen.findByText('⟦documents.createTemplateStep⟧');
+  await waitFor(() => expect((next() as HTMLButtonElement).disabled).toBe(false));
+  // ✎ Period clarity: кроку Period немає — далі Sheets.
   fireEvent.click(next());
   await screen.findByLabelText('Air emissions (AIR)');
 }

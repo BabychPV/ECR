@@ -96,6 +96,16 @@ function mockServer(): void {
         return json({ templateVersionId: 5, templateCode: 'GEN-UPSTREAM', version: '2.3.0', groupRules: [], sheets });
       }
 
+      // ✎ B74 P4: єдиний шаблон проєкту — майстер обирає його сам.
+      if (path.endsWith('/api/v1/projects/1/templates')) {
+        return json([
+          {
+            projectTemplateId: 1, templateId: 4, templateCode: 'GEN-UPSTREAM', templateNameL10n: { values: {} },
+            currentTemplateVersionId: 5, version: '2.3.0', layout: 'PerMonthCopies', isPrimary: true, documentCount: 0,
+          },
+        ]);
+      }
+
       if (path.endsWith('/api/v1/projects')) {
         return json({ items: [{ id: 1, code: 'P07131100', status: 'Active' }], nextCursor: null, totalCount: 1 });
       }
@@ -150,6 +160,9 @@ const next = (): HTMLButtonElement => screen.getByTestId('wizard-next') as HTMLB
 async function toReview(): Promise<HTMLButtonElement> {
   fireEvent.click(await screen.findByLabelText(/documents\.project/, { selector: 'input' }));
   fireEvent.click(await screen.findByRole('option', { name: 'P07131100' }));
+  await waitFor(() => expect(next().disabled).toBe(false));
+  fireEvent.click(next()); // ✎ B74 P4: → Template
+  await screen.findByText('⟦documents.createTemplateStep⟧');
   await waitFor(() => expect(next().disabled).toBe(false));
   fireEvent.click(next());
   await screen.findByText('⟦documents.createSheetsHint⟧');

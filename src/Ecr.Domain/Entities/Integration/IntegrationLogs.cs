@@ -818,6 +818,13 @@ public sealed class JobProgress
     /// </summary>
     public DateTime? AvailableAt { get; private set; }
 
+    /// <summary>
+    /// ✎ JQ-FIFO (b10): порядок вставки рядка — значення послідовності <c>itg.JobProgressEnqueueSeq</c>, яке ставить база
+    /// (DEFAULT). Розв'язує рівність <see cref="AvailableAt"/> (точність — мілісекунда) у claim черги: доти нічию розв'язував
+    /// випадковий GUID у <c>JobId</c>, і FIFO двох постановок однієї мілісекунди не трималося. <c>null</c> — рядок до міграції.
+    /// </summary>
+    public long? EnqueueSeq { get; private set; }
+
     /// <summary>Кінець оренди <c>Running</c>; прострочена — підлягає переклейму.</summary>
     public DateTime? LeaseUntil { get; private set; }
 

@@ -40,7 +40,9 @@ public sealed partial class PeriodStateJob(
     IAuditWriter? audit = null,
     IBackgroundJobScheduler? jobs = null,
     Notifications.NotificationDispatcher? notifications = null,
-    IUiStringCatalog? catalog = null) : IBackgroundJob
+    IUiStringCatalog? catalog = null,
+    IOpenedPeriodRecalculation? openedRecalculation = null,
+    ICalculationResultStore? results = null) : IBackgroundJob
 {
     /// <summary>Ціль витісняючої постановки пошуку осиротілих після системного Reopen.</summary>
     /// <remarks>
@@ -385,6 +387,8 @@ public sealed partial class PeriodStateJob(
         // проєкті, трималося б до кінця прогону по всіх.
         var toMaterialize = new List<int>();
         var opened = new List<Period>();
+        var leftScheduled = new List<int>();
+        var stillScheduled = new List<int>();
         var graceStarted = new List<Period>();
         var skipped = new List<SkippedPeriodTransition>();
         var reopened = 0;
@@ -396,6 +400,8 @@ public sealed partial class PeriodStateJob(
             // збираються заново, а не дописуються.
             toMaterialize.Clear();
             opened.Clear();
+            leftScheduled.Clear();
+            stillScheduled.Clear();
             graceStarted.Clear();
             skipped.Clear();
             reopened = 0;
@@ -450,6 +456,13 @@ public sealed partial class PeriodStateJob(
                 if (before == PeriodState.Scheduled && period.State == PeriodState.Open)
                 {
                     opened.Add(period);
+                }
+
+                // ✎ D-575: період вийшов зі Scheduled у стан, де пишуть (Open/Grace), — його формули досі не
+                // обчислювались; перерахунок ставиться після коміту.
+                if (PeriodOpenedRecalculationTrigger.Requires(before, period.State))
+                {
+                    leftScheduled.Add(period.PeriodKeyValue);
                 }
 
                 // ⚠ Лише `Open → Grace` самого плану (не системний Reopen `Closed → Grace` нижче).
@@ -516,6 +529,9 @@ public sealed partial class PeriodStateJob(
                     calculator.SelectCurrentPeriod(periods)?.Id, utcNow);
             }
 
+            // ✎ D-575: періоди, що лишились не відкритими після переходів цього прогону (для зняття застарілих помилок).
+            stillScheduled.AddRange(periods.Where(p => p.State == PeriodState.Scheduled).Select(p => p.PeriodKeyValue));
+
             await db.SaveChangesAsync(innerCt).ConfigureAwait(false);
 
             // ⛔ L2-06 (аудит 2026-10-03): черга в базі — постановка ВСЕРЕДИНІ
@@ -543,6 +559,14 @@ public sealed partial class PeriodStateJob(
             await EnqueueMaterializationAfterCommitAsync(project, toMaterialize, ct).ConfigureAwait(false);
         }
 
+        // ✎ D-575: відкритий період — перерахунок його документів (формули там досі не обчислювались); після коміту.
+        if (openedRecalculation is not null && leftScheduled.Count > 0)
+        {
+            await openedRecalculation.RequestAsync(project.Id, leftScheduled, ct).ConfigureAwait(false);
+        }
+
+        await SweepAwaitingOpenAsync(project, stillScheduled, ct).ConfigureAwait(false);
+
         await NotifyAsync(
             project, opened, NotificationEventKind.PeriodOpened, "period-opened",
             "notifications.periodOpened.subject", "notifications.periodOpened.body", ct)
@@ -553,6 +577,147 @@ public sealed partial class PeriodStateJob(
             .ConfigureAwait(false);
 
         return skipped;
+    }
+
+    /// <summary>
+    /// ✎ D-575 / P-1123-18: прибирає з періодів АКТИВНОГО проєкту, що лишаються не відкритими (<c>Scheduled</c>), застарілі
+    /// помилки формул (<c>calc.FormulaError</c>) і застарілі результати методологій (актуальний <c>calc.CalculationRun</c>
+    /// з його <c>calc.CalculationResult</c>) — комірки порожні, доки місяць не відкриється. Значення комірок не чіпаються.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Перерахунок у такий період більше не ходить (D-575: <c>RecalculationService</c>, <c>RecalculationJob</c>), тож
+    /// пораховане до D-575 (28 × #N/A і 14 результатів грудня Land на репетиціях W15z/b11) жило б до відкриття місяця.
+    /// Рішення людини P-1123-18: «прибрати їх одразу» — щогодини тут і раз на старті застосунку
+    /// (<see cref="SweepAwaitingOpenAsync(CancellationToken)"/>).
+    /// <para>
+    /// ⚠ Прогони — ТИМ САМИМ шляхом, що прибирання D-560: прогін знімається з актуальності (<c>Superseded</c>, як при
+    /// перемиканні) і віддається <see cref="ICalculationResultStore.PurgeSupersededRunsAsync"/> (той самий порядок видалення,
+    /// FK, умова «лише неактуальні» в кожному DELETE); вимкнене прибирання — рядки доїсть нічна задача, а читачі вже не
+    /// бачать неактуального прогону. Період, у якому є ЗАТВЕРДЖЕНИЙ аркуш, не чіпається (попередження в журнал).
+    /// </para>
+    /// Збій лише в журнал: прогін станів уже закомічено, наступний прогін повторить.
+    /// </remarks>
+    private async Task SweepAwaitingOpenAsync(Project project, List<int> periodKeys, CancellationToken ct)
+    {
+        if (periodKeys.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var keys = periodKeys.Distinct().ToList();
+            var dropped = await db.FormulaErrors
+                .Where(e => keys.Contains(e.PeriodKey)
+                            && db.Documents.Any(d => d.Id == e.DocumentId && d.ProjectId == project.Id))
+                .ExecuteDeleteAsync(ct)
+                .ConfigureAwait(false);
+
+            if (dropped > 0)
+            {
+                LogAwaitingOpenErrorsDropped(_logger, project.Code, project.Id, dropped);
+            }
+
+            await DropAwaitingOpenRunsAsync(project, keys, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogAwaitingOpenErrorsDropFailed(_logger, project.Code, project.Id, ex);
+        }
+    }
+
+    /// <summary>✎ P-1123-18: актуальні прогони не відкритих періодів — з актуальності і в прибирання D-560.</summary>
+    private async Task DropAwaitingOpenRunsAsync(Project project, List<int> keys, CancellationToken ct)
+    {
+        // ⛔ Затверджене не чіпається ніколи: період із затвердженим аркушем (стану бути не повинно) — пропуск і попередження.
+        var approved = await db.ApprovalStates
+            .AsNoTracking()
+            .Where(a => keys.Contains(a.PeriodKey)
+                        && a.Status == DocumentStatus.Approved
+                        && db.Documents.Any(d => d.Id == a.DocumentId && d.ProjectId == project.Id))
+            .Select(a => a.PeriodKey)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        foreach (var key in approved)
+        {
+            LogAwaitingOpenApprovedSkipped(_logger, project.Code, project.Id, key);
+        }
+
+        var sweep = keys.Except(approved).ToList();
+        if (sweep.Count == 0)
+        {
+            return;
+        }
+
+        var runs = await db.CalculationRuns
+            .AsNoTracking()
+            .Where(r => r.ProjectId == project.Id
+                        && r.PeriodKey != null && sweep.Contains(r.PeriodKey.Value)
+                        && r.Status == Domain.Entities.Calculations.CalculationRun.CurrentStatus)
+            .Select(r => new SupersededRun(r.Id, r.PeriodKey ?? 0, r.DocumentId))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (runs.Count == 0)
+        {
+            return;
+        }
+
+        var ids = runs.Select(r => r.RunId).ToList();
+        var superseded = await db.CalculationRuns
+            .Where(r => ids.Contains(r.Id) && r.Status == Domain.Entities.Calculations.CalculationRun.CurrentStatus)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(r => r.Status, Domain.Entities.Calculations.CalculationRun.SupersededStatus), ct)
+            .ConfigureAwait(false);
+        LogAwaitingOpenRunsSuperseded(_logger, project.Code, project.Id, superseded, sweep.Count);
+
+        if (results is not null)
+        {
+            await results.PurgeSupersededRunsAsync(runs, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// ✎ P-1123-18: той самий прохід раз на старті застосунку — щоб після вікна стара видача не чекала годинної задачі.
+    /// Стан — ЕФЕКТИВНИЙ на зараз (лише вперед від збереженого, як у рішенні про запис): період, чия межа відкриття вже
+    /// минула, а задача станів ще не пройшла, вважається відкритим і не чіпається.
+    /// </summary>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Скільки проєктів оглянуто.</returns>
+    public async Task<int> SweepAwaitingOpenAsync(CancellationToken ct)
+    {
+        var projects = await db.Projects
+            .AsNoTracking()
+            .Where(p => p.Status == ProjectStatus.Active)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var now = clock.UtcNow;
+
+        foreach (var project in projects)
+        {
+            try
+            {
+                var zone = ResolveZone(project.TimeZoneId);
+                var yearGrace = YearGraceWindow.For(project.PeriodEnd, project.YearGraceOffsetDays, zone);
+                var periods = await db.Periods
+                    .AsNoTracking()
+                    .Where(p => p.ProjectId == project.Id)
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+                var keys = periods
+                    .Where(p => calculator.Effective(p, now, yearGrace) == PeriodState.Scheduled)
+                    .Select(p => p.PeriodKeyValue)
+                    .ToList();
+
+                await SweepAwaitingOpenAsync(project, keys, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogAwaitingOpenErrorsDropFailed(_logger, project.Code, project.Id, ex);
+            }
+        }
+
+        return projects.Count;
     }
 
     /// <summary>
@@ -834,6 +999,27 @@ public sealed partial class PeriodStateJob(
         Level = LogLevel.Warning,
         Message = "PeriodStateJob: проєкт {ProjectCode} ({ProjectId}) — сповіщення «період відкрито» не розіслано; стани періодів уже збережено.")]
     private static partial void LogOpenedNotificationFailed(ILogger logger, string projectCode, int projectId, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "PeriodStateJob: проєкт {ProjectCode} ({ProjectId}) — знято {Count} застарілих помилок формул не відкритих періодів (D-575).")]
+    private static partial void LogAwaitingOpenErrorsDropped(ILogger logger, string projectCode, int projectId, int count);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "PeriodStateJob: проєкт {ProjectCode} ({ProjectId}) — застарілі помилки формул не відкритих періодів (D-575) "
+            + "не знято; стани вже збережено, наступний прогін повторить.")]
+    private static partial void LogAwaitingOpenErrorsDropFailed(ILogger logger, string projectCode, int projectId, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "PeriodStateJob: проєкт {ProjectCode} ({ProjectId}) — знято з актуальності {Count} прогонів методологій не відкритих періодів ({Periods}) (P-1123-18); рядки прибирає шлях D-560.")]
+    private static partial void LogAwaitingOpenRunsSuperseded(ILogger logger, string projectCode, int projectId, int count, int periods);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "PeriodStateJob: проєкт {ProjectCode} ({ProjectId}) — не відкритий період {PeriodKey} має ЗАТВЕРДЖЕНИЙ аркуш; його результати методологій не прибираються (P-1123-18).")]
+    private static partial void LogAwaitingOpenApprovedSkipped(ILogger logger, string projectCode, int projectId, int periodKey);
 
     [LoggerMessage(
         Level = LogLevel.Warning,

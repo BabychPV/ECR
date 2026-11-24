@@ -80,7 +80,10 @@ function causeTitle(cause: IssueCause): string {
     case 'sourceNotApproved':
       return t('document.calcIssues.source.notApproved.title', { months: namesOf(cause.subjects, 4) });
     case 'sourceChanged':
-      return t('document.calcIssues.source.changed.title', { months: namesOf(cause.subjects, 4) });
+      // ✎ F5-R (D-570): зв'язка Any — змінено ДАНІ джерела (не його затвердження).
+      return (cause.source?.sourceChangedAt ?? null) !== null
+        ? t('document.calcIssues.source.changedData.title', { months: namesOf(cause.subjects, 4) })
+        : t('document.calcIssues.source.changed.title', { months: namesOf(cause.subjects, 4) });
     case 'sourceOther':
       return t('document.calcIssues.source.other.title', { months: namesOf(cause.subjects, 4) });
     case 'hse400':
@@ -166,7 +169,8 @@ export function CalculationIssuesPanel({
   const blocking = rows.formulaErrors.length > 0 || causes.some((cause) => cause.kind === 'sourceNotApproved');
   const truncated = formulaErrorsTruncated(rows);
   const period = formatPeriodKey(periodKey);
-  const detailsId = 'document-calc-issues-details';
+  // ✎ W15z M4: документ «рік» малює панель на КОЖЕН місяць із проблемами — id деталей власний на період (без дублікатів).
+  const detailsId = `document-calc-issues-details-${String(periodKey)}`;
 
   const show = (target: IssueTarget | null): void => {
     setDetails(true);
@@ -190,6 +194,7 @@ export function CalculationIssuesPanel({
       py="xs"
       data-testid="document-calc-issues"
       data-blocking={blocking ? 'true' : 'false'}
+      data-period={periodKey}
     >
       <Group justify="space-between" wrap="wrap" gap="xs" align="baseline">
         {/* ⚠ `role="status"` — на тексті заголовка: Mantine `Alert` власну `role` не приймає (завжди `alert`). */}
@@ -262,7 +267,19 @@ export function CalculationIssuesPanel({
                         {' · '}
                       </>
                     )}
+                    {source.sourceChangedAt !== null && (
+                      <>
+                        {t('document.calcIssues.source.sourceChangedAt')} <Timestamp value={source.sourceChangedAt} />
+                        {' · '}
+                      </>
+                    )}
                     {t('document.calcIssues.source.approvedAt')} <Timestamp value={source.approvedAt} />
+                  </Text>
+                )}
+                {/* ✎ F5-R (D-570, P-1122-4): що робити — переглянути, повернути в роботу чи перерахувати «з затвердженими» (B80 N5). */}
+                {cause.kind === 'sourceChanged' && (
+                  <Text size="xs" data-testid="document-calc-issue-source-hint">
+                    {t('document.calcIssues.source.changed.hint')}
                   </Text>
                 )}
                 {cause.kind === 'hse400' && hse400State === 'notFound' && (

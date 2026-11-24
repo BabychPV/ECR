@@ -131,6 +131,109 @@ public sealed class ParityComparer(
     }
 
     /// <summary>
+    /// ✎ D-571 (P-1123-4): порівнює старий шлях і скрипт версії рівня <c>Configuration</c> на ГОТОВИХ входах — рядках еталонних даних
+    /// старої системи (база ECR), яких у документах live немає. Вибір рядків тут не порівнюється (рядки вже відібрано правилами
+    /// старої системи, і вибір доводить паритет на документах); порівнюються значення, одиниці, відсутні аргументи, помилки кроків і
+    /// відхилення правилом категорії — тим самим <see cref="ParityDiff"/>, що й на документах. Екземпляр таблиці — 0, як у золотих
+    /// наборах. Нічого не пише.
+    /// </summary>
+    /// <param name="methodologyVersionId">Версія (рушій <c>Formulas</c>).</param>
+    /// <param name="scriptText">Тіньовий текст.</param>
+    /// <param name="documentId">Документ контексту (період, календар, довідники).</param>
+    /// <param name="periodKey">Період контексту.</param>
+    /// <param name="rows">Ключ рядка й аргументи.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Звіт і результати старого шляху за рядком (з них — очікування золотого набору).</returns>
+    public async Task<(ParityReport Report, IReadOnlyDictionary<string, ParityRowOutcome> OldRows)> CompareInputsAsync(
+        int methodologyVersionId,
+        string scriptText,
+        long documentId,
+        PeriodKey periodKey,
+        IReadOnlyList<(string Key, IReadOnlyList<CalculationArgument> Arguments)> rows,
+        CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scriptText);
+        ArgumentNullException.ThrowIfNull(rows);
+
+        var methodology = await methodologies.FindByVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
+            ?? throw new ArgumentException($"Версії {methodologyVersionId} немає.", nameof(methodologyVersionId));
+        var version = methodology.Versions.Single(v => v.Id == methodologyVersionId);
+        if (version.Level != CalculationLevel.Configuration)
+        {
+            throw new ArgumentException($"Готові входи порівнюються лише для рівня Configuration ({methodology.Code} {version.Version}).");
+        }
+
+        var oldDescriptor = new MethodologyDescriptor(
+            methodology.Id, version.Id, methodology.Code, version.Version, version.Level, version.NumericMode,
+            version.CalendarMode, version.TraceLevel, MethodologyEngine.Formulas);
+        var scriptDescriptor = oldDescriptor with { Engine = MethodologyEngine.Script };
+        var target = new ParityTarget(methodology.Code, version.Version, version.Id, documentId, periodKey.Value, 0);
+        var oldModule = modules.FirstOrDefault(m => m.CanHandle(oldDescriptor))
+            ?? throw new InvalidOperationException($"Немає модуля для старого шляху версії {methodology.Code} {version.Version}.");
+        var scriptModule = modules.OfType<ScriptCalculationModule>().FirstOrDefault()
+            ?? throw new InvalidOperationException("Модуль скрипта не зареєстровано.");
+        var registries = new RegistrySnapshotCache(registryAsOfUtc: null);
+
+        CalculationBindingContext scriptContext;
+        try
+        {
+            scriptContext = await scriptModule
+                .PrepareAsync(scriptDescriptor, documentId, periodKey, registries, new ScriptPrepareOptions(scriptText, AllowShadowLibraries: true), ct)
+                .ConfigureAwait(false);
+        }
+        catch (DomainException error)
+        {
+            return (new ParityReport(
+                [new ParityMismatch(target.MethodologyCode, target.Version, target.VersionId, documentId, periodKey.Value, 0, null,
+                    ParityAspect.Error, null, Describe(error))],
+                0,
+                0), new Dictionary<string, ParityRowOutcome>());
+        }
+
+        var oldContext = await oldModule.PrepareAsync(oldDescriptor, documentId, periodKey, registries, ct).ConfigureAwait(false);
+        var byRow = rows.ToDictionary(
+            r => r.Key,
+            r => new CalculationInput(oldDescriptor, documentId, 0, periodKey, r.Key, r.Arguments),
+            StringComparer.Ordinal);
+        IReadOnlyList<string> keys = [.. rows.Select(r => r.Key)];
+        var oldRows = await ExecuteRowsAsync(keys, byRow, oldModule, oldContext, false, ct).ConfigureAwait(false);
+        var scriptRows = await ExecuteRowsAsync(keys, byRow, scriptModule, scriptContext, false, ct).ConfigureAwait(false);
+        var report = ParityDiff.Compare(target, new ParitySide(keys, [], keys, oldRows), new ParitySide(keys, [], keys, scriptRows));
+        return (report, oldRows);
+    }
+
+    /// <summary>
+    /// ✎ P-1123-6: лише СТАРИЙ шлях версії рівня <c>Configuration</c> на готових входах (очікування золотого набору для нової версії,
+    /// коли чинна тіньового тексту не має). Нічого не пише.
+    /// </summary>
+    /// <param name="methodologyVersionId">Версія (рушій <c>Formulas</c>).</param>
+    /// <param name="documentId">Документ контексту.</param>
+    /// <param name="periodKey">Період контексту.</param>
+    /// <param name="rows">Ключ рядка й аргументи.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<IReadOnlyDictionary<string, ParityRowOutcome>> ExecuteOldInputsAsync(
+        int methodologyVersionId,
+        long documentId,
+        PeriodKey periodKey,
+        IReadOnlyList<(string Key, IReadOnlyList<CalculationArgument> Arguments)> rows,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        var methodology = await methodologies.FindByVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
+            ?? throw new ArgumentException($"Версії {methodologyVersionId} немає.", nameof(methodologyVersionId));
+        var version = methodology.Versions.Single(v => v.Id == methodologyVersionId);
+        var descriptor = new MethodologyDescriptor(
+            methodology.Id, version.Id, methodology.Code, version.Version, version.Level, version.NumericMode,
+            version.CalendarMode, version.TraceLevel, MethodologyEngine.Formulas);
+        var module = modules.FirstOrDefault(m => m.CanHandle(descriptor))
+            ?? throw new InvalidOperationException($"Немає модуля для старого шляху версії {methodology.Code} {version.Version}.");
+        var context = await module.PrepareAsync(descriptor, documentId, periodKey, new RegistrySnapshotCache(registryAsOfUtc: null), ct)
+            .ConfigureAwait(false);
+        var byRow = rows.ToDictionary(r => r.Key, r => new CalculationInput(descriptor, documentId, 0, periodKey, r.Key, r.Arguments), StringComparer.Ordinal);
+        return await ExecuteRowsAsync([.. rows.Select(r => r.Key)], byRow, module, context, false, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Виконує модуль на відібраних рядках і зводить кожен у <see cref="ParityRowOutcome"/>: значення, відсутні аргументи,
     /// наявність <c>StepError</c>; відхилення рядка правилом категорії — <see cref="ParityRowOutcome.Rejected"/>; будь-який
     /// інший <see cref="DomainException"/> — <see cref="ParityRowOutcome.Error"/> з кодом і ключем, а не мовчазний пропуск.

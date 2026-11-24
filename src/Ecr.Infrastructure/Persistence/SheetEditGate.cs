@@ -325,7 +325,11 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
                                        @LockOwner = 'Transaction', @LockTimeout = @LockTimeout;
             SET @Result = @code;
             IF @code >= 0 AND @DocumentId IS NOT NULL
-                SELECT @Version = CASE WHEN @PeriodKey IS NULL THEN p.TemplateVersionId
+                -- ✎ B74 P3 (D-576): без періоду — чинна версія ПАРИ проєкт × шаблон документа; без пари — проєкту.
+                SELECT @Version = CASE WHEN @PeriodKey IS NULL
+                                       THEN COALESCE((SELECT pt.CurrentTemplateVersionId FROM doc.ProjectTemplate pt
+                                                      WHERE pt.ProjectId = d.ProjectId AND pt.TemplateId = d.TemplateId),
+                                                     p.TemplateVersionId)
                                        WHEN d.TemplateId IS NULL THEN doc.fn_VersionOf(d.ProjectId, @PeriodKey)
                                        ELSE doc.fn_TemplateVersionOf(d.ProjectId, d.TemplateId, @PeriodKey) END,
                        @Migrating = CASE WHEN p.ExternalSettingsJson LIKE '%"migratingTo"%' THEN 1 ELSE 0 END

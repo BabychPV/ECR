@@ -127,8 +127,9 @@ test.describe('Contract: шапка документа', () => {
     const contract = page.getByTestId('document-header-contract');
     await expect(contract.getByRole('heading', { name: /Contract|Контракт|Келісімшарт/ })).toBeVisible();
 
-    // (1) Порядок як в Excel; File Number і Version — службові рядки на своїх місцях.
-    await expect(contract.locator('[data-header-field]')).toHaveCount(9);
+    // (1) Порядок як в Excel; File Number, Template і Version — службові рядки на своїх місцях.
+    // ✎ B74 P4 (D-576): службовий рядок «Template» (код шаблону документа) стоїть перед Version.
+    await expect(contract.locator('[data-header-field]')).toHaveCount(10);
     const order = await contract.locator('[data-header-field]').evaluateAll((nodes) =>
       nodes.map((node) => node.getAttribute('data-header-field')),
     );
@@ -141,6 +142,7 @@ test.describe('Contract: шапка документа', () => {
       'TypeOfActivity',
       'fileNumber',
       'Permit',
+      'template',
       'version',
     ]);
 
@@ -148,7 +150,7 @@ test.describe('Contract: шапка документа', () => {
     await expect(contract.getByLabel('Area — Район')).toBeVisible();
 
     // (2) Службові поля: readOnly без disabled, фокусуються, ввід нічого не змінює.
-    for (const key of ['fileNumber', 'version']) {
+    for (const key of ['fileNumber', 'template', 'version']) {
       const input = contract.locator(`[data-header-field="${key}"]`);
       await expect(input).toHaveAttribute('readonly', '');
       await expect(input).toBeEnabled();

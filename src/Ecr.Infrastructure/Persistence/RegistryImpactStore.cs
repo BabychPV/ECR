@@ -86,8 +86,14 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
     /// <c>ApprovedOnly</c>).
     /// </para>
     /// </remarks>
-    public async Task<IReadOnlyList<RegistryImpactRow>> ListTemplateConsumersAsync(
+    public Task<IReadOnlyList<RegistryImpactRow>> ListTemplateConsumersAsync(
         IReadOnlyCollection<int> templateIds, int firstPeriod, int lastPeriod, int? month, CancellationToken ct)
+        => ListTemplateConsumersRoutedAsync(templateIds, firstPeriod, lastPeriod, month, routedMonth: null, routedVersions: null, ct);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<RegistryImpactRow>> ListTemplateConsumersRoutedAsync(
+        IReadOnlyCollection<int> templateIds, int firstPeriod, int lastPeriod, int? month, int? routedMonth,
+        IReadOnlySet<int>? routedVersions, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(templateIds);
         if (templateIds.Count == 0)
@@ -106,20 +112,94 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
                     on new { d.ProjectId, PeriodKey = instance.PeriodKeyValue }
                     equals new { period.ProjectId, PeriodKey = period.PeriodKeyValue }
                 where period.State == PeriodState.Open || period.State == PeriodState.Grace
-                where db.TemplateVersions.Any(v =>
-                    consumers.Contains(v.TemplateId)
-                    && v.Id == (d.TemplateId == null
-                        ? EcrDbContext.VersionOf(d.ProjectId, instance.PeriodKeyValue)
-                        : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, instance.PeriodKeyValue)))
-                select new { d.Id, d.BusinessKey, d.ProjectId, PeriodKey = instance.PeriodKeyValue, period.State, project.PeriodKind })
+                let versionId = d.TemplateId == null
+                    ? EcrDbContext.VersionOf(d.ProjectId, instance.PeriodKeyValue)
+                    : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, instance.PeriodKeyValue)
+                where db.TemplateVersions.Any(v => consumers.Contains(v.TemplateId) && v.Id == versionId)
+                select new
+                {
+                    d.Id, d.BusinessKey, d.ProjectId, PeriodKey = instance.PeriodKeyValue, period.State, project.PeriodKind,
+                    VersionId = versionId,
+                })
             .Distinct()
             .OrderBy(r => r.Id).ThenBy(r => r.PeriodKey)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // ✎ PERF-06b (D-572): ребро «комірка періоду-власника місяця» — у місячному проєкті лише період (рік, m), якщо він є в
+        // календарі проєкту (будь-який стан: закритий власник не рахується, а інші періоди цю комірку не рахують). Без
+        // рядка календаря маршрутизація віддає комірку екземпляру перегляду — тоді всі періоди, як доти. Рішення — спільне з
+        // воротами F5 (MonthOwnerRouting). ✎ W15z M1: і лише для періоду на версії з routedVersions (версія за періодом — B74).
+        HashSet<(int ProjectId, int PeriodKey)> owners = [];
+        if (routedMonth is { } rm && rows.Exists(r => r.PeriodKind == PeriodKind.Monthly))
+        {
+            owners = await MonthOwnerRouting.ExistingOwnersAsync(
+                    db,
+                    [.. rows.Where(r => r.PeriodKind == PeriodKind.Monthly).Select(r => r.ProjectId).Distinct()],
+                    [.. rows.Select(r => (r.PeriodKey / 100 * 100) + rm).Distinct()],
+                    ct)
+                .ConfigureAwait(false);
+        }
+
+        // ✎ Огляд b11-2 (C): копії аркушів маршрутизація не віддає власнику місяця (MonthColumnRouter — лише оригінали): документ із
+        // копіями в діапазоні чи версія з аркушем, що копіюється, — увесь рік. (D): власник місяця — на версії, що звужує (рік
+        // зі змішаними версіями — інакше увесь рік).
+        HashSet<long> wholeYear = [];
+        Dictionary<long, int?> ownerVersion = [];
+        if (routedMonth is { } routed && routedVersions is { Count: > 0 })
+        {
+            var versions = routedVersions.ToList();
+            var copyable = await db.SheetDefs.AsNoTracking()
+                .Where(s => versions.Contains(s.TemplateVersionId) && s.IsCopyable)
+                .Select(s => s.TemplateVersionId)
+                .Distinct()
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            routedVersions = routedVersions.Except(copyable).ToHashSet();
+
+            var docs = rows.Select(r => r.Id).Distinct().ToList();
+            wholeYear = [.. await db.TableInstances.AsNoTracking()
+                .Where(i => docs.Contains(i.DocumentId) && i.SheetCopyId != null
+                            && i.PeriodKeyValue >= firstPeriod && i.PeriodKeyValue <= lastPeriod)
+                .Select(i => i.DocumentId)
+                .Distinct()
+                .ToListAsync(ct)
+                .ConfigureAwait(false)];
+
+            foreach (var ownerKey in rows.Select(r => (r.PeriodKey / 100 * 100) + routed).Distinct().ToList())
+            {
+                var found = await db.Documents.AsNoTracking()
+                    .Where(d => docs.Contains(d.Id))
+                    .Select(d => new
+                    {
+                        d.Id,
+                        Version = d.TemplateId == null
+                            ? EcrDbContext.VersionOf(d.ProjectId, ownerKey)
+                            : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, ownerKey),
+                    })
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+                foreach (var f in found)
+                {
+                    ownerVersion[(f.Id * 1_000_000) + ownerKey] = f.Version;
+                }
+            }
+        }
+
+        bool OwnerOnRoutedVersion(long documentId, int ownerKey)
+            => ownerVersion.TryGetValue((documentId * 1_000_000) + ownerKey, out var v) && v is { } version
+               && routedVersions!.Contains(version);
+
         // B179 L2: обсяг «місяць» — лише період, що володіє місяцем (те саме правило, що ворота затверджених місяців).
         return [.. rows
             .Where(r => month is not { } m || DocumentSourceGate.OwnedMonths(r.PeriodKind, r.PeriodKey % 100).Contains(m))
+            .Where(r => routedMonth is not { } owned
+                        || routedVersions is null
+                        || !routedVersions.Contains(r.VersionId)
+                        || wholeYear.Contains(r.Id)
+                        || !OwnerOnRoutedVersion(r.Id, (r.PeriodKey / 100 * 100) + owned)
+                        || !MonthOwnerRouting.Narrows(r.PeriodKind, owners.Contains((r.ProjectId, (r.PeriodKey / 100 * 100) + owned)))
+                        || r.PeriodKey % 100 == owned)
             .Select(r => new RegistryImpactRow(r.Id, r.BusinessKey, r.ProjectId, r.PeriodKey, r.State, string.Empty))];
     }
 

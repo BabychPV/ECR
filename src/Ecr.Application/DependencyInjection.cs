@@ -178,6 +178,9 @@ public static class DependencyInjection
         services.AddScoped<CreateDocumentHandler>();
         services.AddScoped<GetDocumentTemplateHandler>();
         services.AddScoped<Projects.GetProjectTemplateTimelineHandler>();
+        services.AddScoped<Projects.ListProjectTemplatesHandler>();   // B74 P3 (D-576)
+        services.AddScoped<Projects.AttachProjectTemplateHandler>();
+        services.AddScoped<Projects.DetachProjectTemplateHandler>();
         services.AddScoped<ListDocumentsHandler>();
         services.AddScoped<GetDocumentListSummaryHandler>();
         services.AddScoped<StepApproversResolver>();

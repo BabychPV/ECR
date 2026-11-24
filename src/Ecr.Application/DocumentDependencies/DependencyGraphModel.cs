@@ -85,6 +85,22 @@ public sealed record DependencyEdge(
 /// <param name="Scope">Обсяг за періодом (об'єднання формул і методологій споживача).</param>
 /// <param name="ViaTemplateFormula">Споживача знайдено за формулою шаблону.</param>
 /// <param name="ViaMethodology">Споживача знайдено за методологією, прив'язаною до нього.</param>
+/// <param name="MonthOwned">
+/// ✎ PERF-06b (<c>D-572</c>, live Quartz): КОЖНЕ читання довідника споживачем — формула шаблону з літеральним місяцем m
+/// (<see cref="PeriodScope.FixedMonth"/>) у ОБЧИСЛЮВАНІЙ місячній колонці <c>M{m}</c> таблиці «місяці в колонках» версії
+/// <c>YearWithMonthColumns</c>, тобто комірку рахує лише період-власник місяця m (маршрутизація місячних колонок, D-474);
+/// методологій і похідних довідників немає. Тоді зміна місяця m джерела будить у МІСЯЧНОМУ проєкті споживача лише
+/// період m (пізніших читачів його чисел будить прогін цього періоду — <c>CrossPeriodFanOut</c>).
+/// </param>
+/// <param name="OwnedVersions">
+/// ✎ PERF-06b (W15z M1): версії шаблону-споживача, у яких КОЖНЕ читання довідника зв'язки — комірка періоду-власника
+/// місяця (як <paramref name="MonthOwned"/>, але по версії): періоди документа на такій версії звужуються до власника місяця,
+/// на інших — увесь рік. Порожньо — жодної (похідний довідник, усі версії читають поза власником); <c>null</c> — формул немає.
+/// </param>
+/// <param name="MethodologyScope">
+/// ✎ W15z M1: обсяг читання довідника МЕТОДОЛОГІЯМИ, що пишуть у шаблон (об'єднання); <c>null</c> — методологій немає.
+/// «Місяць» (<c>REGFIND(…, [Period].Year, [Period].Sequence, …)</c>) — період-власник місяця зміни, сумісно зі звуженням.
+/// </param>
 public sealed record TemplateDependency(
     int SourceTemplateId,
     int ConsumerTemplateId,
@@ -92,7 +108,10 @@ public sealed record TemplateDependency(
     int RegistryDefId,
     PeriodScope Scope,
     bool ViaTemplateFormula,
-    bool ViaMethodology);
+    bool ViaMethodology,
+    bool MonthOwned = false,
+    IReadOnlyList<int>? OwnedVersions = null,
+    PeriodScope? MethodologyScope = null);
 
 /// <summary>Зауваження побудови (ключ — для екрана L5).</summary>
 /// <param name="Key"><c>cycle</c>, <c>astFallback</c>, <c>parseFailed</c>, <c>unknownRegistry</c>.</param>
@@ -137,8 +156,13 @@ public sealed record SourceBindingRow(int BindingId, int SourceTemplateId, int R
 /// <param name="FormulaDefId">Формула.</param>
 /// <param name="Source"><c>formulaDependency</c>, <c>ast</c> або <c>lookupColumn</c>.</param>
 /// <param name="Detail">Таблиця/колонка формули.</param>
+/// <param name="MonthOwned">
+/// ✎ PERF-06b: обсяг — один літеральний місяць m, а формула — колонкова формула ОБЧИСЛЮВАНОЇ місячної колонки
+/// <c>M{m}</c> таблиці «місяці в колонках» версії <c>YearWithMonthColumns</c> (комірку рахує лише період-власник m).
+/// </param>
 public sealed record TemplateRegistryRead(
-    int TemplateId, int TemplateVersionId, int RegistryDefId, PeriodScope Scope, int FormulaDefId, string Source, string Detail);
+    int TemplateId, int TemplateVersionId, int RegistryDefId, PeriodScope Scope, int FormulaDefId, string Source, string Detail,
+    bool MonthOwned = false);
 
 /// <summary>Формула версії методології читає довідник (обсяг уже пораховано).</summary>
 /// <param name="MethodologyId">Методологія.</param>

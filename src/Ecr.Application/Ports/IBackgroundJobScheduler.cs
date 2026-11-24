@@ -32,6 +32,16 @@ public interface IBackgroundJobScheduler
     /// </remarks>
     public bool MergesCascadePeriods => false;
 
+    /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>): чи злиття постановок перерахунку на ту саму ціль ОБ'ЄДНУЄ місяці правки джерела (payload
+    /// <c>sourceMonths</c>: обидві з місяцями — об'єднання, хоч одна без — увесь рік), тож місяці можна нести в payload.
+    /// </summary>
+    /// <remarks>
+    /// Черга в базі — так (<c>DbJobQueue.MergePressFieldsSql</c>, разом із періодами каскаду); Quartz — так з PERF-06b live
+    /// (<c>QuartzSourceMonths</c>). Типово — як <see cref="MergesCascadePeriods"/> (фейки тестів: ні).
+    /// </remarks>
+    public bool MergesSourceMonths => MergesCascadePeriods;
+
     /// <summary>Ставить задачу в чергу негайно.</summary>
     /// <param name="payload">Завдання.</param>
     /// <param name="ct">Токен скасування.</param>
@@ -162,6 +172,31 @@ public interface IBackgroundJobScheduler
     /// </remarks>
     public Task<string?> FindQueuedAsync<TJob>(string targetKey, CancellationToken ct) where TJob : IBackgroundJob
         => Task.FromResult<string?>(null);
+
+    /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>): те саме, що <see cref="FindQueuedAsync{TJob}"/>, для кількох цілей одним зверненням (постановка
+    /// каскаду споживача за 12 періодів): ціль → <c>JobId</c> задачі, що чекає; цілі без такої задачі в результаті немає.
+    /// </summary>
+    /// <typeparam name="TJob">Маркер задачі.</typeparam>
+    /// <param name="targetKeys">Цілі (без префікса типу).</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Ціль → <c>JobId</c>.</returns>
+    /// <remarks>Типова реалізація — по одній ціллю (<see cref="FindQueuedAsync{TJob}"/>).</remarks>
+    public async Task<IReadOnlyDictionary<string, string>> FindQueuedManyAsync<TJob>(
+        IReadOnlyCollection<string> targetKeys, CancellationToken ct) where TJob : IBackgroundJob
+    {
+        ArgumentNullException.ThrowIfNull(targetKeys);
+        var found = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var target in targetKeys.Distinct(StringComparer.Ordinal))
+        {
+            if (await FindQueuedAsync<TJob>(target, ct).ConfigureAwait(false) is { Length: > 0 } jobId)
+            {
+                found[target] = jobId;
+            }
+        }
+
+        return found;
+    }
 
     /// <summary>
     /// Скасовує задачу, що ЧЕКАЄ на ціль, не чіпаючи виконуваної.

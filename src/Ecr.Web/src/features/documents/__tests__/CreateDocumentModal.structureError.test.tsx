@@ -88,6 +88,16 @@ function mockServer(): void {
             });
       }
 
+      // ✎ B74 P4: єдиний шаблон проєкту — майстер обирає його сам.
+      if (url.includes('/api/v1/projects/1/templates')) {
+        return jsonResponse([
+          {
+            projectTemplateId: 1, templateId: 4, templateCode: 'AIR', templateNameL10n: { values: {} },
+            currentTemplateVersionId: 5, version: '1.0', layout: 'PerMonthCopies', isPrimary: true, documentCount: 0,
+          },
+        ]);
+      }
+
       if (url.includes('/api/v1/projects')) {
         return jsonResponse({
           items: [{ id: 1, code: 'PRJ', status: 'Active' }],
@@ -124,6 +134,12 @@ function show(): void {
 async function pickProject(): Promise<void> {
   fireEvent.click(await screen.findByLabelText(/documents\.project/, { selector: 'input' }));
   fireEvent.click(await screen.findByRole('option', { name: 'PRJ' }));
+
+  // ✎ B74 P4: версія й відмова складу — у кроці Template (єдиний шаблон проєкту обраний сам).
+  const next = screen.getByRole('button', { name: '⟦wizard.next⟧' }) as HTMLButtonElement;
+  await waitFor(() => expect(next.disabled).toBe(false));
+  fireEvent.click(next);
+  await screen.findByText('⟦documents.createTemplateStep⟧');
 }
 
 afterEach(() => {
@@ -158,7 +174,7 @@ describe('CreateDocumentModal: збій запиту структури не в�
     await waitFor(() => expect(screen.getByText(/AIR · v1\.0/)).toBeTruthy());
     expect(screen.queryByRole('alert')).toBeNull();
 
-    // ✎ UI-31: аркуші — у кроці Sheets майстра (✎ Period clarity: Project → Sheets, без кроку Period).
+    // ✎ UI-31: аркуші — у кроці Sheets майстра (✎ Period clarity: без кроку Period; ✎ B74 P4: Template → Sheets).
     fireEvent.click(screen.getByRole('button', { name: '⟦wizard.next⟧' }));
     await waitFor(() => expect(screen.getByText('General (GEN)')).toBeTruthy());
   });
@@ -172,7 +188,7 @@ describe('CreateDocumentModal: збій запиту структури не в�
     await waitFor(() => expect(screen.getByText(/AIR · v1\.0/)).toBeTruthy());
 
     const urls = (vi.mocked(fetch).mock.calls as [RequestInfo | URL][]).map(([input]) => String(input));
-    expect(urls.some((url) => url.includes('/api/v1/projects/1/document-template'))).toBe(true);
+    expect(urls.some((url) => url.includes('/api/v1/projects/1/document-template?templateId=4'))).toBe(true);
     expect(urls.filter((url) => url.includes('/api/v1/templates') || url.includes('/template-versions/'))).toEqual([]);
   });
 });

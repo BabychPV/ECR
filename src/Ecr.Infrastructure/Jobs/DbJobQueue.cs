@@ -30,7 +30,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// дав би CONVERT_IMPLICIT на ключі <c>IX_JobProgress_Claim</c>.
 ///
 /// ⚠ Claim іде по ОДНОМУ лейну за запит, а не <c>Lane IN (…)</c>: з рівністю
-/// порядок індексу (Lane, State, AvailableAt, JobId) збігається з ORDER BY, і
+/// порядок індексу (Lane, State, AvailableAt, EnqueueSeq, JobId) збігається з ORDER BY, і
 /// TOP(1) зупиняється на першому рядку. <c>IN</c> дав би сортування всіх
 /// кандидатів — і UPDLOCK на кожному з них до кінця транзакції захоплювача,
 /// тобто сусідній хост із READPAST не бачив би жодного.
@@ -80,7 +80,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
               AND q.[State] = 'Running' AND q.LeaseUntil < CAST(SYSUTCDATETIME() AS datetime2(3))
               AND q.CancelRequestedAt IS NULL
               AND ISNULL(q.ReclaimCount, 0) < @maxReclaims
-            ORDER BY q.AvailableAt, q.JobId)
+            ORDER BY q.AvailableAt, q.EnqueueSeq, q.JobId)
         UPDATE candidate SET
         """ + "\n" + ClaimSet + "\n" + """
             , ReclaimCount = ISNULL(ReclaimCount, 0) + 1
@@ -108,7 +108,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
               AND NOT EXISTS (
                   SELECT 1 FROM itg.JobProgress AS r
                   WHERE r.TargetKey = q.TargetKey AND r.TargetKey IS NOT NULL AND r.[State] = 'Running')
-            ORDER BY q.AvailableAt, q.JobId)
+            ORDER BY q.AvailableAt, q.EnqueueSeq, q.JobId)
         UPDATE candidate SET
             [State] = 'Running', Attempt = ISNULL(Attempt, 0) + 1, ReclaimCount = ISNULL(ReclaimCount, 0),
             CancelRequestedAt = NULL, [Message] = NULL, Error = NULL, ErrorCode = NULL,
@@ -234,7 +234,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     /// </summary>
     /// <remarks>
     /// ✎ Огляд M2: лише пошуком індексу <c>IX_JobProgress_User_Active</c> (Lane, State, CreatedByUserId) INCLUDE (AvailableAt,
-    /// FanOutParentJobId), без читання Payload (прохід читача з автором людини рахується в її ранг — оцінка, не межа), і НЕ в
+    /// FanOutParentJobId, ✎ JQ-FIFO EnqueueSeq), без читання Payload (прохід читача з автором людини рахується в її ранг — оцінка, не межа), і НЕ в
     /// claim під UPDLOCK і applock стелі: вибір робить окремий запит <see cref="FairPickSql"/> на знімку RCSI, claim бере вже
     /// названий рядок.
     /// </remarks>
@@ -244,7 +244,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
             AND (fr.[State] = 'Running'
                  OR (fr.[State] = 'Queued' AND fr.AvailableAt <> CAST(N'9999-12-31T00:00:00' AS datetime2(3))
                      AND fr.FanOutParentJobId IS NULL
-                     AND (fr.AvailableAt < q.AvailableAt OR (fr.AvailableAt = q.AvailableAt AND fr.JobId < q.JobId)))))
+                     AND (fr.AvailableAt < q.AvailableAt OR (fr.AvailableAt = q.AvailableAt AND (ISNULL(fr.EnqueueSeq, 0) < ISNULL(q.EnqueueSeq, 0) OR (ISNULL(fr.EnqueueSeq, 0) = ISNULL(q.EnqueueSeq, 0) AND fr.JobId < q.JobId)))))))
         """;
 
     /// <summary>Скільки найраніших ручних задач КОЖНОЇ людини розглядає «черга людей» (<see cref="FairPickSql"/>).</summary>
@@ -266,16 +266,16 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     internal static readonly string FairPickSql = $$"""
         /* ecr:jobqueue-fair-pick */
         SELECT TOP ({{FairCandidates}}) q.JobId
-          FROM (SELECT TOP ({{FairWindow}}) w.JobId, w.AvailableAt, w.CreatedByUserId
-                  FROM (SELECT q.JobId, q.AvailableAt, q.CreatedByUserId,
-                               ROW_NUMBER() OVER (PARTITION BY q.CreatedByUserId ORDER BY q.AvailableAt, q.JobId) AS UserRow
+          FROM (SELECT TOP ({{FairWindow}}) w.JobId, w.AvailableAt, w.EnqueueSeq, w.CreatedByUserId
+                  FROM (SELECT q.JobId, q.AvailableAt, q.EnqueueSeq, q.CreatedByUserId,
+                               ROW_NUMBER() OVER (PARTITION BY q.CreatedByUserId ORDER BY q.AvailableAt, q.EnqueueSeq, q.JobId) AS UserRow
                           FROM itg.JobProgress AS q WITH (INDEX(IX_JobProgress_User_Active))
                          WHERE q.Lane = @lane AND q.Lane IS NOT NULL AND q.[State] = 'Queued' AND q.CreatedByUserId IS NOT NULL
                            AND q.AvailableAt <= CAST(SYSUTCDATETIME() AS datetime2(3))
                            {{ManualFilter.Trim()}}) AS w
                  WHERE w.UserRow <= {{FairPerUser}}
-                 ORDER BY w.UserRow, w.AvailableAt, w.JobId) AS q
-         ORDER BY {{FairRankSql.Trim()}}, q.AvailableAt, q.JobId;
+                 ORDER BY w.UserRow, w.AvailableAt, w.EnqueueSeq, w.JobId) AS q
+         ORDER BY {{FairRankSql.Trim()}}, q.AvailableAt, q.EnqueueSeq, q.JobId;
         """;
 
     /// <summary>Умова кандидата під межею дітей розкладу (<see cref="FanOutCapPrologue"/>).</summary>
@@ -309,7 +309,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
         if (extra.Length > 0)
         {
             // ⛔ Якір — ORDER BY кандидата; не знайшовся (текст claim змінили) — гучна відмова, а не тихий claim без умов.
-            const string Anchor = "ORDER BY q.AvailableAt, q.JobId)";
+            const string Anchor = "ORDER BY q.AvailableAt, q.EnqueueSeq, q.JobId)";
             if (!sql.Contains(Anchor, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("Claim черги: немає якоря ORDER BY для умов виключення документа й межі дітей.");
@@ -436,6 +436,27 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                         FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'') + N']'));
                     SET @rewrite = 1;
                 END
+                IF JSON_QUERY(@existing, '$.sourceMonths') IS NOT NULL
+                BEGIN
+                    -- ✎ PERF-06b (D-572): місяці правки річного/квартального джерела (`-auto`). Нова постановка без місяців
+                    -- (правка не-місячної колонки, збір PI) — увесь рік: місяці знято; з місяцями — об'єднанням.
+                    IF JSON_QUERY(@payload, '$.sourceMonths') IS NULL
+                    BEGIN
+                        SET @existing = JSON_MODIFY(@existing, '$.sourceMonths', NULL);
+                        SET @rewrite = 1;
+                    END
+                    ELSE IF EXISTS (SELECT [value] FROM OPENJSON(@payload, '$.sourceMonths')
+                                    EXCEPT SELECT [value] FROM OPENJSON(@existing, '$.sourceMonths'))
+                    BEGIN
+                        SET @existing = JSON_MODIFY(@existing, '$.sourceMonths', JSON_QUERY(N'[' + STUFF((
+                            SELECT N',' + u.v
+                            FROM (SELECT [value] AS v FROM OPENJSON(@existing, '$.sourceMonths')
+                                  UNION SELECT [value] FROM OPENJSON(@payload, '$.sourceMonths')) AS u
+                            ORDER BY TRY_CAST(u.v AS int)
+                            FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'') + N']'));
+                        SET @rewrite = 1;
+                    END
+                END
                 IF TRY_CAST(JSON_VALUE(@payload, '$.sourceHop') AS int)
                    < ISNULL(TRY_CAST(JSON_VALUE(@existing, '$.sourceHop') AS int), 0)
                 BEGIN
@@ -553,10 +574,14 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                 -- передає свої періоди тій, що позаду: інакше її місяці загубилися б разом із нею.
                 -- ✎ F5 (огляд b9, п. 1): так само поглинутий прохід читача (чи натискання з ним) — позначку `readerPassMerged`
                 -- отримує задача позаду, інакше ворота подання відпустили б місяць, якого прохід ще не перерахував.
+                -- ✎ PERF-06b (D-572): так само місяці правки річного джерела (`sourceMonths`) — у будь-якого з двох: поглинута з
+                -- місяцями передає їх позаду (об'єднання), поглинута без місяців знімає їх у задачі позаду (увесь рік).
                 SET @payload = CASE WHEN ISJSON({{chainPayload}}) = 1
                                     THEN CASE WHEN JSON_QUERY({{chainPayload}}, '$.cascadePeriods') IS NOT NULL
                                                    OR ISNULL(JSON_VALUE({{chainPayload}}, '$.foreignOwnerPass'), N'false') = N'true'
                                                    OR ISNULL(JSON_VALUE({{chainPayload}}, '$.readerPassMerged'), N'false') = N'true'
+                                                   OR JSON_QUERY({{chainPayload}}, '$.sourceMonths') IS NOT NULL
+                                                   OR (ISJSON(@payload) = 1 AND JSON_QUERY(@payload, '$.sourceMonths') IS NOT NULL)
                                               THEN {{chainPayload}} END
                                END;
         {{CoalescePayloadSql("@behind")}}
@@ -768,7 +793,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
 
     /// <summary>Переклейм без дітей розкладу (<see cref="ClaimExceptFanOutAsync"/>).</summary>
     internal static readonly string ReclaimExceptFanOutSql = ReclaimSql.Replace(
-        "ORDER BY q.AvailableAt, q.JobId)", "AND q.FanOutParentJobId IS NULL\n    ORDER BY q.AvailableAt, q.JobId)", StringComparison.Ordinal);
+        "ORDER BY q.AvailableAt, q.EnqueueSeq, q.JobId)", "AND q.FanOutParentJobId IS NULL\n    ORDER BY q.AvailableAt, q.EnqueueSeq, q.JobId)", StringComparison.Ordinal);
 
     private async Task<ClaimedJob?> ClaimCoreAsync(
         IReadOnlyCollection<string> lanes, string owner, TimeSpan lease, bool exceptFanOut, CancellationToken ct)
@@ -1300,7 +1325,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
             FROM itg.JobProgress AS q WITH (INDEX(IX_JobProgress_Document_Active))
             WHERE q.DocumentId = @doc AND q.DocumentId IS NOT NULL AND q.[State] = 'Queued'
               AND q.Lane IN (@docLaneA, @docLaneB) AND q.AvailableAt <> {ParkedAt}
-            ORDER BY q.AvailableAt, q.JobId;
+            ORDER BY q.AvailableAt, q.EnqueueSeq, q.JobId;
             """,
             p =>
             {
@@ -1472,6 +1497,42 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
             p => p.Add("@target", SqlDbType.NVarChar, JobProgress.MaxTargetKeyLength).Value = targetKey,
             async r => await r.ReadAsync(ct).ConfigureAwait(false) ? r.GetString(0) : null,
             ct);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ PERF-06b (<c>D-572</c>): той самий відбір, що <see cref="FindQueuedByTargetAsync"/>, на перелік цілей (JSON-параметр,
+    /// як <c>OPENJSON</c> в інших місцях черги) — одне звернення замість звернення на ціль.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<string, string>> FindQueuedByTargetsAsync(
+        IReadOnlyCollection<string> targetKeys, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(targetKeys);
+        if (targetKeys.Count == 0)
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        var json = System.Text.Json.JsonSerializer.Serialize(targetKeys.Distinct(StringComparer.Ordinal));
+        return await RunAsync<IReadOnlyDictionary<string, string>>(
+            """
+            SELECT q.TargetKey, q.JobId
+            FROM itg.JobProgress AS q WITH (INDEX(UX_JobProgress_Target_Queued))
+            WHERE q.TargetKey IN (SELECT CAST(t.[value] AS nvarchar(200)) FROM OPENJSON(@targets) AS t)
+              AND q.TargetKey IS NOT NULL AND q.[State] = 'Queued' AND q.Lane IS NOT NULL;
+            """,
+            p => p.Add("@targets", SqlDbType.NVarChar, -1).Value = json,
+            async r =>
+            {
+                var found = new Dictionary<string, string>(StringComparer.Ordinal);
+                while (await r.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    found[r.GetString(0)] = r.GetString(1);
+                }
+
+                return found;
+            },
+            ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

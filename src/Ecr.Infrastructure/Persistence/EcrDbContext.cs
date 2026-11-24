@@ -70,9 +70,8 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<PermitGroup> PermitGroups => Set<PermitGroup>();
     public DbSet<PermitGroupMember> PermitGroupMembers => Set<PermitGroupMember>();
 
-    /// <summary>B80: зв'язки «документ-джерело → довідник → споживачі» і стан-ворота читання.</summary>
+    /// <summary>B80: зв'язки «документ-джерело → довідник»; споживачів дає граф залежностей (B179 L7, D-574).</summary>
     public DbSet<DocumentSourceBinding> DocumentSourceBindings => Set<DocumentSourceBinding>();
-    public DbSet<DocumentSourceBindingConsumer> DocumentSourceBindingConsumers => Set<DocumentSourceBindingConsumer>();
     public DbSet<CalculationBinding> CalculationBindings => Set<CalculationBinding>();
 
     // uom
@@ -411,6 +410,13 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
             // «Invalid object name 'calc.CalculationResultSeq'» — уже після
             // того, як усі числа пораховані.
             modelBuilder.HasSequence<long>("CalculationResultSeq", "calc").StartsAt(1).IncrementsBy(1);
+
+            // ✎ JQ-FIFO (b10): порядок вставки рядка черги — розв'язує рівність AvailableAt у claim (DbJobQueue). DEFAULT ставить
+            // база: і сирий INSERT черги, і дзеркало Quartz (EF) отримують значення, не називаючи стовпця.
+            modelBuilder.HasSequence<long>("JobProgressEnqueueSeq", "itg").StartsAt(1).IncrementsBy(1);
+            modelBuilder.Entity<Domain.Entities.Integration.JobProgress>()
+                .Property(x => x.EnqueueSeq)
+                .HasDefaultValueSql("NEXT VALUE FOR itg.JobProgressEnqueueSeq");
         }
     }
 

@@ -175,6 +175,7 @@ public static class DependencyInjection
         services.AddScoped<IAuditReader, AuditReader>();
         services.AddScoped<IConsistencyIssueReader, ConsistencyIssueReader>();
         services.AddScoped<IDocumentStore, DocumentStore>();
+        services.AddScoped<IProjectTemplateStore, ProjectTemplateStore>();   // B74 P3 (D-576)
         services.AddScoped<IDocumentDeletionStore, DocumentDeletionStore>();
         services.AddScoped<IDocumentSheetCopyStore, DocumentSheetCopyStore>();
         services.AddScoped<IDocumentKeyStore, DocumentKeyStore>();
@@ -525,6 +526,9 @@ public static class DependencyInjection
         // ⚠ Матеріалізація PI з місця переходу періоду в Open/Grace — її кличуть
         // `PeriodStateJob` і `ActivateProjectHandler` після коміту.
         services.AddScoped<IMaterializationScheduler, Jobs.MaterializationScheduler>();
+
+        // ✎ D-575: перерахунок документів періоду, що вийшов зі Scheduled — `PeriodStateJob` і зміна політики зсувів.
+        services.AddScoped<IOpenedPeriodRecalculation, Jobs.OpenedPeriodRecalculation>();
         services.AddScoped<Jobs.ArchiveJob>();
         services.AddScoped<Jobs.ConsistencyCheckJob>();
         services.AddScoped<Jobs.PartitionCheckJob>();

@@ -97,7 +97,16 @@ internal static class DeployScriptHarness
     // LandStaleValuesTests поспіль із порожнім виводом, lane/integ-rpt-stable 40977687661 - код 139. Обгортка:
     // (1) не більше двох pwsh одночасно на всі класи (xUnit ганяє класи паралельно);
     // (2) TERM=dumb і вимкнена телеметрія - жодної взаємодії з терміналом/мережею на старті;
-    // (3) ОДИН повтор запуску ЛИШЕ за коду 139, причина - у stderr. Інші коди й провали перевірок не повторюються.
+    // (3) ОДИН повтор запуску ЛИШЕ за коду 139 (пауза 1 с), причина - у stderr. Інші коди й провали перевірок не повторюються.
+    // ✎ 2026-11-23. Картина збою: з якоїсь миті КОЖЕН новий pwsh у job гине 139 до кінця job, повтор теж
+    // (45136077424 core - усі запуски після 08:23:47; 45112460489 Evidence - після 04:39:35; 39584163913 - навіть
+    // наступний крок workflow). Отже стан спільний і тривкий. Єдиний спільний змінюваний стан pwsh у job -
+    // `~/.cache/powershell` (StartupProfileData-NonInteractive: кожен pwsh читає на старті й переписує на виході).
+    // (4) Тому кожен запуск отримує ВЛАСНИЙ XDG_CACHE_HOME - спільного файлу більше немає. ⚠ Відтворити 139 через
+    // цей файл НЕ вдалося (проба 45152360896: 1200 паралельних стартів зі спільним кешем, 16 прогонів pwsh-класів,
+    // 7 видів псування файлу - нуль 139), тож (4) - усунення єдиного відомого спільного стану, а не доведена причина.
+    // (5) Тому на першому 139 у тестовому хості обгортка друкує діагностику (пам'ять, диск, процеси, змінні DOTNET_/LD_, і
+    // які зміни оточення рятують старт) - наступний випадок назве причину. Повтор (3) - лише страховка.
     private const string LauncherScript = """
         #!/bin/sh
         # Тести інколи звужують PATH: утиліти обгортки (mktemp, cat, rm, flock) шукаємо й у системних каталогах.
@@ -120,12 +129,15 @@ internal static class DeployScriptHarness
         attempt=1
         note=""
         while :; do
+          # Власний кеш PowerShell (профіль JIT, ModuleAnalysisCache) на кожну спробу - див. (4) вище.
+          mkdir -p "$d/cache$attempt"
           # pwsh бачить ЛИШЕ початковий PATH: тести навмисно звужують його (напр. "git недоступний").
-          PATH="$ORIG_PATH" "$ECR_REAL_PWSH" -NoLogo "$@" >"$d/out" 2>"$d/err"
+          PATH="$ORIG_PATH" XDG_CACHE_HOME="$d/cache$attempt" "$ECR_REAL_PWSH" -NoLogo "$@" >"$d/out" 2>"$d/err"
           code=$?
           if [ "$code" -eq 139 ] && [ "$attempt" -lt 2 ]; then
             note="ecr-pwsh-launcher: pwsh exit 139 (SIGSEGV on start), launch retried once"
             attempt=2
+            sleep 1
             continue
           fi
           break
@@ -134,6 +146,26 @@ internal static class DeployScriptHarness
         cat "$d/err" >&2
         [ -n "$note" ] && echo "$note; second attempt exit $code" >&2
         [ "$code" -ge 128 ] && [ -z "$note" ] && echo "ecr-pwsh-launcher: pwsh exit $code" >&2
+        # (5) Діагностика - один раз на тестовий хост (mkdir атомарний), решта падінь посилаються на неї.
+        if [ "$code" -eq 139 ]; then
+          if mkdir "$lockdir/ecr-pwsh-139-diag-${GITHUB_RUN_ID:-0}-$PPID" 2>/dev/null; then
+            {
+              echo "ecr-pwsh-diag: $(date -u +%FT%TZ) $(uname -r) image=${ImageOS:-?}/${ImageVersion:-?}"
+              echo "ecr-pwsh-diag: mem $(free -m 2>/dev/null | awk 'NR==2{print "used="$3"MB avail="$7"MB"} NR==3{print "swap="$3"MB"}' | tr '\n' ' ')"
+              echo "ecr-pwsh-diag: commit $(grep -E '^(CommitLimit|Committed_AS)' /proc/meminfo 2>/dev/null | tr -s ' ' | tr '\n' ' ')"
+              echo "ecr-pwsh-diag: disk tmp=$(df -Pm "$lockdir" 2>/dev/null | awk 'NR==2{print $4}')MB home=$(df -Pm "$HOME" 2>/dev/null | awk 'NR==2{print $4}')MB procs=$(ps -e --no-headers 2>/dev/null | wc -l) pwsh=$(pgrep -c pwsh 2>/dev/null)"
+              echo "ecr-pwsh-diag: env $(env | grep -E '^(DOTNET_|COMPlus_|LD_|PSModulePath=|POWERSHELL_|HOME=|XDG_)' | cut -c1-100 | tr '\n' ' ')"
+              echo "ecr-pwsh-diag: cache $(ls -la "$HOME/.cache/powershell" 2>&1 | tail -n +2 | awk '{print $5":"$9}' | tr '\n' ' ')"
+              for v in "PLAIN=1" "HOME=$d/home" "DOTNET_EnableWriteXorExecute=0" "DOTNET_TieredCompilation=0" "DOTNET_GCgen0size=0x4000000"; do
+                mkdir -p "$d/home" "$d/cache-diag"
+                env "$v" XDG_CACHE_HOME="$d/cache-diag" "$ECR_REAL_PWSH" -NoProfile -NonInteractive -Command 'exit 0' >/dev/null 2>&1
+                echo "ecr-pwsh-diag: start with $v -> exit $?"
+              done
+            } >&2
+          else
+            echo "ecr-pwsh-diag: see the first 139 of this test host" >&2
+          fi
+        fi
         exit $code
         """;
 

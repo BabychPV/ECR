@@ -56,7 +56,11 @@ public static class MigrationCli
           Ecr.MethodologyScriptMigration convert --connection <рядок> --out <тека> [--methodology <код>]
           Ecr.MethodologyScriptMigration shadow  --connection <рядок> --in <тека> [--i-know-this-is-a-copy]
           Ecr.MethodologyScriptMigration pack    --connection <рядок> --in <тека> --out <package.json>
-          Ecr.MethodologyScriptMigration parity  --connection <рядок> --out <report.json> [--methodology <код>] [--document <id>] [--allow-unproven]
+          Ecr.MethodologyScriptMigration parity  --connection <рядок> --out <report.json> [--methodology <код>] [--document <id>] [--allow-unproven] [--eligible-out <ids.json>]
+          Ecr.MethodologyScriptMigration parity-cases --connection <рядок> --in <cases.json> --out <report.json> [--eligible-out <f>] [--golden-out <f>] [--golden-all]
+          Ecr.MethodologyScriptMigration golden-versions --connection <рядок копії> --in <golden-proposals.json> --as-user <id> [--out <f>]
+          Ecr.MethodologyScriptMigration apply   --connection <рядок> --in <package.json> --as-user <id> [--dry-run] [--out <result.json>]
+          Ecr.MethodologyScriptMigration switch  --connection <рядок> --in <eligible.json> --engine Script|Formulas --reason <текст> --as-user <id>
 
         convert — для кожної версії рівня Configuration з рушієм Formulas пише <Код>/<Версія>.ecrs і convert-report.json.
         shadow  — записує тексти як тіньові (SetScript) у базу; лише в базу з "copy|test|upg|dev|stand" в імені
@@ -65,7 +69,11 @@ public static class MigrationCli
                   відбитком у convert-report.json теки --in: змінилося після convert — версію не пакує.
         parity  — порівнює старий розрахунок із тіньовим скриптом на всіх документах і періодах копії, де версія чинна
                   (нічого не пише в базу): звіт JSON + підсумок у консолі. Версії, яких паритет не довів (жодного порівняного
-                  екземпляра, немає тіньового тексту), перелічує й вважає невдачею, якщо немає --allow-unproven.
+                  екземпляра чи значення, немає тіньового тексту), перелічує й вважає невдачею, якщо немає --allow-unproven.
+                  --eligible-out (D-571): лише за 0 розбіжностей пише перелік ДОВЕДЕНИХ версій (versionIds) для switch; при
+                  будь-якій розбіжності файл видаляється, щоб вікно не перемкнуло нічого.
+        apply, switch (D-571) — ЛИШЕ на копії: ті самі обробники, що й ендпоінти script-migration/apply|switch, від імені
+                  користувача копії з правом Calculation.Publish (журнал, відбитки, золотий набір). На живій — лише API.
         Коди виходу: 0 — гаразд (parity: 0 розбіжностей); 1 — є невдалі версії (parity: є розбіжності, нічого не порівняно чи є недоведені версії);
                      2 — помилка запуску чи середовища.
         """;
@@ -88,6 +96,34 @@ public static class MigrationCli
         }
 
         var command = args[0];
+        if (command is "parity-cases" or "golden-versions")
+        {
+            try
+            {
+                return command == "parity-cases"
+                    ? await ReferenceParityCommand.RunAsync(args, output, error, ct).ConfigureAwait(false)
+                    : await GoldenVersionsCommand.RunAsync(args, output, error, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is SqlException or InvalidOperationException or IOException or JsonException)
+            {
+                await error.WriteLineAsync($"Помилка середовища: {ex.Message}").ConfigureAwait(false);
+                return UsageOrEnvironment;
+            }
+        }
+
+        if (command is "apply" or "switch")
+        {
+            try
+            {
+                return await CopyHandlerCommands.RunAsync(command, args, output, error, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is SqlException or InvalidOperationException or IOException or JsonException)
+            {
+                await error.WriteLineAsync($"Помилка середовища: {ex.Message}").ConfigureAwait(false);
+                return UsageOrEnvironment;
+            }
+        }
+
         if (command is not ("convert" or "shadow" or "pack" or "parity"))
         {
             await error.WriteLineAsync($"Невідома команда: {command}").ConfigureAwait(false);
@@ -430,6 +466,8 @@ public static class MigrationCli
             await output.WriteLineAsync("  НЕДОВЕДЕНО " + unproven).ConfigureAwait(false);
         }
 
+        await WriteEligibleAsync(options, report, output, ct).ConfigureAwait(false);
+
         if (report.Targets == 0 || report.ValuesCompared == 0)
         {
             // Порожній прогін нічого не доводить: не «гаразд» (навіть без розбіжностей: жодного значення не порівняно).
@@ -457,6 +495,45 @@ public static class MigrationCli
         return Ok;
     }
 
+    /// <summary>
+    /// ✎ D-571: перелік доведених версій для <c>script-migration/switch</c>. ⛔ Будь-яка розбіжність будь-якої версії — файл
+    /// видаляється (не лишається старий з попереднього прогону): вікно перемикає лише за повністю зеленим прогоном.
+    /// </summary>
+    private static async Task WriteEligibleAsync(Options options, ParityRunReport report, TextWriter output, CancellationToken ct)
+    {
+        if (options.EligibleOut is null)
+        {
+            return;
+        }
+
+        var path = Path.GetFullPath(options.EligibleOut);
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
+
+        if (report.Mismatches.Count > 0 || report.Eligible.Count == 0)
+        {
+            await output.WriteLineAsync("parity: перелік для перемикання НЕ записано (є розбіжності або нічого не доведено).")
+                .ConfigureAwait(false);
+            return;
+        }
+
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var eligible = new EligibleList(
+            [.. report.Eligible.Select(v => v.VersionId)],
+            [.. report.Eligible],
+            [.. report.Versions.Where(v => !v.IsProven && !v.IsLibrary)]);
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(eligible, JsonOptions) + "\n", new UTF8Encoding(false), ct)
+            .ConfigureAwait(false);
+        await output.WriteLineAsync($"parity: доведено {eligible.VersionIds.Count} версій → {path}").ConfigureAwait(false);
+    }
+
     // ---- спільне ----
 
     /// <summary>Контекст бази за рядком підключення.</summary>
@@ -479,7 +556,7 @@ public static class MigrationCli
 
     private sealed record Options(
         string? Connection, string? Out, string? In, string? Methodology, bool IKnowThisIsACopy, long? Document = null,
-        bool AllowUnproven = false)
+        bool AllowUnproven = false, string? EligibleOut = null)
     {
         public static Options? Parse(string command, string[] args, TextWriter error)
         {
@@ -489,6 +566,7 @@ public static class MigrationCli
             string? methodology = null;
             var copy = false;
             var allowUnproven = false;
+            string? eligibleOut = null;
             long? document = null;
             for (var i = 1; i < args.Length; i++)
             {
@@ -520,6 +598,9 @@ public static class MigrationCli
                         break;
                     case "--allow-unproven" when command == "parity":
                         allowUnproven = true;
+                        break;
+                    case "--eligible-out" when i + 1 < args.Length && command == "parity":
+                        eligibleOut = args[++i];
                         break;
                     default:
                         error.WriteLine($"Невідомий або неповний параметр: {args[i]}");
@@ -555,7 +636,7 @@ public static class MigrationCli
                 return null;
             }
 
-            return new Options(connection, outPath, inPath, methodology, copy, document, allowUnproven);
+            return new Options(connection, outPath, inPath, methodology, copy, document, allowUnproven, eligibleOut);
         }
     }
 }
@@ -620,3 +701,10 @@ public sealed record ScriptPackage(string Format, int FormatVersion, IReadOnlyLi
     /// <summary>Поточна версія формату.</summary>
     public const int CurrentVersion = Ecr.Application.Calculations.Scripting.Migration.Fingerprint.FormatVersion;
 }
+
+/// <summary>✎ D-571: перелік доведених паритетом версій для перемикання у вікні.</summary>
+/// <param name="VersionIds">Id версій (тіло <c>script-migration/switch</c>).</param>
+/// <param name="Proven">Підсумок кожної доведеної версії.</param>
+/// <param name="NotProven">Затінені версії, яких не доведено (лишаються на Formulas), з лічильниками.</param>
+public sealed record EligibleList(
+    IReadOnlyList<int> VersionIds, IReadOnlyList<ParityVersionResult> Proven, IReadOnlyList<ParityVersionResult> NotProven);

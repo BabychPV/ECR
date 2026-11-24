@@ -967,6 +967,28 @@ public interface IProjectVersionTimeline
 ```
 
 ```csharp
+// src/Ecr.Application/Ports/IProjectTemplateStore.cs (✎ B74 P3, D-576)
+
+namespace Ecr.Application.Ports;
+
+/// <summary>
+/// Шаблони проєкту (<c>doc.ProjectTemplate</c>): перелік із чинною версією й кількістю документів, блок рядка проєкту
+/// (той самий, що в створенні документа й переносі версії), приєднання й від'єднання (разом зі шкалою пари).
+/// Основний шаблон — шаблон <c>doc.fn_VersionOf(проєкт, 0)</c> до P6.
+/// </summary>
+public interface IProjectTemplateStore
+{
+    Task<IReadOnlyList<ProjectTemplateRow>> ListAsync(int projectId, CancellationToken ct);
+    Task<ProjectTemplateRow?> FindAsync(int projectId, int templateId, CancellationToken ct);
+    Task<ProjectTemplateLockFacts?> LockProjectAsync(int projectId, CancellationToken ct);
+    Task<int> CountDocumentsAsync(int projectId, int templateId, bool isPrimary, CancellationToken ct);
+    Task<bool> HasOwnRouteAsync(int projectId, int templateId, CancellationToken ct);
+    Task<int> CountAsync(int projectId, CancellationToken ct);
+    void Attach(int projectId, int templateId, int currentTemplateVersionId);
+    Task DetachAsync(int projectId, int templateId, CancellationToken ct);
+}```
+
+```csharp
 // src/Ecr.Application/Ports/IColumnRenameMap.cs (RPT-STABLE Part B)
 
 namespace Ecr.Application.Ports;
@@ -2455,6 +2477,22 @@ public interface IMaterializationScheduler
 }
 
 public static class PeriodMaterializationTrigger
+{
+    public static bool Requires(PeriodState before, PeriodState after);
+}
+```
+
+#### `IOpenedPeriodRecalculation`
+
+✎ D-575: формули не відкритого періоду (`Scheduled` активного проєкту) не обчислюються, тож перехід `Scheduled → Open/Grace` (`PeriodOpenedRecalculationTrigger.Requires`) ставить перерахунок (`ICalculationTrigger.RequestAsync`, ціль `-auto`) кожного документа проєкту з таблицями в періоді. Викликати лише ПІСЛЯ коміту переходу (`PeriodStateJob`, `UpdatePeriodPolicyHandler`); збій постановки — у журнал, не викликачу. Активація чернетки не викликає: у чернетці D-575 не діє.
+
+```csharp
+public interface IOpenedPeriodRecalculation
+{
+    public Task RequestAsync(int projectId, IReadOnlyCollection<int> periodKeys, CancellationToken ct);
+}
+
+public static class PeriodOpenedRecalculationTrigger
 {
     public static bool Requires(PeriodState before, PeriodState after);
 }
@@ -4970,6 +5008,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/projects/{id}/timezone` | `Project.Manage` | 8 |
 | `GET` | `/api/v1/projects/{id}/periods` | `Document.View` | 3 |
 | `GET` | `/api/v1/projects/{id}/template-versions` | `Document.View` | 3 |
+| `GET` | `/api/v1/projects/{id}/templates` | `Document.View` (✎ B74 P3, D-576: шаблони проєкту — основний і приєднані, чинна версія, кількість документів; невидимий проєкт — 404) | 8 |
+| `POST` | `/api/v1/projects/{id}/templates` | `Project.Manage` + грант Manage (✎ D-576: `{templateVersionId}` → 201; 409 `ECR-PRD-0409` templateAlreadyAttached / projectArchivedTemplates; 422 yearlyProjectNeedsYearLayout) | 8 |
+| `DELETE` | `/api/v1/projects/{id}/templates/{templateId}` | `Project.Manage` + грант Manage (✎ D-576: 204; 409 `ECR-PRD-0409` templateHasDocuments / primaryTemplate / templateHasRoute; 404 `ECR-TMPL-0404` templateNotInProject) | 8 |
 | `POST` | `/api/v1/projects/{id}/recalculate` | `Calculation.Recalculate` | 3 |
 | `POST` | `/api/v1/periods/{id}/reopen` | `Period.Reopen` | 3 |
 | `GET` | `/api/v1/documents` | `Document.View` | 1 |
@@ -6669,7 +6710,9 @@ public sealed record RowDto(
   `ReadFromDocument`, `RecalculateDependents`; `UpdatedAt`, `UpdatedByUserId`) і `cfg.DocumentSourceBindingConsumer`
   (`BindingId`, `TemplateId`). Сід (`99-epilogue.sql`, секція `B80:source-binding`): рядок `HSE400_LAND_COMPOSITION`
   лише коли є шаблон `HSE400` і довідник `LAND_HSE400_COMPOSITION`, лише INSERT відсутнього (`Any`, `ConfirmWithReason`,
-  біти 1/1); споживач — шаблон `LAND_UI`.
+  біти 1/1); споживач — шаблон `LAND_UI`. ✎ B179 L7 (D-574): `cfg.DocumentSourceBindingConsumer` знято міграцією
+  `B179L7DropSourceBindingConsumer` (рядки — одним записом `DocumentSourceBindingConsumerRetired` в `aud.SecurityEvent`),
+  сід споживачів не заводить; споживачів називає лише граф залежностей.
 - **Ворота в завантажувачі.** `Hse400CompositionSnapshotLoader`: за `ApprovedOnly` місяць `MM` обраного документа HSE400
   дає рядки складу лише коли аркуш таблиці (оригінал) має `Approved` у періоді-власнику місяця (місячний проєкт —
   `yyyyMM`); інший місяць — без вводу, без `F_`, без нульового паритету, і довідник за рік документа не повертається.
@@ -6741,6 +6784,10 @@ public sealed record RowDto(
   зміну до періоду (`D-567`). Крок, що завершився, знімає свій період із плану — відмова зникає. Без живих задач — як
   доти (один запит; розширений ланками джерел, лише коли в графі є ребра «джерело → споживач»). «З затвердженими» (`-dependents-approved`), відхилення, відкликання і
   повернення в роботу не блокуються.
+  ✎ b11 (огляд b11-2 (A) + огляд координатора 24.11): ворота тримають рік і тоді, коли жива ВЛАСНА задача перерахунку чи
+  формул документа (натискання, `-auto`, прохід читача, формули, SHEETNAME); тоді той самий 422 `ECR-SUB-4221` несе
+  `messageKey` **`err.ECR-SUB-4221.ownRecalculationPending`** («триває перерахунок цього документа»). Каскад залежних
+  документа (`-dependents…`) і ланки джерел — як доти, `sourceCascadePending` (текст `D-567` без змін).
 - ✎ B80 N4 (R3.2) — `GET /documents/{id}/calculation-issues` (і `?year=true`): нове необов'язкове поле
   **`sourceIssues`** (`SourceIssueDto[] | null`, лише додаванням) у `CalculationIssuesDto`. Запис: `kind`, `monthNumber`
   (місяць споживача 1–12), `sourcePeriodKey` (`yyyyMM`), `sourceDocumentId`, `sourceProjectCode`, `sourceDocumentKey`,
@@ -6821,6 +6868,12 @@ public sealed record RowDto(
   `POST /documents/{id}/submit` і `…/approve` (`ECR-SUB-4221`), `calculation-issues.sourceIssues` і правило
   `STALE_APPROVED_DEPENDENT` вважають споживачем шаблон, якого називає граф. Таблицю `cfg.DocumentSourceBindingConsumer`
   не читає жоден код (сторож `SourceBindingConsumerTableReadGuardTests`), сід її рядки лишає; зняття — L7.
+- ✎ **B179 L7 — таблицю споживачів знято (D-574).** Міграція `B179L7DropSourceBindingConsumer`: перевірка бази (жоден
+  модуль, синонім чи чужий FK не посилається на таблицю, інакше `THROW 50574` без змін) → рядки з кодами зв'язки й
+  шаблону — одним записом `aud.SecurityEvent` (`EventType = DocumentSourceBindingConsumerRetired`, `ChangedByUserId = 0`;
+  порожня таблиця — без запису) → `DROP TABLE` з PK, FK і індексом. Нічний перерахунок (джерела документа-споживача) і
+  дотик споживачів перед видаленням документа-джерела теж беруть споживачів із графа (L6 їх пропустив: читали навігацію
+  `Consumers`). Контракт API не змінюється.
 - **Відмова циклу при публікації версії-скрипта** (`POST /methodologies/{id}/versions/{versionId}/publish`) перевіряється
   ПІСЛЯ публікації й збереження в транзакції (граф читає лише опубліковані версії): відмова `422 ECR-TMPL-0422`
   відкочує публікацію; золотий набір відхиляється раніше за відмову циклу.

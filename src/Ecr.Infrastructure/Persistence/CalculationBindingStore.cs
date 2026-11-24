@@ -18,6 +18,12 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
     /// </remarks>
     private const int MaxBindings = 5_000;
 
+    /// <summary>
+    /// ✎ D-571: стеля імен аргументів (колонки + псевдоніми місяців) живих таблиць прив'язок: шаблон Land — 83 таблиці, річні до
+    /// ~600 колонок, тобто до ~50 тис. імен; запас удвічі.
+    /// </summary>
+    private const int MaxColumnNames = 100_000;
+
     /// <inheritdoc />
     /// <remarks>
     /// ⚠ Відстежувана навмисно: саме цей рядок повторний <c>PUT</c> змінює на
@@ -169,6 +175,8 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
             return new Dictionary<int, IReadOnlyList<string>>();
         }
 
+        // ✎ D-571: стеля — на імена ЖИВИХ таблиць прив'язок; дев'ять річних таблиць Land по 590 колонок уже більші за 5 000, і
+        // обрізаний перелік давав хибне 0438 на справжніх колонках.
         var rows = await db.ColumnDefs
             .AsNoTracking()
             .Where(c => tableDefIds.Contains(c.TableDefId) && !c.IsDeleted)
@@ -176,15 +184,29 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
             .ThenBy(c => c.Ordinal)
             .ThenBy(c => c.Id)
             .Select(c => new { c.TableDefId, c.Code })
-            .Take(MaxBindings)
+            .Take(MaxColumnNames)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // ✎ D-571: псевдонім місяця (cfg.MonthInputAlias, LAND-YEAR L2a) — теж ім'я аргументу таблиці: CalculationInputBuilder
+        // додає його до аргументів рядка (WithAliases). Без нього звірка 0438 відмовляла публікацію методологій річного шаблону.
+        var aliases = await db.MonthInputAliases
+            .AsNoTracking()
+            .Where(a => tableDefIds.Contains(a.TableDefId))
+            .Select(a => new { a.TableDefId, Code = a.Alias })
+            .Distinct()
+            .OrderBy(a => a.TableDefId)
+            .ThenBy(a => a.Code)
+            .Take(MaxColumnNames)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
         return rows
+            .Concat(aliases)
             .GroupBy(r => r.TableDefId)
             .ToDictionary(
                 g => g.Key,
-                g => (IReadOnlyList<string>)g.Select(r => r.Code).ToList());
+                g => (IReadOnlyList<string>)g.Select(r => r.Code).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
     }
 
     /// <inheritdoc />

@@ -19,6 +19,12 @@ public static class SourceCascadePendingCheck
     /// <summary>Ключ каталогу відмови.</summary>
     public const string MessageKey = "err.ECR-SUB-4221.sourceCascadePending";
 
+    /// <summary>
+    /// ✎ b11 (огляд координатора 24.11): ключ відмови, коли тримає ВЛАСНА жива задача перерахунку чи формул документа
+    /// (огляд b11-2 (A)), а не каскад від джерела — текст D-567 про «зміну джерела (HSE400)» тут був би неправдою.
+    /// </summary>
+    public const string OwnRecalculationMessageKey = "err.ECR-SUB-4221.ownRecalculationPending";
+
     /// <summary>Кидає <see cref="BusinessRuleException"/>, якщо місяць документа ще чекає каскаду від зміни джерела.</summary>
     /// <param name="gate">Ворота; <c>null</c> (тестові фабрики обробників) — перевірки немає.</param>
     /// <param name="documentId">Документ-споживач.</param>
@@ -28,19 +34,31 @@ public static class SourceCascadePendingCheck
     public static async Task EnsureNotPendingAsync(
         ISourceCascadePendingGate? gate, long documentId, int periodKey, string action, CancellationToken ct)
     {
-        if (gate is null || !await gate.IsPendingAsync(documentId, periodKey, ct).ConfigureAwait(false))
+        if (gate is null)
         {
             return;
         }
 
+        var reason = await gate.GetPendingReasonAsync(documentId, periodKey, ct).ConfigureAwait(false);
+        if (reason == CascadePendingReason.None)
+        {
+            return;
+        }
+
+        var own = reason == CascadePendingReason.OwnRecalculation;
+        var message = own
+            ? string.Create(
+                CultureInfo.InvariantCulture,
+                $"{action} неможливе: період {periodKey} документа {documentId} ще перераховується (жива задача перерахунку чи формул документа).")
+            : string.Create(
+                CultureInfo.InvariantCulture,
+                $"{action} неможливе: період {periodKey} документа {documentId} ще перераховується після зміни документа-джерела.");
         throw new BusinessRuleException(
             ErrorCodes.SubmitBlocked,
-            string.Create(
-                CultureInfo.InvariantCulture,
-                $"{action} неможливе: період {periodKey} документа {documentId} ще перераховується після зміни документа-джерела."),
+            message,
             new Dictionary<string, object?>
             {
-                ["messageKey"] = MessageKey,
+                ["messageKey"] = own ? OwnRecalculationMessageKey : MessageKey,
                 ["periodKey"] = periodKey.ToString(CultureInfo.InvariantCulture),
             });
     }

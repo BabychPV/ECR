@@ -75,6 +75,27 @@ public sealed class CalculationTrigger(
 
     /// <inheritdoc />
     /// <remarks>
+    /// ✎ PERF-06b (<c>D-572</c>): місяці — у payload (<c>SourceMonths</c>) лише коли черга зливає постановки об'єднанням
+    /// (<c>DbJobQueue.MergePressFieldsSql</c>: обидві з місяцями — об'єднання, хоч одна без — без місяців, тобто увесь рік). Quartz
+    /// лишає payload першої постановки — місяці другої правки загубилися б, тож там без них (увесь рік, як доти).
+    /// </remarks>
+    public async Task<string?> RequestAsync(
+        long documentId, PeriodKey periodKey, IReadOnlyCollection<int> sourceMonths, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(sourceMonths);
+        if (!await WritableAsync(documentId, periodKey, ct).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        // ✎ PERF-06b (D-572, live Quartz): і Quartz зливає місяці об'єднанням (QuartzSourceMonths) — не лише черга в базі.
+        int[]? months = jobs.MergesSourceMonths && sourceMonths.Count > 0 ? [.. sourceMonths.Distinct().Order()] : null;
+        return await EnqueueSubmittedAsync(AutoTargetOf(documentId, periodKey), documentId, periodKey, ct, sourceMonths: months)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
     /// ⛔ B63 (слово людини 07.11: «тільки погоджені не мають перераховуватися»): залежні від довідника чи
     /// документа-джерела (RT-25, HSE400 3b, FLERT F6) перераховуються ПО АРКУШУ — пропускається лише затверджений;
     /// чернетка, повернутий і поданий перераховуються, поданий — із записом журналу й позначкою
@@ -113,10 +134,19 @@ public sealed class CalculationTrigger(
     /// (затверджені якраз і перераховуються); стан періоду й архів перевіряються як завжди. Ціль черги — своя
     /// (<see cref="DependentsApprovedTargetOf"/>): задача з перекриттям не зливається з задачею без нього і навпаки.
     /// </remarks>
-    public async Task<string?> RequestDependentsAsync(
+    public Task<string?> RequestDependentsAsync(
         long documentId, PeriodKey periodKey, int sourceHop, ApprovedRecalculationOverride? approvedOverride, CancellationToken ct)
+        => RequestDependentsCoreAsync(documentId, periodKey, sourceHop, approvedOverride, document: null, ct);
+
+    /// <summary>
+    /// Тіло <see cref="RequestDependentsAsync(long, PeriodKey, int, ApprovedRecalculationOverride?, CancellationToken)"/>; ✎ PERF-06b
+    /// (<c>D-572</c>): <paramref name="document"/> — пакетні читання документа на кілька періодів (каскад на черзі без об'єднання).
+    /// </summary>
+    private async Task<string?> RequestDependentsCoreAsync(
+        long documentId, PeriodKey periodKey, int sourceHop, ApprovedRecalculationOverride? approvedOverride,
+        DocumentWritability? document, CancellationToken ct)
     {
-        if (!await WritableAsync(documentId, periodKey, ct, ignoreAllApproved: approvedOverride is not null).ConfigureAwait(false))
+        if (!await WritableAsync(documentId, periodKey, ct, ignoreAllApproved: approvedOverride is not null, document: document).ConfigureAwait(false))
         {
             return null;
         }
@@ -132,8 +162,11 @@ public sealed class CalculationTrigger(
         // RegistryImpactRecalculationJob) транзакції не відкриває — це запобіжник на майбутнє, а не робочий шлях.
         // ✎ Задача з перекриттям, що вже СТАРТУВАЛА (лок документа взято), сама скасовує звичайну, яка встигла стати в
         // чергу, поки вона чекала лок (`RecalculationJob`): входи вона читає вже після того.
+        var approvedTarget = DependentsApprovedTargetOf(documentId, periodKey);
         if (approvedOverride is null
-            && await jobs.FindQueuedAsync<IRecalculationJob>(DependentsApprovedTargetOf(documentId, periodKey), ct).ConfigureAwait(false)
+            && (document?.Covered is { } covered
+                ? covered.GetValueOrDefault(approvedTarget)
+                : await jobs.FindQueuedAsync<IRecalculationJob>(approvedTarget, ct).ConfigureAwait(false))
                 is { Length: > 0 } coveringJobId)
         {
             return coveringJobId;
@@ -166,6 +199,9 @@ public sealed class CalculationTrigger(
     public bool CoalescesCascadePeriods => jobs.MergesCascadePeriods;
 
     /// <inheritdoc />
+    public bool CarriesSourceMonths => jobs.MergesSourceMonths;
+
+    /// <inheritdoc />
     /// <remarks>
     /// <para>
     /// ✎ PERF-06 (<c>D-566</c>): ціль <see cref="SourceCascadeTargetOf"/> (<c>doc{id}-y{рік}-dependents</c>) — системні залежні під
@@ -191,11 +227,14 @@ public sealed class CalculationTrigger(
         ArgumentNullException.ThrowIfNull(periodKeys);
         if (!CoalescesCascadePeriods)
         {
+            // ✎ PERF-06b (D-572): і поперіодно (Quartz, live InProcess) — читання документа пакетом на всі його періоди.
             string? last = null;
             var each = new List<int>();
-            foreach (var period in periodKeys.Distinct().Order())
+            var perPeriod = periodKeys.Distinct().Order().ToList();
+            var prefetched = await PrefetchAsync(documentId, perPeriod, ct).ConfigureAwait(false);
+            foreach (var period in perPeriod)
             {
-                if (await RequestDependentsAsync(documentId, new PeriodKey(period), sourceHop, ct).ConfigureAwait(false) is { } id)
+                if (await RequestDependentsCoreAsync(documentId, new PeriodKey(period), sourceHop, null, prefetched, ct).ConfigureAwait(false) is { } id)
                 {
                     last = id;
                     each.Add(period);
@@ -207,10 +246,16 @@ public sealed class CalculationTrigger(
 
         var periods = new List<int>();
         var seeds = new List<int>();
-        foreach (var period in periodKeys.Where(p => p / 100 == year).Distinct().Order())
+
+        // ✎ PERF-06b (D-572, вимір 200 споживачів): архівність проєкту й склад аркушів документа — один раз на документ, стани
+        // періодів і аркушів — одним зверненням кожне на всі періоди (ребро «рік»: 12 періодів на споживача), а не на кожен період.
+        var candidates = periodKeys.Where(p => p / 100 == year).Distinct().Order().ToList();
+        var document = await PrefetchAsync(documentId, candidates, ct).ConfigureAwait(false);
+
+        foreach (var period in candidates)
         {
             var key = new PeriodKey(period);
-            if (!await WritableAsync(documentId, key, ct).ConfigureAwait(false))
+            if (!await WritableAsync(documentId, key, ct, document: document).ConfigureAwait(false))
             {
                 continue;
             }
@@ -218,8 +263,10 @@ public sealed class CalculationTrigger(
             // ✎ Огляд F2: період уже чекає в задачі «з затвердженими» — його рахує вона, але вона (названий період) будить
             // лише РАНІШИХ читачів; пізніші місяці, що читають його обчислені числа ([Period:-1]), будить ця задача —
             // період іде затравкою (cascadeSeeds), а не періодом до розрахунку.
-            if (await jobs.FindQueuedAsync<IRecalculationJob>(DependentsApprovedTargetOf(documentId, key), ct).ConfigureAwait(false)
-                    is { Length: > 0 })
+            var approvedTarget = DependentsApprovedTargetOf(documentId, key);
+            if (document.Covered is { } covered
+                    ? covered.ContainsKey(approvedTarget)
+                    : await jobs.FindQueuedAsync<IRecalculationJob>(approvedTarget, ct).ConfigureAwait(false) is { Length: > 0 })
             {
                 seeds.Add(period);
                 continue;
@@ -303,7 +350,7 @@ public sealed class CalculationTrigger(
 
     /// <summary>
     /// B83: ціль автоперерахунку після збору PI і синхронізації подій — окрема від кнопки, правки шапки й нічних
-    /// дочірніх задач (<c>TargetOf</c>), щоб злиття не губило позначку поданих (див. <see cref="RequestAsync"/>).
+    /// дочірніх задач (<c>TargetOf</c>), щоб злиття не губило позначку поданих (див. <see cref="RequestAsync(long, PeriodKey, CancellationToken)"/>).
     /// </summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>
@@ -327,16 +374,26 @@ public sealed class CalculationTrigger(
     /// піднімає закритий місяць до <c>Grace</c>, тож самого стану періоду не досить.
     /// </para>
     /// </remarks>
-    private async Task<bool> WritableAsync(long documentId, PeriodKey periodKey, CancellationToken ct, bool ignoreAllApproved = false)
+    private async Task<bool> WritableAsync(
+        long documentId, PeriodKey periodKey, CancellationToken ct, bool ignoreAllApproved = false, DocumentWritability? document = null)
     {
-        var state = await periods.FindPeriodStateAsync(documentId, periodKey.Value, ct).ConfigureAwait(false);
+        var state = document?.States is { } states && states.TryGetValue(periodKey.Value, out var known)
+            ? known
+            : await periods.FindPeriodStateAsync(documentId, periodKey.Value, ct).ConfigureAwait(false);
         if (state is not { } periodState || periodState == PeriodState.Scheduled
             || RecalculationWritePolicy.Check(periodState, hasSubmittedSheets: false) != RecalculationWriteDenial.None)
         {
             return false;
         }
 
-        if (await periods.IsDocumentProjectArchivedOrArchivingAsync(documentId, ct).ConfigureAwait(false))
+        var archived = document?.Archived
+                       ?? await periods.IsDocumentProjectArchivedOrArchivingAsync(documentId, ct).ConfigureAwait(false);
+        if (document is not null)
+        {
+            document.Archived = archived;
+        }
+
+        if (archived)
         {
             return false;
         }
@@ -346,8 +403,10 @@ public sealed class CalculationTrigger(
             return true;
         }
 
-        var sheets = await workflow.GetSheetsAsync(documentId, periodKey, ct).ConfigureAwait(false);
-        return !await AllApprovedAsync(documentId, sheets, ct).ConfigureAwait(false);
+        var sheets = document?.Sheets is { } byPeriod && byPeriod.TryGetValue(periodKey.Value, out var prefetched)
+            ? prefetched
+            : await workflow.GetSheetsAsync(documentId, periodKey, ct).ConfigureAwait(false);
+        return !await AllApprovedAsync(documentId, sheets, ct, document).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -355,23 +414,69 @@ public sealed class CalculationTrigger(
     /// <c>RecalculateDocumentHandler</c>. Склад невідомий — лише коли всі наявні стани аркушів затверджені.
     /// </summary>
     private async Task<bool> AllApprovedAsync(
-        long documentId, IReadOnlyList<Domain.Entities.Workflow.ApprovalState> sheets, CancellationToken ct)
+        long documentId, IReadOnlyList<Domain.Entities.Workflow.ApprovalState> sheets, CancellationToken ct,
+        DocumentWritability? document = null)
     {
         bool Approved(int sheetId, long? copyId) => sheets.Any(s =>
             s.SheetDefId == sheetId && s.SheetCopyId == copyId && s.Status == DocumentStatus.Approved);
 
-        var included = await documents.GetIncludedSheetIdsAsync(documentId, ct).ConfigureAwait(false);
+        var included = document?.Included ?? await documents.GetIncludedSheetIdsAsync(documentId, ct).ConfigureAwait(false);
+        if (document is not null)
+        {
+            document.Included = included;
+        }
 
         if (included.Count == 0)
         {
             return sheets.Count > 0 && sheets.All(s => s.Status == DocumentStatus.Approved);
         }
 
-        var copiesBySheet = (await sheetCopies.ListGroupsAsync(documentId, ct).ConfigureAwait(false))
-            .ToDictionary(g => g.SheetDefId, g => g.Copies);
+        var copiesBySheet = document?.CopiesBySheet
+                            ?? (await sheetCopies.ListGroupsAsync(documentId, ct).ConfigureAwait(false))
+                                .ToDictionary(g => g.SheetDefId, g => g.Copies);
+        if (document is not null)
+        {
+            document.CopiesBySheet = copiesBySheet;
+        }
 
         return included.All(sheetId => Approved(sheetId, null)
             && (copiesBySheet.GetValueOrDefault(sheetId) ?? []).All(c => Approved(sheetId, c.SheetCopyId)));
+    }
+
+    /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>): частини перевірки «чи є що перераховувати», що залежать лише від документа (архівність проєкту,
+    /// склад аркушів, копії), — один раз на документ у межах однієї постановки каскаду кількох періодів.
+    /// </summary>
+    private async Task<DocumentWritability> PrefetchAsync(long documentId, List<int> candidates, CancellationToken ct)
+    {
+        var document = new DocumentWritability();
+        if (candidates.Count > 1)
+        {
+            document.States = await periods.FindPeriodStatesAsync(documentId, candidates, ct).ConfigureAwait(false);
+            document.Sheets = await workflow.GetSheetsForPeriodsAsync(documentId, candidates, ct).ConfigureAwait(false);
+            document.Covered = await jobs
+                .FindQueuedManyAsync<IRecalculationJob>(
+                    [.. candidates.Select(p => DependentsApprovedTargetOf(documentId, new PeriodKey(p)))], ct)
+                .ConfigureAwait(false);
+        }
+
+        return document;
+    }
+
+    private sealed class DocumentWritability
+    {
+        /// <summary>Задачі «з затвердженими», що чекають, за ціллю (огляд F2 — затравки).</summary>
+        public IReadOnlyDictionary<string, string>? Covered { get; set; }
+
+        public IReadOnlyDictionary<int, PeriodState?>? States { get; set; }
+
+        public IReadOnlyDictionary<int, IReadOnlyList<Domain.Entities.Workflow.ApprovalState>>? Sheets { get; set; }
+
+        public bool? Archived { get; set; }
+
+        public IReadOnlyList<int>? Included { get; set; }
+
+        public Dictionary<int, IReadOnlyList<SheetCopyOrdinal>>? CopiesBySheet { get; set; }
     }
 
     /// <summary>Єдина точка постановки системного перерахунку, що пише й подані аркуші.</summary>
@@ -382,9 +487,21 @@ public sealed class CalculationTrigger(
     /// </remarks>
     private Task<string> EnqueueSubmittedAsync(
         string target, long documentId, PeriodKey periodKey, CancellationToken ct, int sourceHop = 0,
-        ApprovedRecalculationOverride? approvedOverride = null, TimeSpan delay = default)
+        ApprovedRecalculationOverride? approvedOverride = null, TimeSpan delay = default, int[]? sourceMonths = null)
     {
         var payload =
+            // ✎ PERF-06b (D-572): власний перерахунок річного/квартального джерела з місяцями правки.
+            sourceMonths is not null
+                ? (object)new
+                {
+                    DocumentId = documentId,
+                    PeriodKey = periodKey.Value,
+                    TriggeredByUserId = (int?)null,
+                    SheetDefId = (int?)null,
+                    RecalculateSubmitted = true,
+                    SourceMonths = sourceMonths,
+                }
+                :
             // B80 N5: перекриття адміністратора — затверджені теж (IncludeApproved) з автором і причиною для журналу.
             approvedOverride is not null
                 ? (object)new

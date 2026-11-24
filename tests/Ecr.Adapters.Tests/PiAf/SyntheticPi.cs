@@ -43,7 +43,7 @@ internal class SyntheticPi(int tags, DateTime origin, TimeSpan step, DateTime en
     public long PointsPerTag => (end - origin).Ticks / step.Ticks;
 
     /// <inheritdoc />
-    public ExternalTransport Transport => ExternalTransport.PiSqlClient;
+    public ExternalTransport Transport { get; init; } = ExternalTransport.PiSqlClient;
 
     /// <inheritdoc />
     public Task<IReadOnlyList<SourceEntityDescriptor>> DiscoverAsync(int dataSourceId, CancellationToken ct)

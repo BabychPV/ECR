@@ -262,43 +262,38 @@ public sealed partial class LandHse400CompositionRegistryTests
     {
         var f = await ArrangeAsync();
         var template = await BuildDocumentAsync(("FG_Internal", "Density_20", 1, 0.81m));
-        var consumer = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: Year2026);
-        string consumerCode;
-        await using (var db = sql.CreateContext())
-        {
-            consumerCode = await db.Templates.Where(t => t.Id == consumer.TemplateId).Select(t => t.Code).SingleAsync();
-        }
 
         var bindingCode = $"B80SEED_{f.Tag}";
-        var section = SeedSection()
+        var section = SeedSection();
+
+        // ✎ B179 L7 (D-574): секція не пише в знятий ручний перелік споживачів — споживачів називає граф.
+        Assert.DoesNotContain("DocumentSourceBindingConsumer", section, StringComparison.Ordinal);
+        section = section
             .Replace("N'HSE400_LAND_COMPOSITION'", $"N'{bindingCode}'", StringComparison.Ordinal)
             .Replace("N'LAND_HSE400_COMPOSITION'", $"N'{f.CompositionCode}'", StringComparison.Ordinal)
-            .Replace("N'HSE400'", $"N'{template}'", StringComparison.Ordinal)
-            .Replace("N'LAND_UI'", $"N'{consumerCode}'", StringComparison.Ordinal);
+            .Replace("N'HSE400'", $"N'{template}'", StringComparison.Ordinal);
 
         await RunBatchesAsync(section);
 
         await using (var db = sql.CreateContext())
         {
-            var binding = await db.DocumentSourceBindings.AsNoTracking().Include(b => b.Consumers).SingleAsync(b => b.Code == bindingCode);
+            var binding = await db.DocumentSourceBindings.AsNoTracking().SingleAsync(b => b.Code == bindingCode);
             Assert.Equal(DocumentSourceState.Any, binding.SourceState);
             Assert.Equal(DocumentSourcePolicy.ConfirmWithReason, binding.Policy);
             Assert.True(binding.ReadFromDocument);
             Assert.True(binding.RecalculateDependents);
-            Assert.Equal(consumer.TemplateId, Assert.Single(binding.Consumers).TemplateId);
 
             await db.DocumentSourceBindings.Where(b => b.Code == bindingCode)
                 .ExecuteUpdateAsync(s => s.SetProperty(b => b.SourceState, DocumentSourceState.ApprovedOnly));
         }
 
-        // Повторний старт (сід на кожному старті) — рядок той самий, стан не скинуто, споживач не задвоєно.
+        // Повторний старт (сід на кожному старті) — рядок той самий, стан не скинуто, зв'язку не задвоєно.
         await RunBatchesAsync(section);
 
         await using (var db = sql.CreateContext())
         {
-            var binding = await db.DocumentSourceBindings.AsNoTracking().Include(b => b.Consumers).SingleAsync(b => b.Code == bindingCode);
+            var binding = await db.DocumentSourceBindings.AsNoTracking().SingleAsync(b => b.Code == bindingCode);
             Assert.Equal(DocumentSourceState.ApprovedOnly, binding.SourceState);
-            Assert.Single(binding.Consumers);
         }
     }
 

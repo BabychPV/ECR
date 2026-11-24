@@ -167,6 +167,10 @@ UNIT_MAP['one'] = 'one'
 # вже є в базовому сіді (09-seed.sql: mg_per_m3 - MassConcentration, pct_vol - безрозмірна), нових одиниць не додаємо.
 UNIT_MAP['mg/m3'] = 'mg_per_m3'
 UNIT_MAP['%vol'] = 'pct_vol'
+# ✎ P-1123-4 (людина 23.11): одиниці аргументів C05_05 на колонках шаблону, а не в тексті скрипта (land-script-units.json):
+# густина газу кг/Sm3, нижча теплота згоряння МДж/Sm3. Обидві одиниці - у базовому сіді (seed/00-prelude.sql).
+UNIT_MAP['kg/Sm3'] = 'kg_per_Sm3'
+UNIT_MAP['MJ/Sm3'] = 'MJ_per_Sm3'
 
 # ---------- довідники ----------
 registries = {}
@@ -399,8 +403,8 @@ for _m, _d in sorted(_ro_all.items()):
 TEXT_ARGS = {'T3_00': ['Land_OverhauledEngines', 'Land_Rotation'], 'T5_09': ['Land_TypePetrStation'], 'T5_27': ['Land_TypeBurnFuel']}
 EXTRA = {
     'T3_00': {'CalculationMonth': ('Formula', '[Period].Sequence', 'one', 'Calculation month'),
-              'Density': ('Decimal', None, 'one', 'Gas density (HSE400; manual input here)'),
-              'FuelLowerHeating': ('Decimal', None, 'one', 'Lower heating value (HSE400; manual input here)'),
+              'Density': ('Decimal', None, 'kg/Sm3', 'Gas density (HSE400; manual input here)'),
+              'FuelLowerHeating': ('Decimal', None, 'MJ/Sm3', 'Lower heating value (HSE400; manual input here)'),
               'H2Smass': ('Decimal', None, 'one', 'H2S mass (HSE400; manual input here)'),
               'MercaptanSulphurContent': ('Decimal', None, 'one', 'Mercaptan sulphur content (HSE400; manual input here)')},
     'T5_08': {'DaysInCalcMonth': ('Formula', '[Period].Days', 'one', 'Days in calculation month'),
@@ -1270,6 +1274,63 @@ def _arg_bridges():
 
 
 _arg_bridges()
+
+
+# ---- P-1123-4 (людина 23.11: «Вода має прості формули тому ми їх рахуємо в таблиці і все»): T7b_00.ECW_EC_tons - не вихід
+# методології ECW_C09_02_01 (виключена з міграції на скрипти, рахувати її нічим), а формула таблиці з ТІЄЮ САМОЮ семантикою:
+#   * методологія: (@Concentration * @Volume) / k1, k1 = 1e6 (мг/л * м3 -> т), правила {} (усі рядки);
+#   * фільтр активності D-425 (land-row-filter.json runningOnly): рядок рахується, лише коли Land_Status = RUNNING
+#     (S3_9 - порожній статус, результату немає);
+#   * бракує аргументу (порожня концентрація чи об'єм) - результату немає (MissingInputs), а не нуль.
+# Після YearMonths: ECW_EC_tons_M01..M12 = та сама умова з колонкою місяця m і Volume_Mmm (змінна формула).
+DECIDED_TABLE_FORMULAS = {
+    'T7b_00': {
+        'ECW_EC_tons': {
+            'methodology': 'ECW_C09_02_01',
+            'status': ('Land_Status', 'LAND_GENERIC_EQUIPSTATUS', 'RUNNING'),
+            # IF(...) повертає концентрацію лише для рядка, що рахується, і знімає з неї одиницю: діалект шаблону не має похідної
+            # одиниці «мг/л x м3» (expr.unit.productUndeclared), а перехід у тонни - це сам k1 = 1e6 методології. NULL з IF
+            # (не RUNNING або бракує аргументу) дає порожню комірку, як «немає результату» методології.
+            'expression': "IF(REGFIELD([Land_Status], 'NAME') = '%s' AND NOT ([Concentration] = NULL OR [Volume] = NULL),"
+                          " [Concentration], NULL) * [Volume] / 1000000",
+        },
+    },
+}
+
+
+def _decided_table_formulas():
+    regs = registries
+    for s_ in out['sheets']:
+        for t_ in s_['tables']:
+            spec_t = DECIDED_TABLE_FORMULAS.get(t_['code'])
+            if not spec_t:
+                continue
+            cols = {c['code']: c for c in t_['columns']}
+            for code, spec in spec_t.items():
+                col = cols.get(code)
+                status_col, reg_code, entry_code = spec['status']
+                if col is None or col['dataType'] != 'Calculated':
+                    raise SystemExit('table formulas: %s.%s не Calculated-вихід' % (t_['code'], code))
+                if any(x not in cols for x in (status_col, 'Concentration', 'Volume')):
+                    raise SystemExit('table formulas: %s без %s/Concentration/Volume' % (t_['code'], status_col))
+                entries = [e for e in regs[reg_code]['entries'] if e['code'] == entry_code]
+                if len(entries) != 1 or sum(1 for e in regs[reg_code]['entries'] if e['name'] == entries[0]['name']) != 1:
+                    raise SystemExit('table formulas: запис %s/%s не однозначний за назвою' % (reg_code, entry_code))
+                col['dataType'] = 'Formula'
+                col['readOnly'] = True
+                col['expression'] = spec['expression'] % entries[0]['name']
+                col['ecrAdded'] = ('table formula = methodology %s semantics incl. D-425 %s filter (P-1123-4)'
+                                   % (spec['methodology'], entry_code))
+                calc = t_.get('calc')
+                if calc and spec['methodology'] in calc['methodologies']:
+                    calc['methodologies'] = [m for m in calc['methodologies'] if m != spec['methodology']]
+                    calc['outputs'] = [o for o in calc['outputs'] if o != code]
+                    if not calc['methodologies']:
+                        del t_['calc']
+    print('decided table formulas: %d' % sum(len(v) for v in DECIDED_TABLE_FORMULAS.values()))
+
+
+_decided_table_formulas()
 
 # ---- склад газу HSE400 (LP-10): довідники LAND_HSE400_STREAM / LAND_HSE400_COMPOSITION і мости аргументів Density20, Vddg ...
 # Значень складу в моделі немає (їх одноразово завантажує tools/land/Import-LandHse400Composition.ps1); див. hse400_bridges.py.

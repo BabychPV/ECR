@@ -55,5 +55,43 @@ describe('CalculationIssuesPanel — доступність', { timeout: 120_000
       const violations = await findViolations(document.body);
       expect(violations, describeViolations(violations)).toHaveLength(0);
     });
+
+    // ✎ W15z M4: документ «рік» — панель на кожен місяць (тут два) з розгорнутими деталями: id деталей і зв'язки
+    // `aria-controls` власні на місяць, причина джерела з датами й діями — без порушень (у т. ч. duplicate-id).
+    it(`${colorScheme}: дві панелі місяців документа «рік» з розгорнутими деталями без порушень`, async () => {
+      const rows = {
+        issues: [issue(1, 2)],
+        hints: [],
+        finishedAt: null,
+        formulaErrors: [],
+        sourceIssues: [
+          {
+            kind: 'SourceChangedAfterApproval', monthNumber: 10, sourcePeriodKey: 202610, sourceDocumentId: 7,
+            sourceProjectCode: 'HSE', sourceDocumentKey: 'HSE400-2026', sourceApprovedAt: '2026-11-01T08:00:00Z',
+            approvedAt: '2026-11-02T08:00:00Z', sourceChangedAt: null,
+          },
+        ],
+      };
+      render(
+        <Shell colorScheme={colorScheme}>
+          {[202609, 202610].map((periodKey) => (
+            <CalculationIssuesPanel
+              key={periodKey}
+              periodKey={periodKey}
+              rows={rows}
+              tables={[table(1, '3.00 Stationary equipment')]}
+              onOpenCell={() => {}}
+              onOpenSource={() => {}}
+            />
+          ))}
+        </Shell>,
+      );
+      for (const toggle of screen.getAllByTestId('document-calc-issues-details-toggle')) fireEvent.click(toggle);
+
+      const controls = screen.getAllByTestId('document-calc-issues-details-toggle').map((t) => t.getAttribute('aria-controls'));
+      expect(new Set(controls).size).toBe(2);
+      const violations = await findViolations(document.body);
+      expect(violations, describeViolations(violations)).toHaveLength(0);
+    });
   }
 });

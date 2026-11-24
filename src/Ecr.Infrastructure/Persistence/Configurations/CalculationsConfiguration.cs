@@ -598,6 +598,12 @@ public sealed class CalculationRunConfiguration : IEntityTypeConfiguration<Calcu
         // ✎ PERF-01 (D-564a, огляд H2): межа журналу комірок у мить завершення прогону (без годинників).
         builder.Property(x => x.CellChangeWatermark);
 
+        // ✎ W15z M7 (огляд b11 №3): закомічена межа журналу комірок на старті прогону (входи чисел), без годинників.
+        builder.Property(x => x.InputsCellChangeWatermark);
+
+        // ✎ P-1123-20: стан джерел, які бачив прогін (відбитки на документ × період джерела), JSON.
+        builder.Property(x => x.SourceStateJson).HasColumnType("nvarchar(max)");
+
         // ⛔ Унікальний ФІЛЬТРОВАНИЙ індекс — той самий прийом, що вже тримає
         // «поточний зріз» у `UX_ReportSnapshot_Current`. Доти інваріант
         // «актуальний прогін на область — щонайбільше один» не тримало НІЩО:

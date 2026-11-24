@@ -998,7 +998,10 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
             .AsNoTracking()
             .Where(b => b.IsActive && ids.Contains(b.TableDefId))
             .OrderBy(b => b.Id)
-            .Take(MaxChildren)
+
+            // ⛔ W15z: без стелі. Річна розкладка дає прив'язку на кожен місяць кожного виходу (LAND_UI 1.0.19.0 - 10 075,
+            // 1.0.20.0 - 9 300), і стеля 10 000, обрізаючи за Id, мовчки ховала б результати найновіших прив'язок.
+            // Обсяг обмежений самими таблицями запиту (прив'язки однієї версії шаблону).
             .Select(b => new { b.TableDefId, b.ColumnDefId, b.MethodologyId, b.OutputCode, b.MatchJson })
             .ToListAsync(ct)
             .ConfigureAwait(false);

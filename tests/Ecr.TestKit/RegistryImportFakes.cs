@@ -48,7 +48,8 @@ public sealed class FakeRegistryImportTarget : IRegistryImportTarget
 
             // Stage on a copy; publish only when the whole plan went through (the contract of a real transaction).
             var staged = Stored.ToList();
-            staged.RemoveAll(p => plan.Delete.Any(d => d.OwnerKey == p.OwnerKey && d.Key == p.Key));
+            // ✎ D-569: a delete names the bucket of an owner's row outside the import's bucket too.
+            staged.RemoveAll(p => plan.Delete.Any(d => d.OwnerKey == p.OwnerKey && d.Key == p.Key && d.Scope == p.Scope));
             staged.AddRange(plan.Insert.Select(i => new ExistingParent(
                 plan.Scope.OwnerKey,
                 null,

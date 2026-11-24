@@ -27,7 +27,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// <c>aud.ConsistencyIssue</c>.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class ConsistencyCheckJobDetectionTests(SqlServerFixture sql)
+public sealed partial class ConsistencyCheckJobDetectionTests(SqlServerFixture sql)
 {
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]

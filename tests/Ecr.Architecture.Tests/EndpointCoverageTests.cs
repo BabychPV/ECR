@@ -538,6 +538,7 @@ public sealed partial class EndpointCoverageTests
                 "err.ECR-REQ-0422.dataSourceEndpointMalformed", "err.ECR-REQ-0422.dataSourceEndpointHostNotAllowed",
                 "err.ECR-REQ-0422.dataSourceEndpointSqlScheme", "err.ECR-REQ-0422.dataSourceEndpointSqlLinkLocal",
                 "err.ECR-REQ-0422.dataSourceEndpointSqlForbiddenOption",
+                "err.ECR-REQ-0422.dataSourceEndpointNotConnectionString", "err.ECR-REQ-0422.dataSourceFieldNotRead",
             ],
             "messageKey сервера, але лише з FieldOfKey — інші сюди не доходять."),
 

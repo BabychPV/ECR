@@ -337,7 +337,51 @@ public sealed class DependencyGraphProvider(
         }
 
         diagnostics.AddRange(fallbackVersions.Select(v => new DependencyGraphDiagnostic("astFallback", $"template version {v}")));
-        return reads;
+        return await MarkMonthOwnedAsync(reads, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Місяць літерального обсягу (<see cref="PeriodScope.FixedMonth"/> одного місяця); інакше <c>null</c>.</summary>
+    internal static int? SingleFixedMonth(PeriodScope scope)
+        => scope.Kind == PeriodScopeKind.Year && scope.MonthMask != 0 && System.Numerics.BitOperations.IsPow2(scope.MonthMask)
+            ? System.Numerics.BitOperations.Log2((uint)scope.MonthMask)
+            : null;
+
+    /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>, live Quartz): позначає читання, комірку якого рахує лише період-власник літерального місяця
+    /// (<see cref="TemplateRegistryRead.MonthOwned"/>): колонкова формула (без рядка) ОБЧИСЛЮВАНОЇ місячної колонки
+    /// <c>M{m}</c> (той самий m, що в <c>REGFIND(…, [Period].Year, m, …)</c>) таблиці «місяці в колонках» версії
+    /// <c>YearWithMonthColumns</c> — маршрутизація місячних колонок (D-474, LAND-YEAR L1) віддає таку комірку періоду m.
+    /// Усе інше — без позначки (увесь рік, як доти). Одне звернення — лише коли є читання з одним літеральним місяцем.
+    /// </summary>
+    private async Task<List<TemplateRegistryRead>> MarkMonthOwnedAsync(List<TemplateRegistryRead> reads, CancellationToken ct)
+    {
+        var candidates = reads.Where(r => r.Source != "lookupColumn" && SingleFixedMonth(r.Scope) is not null)
+            .Select(r => r.FormulaDefId).Distinct().ToList();
+        if (candidates.Count == 0)
+        {
+            return reads;
+        }
+
+        var shapes = await (
+                from formula in db.FormulaDefs.AsNoTracking()
+                where candidates.Contains(formula.Id) && formula.Scope == FormulaScope.Column && formula.RowDefId == null
+                join column in db.ColumnDefs.AsNoTracking() on formula.ColumnDefId equals (int?)column.Id
+                join table in db.TableDefs.AsNoTracking() on formula.TableDefId equals table.Id
+                join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+                join version in db.TemplateVersions.AsNoTracking() on sheet.TemplateVersionId equals version.Id
+                where !column.IsDeleted && !table.IsDeleted && column.IsMonthColumn
+                      && (column.DataType == CellDataType.Formula || column.DataType == CellDataType.Calculated)
+                      && table.LayoutKind == TableLayoutKind.MonthsInColumns
+                      && version.Layout == TemplateLayout.YearWithMonthColumns
+                select new { formula.Id, column.MonthNumber })
+            .ToDictionaryAsync(s => s.Id, s => s.MonthNumber, ct)
+            .ConfigureAwait(false);
+
+        return [.. reads.Select(r => SingleFixedMonth(r.Scope) is { } month
+                                     && r.Source != "lookupColumn"
+                                     && shapes.TryGetValue(r.FormulaDefId, out var owner) && owner == month
+            ? r with { MonthOwned = true }
+            : r)];
     }
 
     /// <summary>Довжина уривка формули в доказі.</summary>

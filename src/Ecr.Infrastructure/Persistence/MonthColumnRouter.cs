@@ -107,7 +107,14 @@ public sealed class MonthColumnRouter : IMonthColumnRouter
                 where d.Id == documentId
                 join p in _db.Projects.AsNoTracking() on d.ProjectId equals p.Id
                 where p.PeriodKind == PeriodKind.Monthly
-                select new MonthRoutingDocument(d.Id, p.Id, p.TemplateVersionId))
+                // ✎ B74 P3 (D-576): версія ПАРИ проєкт × шаблон документа; без пари — версія проєкту, як доти.
+                select new MonthRoutingDocument(
+                    d.Id,
+                    p.Id,
+                    _db.ProjectTemplates
+                        .Where(pt => pt.ProjectId == d.ProjectId && pt.TemplateId == d.TemplateId)
+                        .Select(pt => (int?)pt.CurrentTemplateVersionId)
+                        .FirstOrDefault() ?? p.TemplateVersionId))
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
         if (found is not null && !RoutesVersion(found.TemplateVersionId))
@@ -145,7 +152,11 @@ public sealed class MonthColumnRouter : IMonthColumnRouter
                     Id = instance.Id,
                     DocumentId = document.Id,
                     ProjectId = project.Id,
-                    TemplateVersionId = project.TemplateVersionId,
+                    // ✎ B74 P3 (D-576): версія ПАРИ проєкт × шаблон документа; без пари — версія проєкту, як доти.
+                    TemplateVersionId = _db.ProjectTemplates
+                        .Where(pt => pt.ProjectId == document.ProjectId && pt.TemplateId == document.TemplateId)
+                        .Select(pt => (int?)pt.CurrentTemplateVersionId)
+                        .FirstOrDefault() ?? project.TemplateVersionId,
                     TableDefId = instance.TableDefId,
                     PeriodKeyValue = instance.PeriodKeyValue,
                 };

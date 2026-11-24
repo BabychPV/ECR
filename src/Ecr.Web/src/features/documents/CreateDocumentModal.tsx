@@ -6,6 +6,7 @@ import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 import type { CreateDocumentRequest, DocumentIdResponse } from '@/api/types';
 import { projectsQuery } from '@/features/projects/allProjects';
+import { fetchProjectTemplates, projectTemplatesKey } from '@/features/projects/projectTemplatesApi';
 import { listDocuments } from './api';
 import { groupRuleViolations } from './groupRuleViolations';
 import { localized } from '@/shared/i18n/localized';
@@ -24,10 +25,14 @@ import { t } from '@/shared/i18n';
  * «≥ 2 кроків або є що перевірити перед застосуванням (створити документ…)» →
  * `Wizard`; макет — `docs/design/hybrid/screens-work.js`, `openCreate`).
  *
- * Кроки: Project → Sheets → Review (додає `Wizard`; ✎ Period clarity: кроку Period немає — «один документ
- * на об'єкт, усі місяці всередині»). Кроку «Template»
- * з макета немає навмисно: версію шаблону визначає ПРОЄКТ (V-12, V-11), обирати
- * її нема з чого — тож вона показується в кроці Project і в підсумку.
+ * Кроки: Project → Template → Sheets → Review (додає `Wizard`; ✎ Period clarity: кроку Period немає — «один документ
+ * на об'єкт, усі місяці всередині»).
+ *
+ * ✎ B74 P4 (D-576, рішення людини 13.11): проєкт «рік · об'єкт» тримає документи КІЛЬКОХ шаблонів, тож крок
+ * Template повернувся — але обирається ШАБЛОН проєкту (`GET /projects/{id}/templates`), а не версія: версію й далі
+ * визначає проєкт (V-12, V-11), вона показується в кроці й у підсумку. Один шаблон — обраний одразу, але крок
+ * видно (людина бачить, за яким шаблоном заводиться документ). Аркуші — `document-template?templateId=`,
+ * у запиті створення — `templateId`.
  *
  * ⛔ Дії не було в інтерфейсі: сторож вважав `POST /documents` досяжним, бо
  * клієнт ЧИТАЄ `GET /documents` тією самою адресою (`A7-42`).
@@ -80,6 +85,9 @@ export function CreateDocumentModal({
 
   const [projectId, setProjectId] = useState<string | null>(null);
 
+  // ✎ B74 P4: шаблон проєкту, обраний людиною; `null` — ще не обрано (єдиний шаблон підставляється нижче).
+  const [pickedTemplateId, setPickedTemplateId] = useState<string | null>(null);
+
   // `null` — типовий склад (усі аркуші з відповіді сервера); масив — вибір людини.
   const [pickedSheets, setPickedSheets] = useState<number[] | null>(null);
 
@@ -92,6 +100,7 @@ export function CreateDocumentModal({
     if (!opened) return;
 
     setProjectId(null);
+    setPickedTemplateId(null);
     setPickedSheets(null);
     setName({});
   }, [opened]);
@@ -117,11 +126,33 @@ export function CreateDocumentModal({
   const existingDocs = existing.data?.items ?? [];
   const firstExisting = existingDocs[0] ?? null;
 
-  const template = useQuery({
-    queryKey: ['projects', Number(projectId), 'document-template'],
-    queryFn: () =>
-      apiFetch<DocumentTemplateDto>(`/api/v1/projects/${projectId ?? ''}/document-template`),
+  /*
+   * ✎ B74 P4: шаблони ОБРАНОГО проєкту — лише вони пропонуються в кроці Template (шаблон поза проєктом сервер
+   * однаково відхилить: `422 err.ECR-DOC-0422.templateNotInProject`).
+   */
+  const projectTemplates = useQuery({
+    queryKey: projectTemplatesKey(Number(projectId)),
+    queryFn: () => fetchProjectTemplates(Number(projectId)),
     enabled: opened && projectId !== null,
+  });
+
+  const templateRows = projectTemplates.data ?? [];
+
+  // Єдиний шаблон проєкту — обраний одразу (крок однаково видно); вибір людини — лише з шаблонів цього проєкту.
+  const templateId =
+    pickedTemplateId !== null && templateRows.some((row) => String(row.templateId) === pickedTemplateId)
+      ? pickedTemplateId
+      : templateRows.length === 1 && templateRows[0] !== undefined
+        ? String(templateRows[0].templateId)
+        : null;
+
+  const template = useQuery({
+    queryKey: ['projects', Number(projectId), 'document-template', templateId],
+    queryFn: () =>
+      apiFetch<DocumentTemplateDto>(
+        `/api/v1/projects/${projectId ?? ''}/document-template?templateId=${templateId ?? ''}`,
+      ),
+    enabled: opened && projectId !== null && templateId !== null,
   });
 
   const versionId = template.data?.templateVersionId ?? null;
@@ -169,6 +200,8 @@ export function CreateDocumentModal({
         method: 'POST',
         body: JSON.stringify({
           projectId: Number(projectId),
+          // ✎ B74 P4: документ — за ОБРАНИМ шаблоном проєкту (бізнес-ключ тоді несе код шаблону).
+          templateId: Number(templateId),
           templateVersionId: Number(versionId),
           sheetDefIds: sheets,
 
@@ -190,7 +223,7 @@ export function CreateDocumentModal({
    * майстра (див. шапку), тож `Wizard` не бачить «незбереженого» — питання ставить сам майстер документа, коли є
    * що втрачати (обраний проєкт, змінений склад аркушів або назва). Порожній майстер закривається одразу.
    */
-  const hasInput = projectId !== null || pickedSheets !== null || hasAnyText(name);
+  const hasInput = projectId !== null || pickedTemplateId !== null || pickedSheets !== null || hasAnyText(name);
   const [discarding, setDiscarding] = useState(false);
 
   useEffect(() => {
@@ -245,7 +278,7 @@ export function CreateDocumentModal({
       id: 'project',
       label: t('documents.project'),
       hint: t('documents.createProjectHint'),
-      canNext: () => projectId !== null && versionId !== null,
+      canNext: () => projectId !== null,
       render: () => (
         <Stack gap="xs">
           {sourceError !== null && (
@@ -264,14 +297,59 @@ export function CreateDocumentModal({
             onChange={(value) => {
               setProjectId(value);
 
-              // Аркуші належать версії проєкту: залишений вибір від попереднього послав би
+              // Шаблони й аркуші належать проєкту: залишений вибір від попереднього послав би
               // на сервер ідентифікатори з чужої структури.
+              setPickedTemplateId(null);
               setPickedSheets(null);
             }}
           />
 
-          {/* ⚠ Відмова окремим банером: без нього «немає права» чи архівний шаблон
-              (`ECR-TMPL-0409`) виглядали б як проєкт без аркушів. */}
+          {existingBanner}
+
+          <LocalizedInput
+            label={t('documents.name')}
+            description={t('documents.nameHint')}
+            value={name}
+            onChange={setName}
+          />
+        </Stack>
+      ),
+    },
+    {
+      // ✎ B74 P4 (D-576): шаблон нового документа — лише шаблони обраного проєкту.
+      id: 'template',
+      label: t('documents.template'),
+      hint: t('documents.createTemplateStep'),
+      canNext: () => templateId !== null && versionId !== null,
+      render: () => (
+        <Stack gap="xs">
+          {projectTemplates.error !== null && (
+            <ErrorAlert error={projectTemplates.error} onRetry={() => void projectTemplates.refetch()} />
+          )}
+
+          <Select
+            label={t('documents.template')}
+            required
+            data={templateRows.map((row) => {
+              const rowName = localized(row.templateNameL10n);
+
+              return {
+                value: String(row.templateId),
+                label: rowName.length > 0 ? `${row.templateCode} · ${rowName}` : row.templateCode,
+              };
+            })}
+            value={templateId}
+            allowDeselect={false}
+            onChange={(value) => {
+              setPickedTemplateId(value);
+
+              // Аркуші належать шаблону: склад іншого шаблону з цього вибору не складеш.
+              setPickedSheets(null);
+            }}
+          />
+
+          {/* ⚠ Відмова окремим банером: без нього «немає права», архівний шаблон (`ECR-TMPL-0409`) чи шаблон
+              поза проєктом (`ECR-DOC-0422`) виглядали б як шаблон без аркушів. */}
           {template.error !== null && (
             <ErrorAlert error={template.error} onRetry={() => void template.refetch()} />
           )}
@@ -287,15 +365,6 @@ export function CreateDocumentModal({
               ]}
             />
           )}
-
-          {existingBanner}
-
-          <LocalizedInput
-            label={t('documents.name')}
-            description={t('documents.nameHint')}
-            value={name}
-            onChange={setName}
-          />
         </Stack>
       ),
     },
@@ -360,11 +429,15 @@ export function CreateDocumentModal({
         <KeyValue
           items={[
             { label: t('documents.project'), value: projectCode },
+            // ✎ B74 P4 (D-576): шаблон — під власним підписом «Template»; версія — окремим рядком.
             {
-              label: t('documents.version'),
+              label: t('documents.template'),
               value: template.data === undefined ? null : template.data.templateCode,
               mono: true,
-              ...(template.data === undefined ? {} : { hint: `v${template.data.version}` }),
+            },
+            {
+              label: t('documents.version'),
+              value: template.data === undefined ? null : `v${template.data.version}`,
             },
             {
               label: t('documents.sheets'),

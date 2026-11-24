@@ -460,7 +460,7 @@ public sealed class SourceDocumentDependentsAcceptanceTests(SqlServerFixture sql
             await db.SaveChangesAsync().ConfigureAwait(false);
         }
 
-        // Зв'язка Any, біти 1/1; жодного рядка споживачів.
+        // Зв'язка Any, біти 1/1; ручного переліку споживачів немає взагалі (B179 L7, D-574: таблицю знято).
         int bindingId;
         await using (var db = builder.CreateContext())
         {
@@ -468,7 +468,6 @@ public sealed class SourceDocumentDependentsAcceptanceTests(SqlServerFixture sql
             db.DocumentSourceBindings.Add(binding);
             await db.SaveChangesAsync().ConfigureAwait(false);
             bindingId = binding.Id;
-            Assert.False(await db.DocumentSourceBindingConsumers.AnyAsync(c => c.BindingId == bindingId).ConfigureAwait(false));
         }
 
         string userName;

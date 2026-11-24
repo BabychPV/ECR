@@ -187,6 +187,11 @@ public static partial class StartupSequence
         await AirTypeStartupStep.RunAsync(app.Services, logger, CancellationToken.None).ConfigureAwait(false);
         Lap(logger, lap, "4d AIR");
 
+        // 4e) ✎ D-575 / P-1123-18: застаріле в не відкритих місяцях (помилки формул, результати методологій) — одразу на
+        //     старті, а не до години пізніше; ніколи не зупиняє старт.
+        await AwaitingOpenStartupStep.RunAsync(app.Services, logger, CancellationToken.None).ConfigureAwait(false);
+        Lap(logger, lap, "4e D-575");
+
         // 5) ПОКИНУТІ фонові задачі. ⛔ Задача, яку виконував процес, що
         //     впав, лишається `Running`/`Queued` у базі НАЗАВЖДИ — процеса,
         //     який мав позначити її `Failed`, уже немає. Без цього кроку така

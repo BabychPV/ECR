@@ -762,6 +762,22 @@ public sealed class RecalculationService(
             return 0;
         }
 
+        // ⛔ D-575 (рішення людини 23.11, варіант B): формули НЕ ВІДКРИТОГО періоду (Scheduled активного проєкту) не
+        // обчислюються — комірки лишаються як є (порожні, без помилки), доки місяць не відкриється; далі діє D-506. Одна
+        // точка для всіх шляхів формул: задача формул після правки, читачі інших періодів (каскад, ланцюжок періодів),
+        // кнопка «Перерахувати»/F9, рік, нічний розклад, перерахунок після міграції версії, подання. Збережені значення
+        // (введені й похідні) не чіпаються. Збережені помилки формул такого періоду — застарілі (D-575 їх не допускає):
+        // знімаються тут же, без подій журналу (помилки не було в місяці, який існує для людини).
+        // Стан читається ОДИН раз — він же нижче йде в `IsLateEdit` (кількість звернень прогону не зростає).
+        var evaluationState = await periods
+            .FindEvaluationStateAsync(instance.DocumentId, periodKey.Value, ct)
+            .ConfigureAwait(false);
+        if (evaluationState is { AwaitingOpen: true })
+        {
+            await DropAwaitingOpenErrorsAsync(allInstances, periodKey, ct).ConfigureAwait(false);
+            return 0;
+        }
+
         // ✎ D-461: комірки з ручним значенням замість формули — ОДИН запит на прогін (індекс за періодом × екземпляром),
         // далі O(1) на комірку в `Evaluate`. Прогін їх не перезаписує НІКОЛИ (і після вимкнення прапорця формули), а
         // залежні формули читають ручне значення (воно вже в `values` зі сховища).
@@ -1190,9 +1206,12 @@ public sealed class RecalculationService(
         // за походженням означало б залишити половину пізніх значень
         // непоміченими. «Хто змінив» тут і далі система (`SystemUserId`) —
         // це різні питання: КОЛИ і ХТО.
-        var periodState = await periods
-            .FindPeriodStateAsync(instance.DocumentId, periodKey.Value, ct)
-            .ConfigureAwait(false);
+        // ✎ D-575: стан уже прочитано (FindEvaluationStateAsync вище); окремий запит — лише без нього (заглушки тестів).
+        var periodState = evaluationState is { } known
+            ? known.State
+            : await periods
+                .FindPeriodStateAsync(instance.DocumentId, periodKey.Value, ct)
+                .ConfigureAwait(false);
         // WW-03 (рішення людини 13.10, п. 6): похідна зміна від правки ІНШОГО місяця — не «пізня».
         // ✎ LAND-YEAR B60: прогін закритого якоря пише лише не-місячне — «пізня» за річним правилом (агрегат місяців,
         // AnnualPeriodRule.IsLate, як PATCH не-місячної колонки), а не за станом самого якоря (Closed → ніколи).
@@ -1479,6 +1498,27 @@ public sealed class RecalculationService(
         /// Посилання на вже прочитані словники, без копій; каскад Rollup доповнює той самий об'єкт.
         /// </summary>
         public Dictionary<(int PeriodOffset, int TableDefId), IReadOnlyDictionary<string, long>> OtherPeriodRows { get; } = [];
+    }
+
+    /// <summary>
+    /// ✎ D-575: знімає збережені помилки формул періоду, який ще не відкрито (їх дав прогін до D-575 або чернетка
+    /// проєкту) — лише рядки <c>calc.FormulaError</c>; значення комірок не чіпаються.
+    /// </summary>
+    private async Task DropAwaitingOpenErrorsAsync(
+        IReadOnlyList<TableInstanceRef> instances, PeriodKey periodKey, CancellationToken ct)
+    {
+        // ✎ D-575: прапорець — із того самого запиту екземплярів (EXISTS), тож без помилок — нуль звернень.
+        var flagged = instances.Where(i => i.HasFormulaErrors).Select(i => i.TableInstanceId).Distinct().ToList();
+        if (formulaErrors is null || flagged.Count == 0)
+        {
+            return;
+        }
+
+        var stale = await formulaErrors.ReadInstancesAsync(flagged, periodKey, ct).ConfigureAwait(false);
+        if (stale.Count > 0)
+        {
+            await formulaErrors.ApplyAsync([], [.. stale.Select(e => e.Address)], ct).ConfigureAwait(false);
+        }
     }
 
     /// <summary>

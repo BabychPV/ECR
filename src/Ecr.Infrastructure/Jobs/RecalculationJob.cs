@@ -70,7 +70,8 @@ public sealed partial class RecalculationJob(
     IRecalculationCompletionHook? completionHook = null,
     IMonthColumnRouter? monthRouter = null,
     IJobLeaseContext? lease = null,
-    IJobQueue? queue = null) : IRecalculationJob
+    IJobQueue? queue = null,
+    IDependencyGraphProvider? dependencyGraph = null) : IRecalculationJob
 {
     [LoggerMessage(
         Level = LogLevel.Error,
@@ -373,10 +374,36 @@ public sealed partial class RecalculationJob(
                 projectId, periodKey, request.TriggeredByUserId, startedAt,
                 documentId: request.DocumentId > 0 ? request.DocumentId : null);
 
+        // ✎ W15z M7 (огляд b11 №3): межа входів прогону документа — закомічений журнал комірок до читання входів; періоди, які
+        // прогін перерахував ЦІЛКОМ (решта — min з межею попереднього актуального прогону), і ця попередня межа.
+        long? inputsWatermark = null;
+        var fullPeriods = new HashSet<int>();
+        var previousInputsWatermarks = new Dictionary<int, long?>();
+
+        // ✎ P-1123-20: стан джерел, які бачить прогін (знято на старті разом із межею), і стан попереднього актуального.
+        string? sourceStates = null;
+        var previousSourceStates = new Dictionary<int, string?>();
+        // ✎ Огляд b11 №4 (LOW): IncludeApproved (-dependents-approved) ПЕРЕПИСУЄ затверджені аркуші — не неповний сам по собі;
+        // неповним його робить лише справжній пропуск (перенесення, область аркуша, період без формул).
+        var partialAll = request.SheetDefId is not null || request.ForeignOwnerPass;
+
         async Task<(Domain.Entities.Calculations.CalculationRun Run, ModuleProfile Profile)> RunForAsync(int periodKey)
         {
             if (!periodRuns.TryGetValue(periodKey, out var entry))
             {
+                if (request.DocumentId > 0)
+                {
+                    var previous = await db.CalculationRuns.AsNoTracking()
+                        .Where(r => r.DocumentId == request.DocumentId && r.PeriodKey == periodKey
+                                    && r.Status == Domain.Entities.Calculations.CalculationRun.CurrentStatus)
+                        .Select(r => new { r.InputsCellChangeWatermark, r.SourceStateJson })
+                        .FirstOrDefaultAsync(ct)
+                        .ConfigureAwait(false);
+                    previousInputsWatermarks[periodKey] = previous?.InputsCellChangeWatermark;
+                    // ✎ Огляд b11 №5: попереднього документного прогону немає — числа, яких неповний прогін не чіпав, невідомо звідки.
+                    previousSourceStates[periodKey] = previous is null ? DocumentSourceIssues.UnknownState : previous.SourceStateJson;
+                }
+
                 entry = (NewRun(periodKey), new ModuleProfile());
                 periodRuns.Add(periodKey, entry);
                 db.CalculationRuns.Add(entry.Run);
@@ -394,6 +421,13 @@ public sealed partial class RecalculationJob(
             // нижче — і задача лишалася `Running` назавжди, хоча catch
             // виглядав так, ніби мав це перехопити.
             //
+            // ✎ W15z M7 (огляд b11 №3): межа — ДО першого читання входів (формули, методології); лише прогін документа.
+            if (request.DocumentId > 0)
+            {
+                inputsWatermark = await CellChangeWatermarks.CommittedAsync(db, ct).ConfigureAwait(false);
+                sourceStates = await SourceStatesAsync(request, ct).ConfigureAwait(false);
+            }
+
             // ⚠ Названий період — прогін створюється ОДРАЗУ, як і завжди.
             if (request.PeriodKey is { } requestedPeriod)
             {
@@ -439,14 +473,15 @@ public sealed partial class RecalculationJob(
                 // ✎ LAND-YEAR B24 (D-NEW-3): закритий якір річної розкладки у відкритому році — НЕ відмова, а прогін лише
                 // не-місячних цілей під агрегатом року (ключ — якір, значення — місяці року); методологій за ним немає.
                 var annualOnly = new Dictionary<int, IReadOnlyList<int>>();
-                var refused = await RefusedPeriodsAsync(docRequest, ct, annualOnly).ConfigureAwait(false);
+                var awaitingOpen = new HashSet<int>();
+                var refused = await RefusedPeriodsAsync(docRequest, ct, annualOnly, awaitingOpen).ConfigureAwait(false);
 
                 // Названий період, створений наперед (вище), — закритий якір: прогону методологій за ним не буде, а
                 // завершити його означало б зробити порожній прогін актуальним і сховати результати закритого місяця.
                 // Свіжий прогін без жодного результату прибирається (кілька документів — він міг бути вже спільним).
+                // ✎ D-575: так само не відкритий місяць — стан періоду спільний для всіх документів проєкту, тож і за кількох.
                 if (request.PeriodKey is { } namedAnchor
-                    && documentIds.Count == 1
-                    && annualOnly.ContainsKey(namedAnchor)
+                    && ((documentIds.Count == 1 && annualOnly.ContainsKey(namedAnchor)) || awaitingOpen.Contains(namedAnchor))
                     && periodRuns.TryGetValue(namedAnchor, out var unusedRun))
                 {
                     periodRuns.Remove(namedAnchor);
@@ -515,7 +550,8 @@ public sealed partial class RecalculationJob(
                     if (await ParkCoveredAsync(request, step, ct).ConfigureAwait(false) > 0)
                     {
                         annualOnly.Clear();
-                        refused = await RefusedPeriodsAsync(docRequest, ct, annualOnly).ConfigureAwait(false);
+                        awaitingOpen.Clear();
+                        refused = await RefusedPeriodsAsync(docRequest, ct, annualOnly, awaitingOpen).ConfigureAwait(false);
                         periods = await ScopePeriodsAsync(docRequest, refused, ct).ConfigureAwait(false);
                         openPeriods = periods;
                         periods = Planned(periods, chainDecision!);
@@ -535,7 +571,8 @@ public sealed partial class RecalculationJob(
                 }
 
                 var stepChanged = chain ? new Dictionary<int, HashSet<(int TableDefId, int ColumnDefId)>>() : null;
-                var cells = await FormulasAsync(docRequest, periods, submittedChanges, ct, annualOnly, stepChanged)
+                var cells = await FormulasAsync(
+                        docRequest, periods, submittedChanges, ct, annualOnly, stepChanged, WakesLaterReaders(docRequest, chain))
                     .ConfigureAwait(false);
 
                 // ✎ PERF-01 (D-564a, огляд H1): план вужчий за рік — пізніші місяці, що читають обчислені числа цього кроку
@@ -581,6 +618,12 @@ public sealed partial class RecalculationJob(
                 {
                     LogSkippedSheets(logger, documentId, skippedPairs);
                 }
+
+                // ✎ W15z M7 (огляд b11 №3): періоди з будь-яким затвердженим станом (оригінал чи копія) — їхні числа прогін
+                // не переписує, тож межа входів періоду не вища за межу попереднього актуального прогону.
+                var approvedStatePeriods = request.DocumentId > 0
+                    ? await ApprovedStatePeriodsAsync(documentId, ct).ConfigureAwait(false)
+                    : [];
 
                 var bindingPlan = await BindingsAsync(docRequest, methodologyScope, skippedSheets, ct).ConfigureAwait(false);
                 var bindingsByPeriod = bindingPlan.Bindings;
@@ -654,8 +697,9 @@ public sealed partial class RecalculationJob(
                 // не існує за визначенням — там єдине джерело правди про
                 // періоди це екземпляри таблиць. Підставити туди нуль і був
                 // початковий дефект.
+                // ✎ D-575: названий не відкритий місяць — без прогону методологій (як закритий якір).
                 var methodologyPeriods = request.PeriodKey is { } namedPeriod
-                    ? (annualOnly.ContainsKey(namedPeriod) ? [] : (IReadOnlyList<int>)[namedPeriod])
+                    ? (annualOnly.ContainsKey(namedPeriod) || awaitingOpen.Contains(namedPeriod) ? [] : (IReadOnlyList<int>)[namedPeriod])
                     : methodologyScope;
                 scopeByDocument[documentId] = [.. methodologyScope.Union(methodologyPeriods)];
 
@@ -678,6 +722,12 @@ public sealed partial class RecalculationJob(
                         formulaCeiling + ((ceiling - formulaCeiling) * (p + 1) / methodologyPeriods.Count);
 
                     var (run, runProfile) = await RunForAsync(period).ConfigureAwait(false);
+
+                    if (periods.Contains(period) && (request.IncludeApproved || !approvedStatePeriods.Contains(period))
+                        && !bindingPlan.CarryOver.ContainsKey(period) && !bindingPlan.CarryOverInstances.ContainsKey(period))
+                    {
+                        fullPeriods.Add(period);
+                    }
 
                     if (!completionGuards.TryGetValue(period, out var periodGuards))
                     {
@@ -776,6 +826,38 @@ public sealed partial class RecalculationJob(
             // пораховано, і ретрай усієї задачі перерахував би їх заново саме в пік дедлайну. Відмова
             // відкочує перемикання цілком (перевірка — перша в транзакції), тож повтор безпечний.
             // Вичерпано — задача відкладається (нижче, `catch`), а не падає.
+            // ✎ W15z M7 (огляд b11 №3): межа входів — ДО перемикання актуальності (актуальний прогін без межі лише тримав би
+            // позначку). Не цілком перерахований період — min з межею попереднього актуального прогону; невідома — NULL.
+            if (request.DocumentId > 0)
+            {
+                foreach (var (period, (run, _)) in periodRuns)
+                {
+                    var watermark = EffectiveInputsWatermark(
+                        inputsWatermark,
+                        partialAll || !fullPeriods.Contains(period),
+                        previousInputsWatermarks.GetValueOrDefault(period));
+                    if (watermark is { } value)
+                    {
+                        await db.Database
+                            .ExecuteSqlAsync(
+                                $"UPDATE calc.CalculationRun SET InputsCellChangeWatermark = {value} WHERE Id = {run.Id}",
+                                ct)
+                            .ConfigureAwait(false);
+                    }
+
+                    // ✎ P-1123-20: стан джерел — той самий принцип: неповний період лишає стан попереднього актуального.
+                    var state = partialAll || !fullPeriods.Contains(period)
+                        ? previousSourceStates.GetValueOrDefault(period)
+                        : sourceStates;
+                    if (state is not null)
+                    {
+                        await db.Database
+                            .ExecuteSqlAsync($"UPDATE calc.CalculationRun SET SourceStateJson = {state} WHERE Id = {run.Id}", ct)
+                            .ConfigureAwait(false);
+                    }
+                }
+            }
+
             foreach (var (period, (run, profile)) in periodRuns)
             {
                 var guards = completionGuards.GetValueOrDefault(period) ?? [];
@@ -1107,7 +1189,25 @@ public sealed partial class RecalculationJob(
         // ✎ PSS-04: у ланцюжку — після КОЖНОГО кроку: період уже актуальний, залежні від нього не чекають решти року.
         if (completionHook is not null && scopeByDocument.Count > 0)
         {
-            await completionHook.OnSucceededAsync(scopeByDocument, request.SourceHop, ct).ConfigureAwait(false);
+            // ✎ PERF-06b (D-572): місяці правки річного/квартального джерела — лише з доказом, що його методології й формули не
+            // переносять зміну в інші місяці; сумнів — увесь рік.
+            IReadOnlyDictionary<long, int[]> completed = scopeByDocument;
+            if (request is { SourceMonths.Length: > 0, PeriodKey: { } autoPeriod }
+                && await SourceKeepsMonthsAsync(request.DocumentId, ct).ConfigureAwait(false))
+            {
+                var withMonths = new ChangedPeriodsDictionary
+                {
+                    SourceMonths = new Dictionary<int, IReadOnlySet<int>> { [autoPeriod] = request.SourceMonths.ToHashSet() },
+                };
+                foreach (var (doc, periods) in scopeByDocument)
+                {
+                    withMonths[doc] = periods;
+                }
+
+                completed = withMonths;
+            }
+
+            await completionHook.OnSucceededAsync(completed, request.SourceHop, ct).ConfigureAwait(false);
         }
 
         if (chainContinues)
@@ -2215,10 +2315,12 @@ public sealed partial class RecalculationJob(
     /// <param name="ct">Токен скасування.</param>
     /// <param name="annualOnly">✎ LAND-YEAR B24: закриті якорі річної розкладки → місяці їхнього року (лише не-місячні цілі).</param>
     /// <param name="changedOut">✎ PERF-01: куди скласти змінені колонки за періодом (дописування читачів у план ланцюжка).</param>
+    /// <param name="wakeLaterReaders">✎ PERF-06b: будити й пізніших читачів (<see cref="WakesLaterReaders"/>).</param>
     private async Task<int> FormulasAsync(
         RecalculationRequest request, IReadOnlyList<int> periods, SubmittedSheetChanges submittedChanges,
         CancellationToken ct, IReadOnlyDictionary<int, IReadOnlyList<int>>? annualOnly = null,
-        Dictionary<int, HashSet<(int TableDefId, int ColumnDefId)>>? changedOut = null)
+        Dictionary<int, HashSet<(int TableDefId, int ColumnDefId)>>? changedOut = null,
+        bool wakeLaterReaders = false)
     {
         var written = 0;
         var changedByPeriod = changedOut ?? new Dictionary<int, HashSet<(int TableDefId, int ColumnDefId)>>();
@@ -2272,7 +2374,7 @@ public sealed partial class RecalculationJob(
                 {
                     await fanOut
                         .EnqueueReadersAsync(
-                            request.DocumentId, new PeriodKey(period), changed, onlyEarlierReaders: true, hops: 1, ct)
+                            request.DocumentId, new PeriodKey(period), changed, onlyEarlierReaders: !wakeLaterReaders, hops: 1, ct)
                         .ConfigureAwait(false);
                 }
             }
@@ -2280,6 +2382,18 @@ public sealed partial class RecalculationJob(
 
         return written;
     }
+
+    /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>, live Quartz): чи прогін будить і ПІЗНІШИХ читачів своїх змінених чисел
+    /// (<c>[Period:-k]</c>, <c>[Period:#k]</c>, чужі колонки річної розкладки) — так для прогону ОДНОГО періоду поза ланцюжком
+    /// (залежні періоду, <c>-auto</c>, натискання місяця): пізніших періодів у ньому немає, і без цього вони лишалися б зі
+    /// старим числом — зокрема після звуження каскаду до періоду-власника місяця правки. Рік і ланцюжок (черга в базі:
+    /// <c>ExtendWithLaterReadersAsync</c>) рахують пізніші самі — там, як доти, лише раніші.
+    /// </summary>
+    /// <param name="request">Завдання документа.</param>
+    /// <param name="chain">Прогін — крок ланцюжка черги в базі.</param>
+    internal static bool WakesLaterReaders(RecalculationRequest request, bool chain)
+        => !chain && request is { PeriodKey: not null, CascadePeriods: null };
 
     /// <summary>
     /// Періоди документа, у які цей прогін має право писати, ЗА ЗРОСТАННЯМ.
@@ -2359,6 +2473,45 @@ public sealed partial class RecalculationJob(
         }
 
         return [.. scopes.Where(key => !refused.Contains(key)).OrderBy(key => key)];
+    }
+
+    /// <summary>
+    /// Пари «таблиця × методологія» активних прив'язок (W15z, C11_10 на T9a_28).
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="tableDefIds">Таблиці екземплярів прогону.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Різні пари; рівно те, що потрібно розкладу прогону.</returns>
+    /// <remarks>
+    /// ⛔ Раніше читалися РЯДКИ прив'язок за <c>Id</c> зі стелею <see cref="MaxBindings"/> (5 000): річна розкладка
+    /// (D-474) дає по прив'язці на кожен місяць кожного виходу, і в LAND_UI 1.0.20.0 їх 9 300 - стеля мовчки відрізала
+    /// найновіші, і методологія, чиї прив'язки опинились за межею (C11_10 на T9a_28 після клону), просто не рахувалась:
+    /// без помилки, без попередження, результати зникали (репетиція W15z на копії живої бази, 23.11). Розкладу прогону
+    /// потрібна лише пара (таблиця, методологія) - її й читаємо, DISTINCT у базі. Стеля лишається, але переповнення - відмова,
+    /// а не обрізання.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">Пар більше за <see cref="MaxBindings"/>.</exception>
+    internal static async Task<List<BindingRow>> BindingPairsAsync(EcrDbContext db, IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(tableDefIds);
+        var ids = tableDefIds.Distinct().ToList();
+        var pairs = await db.CalculationBindings
+            .AsNoTracking()
+            .Where(b => b.IsActive && ids.Contains(b.TableDefId))
+            .Select(b => new { b.TableDefId, b.MethodologyId })
+            .Distinct()
+            .OrderBy(p => p.TableDefId).ThenBy(p => p.MethodologyId)
+            .Take(MaxBindings + 1)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (pairs.Count > MaxBindings)
+        {
+            throw new InvalidOperationException(
+                $"Пар «таблиця × методологія» у прогоні більше за {MaxBindings}: прогін не обрізає прив'язки мовчки.");
+        }
+
+        return [.. pairs.Select(p => new BindingRow(p.TableDefId, p.MethodologyId))];
     }
 
     /// <summary>
@@ -2454,14 +2607,7 @@ public sealed partial class RecalculationJob(
 
         var tableDefIds = instances.Select(i => i.TableDefId).Distinct().ToList();
 
-        var bindings = await db.CalculationBindings
-            .AsNoTracking()
-            .Where(b => b.IsActive && tableDefIds.Contains(b.TableDefId))
-            .OrderBy(b => b.Id)
-            .Take(MaxBindings)
-            .Select(b => new BindingRow(b.TableDefId, b.MethodologyId))
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        var bindings = await BindingPairsAsync(db, tableDefIds, ct).ConfigureAwait(false);
 
         // ⛔ RC15 (P2-A/P2-C): які таблиці прогін ПЕРЕРАХОВУЄ («активні») — а які ні:
         //  - область аркуша: лише таблиці цього аркуша;
@@ -3032,8 +3178,14 @@ public sealed partial class RecalculationJob(
     /// вони НЕ відмовляють і не вилучаються, а рахуються лише не-місячними цілями під агрегатом року
     /// (<see cref="AnnualOnlyAnchorsAsync"/>); <c>null</c> — не збирати (рішення те саме).
     /// </param>
+    /// <param name="awaitingOpen">
+    /// ✎ D-575: куди скласти періоди, які ще не відкрито (<c>Scheduled</c> активного проєкту), — вони вилучаються зі скоупу
+    /// (ні формул, ні прогону методологій, ні <c>calc.CalculationRun</c>/<c>CalculationResult</c>), і названий такий період
+    /// теж не відмовляє, а просто нічого не рахує; <c>null</c> — не збирати (рішення те саме).
+    /// </param>
     private async Task<IReadOnlySet<int>> RefusedPeriodsAsync(
-        RecalculationRequest request, CancellationToken ct, Dictionary<int, IReadOnlyList<int>>? annualOnly = null)
+        RecalculationRequest request, CancellationToken ct, Dictionary<int, IReadOnlyList<int>>? annualOnly = null,
+        HashSet<int>? awaitingOpen = null)
     {
         // ⛔ B69: архівований (чи той, що архівується) проєкт — відмова цілим прогоном, і роком, і названим періодом. Нижче
         // виняток «місяць відкрито для документа» піднімає закритий місяць до Grace; виняток, що пережив архівацію,
@@ -3123,6 +3275,16 @@ public sealed partial class RecalculationJob(
 
         foreach (var period in states)
         {
+            // ⛔ D-575 (рішення людини 23.11, P-1123-9): місяць, якого ще не відкрито, не рахується НІЧИМ — ні формулами, ні
+            // методологіями. Одна точка для всіх шляхів задачі (рік, період, нічний розклад, перерахунок після міграції,
+            // F9/«Перерахувати», каскад): поза скоупом — ні прогону, ні результатів. Наявні рядки не чіпаються.
+            if (period.AwaitingOpen)
+            {
+                refused.Add(period.PeriodKeyValue);
+                awaitingOpen?.Add(period.PeriodKeyValue);
+                continue;
+            }
+
             if (anchors.TryGetValue(period.PeriodKeyValue, out var yearKeys))
             {
                 annualOnly?.TryAdd(period.PeriodKeyValue, yearKeys);
@@ -3190,7 +3352,7 @@ public sealed partial class RecalculationJob(
                 from d in db.Documents.AsNoTracking()
                 where d.Id == request.DocumentId
                 join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
-                select new { ProjectId = p.Id, p.PeriodKind })
+                select new { ProjectId = p.Id, p.PeriodKind, d.TemplateId })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
         if (document is null || document.PeriodKind != Domain.Enums.PeriodKind.Monthly)
@@ -3210,9 +3372,15 @@ public sealed partial class RecalculationJob(
             }
 
             // Розкладка версії ПЕРІОДУ-якоря (шкала версій проєкту, doc.fn_VersionOf), а не «чинної» версії проєкту.
-            var layout = await db.TemplateVersions
-                .AsNoTracking()
-                .Where(v => v.Id == EcrDbContext.VersionOf(document.ProjectId, anchor))
+            // ✎ B74 P3 (D-576): шкала шаблону ДОКУМЕНТА (пара проєкт × шаблон); без шаблону — основний, як доти. Гілка — у
+            // C#, а не тернарником у виразі: захоплене `TemplateId.Value` EF обчислював би й для документа без шаблону.
+            var projectOfDocument = document.ProjectId;
+            var anchorVersions = document.TemplateId is { } documentTemplate
+                ? db.TemplateVersions.AsNoTracking()
+                    .Where(v => v.Id == EcrDbContext.TemplateVersionOf(projectOfDocument, documentTemplate, anchor))
+                : db.TemplateVersions.AsNoTracking()
+                    .Where(v => v.Id == EcrDbContext.VersionOf(projectOfDocument, anchor));
+            var layout = await anchorVersions
                 .Select(v => (Domain.Enums.TemplateLayout?)v.Layout)
                 .FirstOrDefaultAsync(ct)
                 .ConfigureAwait(false);
@@ -3267,6 +3435,63 @@ public sealed partial class RecalculationJob(
 
         return [.. rows.Select(r => (r.PeriodKey, r.SheetDefId, r.SheetCopyId ?? 0L))];
     }
+
+    /// <summary>
+    /// ✎ W15z M7 (огляд b11 №3): межа входів чисел документа × періоду після прогону. Цілком перерахований період — межа
+    /// старту прогону; не цілком (затверджені стани, перенесення, область аркуша, без формул) — <c>min</c> із межею
+    /// попереднього актуального прогону: числа, яких прогін не чіпав, лишилися звідти. Будь-яка невідома — <c>null</c>.
+    /// </summary>
+    /// <param name="start">Закомічена межа журналу на старті прогону.</param>
+    /// <param name="partial">Чи період перераховано не цілком.</param>
+    /// <param name="previous">Межа попереднього актуального прогону тієї ж осі (немає — <c>null</c>).</param>
+    /// <returns>Межа або <c>null</c>.</returns>
+    internal static long? EffectiveInputsWatermark(long? start, bool partial, long? previous)
+        => !partial ? start
+            : start is { } own && previous is { } before ? Math.Min(own, before)
+            : null;
+
+    /// <summary>
+    /// ✎ P-1123-20: стан джерел документа запиту за його роки (<c>DocumentSourceIssues.SourceStatesJsonAsync</c>) — ДО читання
+    /// входів. ✎ Огляд b11 №5 (HIGH): не вдалося (без графа, будь-який збій) — явне «невідомо»
+    /// (<see cref="DocumentSourceIssues.UnknownState"/>), яке позначку ставить, а не гасить; скасування — далі.
+    /// </summary>
+    private async Task<string> SourceStatesAsync(RecalculationRequest request, CancellationToken ct)
+    {
+        if (dependencyGraph is null)
+        {
+            return DocumentSourceIssues.UnknownState;
+        }
+
+        try
+        {
+            IReadOnlyCollection<int> years = request.PeriodKey is { } named ? [named / 100]
+                : request.Year is { } year ? [year]
+                : await db.TableInstances.AsNoTracking()
+                    .Where(i => i.DocumentId == request.DocumentId)
+                    .Select(i => i.PeriodKeyValue / 100)
+                    .Distinct()
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+            return await new DocumentSourceIssues(db, readOverride: null, dependencyGraph)
+                .SourceStatesJsonAsync(request.DocumentId, years, ct)
+                .ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Будь-який збій знімка — «невідомо» (позначка), а не зупинка перерахунку.
+        catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
+        {
+            return DocumentSourceIssues.UnknownState;
+        }
+    }
+
+    /// <summary>✎ W15z M7: періоди документа з будь-яким затвердженим станом аркуша (оригінал чи копія).</summary>
+    private async Task<HashSet<int>> ApprovedStatePeriodsAsync(long documentId, CancellationToken ct)
+        => [.. await db.ApprovalStates.AsNoTracking()
+            .Where(s => s.DocumentId == documentId && s.Status == Domain.Enums.DocumentStatus.Approved)
+            .Select(s => s.PeriodKey)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false)];
 
     /// <summary>Аркуші документа за періодами, які прогін ПРОПУСКАЄ: лише затверджені (ФВ-9.17, ✎ B79).</summary>
     /// <param name="request">Завдання.</param>
@@ -3648,13 +3873,16 @@ public sealed partial class RecalculationJob(
     private sealed record InstanceRow(long Id, int TableDefId, int PeriodKeyValue, int SheetDefId);
 
     /// <summary>Прив'язка методології до опису таблиці.</summary>
-    private sealed record BindingRow(int TableDefId, int MethodologyId);
+    internal sealed record BindingRow(int TableDefId, int MethodologyId);
 
     /// <summary>Прив'язка разом із періодом, у якому вона рахується.</summary>
     private sealed record PeriodBindingRow(int PeriodKeyValue, CalculationBindingRef Binding);
 
     /// <summary>Стан одного періоду — для гейту запису.</summary>
-    private sealed record PeriodStateRow(int PeriodKeyValue, Domain.Enums.PeriodState State);
+    /// <param name="PeriodKeyValue">Період.</param>
+    /// <param name="State">Ефективний стан.</param>
+    /// <param name="AwaitingOpen">✎ D-575: <c>Scheduled</c> АКТИВНОГО проєкту — ще не відкрито (у чернетці — ні).</param>
+    private sealed record PeriodStateRow(int PeriodKeyValue, Domain.Enums.PeriodState State, bool AwaitingOpen = false);
 
     /// <summary>
     /// Стеля вибірки періодів для гейту стану: проєкт — один рік, тобто щонайбільше 12 періодів
@@ -3688,15 +3916,20 @@ public sealed partial class RecalculationJob(
             .ConfigureAwait(false);
 
         var now = clock.UtcNow;
-        return [.. rows.Select(r => new PeriodStateRow(
-            r.Period.PeriodKeyValue,
-            r.Status == Domain.Enums.ProjectStatus.Active
+        return [.. rows.Select(r =>
+        {
+            var active = r.Status == Domain.Enums.ProjectStatus.Active;
+            var state = active
                 ? PeriodStates.Effective(
                     r.Period,
                     now,
                     Domain.Services.YearGraceWindow.For(
                         r.PeriodEnd, r.YearGraceOffsetDays, SiteTimeZone.Create(r.TimeZoneId).ToTimeZoneInfo()))
-                : r.Period.State))];
+                : r.Period.State;
+
+            // ✎ D-575: те саме правило, що PeriodStore.FindEvaluationStateAsync (формули) — тут для методологій.
+            return new PeriodStateRow(r.Period.PeriodKeyValue, state, active && state == Domain.Enums.PeriodState.Scheduled);
+        })];
     }
 
     /// <summary>
@@ -3987,6 +4220,12 @@ public sealed partial class RecalculationJob(
 /// <c>-dependents-approved</c> — надмножина роботи), але пізніші місяці, що читають їхні обчислені числа, — так: задача
 /// названого періоду будить лише ранніших читачів. Злиття — об'єднанням.
 /// </param>
+/// <param name="SourceMonths">
+/// ✎ PERF-06b (<c>D-572</c>): власний перерахунок (<c>-auto</c>) РІЧНОГО/КВАРТАЛЬНОГО документа-джерела після правки — місяці
+/// правки (усі змінені колонки місячні). Успіх прогону передає їх хуку джерела, ЯКЩО методології й формули джерела не
+/// переносять зміну в інші місяці (<c>SourceKeepsMonthsAsync</c>); інакше — увесь рік. Злиття — об'єднанням, постановка без
+/// місяців знімає їх. <c>null</c> — увесь рік.
+/// </param>
 public sealed record RecalculationRequest(
     int ProjectId,
     long DocumentId,
@@ -4015,7 +4254,8 @@ public sealed record RecalculationRequest(
     bool ChainRecheck = false,
     int[]? CascadePeriods = null,
     int[]? CascadeAppend = null,
-    int[]? CascadeSeeds = null)
+    int[]? CascadeSeeds = null,
+    int[]? SourceMonths = null)
 {
     /// <summary>
     /// ✎ B59: нижня межа ключа періоду скоупу (включно); без року — <see cref="int.MinValue"/>.

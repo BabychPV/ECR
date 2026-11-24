@@ -155,7 +155,8 @@ public sealed class GetCalculationIssuesHandler(
                     named ? r.SourceProjectCode : null,
                     named ? r.SourceDocumentKey : null,
                     named ? r.SourceApprovedAt : null,
-                    r.ApprovedAt);
+                    r.ApprovedAt,
+                    r.SourceChangedAt);
             }),
         ];
     }

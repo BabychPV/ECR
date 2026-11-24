@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Text;
 using Ecr.TestKit;
 using Xunit;
@@ -252,10 +252,14 @@ public sealed class LandYearMonthsLibTests
         // план LAND-YEAR §a.1: 6 080 -> 14 119 (+8 904 = (669 + 73) × 12, −865 = 669 + 73 + 123);
         // ✎ B26 (P-0118-24/25): T7b_00 +3 (Land_Status, селектор Concentration, змінна формула Volume) -> 6 083;
         // YearMonths: −2 (Concentration, Volume) +12 (Volume_M01..M12) -> 14 132; селекторів 124, змінних 74
-        Assert.Contains("COLS=6083->14132\n", output, StringComparison.Ordinal);
-        Assert.Contains("STAT=53|8916|867|124|74|669|0\n", output, StringComparison.Ordinal);
-        // прив'язок-цілей 669 × 12; псевдонімів (124 + 74) × 12 = 2 376 (cfg.MonthInputAlias, L0); груп 669 + 74
-        Assert.Contains("PLAN=8028|2376|743\n", output, StringComparison.Ordinal);
+        // ✎ P-1123-4: +1 міст T9_07.Land_Measure_SubstanceConsumption (селектор місяця: прибирається, лишає псевдоніми)
+        // -> 6 084 -> 14 132; прибраних 868, селекторів 125
+        Assert.Contains("COLS=6084->14132\n", output, StringComparison.Ordinal);
+        // ✎ P-1123-4 (вода): T7b_00.ECW_EC_tons - формула таблиці, тож змінних 75, виходів методологій 668
+        Assert.Contains("STAT=53|8916|868|125|75|668|0\n", output, StringComparison.Ordinal);
+        // прив'язок-цілей 668 × 12; псевдонімів (125 + 75) × 12 = 2 400 (cfg.MonthInputAlias, L0; ✎ P-1123-4: +12 на T9_07, +12 вода);
+        // груп 669 + 74
+        Assert.Contains("PLAN=8016|2400|743\n", output, StringComparison.Ordinal);
         Assert.Contains("LEFT=0|0\n", output, StringComparison.Ordinal);
         Assert.Contains("T7B=" + M12("ECW_EC_tons") + "\n", output, StringComparison.Ordinal);
 
@@ -281,7 +285,7 @@ public sealed class LandYearMonthsLibTests
         // два підсумки xlsm на своєму місці: 7.0 «Annual» після Q4, 9b «TOTAL» після December
         Assert.Contains("XLSM=Q4,Annual|December,TOTAL\n", output, StringComparison.Ordinal);
         Assert.Contains("R3=0\n", output, StringComparison.Ordinal);
-        Assert.Contains("SECOND=0|0|8028|2376\n", output, StringComparison.Ordinal);
+        Assert.Contains("SECOND=0|0|8016|2400\n", output, StringComparison.Ordinal);
     }
 
     [Fact]

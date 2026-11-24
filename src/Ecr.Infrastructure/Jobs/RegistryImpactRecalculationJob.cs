@@ -95,7 +95,9 @@ public sealed partial class RegistryImpactRecalculationJob(
         // ✎ PERF-06 (D-566, рішення людини 22.11): каскад від правки документа-джерела — ОДНА задача на документ-споживач і рік
         // з періодами, які читають змінений місяць (обсяг ребра графа вище); правки за вікно каскаду зливаються об'єднанням
         // періодів, ланцюжок, що вже йде, дописує нові. Перекриття адміністратора (затверджені) — поперіодно, як доти.
-        var cascade = request.IsSourceDocumentChange && !request.IncludeApproved && trigger.CoalescesCascadePeriods;
+        // ✎ PERF-06b (D-572): і на черзі без об'єднання (Quartz, live InProcess) — через ту саму постановку на документ і рік:
+        // вона ставить поперіодно (payload першої, як до D-566), але читання документа — пакетом на всі його періоди.
+        var cascade = request.IsSourceDocumentChange && !request.IncludeApproved;
         if (cascade)
         {
             foreach (var group in targets.GroupBy(t => (t.DocumentId, Year: t.PeriodKey / 100)).OrderBy(g => g.Key))
@@ -235,13 +237,50 @@ public sealed partial class RegistryImpactRecalculationJob(
 
             var (first, last) = scope.Kind == PeriodScopeKind.All ? (int.MinValue, int.MaxValue) : (year * 100, (year * 100) + 99);
             var onlyMonth = scope.Kind == PeriodScopeKind.Month ? month : null;
-            rows.AddRange(await impact
-                .ListTemplateConsumersAsync([consumer.Key], first, last, onlyMonth, ct)
-                .ConfigureAwait(false));
+
+            // ✎ PERF-06b (D-572): «рік з літеральними місяцями», де КОЖНЕ читання — комірка періоду-власника свого місяця
+            // (TemplateDependency.MonthOwned, без методологій) — зміна місяця m будить у місячному проєкті лише період m.
+            // Пізніших читачів його чисел будить прогін цього періоду (CrossPeriodFanOut, RecalculationJob.FormulasAsync).
+            // ✎ W15z M1: звуження — по версії шаблону (TemplateDependency.OwnedVersions): старі версії, що читають довідник поза
+            // власником, не відкочують увесь шаблон до року — лише свої періоди. Рішення й причина — у журнал.
+            var consumerEdges = consumer.ToList();
+            // Обсяг ребра «місяць» звужує сам (onlyMonth); «усе» — будь-який період; «рік» — рішення по версіях і методологіях
+            // (маска не потрібна: версія з OwnedVersions читає лише літеральні місяці в комірках їхніх власників; «рік» без маски
+            // дають старі версії — їхні періоди однаково на весь рік).
+            var reason = scope.Kind == PeriodScopeKind.All
+                ? "edge scope covers any period (derived registry or unrecognised period key)"
+                : scope.Kind == PeriodScopeKind.Month
+                    ? month is null ? "edited months unknown (whole year)" : null
+                    : month is null
+                        ? "edited months unknown (whole year)"
+                        : Persistence.MonthOwnerRouting.RefusalReason(consumerEdges);
+            var monthScope = scope.Kind == PeriodScopeKind.Month;
+            var routedVersions = reason is null && !monthScope ? Persistence.MonthOwnerRouting.OwnedVersions(consumerEdges) : null;
+            int? routedMonth = reason is null && !monthScope ? month : null;
+            var found = await impact
+                .ListTemplateConsumersRoutedAsync([consumer.Key], first, last, onlyMonth, routedMonth, routedVersions, ct)
+                .ConfigureAwait(false);
+            if (_logger.IsEnabled(LogLevel.Information))
+            {
+                var monthText = month?.ToString(CultureInfo.InvariantCulture) ?? "-";
+                var why = reason ?? (monthScope ? "edge scope is month" : "owned versions " + string.Join(",", routedVersions!));
+                var periods = string.Join(",", found.Select(r => r.PeriodKey).Distinct().Order());
+                LogRouting(
+                    _logger, request.BindingId!.Value, consumer.Key, year, monthText,
+                    reason is null ? "month owner" : "whole year", why, found.Count, periods);
+            }
+            rows.AddRange(found);
         }
 
         return rows;
     }
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "PERF-06b: binding {BindingId} → consumer template {ConsumerTemplateId}, year {Year}, edited month {Month}: {Decision} ({Reason}); consumer rows {Count}, periods {Periods}.")]
+    private static partial void LogRouting(
+        ILogger logger, int bindingId, int consumerTemplateId, int year, string month, string decision, string reason, int count,
+        string periods);
 
     [LoggerMessage(
         Level = LogLevel.Error,

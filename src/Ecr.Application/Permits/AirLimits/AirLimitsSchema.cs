@@ -19,6 +19,13 @@ public sealed record AirLimitsSettings(
     public static AirLimitsSettings Default { get; } = new(NaeTreeSchema.RegistryCode, AirLimitsSchema.DefaultSubstanceRegistry);
 }
 
+/// <summary>How a specification is bound to the permit tables (<see cref="AirLimitsSchema.Bind"/>).</summary>
+/// <param name="Spec">Fields renamed to the column codes: what preview and apply read and store.</param>
+/// <param name="Read">The same reading rules with the user's field names: what the analysis reads.</param>
+/// <param name="Unsaved">Fields that match no column of the tables: read, not saved (a warning).</param>
+public sealed record AirFieldBinding(
+    RegistryImport.RegistryImportSpec Spec, RegistryImport.RegistryImportSpec Read, IReadOnlyList<string> Unsaved);
+
 /// <summary>Fixed names of the "Air Limits Import" permit type (NAE plan N3).</summary>
 public static class AirLimitsSchema
 {
@@ -64,6 +71,12 @@ public static class AirLimitsSchema
 
     /// <summary>Area code of a region without areas.</summary>
     public const string NoArea = NaeAfTreeBuilder.NoArea;
+
+    /// <summary>
+    /// ✎ D-569 (P-1123-1): audit entity of a permit's «current table» — one <c>aud.StructureChange</c> record per apply with
+    /// <c>EntityId</c> = permit id (file name, specification, removed keys); the permit card reads the latest one.
+    /// </summary>
+    public const string CurrentTableAuditEntity = "permit.AirImportTable";
 
     /// <summary>Registry code of the sources table.</summary>
     public static string SourcesRegistry => PermitHeaderFields.TableRegistryCode(TypeCode, SourcesTable);
@@ -183,12 +196,38 @@ public static class AirLimitsSchema
         Domain.Entities.Configuration.RegistryDef sources,
         Domain.Entities.Configuration.RegistryDef substances)
     {
+        var binding = Bind(spec, sources, substances);
+        return (binding.Spec, binding.Unsaved);
+    }
+
+    /// <summary>
+    /// The binding of <see cref="BindFields"/> in two forms: <c>Spec</c> — fields renamed to the column codes (preview and apply
+    /// store them); <c>Read</c> — the same reading rules with the user's own field names (the analysis: the wizard matches its
+    /// findings by those names).
+    /// </summary>
+    /// <remarks>
+    /// ✎ D-569 (P-1123-1, «Цех», reproduced on the live copy 23.11): a field bound to an ADDED column (by code or display name)
+    /// that names neither a file column nor header texts — the wizard's «Add field» leaves both empty — used to read nothing
+    /// (a <c>regColumnMissing</c> warning) AND, being bound, blocked the header-name fallback of its column: the apply went
+    /// through and the column stayed empty. Now such a field is read by the column's display names (and its own name) as a whole
+    /// header, and every field bound to an added column MUST be read: not found / taken / ambiguous is an error
+    /// (<see cref="AirLimitsKeys.AddedColumnUnread"/>) that blocks the apply.
+    /// </remarks>
+    /// <param name="spec">The profile's specification.</param>
+    /// <param name="sources">The AIR_SOURCES definition.</param>
+    /// <param name="substances">The AIR_SOURCE_SUBSTANCES definition.</param>
+    public static AirFieldBinding Bind(
+        RegistryImport.RegistryImportSpec spec,
+        Domain.Entities.Configuration.RegistryDef sources,
+        Domain.Entities.Configuration.RegistryDef substances)
+    {
         ArgumentNullException.ThrowIfNull(spec);
         var parent = ParentColumnsOf(sources);
         var child = ChildColumnsOf(substances);
         var taken = spec.Fields.Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
-        var renames = new Dictionary<string, string>(StringComparer.Ordinal);
+        var bound = new Dictionary<string, Domain.Entities.Configuration.RegistryFieldDef>(StringComparer.Ordinal);
         var unsaved = new List<string>();
+        var relevelled = new Dictionary<string, RegistryImport.ImportLevel>(StringComparer.Ordinal);
         foreach (var field in spec.Fields)
         {
             if (field.Informational || field.Name == spec.ParentKeyField || field.Name == spec.ChildKeyField)
@@ -197,18 +236,39 @@ public static class AirLimitsSchema
             }
 
             var isParent = field.Level == RegistryImport.ImportLevel.Parent;
-            if ((isParent ? parent : child).ContainsKey(field.Name))
+            var added = isParent ? AddedSourceColumns(sources) : AddedSubstanceColumns(substances);
+            if ((isParent ? ParentColumns : ChildColumns).ContainsKey(field.Name))
             {
                 continue;
             }
 
-            var added = isParent ? AddedSourceColumns(sources) : AddedSubstanceColumns(substances);
+            if ((isParent ? parent : child).ContainsKey(field.Name))
+            {
+                // Already the added column's code («Add as new column» writes it so).
+                bound[field.Name] = added.First(c => string.Equals(c.Code, field.Name, StringComparison.OrdinalIgnoreCase));
+                continue;
+            }
+
             var wanted = field.Name.Trim();
-            var column = added.FirstOrDefault(c => string.Equals(c.Code, wanted, StringComparison.OrdinalIgnoreCase)
-                                                   || c.NameL10n.Values.Values.Any(n => string.Equals(n.Trim(), wanted, StringComparison.OrdinalIgnoreCase)));
+            bool Named(Domain.Entities.Configuration.RegistryFieldDef c)
+                => string.Equals(c.Code, wanted, StringComparison.OrdinalIgnoreCase)
+                   || c.NameL10n.Values.Values.Any(n => string.Equals(n.Trim(), wanted, StringComparison.OrdinalIgnoreCase));
+            var column = added.FirstOrDefault(Named);
+            if (column is null)
+            {
+                // ✎ D-569: the wizard's «Add field» starts at the level «Substance row»; a field named after a column of the OTHER
+                // table («Цех» is a source column) is that column — read at the column's level, not reported «not saved».
+                var otherLevel = isParent ? AddedSubstanceColumns(substances) : AddedSourceColumns(sources);
+                if (otherLevel.FirstOrDefault(Named) is { } across && !taken.Contains(across.Code))
+                {
+                    column = across;
+                    relevelled[field.Name] = isParent ? RegistryImport.ImportLevel.Child : RegistryImport.ImportLevel.Parent;
+                }
+            }
+
             if (column is not null && !taken.Contains(column.Code))
             {
-                renames[field.Name] = column.Code;
+                bound[field.Name] = column;
                 taken.Add(column.Code);
             }
             else
@@ -217,9 +277,50 @@ public static class AirLimitsSchema
             }
         }
 
-        var bound = spec.WithRenamedFields(renames);
-        return (bound.WithFields(bound.Fields, HeaderNamed(bound, sources, substances)), unsaved);
+        RegistryImport.RegistryImportSpec Build(bool renamed)
+        {
+            var fields = new List<RegistryImport.ImportFieldSpec>();
+            var byHeader = new List<RegistryImport.HeaderNamedField>();
+            foreach (var field in spec.Fields)
+            {
+                if (!bound.TryGetValue(field.Name, out var column))
+                {
+                    fields.Add(field);
+                    continue;
+                }
+
+                var name = renamed ? column.Code : field.Name;
+                var label = DisplayName(column);
+                var levelled = relevelled.TryGetValue(field.Name, out var level) ? field.AtLevel(level) : field;
+                var read = (renamed ? levelled.Renamed(column.Code) : levelled).MustRead(AirLimitsKeys.AddedColumnUnread, label);
+                if (string.IsNullOrWhiteSpace(field.Column) && field.Patterns.Count == 0)
+                {
+                    // Neither a file column nor header texts: read by the column's name as the whole header (and the field's own).
+                    byHeader.Add(new RegistryImport.HeaderNamedField(
+                        read,
+                        [.. column.NameL10n.Values.Values.Append(field.Name).Append(name)
+                            .Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.OrdinalIgnoreCase)]));
+                }
+                else
+                {
+                    fields.Add(read);
+                }
+            }
+
+            var shaped = spec.WithFields(fields, []);
+            var names = fields.Select(f => f.Name).Concat(byHeader.Select(b => b.Field.Name))
+                .Concat(bound.Values.Select(c => c.Code))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return shaped.WithFields(fields, [.. byHeader, .. HeaderNamed(names, sources, substances)]);
+        }
+
+        return new AirFieldBinding(Build(renamed: true), Build(renamed: false), unsaved);
     }
+
+    private static string DisplayName(Domain.Entities.Configuration.RegistryFieldDef column)
+        => column.NameL10n.Values.TryGetValue("en", out var en) && !string.IsNullOrWhiteSpace(en)
+            ? en
+            : column.NameL10n.Values.Values.FirstOrDefault(n => !string.IsNullOrWhiteSpace(n)) ?? column.Code;
 
     /// <summary>
     /// ✎ Pass 3b (UAT P2-1): every added column no field of the spec reads yet is offered for a file column whose whole header equals
@@ -227,15 +328,12 @@ public static class AirLimitsSchema
     /// column» again, and the analysis no longer lists it as unmapped.
     /// </summary>
     private static List<RegistryImport.HeaderNamedField> HeaderNamed(
-        RegistryImport.RegistryImportSpec spec, Domain.Entities.Configuration.RegistryDef sources, Domain.Entities.Configuration.RegistryDef substances)
-    {
-        var taken = spec.Fields.Select(f => f.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return
+        HashSet<string> taken, Domain.Entities.Configuration.RegistryDef sources, Domain.Entities.Configuration.RegistryDef substances)
+        =>
         [
             .. AddedSourceColumns(sources).Where(c => Offered(c, taken)).Select(c => Candidate(c, RegistryImport.ImportLevel.Parent)),
             .. AddedSubstanceColumns(substances).Where(c => Offered(c, taken)).Select(c => Candidate(c, RegistryImport.ImportLevel.Child)),
         ];
-    }
 
     /// <summary>A plain-value column (text, number, date) no field reads: a lookup or a formula is never filled from a header name.</summary>
     private static bool Offered(Domain.Entities.Configuration.RegistryFieldDef column, HashSet<string> taken)

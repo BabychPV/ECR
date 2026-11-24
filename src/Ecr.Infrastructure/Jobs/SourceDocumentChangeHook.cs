@@ -41,6 +41,19 @@ public sealed class ChangedPeriodsDictionary : Dictionary<long, int[]>
 {
     /// <summary>Версії шаблонів екземплярів документів у змінених періодах; <c>null</c> — невідомо.</summary>
     public IReadOnlySet<int>? TemplateVersionIds { get; init; }
+
+    /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>): колонки, які змінив прохід формул (насіння й похідні) за періодом; <c>null</c> — невідомо.
+    /// З них хук виводить місяці правки річного/квартального джерела (усі колонки — місячні; інакше — увесь рік).
+    /// </summary>
+    public IReadOnlyDictionary<int, IReadOnlySet<int>>? ChangedColumns { get; init; }
+
+    /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>): місяці правки річного/квартального джерела за періодом, які власний перерахунок джерела
+    /// (<c>-auto</c>) довів: його методології й формули не переносять зміну в інші місяці. <c>null</c> чи немає періоду —
+    /// увесь рік.
+    /// </summary>
+    public IReadOnlyDictionary<int, IReadOnlySet<int>>? SourceMonths { get; init; }
 }
 
 /// <summary>
@@ -73,7 +86,7 @@ public sealed class ChangedPeriodsDictionary : Dictionary<long, int[]>
 /// ✎ B179 L2b (рішення людини Q1: «тригер на кожну правку джерела»): правка комірки дає лише задачу формул, а споживачі
 /// (Land) читають і РЕЗУЛЬТАТИ МЕТОДОЛОГІЙ джерела (рядки складу <c>F_&lt;X&gt;</c>, <c>Hse400CompositionSnapshotLoader</c>).
 /// Тому для правки (<see cref="OnCellsEditedAsync"/>) за тими самими воротами хук ставить ВЛАСНИЙ перерахунок
-/// документа-джерела за період (<see cref="ICalculationTrigger.RequestAsync"/>: злита ціль <c>doc{id}-p{період}-auto</c>
+/// документа-джерела за період (<see cref="ICalculationTrigger.RequestAsync(long, PeriodKey, CancellationToken)"/>: злита ціль <c>doc{id}-p{період}-auto</c>
 /// — 50 правок місяця дають одну задачу; затверджений/закритий період — відмова), а не батьківську задачу споживачів:
 /// споживачі зі старими <c>F_</c> рахувалися б марно. Успіх того перерахунку кличе <see cref="OnSucceededAsync"/> —
 /// звідти вже батьківська задача. Петлі немає: <see cref="OnSucceededAsync"/> (шлях <see cref="RecalculationJob"/>)
@@ -169,11 +182,24 @@ public sealed partial class SourceDocumentChangeHook(
             // його успіху. Лишаються лише періоди, де тригер відмовив (затверджено все, закритий, архів): там одразу як у L2.
             if (cellsEdited && sourceRecalculation is not null)
             {
+                // ✎ PERF-06b (D-572): річне/квартальне джерело — місяці правки (усі змінені колонки місячні) їдуть крізь `-auto`.
+                // Черга, що не зливає місяці, їх однаково не несе — колонок не читаємо (жодного звернення понад доти).
+                // ✎ PERF-06b live: Quartz теж зливає місяці (QuartzSourceMonths) — CarriesSourceMonths, а не злиття періодів.
+                var editedMonths = sourceRecalculation.CarriesSourceMonths
+                    ? await EditedMonthsAsync(
+                            matched.Where(f => f.PeriodKind != PeriodKind.Monthly).Select(f => (f.DocumentId, f.PeriodKeyValue, f.PeriodKind)),
+                            (periodsByDocument as ChangedPeriodsDictionary)?.ChangedColumns, ct)
+                        .ConfigureAwait(false)
+                    : new Dictionary<(long DocumentId, int PeriodKey), int[]>();
+
                 var declined = new HashSet<(long DocumentId, int PeriodKey)>();
                 foreach (var (documentId, periodKey) in matched.Select(f => (f.DocumentId, f.PeriodKeyValue)).Distinct())
                 {
-                    if (await sourceRecalculation.RequestAsync(documentId, new PeriodKey(periodKey), ct).ConfigureAwait(false)
-                        is null)
+                    var months = editedMonths.GetValueOrDefault((documentId, periodKey));
+                    var enqueued = months is null
+                        ? await sourceRecalculation.RequestAsync(documentId, new PeriodKey(periodKey), ct).ConfigureAwait(false)
+                        : await sourceRecalculation.RequestAsync(documentId, new PeriodKey(periodKey), months, ct).ConfigureAwait(false);
+                    if (enqueued is null)
                     {
                         declined.Add((documentId, periodKey));
                     }
@@ -182,14 +208,24 @@ public sealed partial class SourceDocumentChangeHook(
                 matched = [.. matched.Where(f => declined.Contains((f.DocumentId, f.PeriodKeyValue)))];
             }
 
+            // ✎ PERF-06b (D-572): місяці, які довів власний перерахунок річного/квартального джерела (шлях RecalculationJob).
+            var provenMonths = cellsEdited ? null : (periodsByDocument as ChangedPeriodsDictionary)?.SourceMonths;
+
             var targets = new SortedSet<(int BindingId, int RegistryDefId, int Year, int Month)>();
             foreach (var f in matched)
             {
                 // Місяць — лише місячного проєкту (0 — увесь рік): період іншої довжини володіє кількома місяцями.
-                var month = f.PeriodKind == PeriodKind.Monthly ? f.PeriodKeyValue % 100 : 0;
+                // ✎ PERF-06b (D-572): річний/квартальний — місяці, доведені `-auto` джерела (у межах місяців періоду), кожен
+                // своєю задачею зв'язки; каскад споживача зливає їх об'єднанням. Не доведено — увесь рік, як доти.
+                int[] months = f.PeriodKind == PeriodKind.Monthly
+                    ? [f.PeriodKeyValue % 100]
+                    : OwnedProvenMonths(f.PeriodKind, f.PeriodKeyValue, provenMonths) ?? [0];
                 foreach (var binding in bindings.Where(b => b.SourceTemplateId == f.TemplateId))
                 {
-                    targets.Add((binding.Id, binding.RegistryDefId, f.PeriodKeyValue / 100, month));
+                    foreach (var month in months)
+                    {
+                        targets.Add((binding.Id, binding.RegistryDefId, f.PeriodKeyValue / 100, month));
+                    }
                 }
             }
 
@@ -216,6 +252,74 @@ public sealed partial class SourceDocumentChangeHook(
         {
             LogEnqueueFailed(_logger, string.Join(", ", periodsByDocument.Keys), ex);
         }
+    }
+
+    /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>): місяці, у межах періоду річного/квартального джерела, які довів його власний перерахунок;
+    /// <c>null</c> — увесь рік (не доведено, порожньо чи місяць поза періодом).
+    /// </summary>
+    internal static int[]? OwnedProvenMonths(
+        PeriodKind kind, int periodKey, IReadOnlyDictionary<int, IReadOnlySet<int>>? proven)
+    {
+        if (proven is null || !proven.TryGetValue(periodKey, out var months) || months.Count == 0)
+        {
+            return null;
+        }
+
+        var owned = DocumentSourceGate.OwnedMonths(kind, periodKey % 100).ToHashSet();
+        return months.All(owned.Contains) ? [.. months.Order()] : null;
+    }
+
+    /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>): місяці правки за (документ, період) річного/квартального джерела — коли КОЖНА колонка, яку
+    /// змінив прохід формул у періоді (насіння й похідні), місячна (<c>IsMonthColumn</c> з номером) і в межах місяців періоду.
+    /// Не-місячна колонка (рядок видалено — сіються всі колонки), невідома колонка чи колонок немає — періоду в результаті
+    /// немає (увесь рік). Одне звернення до бази — лише коли є такі періоди й відомі колонки.
+    /// </summary>
+    private async Task<Dictionary<(long DocumentId, int PeriodKey), int[]>> EditedMonthsAsync(
+        IEnumerable<(long DocumentId, int PeriodKey, PeriodKind Kind)> periods,
+        IReadOnlyDictionary<int, IReadOnlySet<int>>? changedColumns,
+        CancellationToken ct)
+    {
+        var result = new Dictionary<(long, int), int[]>();
+        var wanted = periods.Distinct().Where(p => changedColumns?.GetValueOrDefault(p.PeriodKey) is { Count: > 0 }).ToList();
+        if (wanted.Count == 0)
+        {
+            return result;
+        }
+
+        var ids = wanted.SelectMany(p => changedColumns![p.PeriodKey]).Distinct().ToList();
+        var columns = await db.ColumnDefs.AsNoTracking()
+            .Where(c => ids.Contains(c.Id))
+            .Select(c => new { c.Id, c.IsMonthColumn, c.MonthNumber })
+            .ToDictionaryAsync(c => c.Id, ct)
+            .ConfigureAwait(false);
+
+        foreach (var (documentId, periodKey, kind) in wanted)
+        {
+            var owned = DocumentSourceGate.OwnedMonths(kind, periodKey % 100).ToHashSet();
+            var months = new SortedSet<int>();
+            var known = true;
+            foreach (var id in changedColumns![periodKey])
+            {
+                if (columns.TryGetValue(id, out var column) && column.IsMonthColumn && column.MonthNumber is { } m && owned.Contains(m))
+                {
+                    months.Add(m);
+                }
+                else
+                {
+                    known = false;
+                    break;
+                }
+            }
+
+            if (known && months.Count > 0)
+            {
+                result[(documentId, periodKey)] = [.. months];
+            }
+        }
+
+        return result;
     }
 
     [LoggerMessage(

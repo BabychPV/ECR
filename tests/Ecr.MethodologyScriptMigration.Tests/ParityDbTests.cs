@@ -27,7 +27,9 @@ public sealed class ParityDbTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2099, 1, 10, 9, 0, 0, DateTimeKind.Utc);
 
-    private sealed record Scene(string MainCode, string LibraryCode, long DocumentId, int MainVersionId, int LibraryVersionId);
+    private sealed record Scene(
+        string MainCode, string LibraryCode, long DocumentId, int MainVersionId, int LibraryVersionId, string ZoneCode = "", string QtyCode = "",
+        int PeriodKey = 0);
 
     private static LocalizedText Name(string value) => new(new Dictionary<string, string> { ["en"] = value });
 
@@ -196,6 +198,138 @@ public sealed class ParityDbTests(SqlServerFixture sql)
         Assert.Contains("НЕДОВЕДЕНО " + scene.MainCode + " V2", cli.Output, StringComparison.Ordinal);
     }
 
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task D571_версія_з_екземплярами_але_без_жодного_значення_недоведена_й_не_потрапляє_в_перелік_перемикання()
+    {
+        // До D-571 така версія мала comparedForVersion = 1 і рахувалась доведеною поруч із будь-якою зеленою.
+        var scene = await ArrangeAsync(209909, noMatch: true);
+        await ShadowAsync(scene);
+
+        var report = await RunAsync(scene);
+
+        var main = Assert.Single(report.Versions, v => v.VersionId == scene.MainVersionId);
+        Assert.Equal(1, main.Targets);
+        Assert.Equal(0, main.ValuesCompared);
+        Assert.False(main.IsProven);
+        Assert.Contains(report.UnprovenVersions, u => u.StartsWith(scene.MainCode + " V1: no values compared", StringComparison.Ordinal));
+        Assert.DoesNotContain(report.Eligible, v => v.VersionId == scene.MainVersionId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task D571_eligible_out_пише_доведені_версії_а_за_розбіжності_видаляє_файл()
+    {
+        var scene = await ArrangeAsync(209910);
+        await ShadowAsync(scene);
+        var directory = Path.Combine(Path.GetTempPath(), "ecr-ms-parity-" + Guid.NewGuid().ToString("N"));
+        var report = Path.Combine(directory, "parity.json");
+        var eligible = Path.Combine(directory, "eligible.json");
+        var docId = scene.DocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        var ok = await CliAsync("parity", "--connection", sql.ConnectionString, "--methodology", scene.MainCode,
+            "--document", docId, "--out", report, "--eligible-out", eligible);
+
+        Assert.Equal(MigrationCli.Ok, ok.Code);
+        var json = await File.ReadAllTextAsync(eligible);
+        Assert.Contains("\"versionIds\": [\n    " + scene.MainVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture), json, StringComparison.Ordinal);
+
+        await using (var db = MigrationCli.CreateContext(sql.ConnectionString, readOnly: false))
+        {
+            var version = await db.MethodologyVersions.SingleAsync(v => v.Id == scene.MainVersionId);
+            var changed = version.ScriptText!.Replace("\"0304\": 0.7,", "\"0304\": 0.8,", StringComparison.Ordinal);
+            Assert.NotEqual(version.ScriptText, changed);
+            version.SetScript(changed, ScriptCompiler.Hash(changed));
+            await db.SaveChangesAsync();
+        }
+
+        var failed = await CliAsync("parity", "--connection", sql.ConnectionString, "--methodology", scene.MainCode,
+            "--document", docId, "--out", report, "--eligible-out", eligible, "--allow-unproven");
+
+        Assert.Equal(MigrationCli.Failures, failed.Code);
+        Assert.False(File.Exists(eligible), "after a mismatch the switch list must not survive");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task D571_parity_cases_доводить_версію_на_рядках_еталона_і_ловить_зміну_тексту()
+    {
+        var scene = await ArrangeAsync(209911);
+        await ShadowAsync(scene);
+        var directory = Path.Combine(Path.GetTempPath(), "ecr-ms-ref-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var cases = Path.Combine(directory, "cases.json");
+        var eligible = Path.Combine(directory, "ref-eligible.json");
+        var golden = Path.Combine(directory, "golden.json");
+        var report = Path.Combine(directory, "ref-parity.json");
+        var periodKey = scene.PeriodKey.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var docId = scene.DocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var versionId = scene.MainVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        await File.WriteAllTextAsync(cases, $$"""
+            {"referenceDatabase":"ECR","documentId":{{docId}},"periodKey":{{periodKey}},"versions":[{"versionId":{{versionId}},"methodologyCode":"{{scene.MainCode}}","version":"V1","cases":[
+              {"key":"REF001","table":"T","arguments":[{"argumentCode":"{{scene.ZoneCode}}","valueString":"North"},{"argumentCode":"{{scene.QtyCode}}","value":10}]},
+              {"key":"REF002","table":"T","arguments":[{"argumentCode":"{{scene.ZoneCode}}","valueString":"South"},{"argumentCode":"{{scene.QtyCode}}","value":4}]},
+              {"key":"REF003","table":"T","arguments":[{"argumentCode":"{{scene.ZoneCode}}","valueString":"North"}]}]}]}
+            """);
+
+        var ok = await CliAsync("parity-cases", "--connection", sql.ConnectionString, "--in", cases, "--out", report,
+            "--eligible-out", eligible, "--golden-out", golden);
+
+        Assert.True(ok.Code == MigrationCli.Ok, ok.Output + ok.Error);
+        Assert.Contains("розбіжностей 0", ok.Output, StringComparison.Ordinal);
+        var proven = await File.ReadAllTextAsync(eligible);
+        Assert.Contains("\"source\": \"reference:ECR\"", proven, StringComparison.Ordinal);
+        Assert.Contains("\"versionId\": " + versionId, proven, StringComparison.Ordinal);
+        Assert.Contains("Emission@", await File.ReadAllTextAsync(golden), StringComparison.Ordinal);
+
+        await using (var db = MigrationCli.CreateContext(sql.ConnectionString, readOnly: false))
+        {
+            var version = await db.MethodologyVersions.SingleAsync(v => v.Id == scene.MainVersionId);
+            var changed = version.ScriptText!.Replace("\"0301\": 0.5,", "\"0301\": 0.51,", StringComparison.Ordinal);
+            Assert.NotEqual(version.ScriptText, changed);
+            version.SetScript(changed, ScriptCompiler.Hash(changed));
+            await db.SaveChangesAsync();
+        }
+
+        var failed = await CliAsync("parity-cases", "--connection", sql.ConnectionString, "--in", cases, "--out", report, "--eligible-out", eligible);
+
+        Assert.Equal(MigrationCli.Failures, failed.Code);
+        Assert.Contains("value.number", failed.Output, StringComparison.Ordinal);
+        Assert.False(File.Exists(eligible), "a mismatch must leave no switch list");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task D571_parity_cases_без_тіньового_тексту_рахує_очікування_старим_рушієм_і_нічого_не_доводить()
+    {
+        // P-1123-6 (C11_15): у чинної версії немає правил -> тіньового тексту немає; очікування нової версії все одно — вихід
+        // старого рушія на синтетичних рядках, а перелік перемикання цю версію не містить.
+        var scene = await ArrangeAsync(209912);
+        var directory = Path.Combine(Path.GetTempPath(), "ecr-ms-syn-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var cases = Path.Combine(directory, "cases.json");
+        var golden = Path.Combine(directory, "golden.json");
+        var eligible = Path.Combine(directory, "eligible.json");
+        var periodKey = scene.PeriodKey.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var docId = scene.DocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var versionId = scene.MainVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        await File.WriteAllTextAsync(cases, $$"""
+            {"referenceDatabase":"synthetic","documentId":{{docId}},"periodKey":{{periodKey}},"versions":[{"versionId":{{versionId}},"methodologyCode":"{{scene.MainCode}}","version":"V1","cases":[
+              {"key":"SYN_R01","table":"SYN","arguments":[{"argumentCode":"{{scene.ZoneCode}}","valueString":"North"},{"argumentCode":"{{scene.QtyCode}}","value":10}]},
+              {"key":"SYN_V01","table":"SYN","arguments":[{"argumentCode":"{{scene.ZoneCode}}","valueString":"South"},{"argumentCode":"{{scene.QtyCode}}","value":4}]}]}]}
+            """);
+
+        var run = await CliAsync("parity-cases", "--connection", sql.ConnectionString, "--in", cases, "--out", Path.Combine(directory, "report.json"),
+            "--eligible-out", eligible, "--golden-out", golden, "--golden-all");
+
+        Assert.Equal(MigrationCli.Failures, run.Code); // нічого не доведено
+        Assert.Contains("no shadow text (old engine only", run.Output, StringComparison.Ordinal);
+        Assert.False(File.Exists(eligible));
+        var json = await File.ReadAllTextAsync(golden);
+        Assert.Contains("\"key\": \"SYN_V01\"", json, StringComparison.Ordinal); // --golden-all: кожен рядок із виходами
+        Assert.Contains("Emission@", json, StringComparison.Ordinal);
+    }
+
     // ───── стенд ─────
 
     private async Task<ParityRunReport> RunAsync(Scene scene)
@@ -354,7 +488,7 @@ public sealed class ParityDbTests(SqlServerFixture sql)
         mainVersion.Publish(1, "seed", new DateOnly(2099, 1, 1), true, Now);
         await db.SaveChangesAsync();
 
-        return new Scene(mainCode, libraryCode, document.DocumentId, mainVersion.Id, libVersion.Id);
+        return new Scene(mainCode, libraryCode, document.DocumentId, mainVersion.Id, libVersion.Id, zone.Code, qty.Code, periodKey);
     }
 
     private static void AddConstant(

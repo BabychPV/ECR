@@ -130,4 +130,11 @@ public static class PeriodStateCatchUp
         => [.. advanced
             .Where(a => PeriodMaterializationTrigger.Requires(a.Before, a.After))
             .Select(a => a.Period.PeriodKeyValue)];
+
+    /// <summary>✎ D-575: періоди, що вийшли зі <c>Scheduled</c> (<see cref="PeriodOpenedRecalculationTrigger"/>), — їм перерахунок.</summary>
+    /// <param name="advanced">Застосовані переходи.</param>
+    public static IReadOnlyList<int> ToRecalculate(IReadOnlyList<Advanced> advanced)
+        => [.. advanced
+            .Where(a => PeriodOpenedRecalculationTrigger.Requires(a.Before, a.After))
+            .Select(a => a.Period.PeriodKeyValue)];
 }

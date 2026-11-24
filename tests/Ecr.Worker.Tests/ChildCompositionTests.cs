@@ -86,7 +86,13 @@ public sealed class ChildCompositionTests
 
         // ⛔ Усе, що задача перерахунку бере з контейнера: сама задача, обробник
         // завершення (fencing), і те, що оркестратор резолвить у своїх scope на пакет.
-        Assert.IsType<RecalculationJob>(sp.GetRequiredService<IRecalculationJob>());
+        var recalculation = Assert.IsType<RecalculationJob>(sp.GetRequiredService<IRecalculationJob>());
+
+        // ✎ B179 L7 (D-574): нічний розклад і дотик споживачів перед видаленням джерела беруть споживачів із графа
+        // залежностей; параметр необов'язковий (ручні збірки в тестах), тож контейнер мусить дати його сам — інакше
+        // нічний розклад мовчки не бачив би джерел. Мутація: зняти реєстрацію IDependencyGraphProvider → червоний.
+        Assert.NotNull(CapturedGraph(recalculation));
+        Assert.NotNull(CapturedGraph(Assert.IsType<DocumentDeletionStore>(sp.GetRequiredService<IDocumentDeletionStore>())));
         Assert.NotNull(sp.GetRequiredService<MethodologyResolver>());
         Assert.NotNull(sp.GetRequiredService<CalculationInputBuilder>());
         Assert.NotNull(sp.GetRequiredService<CalculationOutputWriter>());
@@ -124,6 +130,13 @@ public sealed class ChildCompositionTests
             provider.GetServices<IHostedService>().Select(h => h.GetType()).ToArray());
         Assert.False(sp.GetRequiredService<EditPathWarmupOptions>().WarmQuartz);
     }
+
+    /// <summary>Граф, захоплений первинним конструктором (поле <c>&lt;dependencyGraph&gt;P</c>).</summary>
+    private static IDependencyGraphProvider? CapturedGraph(object instance)
+        => (IDependencyGraphProvider?)(instance.GetType()
+                .GetField("<dependencyGraph>P", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+            ?? throw new InvalidOperationException($"{instance.GetType().Name}: поля графа немає — перевір ім'я параметра."))
+            .GetValue(instance);
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]

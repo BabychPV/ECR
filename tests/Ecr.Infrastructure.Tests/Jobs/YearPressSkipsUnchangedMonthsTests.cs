@@ -70,6 +70,9 @@ public sealed partial class YearPressSkipsUnchangedMonthsTests(SqlServerFixture 
 
     private int _unitId;
 
+    /// <summary>✎ PERF-06b: справжній граф залежностей (обсяг ребра зв'язки для помісячної гілки джерел).</summary>
+    private bool _withGraph;
+
     [Fact]
     public async Task Правка_місяця_3_перераховує_лише_місяць_3_і_місяць_на_екрані()
     {
@@ -749,7 +752,8 @@ public sealed partial class YearPressSkipsUnchangedMonthsTests(SqlServerFixture 
             clock,
             jobs: scheduler,
             lease: lease,
-            queue: queue)
+            queue: queue,
+            dependencyGraph: _withGraph ? SourceDependencyWorld.Graph(db) : null)
         {
             OwnerReadersProbe = _ownerReaders,
             CrossReadVersionLimit = _versionLimit ?? 64,

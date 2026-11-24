@@ -180,6 +180,15 @@ public sealed class PeriodStore(EcrDbContext db, Ecr.Domain.Abstractions.IClock?
     /// <inheritdoc />
     public async Task<Ecr.Domain.Enums.PeriodState?> FindPeriodStateAsync(
         long documentId, int periodKey, CancellationToken ct)
+        => (await FindEvaluationStateAsync(documentId, periodKey, ct).ConfigureAwait(false))?.State;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ D-575: той самий запит, що й був у <see cref="FindPeriodStateAsync"/> (тепер він читає звідси) — правило
+    /// ефективного стану одне.
+    /// </remarks>
+    public async Task<PeriodEvaluationState?> FindEvaluationStateAsync(
+        long documentId, int periodKey, CancellationToken ct)
     {
         // Той самий ланцюг документ → проєкт → період, що й у меж: `PeriodKey`
         // не унікальний глобально, і без проєкту питання «який стан у 202601»
@@ -225,7 +234,8 @@ public sealed class PeriodStore(EcrDbContext db, Ecr.Domain.Abstractions.IClock?
 
         // ⚠ Лише для АКТИВНОГО проєкту — як у `AccessDecisionService`, `WorkflowStore`
         // і в самій задачі станів (`A7-25`): періоди чернетки за датами не просуваються.
-        var effective = clock is null || row.Status != Ecr.Domain.Enums.ProjectStatus.Active
+        var active = row.Status == Ecr.Domain.Enums.ProjectStatus.Active;
+        var effective = clock is null || !active
             ? period.State
             : PeriodStates.Effective(
                 period,
@@ -236,7 +246,73 @@ public sealed class PeriodStore(EcrDbContext db, Ecr.Domain.Abstractions.IClock?
                     Ecr.Domain.ValueObjects.SiteTimeZone.Create(row.TimeZoneId).ToTimeZoneInfo()));
 
         // Закритий місяць, відкритий лише для цього документа, — Grace для нього (пізня правка, автоперерахунок).
-        return Ecr.Domain.Services.DocumentPeriodReopenRule.Apply(effective, row.DocumentReopened);
+        var state = Ecr.Domain.Services.DocumentPeriodReopenRule.Apply(effective, row.DocumentReopened);
+
+        // ✎ D-575: «ще не відкрито» — лише в активному проєкті (у чернетці Scheduled — усі періоди за побудовою).
+        return new PeriodEvaluationState(state, active && state == Ecr.Domain.Enums.PeriodState.Scheduled);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ PERF-06b (<c>D-572</c>): той самий ланцюг і те саме правило, що <see cref="FindPeriodStateAsync"/> (ефективний стан на
+    /// годиннику, виняток документа), — одним запитом на всі ключі.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<int, Ecr.Domain.Enums.PeriodState?>> FindPeriodStatesAsync(
+        long documentId, IReadOnlyCollection<int> periodKeys, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(periodKeys);
+        var keys = periodKeys.Distinct().ToList();
+        var states = keys.ToDictionary(k => k, _ => (Ecr.Domain.Enums.PeriodState?)null);
+        if (keys.Count == 0)
+        {
+            return states;
+        }
+
+        var withException = clock is not null;
+        var now = clock?.UtcNow ?? default;
+        var row = await (
+                from document in db.Documents.AsNoTracking()
+                where document.Id == documentId
+                join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
+                select new
+                {
+                    project.Status,
+                    project.PeriodEnd,
+                    project.YearGraceOffsetDays,
+                    project.TimeZoneId,
+                    Reopened = db.DocumentPeriodReopens
+                        .Where(x => withException && x.DocumentId == documentId && keys.Contains(x.PeriodKeyValue)
+                                    && x.ClosedAt == null && x.OpenUntil > now)
+                        .Select(x => x.PeriodKeyValue)
+                        .ToList(),
+                    Periods = db.Periods
+                        .AsNoTracking()
+                        .Where(p => p.ProjectId == document.ProjectId && keys.Contains(p.PeriodKeyValue))
+                        .ToList(),
+                })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (row is null)
+        {
+            return states;
+        }
+
+        foreach (var period in row.Periods)
+        {
+            var effective = clock is null || row.Status != Ecr.Domain.Enums.ProjectStatus.Active
+                ? period.State
+                : PeriodStates.Effective(
+                    period,
+                    now,
+                    Ecr.Domain.Services.YearGraceWindow.For(
+                        row.PeriodEnd,
+                        row.YearGraceOffsetDays,
+                        Ecr.Domain.ValueObjects.SiteTimeZone.Create(row.TimeZoneId).ToTimeZoneInfo()));
+            states[period.PeriodKeyValue] = Ecr.Domain.Services.DocumentPeriodReopenRule.Apply(
+                effective, row.Reopened.Contains(period.PeriodKeyValue));
+        }
+
+        return states;
     }
 
     /// <inheritdoc />

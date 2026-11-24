@@ -82,6 +82,13 @@ public interface IApprovalQueueStore
         int take,
         IReadOnlyCollection<long> participatedDocumentIds,
         CancellationToken ct);
+
+    /// <summary>
+    /// ✎ B74 P3 (D-576): версія шаблону документа іншого (не основного) шаблону проєкту за період —
+    /// <c>doc.fn_TemplateVersionOf</c>; черга бере знімок і маршрут цієї версії, а не версії основного шаблону.
+    /// </summary>
+    public Task<int?> TemplateVersionOfAsync(int projectId, int templateId, int periodKey, CancellationToken ct)
+        => throw new NotSupportedException("Версія пари проєкт × шаблон (B74) не реалізована цим сховищем.");
 }
 
 /// <summary>Проєкт для черги.</summary>
@@ -92,9 +99,10 @@ public interface IApprovalQueueStore
 /// <param name="Status">Статус проєкту.</param>
 /// <param name="IsArchiving">Іде архівація.</param>
 /// <param name="MultiVersion">RPT-STABLE B2: частина періодів проєкту на іншій версії шаблону (шкала версій).</param>
+/// <param name="PrimaryTemplateId">✎ B74 P3 (D-576): основний шаблон проєкту (шаблон <paramref name="TemplateVersionId"/>).</param>
 public sealed record ApprovalQueueProject(
     int ProjectId, string ProjectCode, int TemplateVersionId, string TemplateCode, ProjectStatus Status, bool IsArchiving,
-    bool MultiVersion = false);
+    bool MultiVersion = false, int? PrimaryTemplateId = null);
 
 /// <summary>Чинні маршрути з кроками й кодами ролей.</summary>
 /// <param name="Routes">Маршрути з кроками.</param>
@@ -134,6 +142,9 @@ public sealed record ApprovalQueueCandidate(
 {
     /// <summary>Копія аркуша (RS); <c>null</c> — оригінал.</summary>
     public long? SheetCopyId { get; init; }
+
+    /// <summary>✎ B74 P3 (D-576): шаблон документа (<c>Document.TemplateId</c>); <c>null</c> — основний шаблон проєкту.</summary>
+    public int? DocumentTemplateId { get; init; }
 }
 
 /// <summary>Позиція в порядку черги: момент подання (тики UTC) і ключ стану.</summary>
@@ -177,6 +188,9 @@ public sealed record ReturnedSheetCandidate(
 
     /// <summary>Копія аркуша (RS); <c>null</c> — оригінал.</summary>
     public long? SheetCopyId { get; init; }
+
+    /// <summary>✎ B74 P3 (D-576): шаблон документа (<c>Document.TemplateId</c>); <c>null</c> — основний шаблон проєкту.</summary>
+    public int? DocumentTemplateId { get; init; }
 }
 
 /// <summary>✎ D-449: вид повернення на доопрацювання.</summary>

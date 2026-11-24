@@ -137,6 +137,10 @@ public sealed record AirLimitsAnalysisDto(string? ProfileCode, ImportAnalysis An
 /// The region (and area) map to the NAE tree; <c>false</c> — «region/area not in NAE tree»: NAE codes are matched without the tree scope.
 /// </param>
 /// <param name="UnsavedFields">✎ Pass 3: fields that match no target column — their values will not be saved.</param>
+/// <param name="EmptiedColumns">
+/// ✎ D-569 (P-1123-1): columns of the two tables no field reads from this file — after the apply they are empty in every row of
+/// the permit (the last uploaded table is the only current one; nothing is carried over from the replaced rows).
+/// </param>
 public sealed record AirLimitsPreviewDto(
     long PermitId,
     string PermitNumber,
@@ -147,7 +151,16 @@ public sealed record AirLimitsPreviewDto(
     long? RegionEntryId = null,
     long? AreaEntryId = null,
     bool ScopeInNaeTree = true,
-    IReadOnlyList<string>? UnsavedFields = null);
+    IReadOnlyList<string>? UnsavedFields = null,
+    IReadOnlyList<AirAddedColumnDto>? EmptiedColumns = null);
+
+/// <summary>✎ D-569 (P-1123-1): the permit's current parameters table — the last file applied to it.</summary>
+/// <param name="FileName">Name of the uploaded file; <c>null</c> — not recorded (an import before 23.11).</param>
+/// <param name="ImportedAt">When it was applied, UTC.</param>
+/// <param name="ImportedBy">Display name of the user who applied it.</param>
+/// <param name="Sources">Source rows the import wrote.</param>
+/// <param name="Substances">Substance rows the import wrote.</param>
+public sealed record AirCurrentTableDto(string? FileName, DateTime ImportedAt, string? ImportedBy, int Sources, int Substances);
 
 /// <summary>Result of <c>POST /api/v1/permits/{permitId}/air-limits/import/apply</c>.</summary>
 /// <param name="PermitId">Permit.</param>
@@ -297,6 +310,7 @@ public sealed record AirTotalDto(
 /// <param name="AddedColumns">P1 07.11: columns added to the two tables (sources first, then substances), in table order.</param>
 /// <param name="SourcesRegistryCode">Registry of <c>AIR_SOURCES</c> — where the card writes an edited source row (generic batch).</param>
 /// <param name="SubstancesRegistryCode">Registry of <c>AIR_SOURCE_SUBSTANCES</c>.</param>
+/// <param name="CurrentTable">✎ D-569: the last parameters table applied to the permit; <c>null</c> — none recorded.</param>
 public sealed record AirLimitsPermitDto(
     long PermitId,
     string PermitNumber,
@@ -308,4 +322,5 @@ public sealed record AirLimitsPermitDto(
     int SubstanceRows,
     IReadOnlyList<AirAddedColumnDto>? AddedColumns = null,
     string? SourcesRegistryCode = null,
-    string? SubstancesRegistryCode = null);
+    string? SubstancesRegistryCode = null,
+    AirCurrentTableDto? CurrentTable = null);

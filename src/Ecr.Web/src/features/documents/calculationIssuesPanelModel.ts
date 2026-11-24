@@ -3,7 +3,7 @@ import type { SourceIssue } from '@/features/calculationIssues/api';
 import { copyFieldsOf } from '@/features/documents/sheetCopies/sheetCopyTypes';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { localized } from '@/shared/i18n/localized';
-import type { UnmatchedRows } from './useUnmatchedRows';
+import { representedFormulaCells, type UnmatchedRows } from './useUnmatchedRows';
 import { groupRowCount, groupUnmatchedRows } from './unmatchedRowsModel';
 
 /**
@@ -52,6 +52,11 @@ export interface IssueSource {
   /** Дати першого місяця: коли затверджено джерело і коли — місяць споживача (UTC). */
   readonly sourceApprovedAt: string | null;
   readonly approvedAt: string | null;
+  /**
+   * ✎ F5-R (D-570): зв'язка `Any` — коли (найпізніше в групі) змінено дані місяця джерела після затвердження цього місяця;
+   * `null` — причина `ApprovedOnly` (затвердження джерела) чи не `sourceChanged`.
+   */
+  readonly sourceChangedAt: string | null;
 }
 
 /** Рядок панелі — одна причина. */
@@ -274,7 +279,9 @@ export function sourceKindOf(kind: string): IssueCauseKind {
 function sourceCauses(issues: readonly SourceIssue[]): IssueCause[] {
   const groups = new Map<string, SourceIssue[]>();
   for (const issue of issues) {
-    const key = `source:${sourceKindOf(issue.kind)}:${String(issue.sourceDocumentId ?? 'hidden')}`;
+    // ✎ F5-R: «дані джерела змінено» (Any, `sourceChangedAt`) — окрема причина від «затвердження джерела змінилось».
+    const variant = (issue.sourceChangedAt ?? null) === null ? '' : ':data';
+    const key = `source:${sourceKindOf(issue.kind)}${variant}:${String(issue.sourceDocumentId ?? 'hidden')}`;
     groups.set(key, [...(groups.get(key) ?? []), issue]);
   }
 
@@ -303,9 +310,21 @@ function sourceCauses(issues: readonly SourceIssue[]): IssueCause[] {
         label,
         sourceApprovedAt: visible ? first.sourceApprovedAt : null,
         approvedAt: first.approvedAt,
+        sourceChangedAt: latestChange(group),
       },
     };
   });
+}
+
+/** ✎ F5-R (D-570): найпізніша зміна даних джерела серед рядків групи (ISO UTC однакової форми — порівняння рядків). */
+function latestChange(group: readonly SourceIssue[]): string | null {
+  let latest: string | null = null;
+  for (const issue of group) {
+    const at = issue.sourceChangedAt ?? null;
+    if (at !== null && (latest === null || Date.parse(at) > Date.parse(latest))) latest = at;
+  }
+
+  return latest;
 }
 
 /**
@@ -315,12 +334,10 @@ function sourceCauses(issues: readonly SourceIssue[]): IssueCause[] {
  * і лічильники причин — нижня межа («N+»).
  */
 export function formulaErrorsTruncated(rows: UnmatchedRows): boolean {
-  const represented = rows.formulaErrors.reduce(
-    (sum, error) => sum + (error.kind === 'Error' ? 1 + error.dependentCount : Math.max(1, error.dependentCount)),
-    0,
-  );
+  // ✎ Огляд M4 (2): документ «рік» — обрізання визначено за відповіддю року (`splitIssuesByMonth`), не за місяцем.
+  if (rows.truncatedFormulaErrors === true) return true;
 
-  return (rows.formulaErrorTotal ?? 0) > represented;
+  return (rows.formulaErrorTotal ?? 0) > representedFormulaCells(rows.formulaErrors);
 }
 
 /** Перші `limit` назв через кому і «…», якщо є ще. */

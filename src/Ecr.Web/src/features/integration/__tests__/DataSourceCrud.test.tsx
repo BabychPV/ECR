@@ -222,8 +222,9 @@ describe("З'єднання: створення", () => {
 
     type(scope, /sources\.code/, 'LAB');
     type(scope, /sources\.name/, 'Lab feed');
-    type(scope, /^.*sources\.endpoint/, 'Server=lab;Database=Lims');
-    type(scope, /sources\.catalog/, 'Lims');
+    type(scope, /^.*sources\.endpoint/, 'Driver={PI SQL Client};AF Server=lab;AF Database=Lims');
+    // ⛔ PI SQL Client каталогу не читає (база — AF Database у рядку): поля немає, у тілі — null.
+    expect(within(scope).queryByLabelText(/sources\.catalog/)).toBeNull();
 
     const before = listReads();
     fireEvent.click(within(scope).getByRole('button', { name: /sources\.create/ }));
@@ -238,9 +239,9 @@ describe("З'єднання: створення", () => {
       nameL10n: { [language()]: 'Lab feed' },
       // D-212: транспорт не вибирали — типовий PI SQL (views — основний канал).
       transport: 'PiSqlClient',
-      endpoint: 'Server=lab;Database=Lims',
+      endpoint: 'Driver={PI SQL Client};AF Server=lab;AF Database=Lims',
       secondaryEndpoint: null,
-      catalog: 'Lims',
+      catalog: null,
       maxParallel: null,
       isActive: true,
       secretConfirmation: null,
@@ -335,6 +336,45 @@ describe("З'єднання: створення", () => {
     expect(secondary.value).toBe('https://user:pass@lab2.example.invalid/api');
   });
 
+  it('422 dataSourceFieldNotRead з field=catalog — причина під КАТАЛОГОМ (лише для читання), значення не загублене', async () => {
+    respond({
+      change: () =>
+        json(
+          {
+            title: 'Invalid request',
+            status: 422,
+            errorCode: 'ECR-REQ-0422',
+            correlationId: 'c-422',
+            messageKey: 'err.ECR-REQ-0422.dataSourceFieldNotRead',
+            field: 'catalog',
+          },
+          422,
+        ),
+    });
+    show();
+
+    await screen.findByText('Main PI server');
+    const scope = await openCreate();
+
+    type(scope, /sources\.code/, 'LAB');
+    type(scope, /sources\.name/, 'Lab feed');
+    fireEvent.click(within(scope).getByLabelText(/sources\.transport/));
+    fireEvent.click(screen.getByRole('option', { name: 'PiWebApi' }));
+    type(scope, /sources\.catalog/, 'ECR');
+    fireEvent.click(within(scope).getByLabelText(/sources\.transport/));
+    fireEvent.click(screen.getByRole('option', { name: 'PiSqlClient' }));
+    type(scope, /^.*sources\.endpoint/, 'Driver={PI SQL Client};AF Server=lab');
+
+    fireEvent.click(within(scope).getByRole('button', { name: /sources\.create/ }));
+
+    const catalog = field(scope, /sources\.catalog/);
+
+    await waitFor(() => expect(errorOf(catalog)).toContain('err.ECR-REQ-0422.dataSourceFieldNotRead'));
+    expect(catalog.readOnly).toBe(true);
+    expect(catalog.value).toBe('ECR');
+    expect(within(scope).queryByRole('alert')).toBeNull();
+  });
+
   // D1: політика адреси (SSRF) — відмова біля поля адреси, а не загальним алертом.
   it.each([
     'dataSourceEndpointScheme',
@@ -344,6 +384,7 @@ describe("З'єднання: створення", () => {
     'dataSourceEndpointSqlScheme',
     'dataSourceEndpointSqlLinkLocal',
     'dataSourceEndpointSqlForbiddenOption',
+    'dataSourceEndpointNotConnectionString',
   ])('422 %s — причина БІЛЯ поля адреси, без загального алерта', async (key) => {
     respond({
       change: () =>

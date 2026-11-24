@@ -348,6 +348,9 @@ export interface DocumentHeaderPanelProps {
   /** ✎ RC15-A: версія шаблону документа — «Version» секції «Contract», лише для читання. */
   readonly templateVersion?: string | undefined;
 
+  /** ✎ B74 P4 (D-576): код шаблону документа — «Template» секції «Contract», лише для читання. */
+  readonly templateCode?: string | undefined;
+
   /**
    * ✎ RC16-Z35: людина запустила перевірку документа (Validate) — порожні обов'язкові поля
    * підсвічуються помилкою одразу, не чекаючи, поки в кожне заглянуть.
@@ -376,6 +379,7 @@ export function DocumentHeaderPanel({
   collapsible = false,
   businessKey,
   templateVersion,
+  templateCode,
   showRequiredErrors = false,
   openRequest,
   periodKey,
@@ -829,13 +833,14 @@ export function DocumentHeaderPanel({
   const serviceValues: Partial<Record<ContractKey, string | undefined>> = {
     fileNumber: businessKey,
     version: templateVersion,
+    template: templateCode,
   };
   const contract: readonly (readonly [ContractKey, DocumentHeaderField | null])[] =
     contractFields.length === 0
       ? []
       : [
           ...contractFields,
-          ...(['fileNumber', 'version'] as const)
+          ...(['fileNumber', 'template', 'version'] as const)
             .filter((key) => serviceValues[key] !== undefined && !contractFields.some(([k]) => k === key))
             .map((key) => [key, null] as const),
         ].sort((a, b) => contractRank(a[0]) - contractRank(b[0]));
@@ -926,7 +931,13 @@ export function DocumentHeaderPanel({
               field === null ? (
                 <TextInput
                   key={key}
-                  label={t(key === 'version' ? 'document.header.contract.version' : 'document.header.contract.fileNumber')}
+                  label={t(
+                    key === 'version'
+                      ? 'document.header.contract.version'
+                      : key === 'template'
+                        ? 'documents.template'
+                        : 'document.header.contract.fileNumber',
+                  )}
                   value={serviceValues[key] ?? ''}
                   readOnly
                   data-header-field={key}

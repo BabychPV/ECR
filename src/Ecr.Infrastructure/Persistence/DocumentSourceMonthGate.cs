@@ -110,6 +110,40 @@ public sealed class DocumentSourceMonthGate(EcrDbContext db, bool? readOverride,
         => [.. (await new DocumentSourceIssues(db, readOverride, graph).ListAsync(documentId, periodKeys, ct).ConfigureAwait(false))
             .Select(f => f.Row)];
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ F5-R (D-570): один екземпляр <see cref="DocumentSourceIssues"/> на всю сторінку — обраний документ-джерело року
+    /// й таблиці зв'язки кешуються між документами; граф без жодного ребра «джерело → споживач» — жодного запиту.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<long, IReadOnlyList<int>>> ListSourceChangedPeriodsAsync(
+        IReadOnlyDictionary<long, IReadOnlyList<int>> approved, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(approved);
+        var result = new Dictionary<long, IReadOnlyList<int>>();
+        if (readOverride == false || approved.All(a => a.Value.Count == 0)
+            || (await graph.GetAsync(ct).ConfigureAwait(false)).TemplateDependencies.Count == 0)
+        {
+            return result;
+        }
+
+        var issues = new DocumentSourceIssues(db, readOverride, graph);
+        foreach (var (documentId, periods) in approved.Where(a => a.Value.Count > 0).OrderBy(a => a.Key))
+        {
+            var changed = (await issues.ListAsync(documentId, periods, ct).ConfigureAwait(false))
+                .Where(f => f.Row.Kind == ISourceIssueReader.SourceChangedAfterApproval)
+                .Select(f => f.Row.PeriodKey)
+                .Distinct()
+                .Order()
+                .ToList();
+            if (changed.Count > 0)
+            {
+                result[documentId] = changed;
+            }
+        }
+
+        return result;
+    }
+
     /// <summary>
     /// Зв'язки в стані <c>ApprovedOnly</c> (склад HSE400), споживачем яких є шаблон документа за період: власний шаблон
     /// документа (B74) або шаблон версії ПЕРІОДУ проєкту (шкала, <c>EcrDbContext.VersionOf</c> — сторож B74).
@@ -136,8 +170,13 @@ public sealed class DocumentSourceMonthGate(EcrDbContext db, bool? readOverride,
     /// <param name="periodKeys">Періоди.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Період → зв'язки за зростанням id; періоду без зв'язок у словнику немає.</returns>
+    /// <param name="includeAny">
+    /// ✎ F5-R (D-570): і зв'язки в стані <c>Any</c> (проблема «джерело змінено після затвердження»); ворота подання їх не
+    /// беруть — за <c>Any</c> подання не залежить від затвердження джерела.
+    /// </param>
     internal static async Task<Dictionary<int, List<ConsumerBinding>>> ConsumerBindingsByPeriodAsync(
-        EcrDbContext db, IDependencyGraphProvider graph, long documentId, IReadOnlyCollection<int> periodKeys, CancellationToken ct)
+        EcrDbContext db, IDependencyGraphProvider graph, long documentId, IReadOnlyCollection<int> periodKeys, CancellationToken ct,
+        bool includeAny = false)
     {
         var keys = periodKeys.Distinct().ToList();
         if (keys.Count == 0)
@@ -168,10 +207,10 @@ public sealed class DocumentSourceMonthGate(EcrDbContext db, bool? readOverride,
         var bindings = await (
                 from b in db.DocumentSourceBindings.AsNoTracking()
                 where bindingIds.Contains(b.Id)
-                      && b.SourceState == DocumentSourceState.ApprovedOnly
+                      && (includeAny || b.SourceState == DocumentSourceState.ApprovedOnly)
                       && b.MappingKind == DocumentSourceBinding.Hse400CompositionMapping
                 orderby b.Id
-                select new { b.Id, b.ReadFromDocument })
+                select new { b.Id, b.ReadFromDocument, b.SourceState })
             .ToListAsync(ct).ConfigureAwait(false);
 
         var result = new Dictionary<int, List<ConsumerBinding>>();
@@ -180,7 +219,7 @@ public sealed class DocumentSourceMonthGate(EcrDbContext db, bool? readOverride,
             var ids = templateBindings.GetValueOrDefault(o.TemplateId);
             var found = bindings
                 .Where(b => ids is not null && ids.Contains(b.Id))
-                .Select(b => new ConsumerBinding(b.Id, b.ReadFromDocument, o.PeriodKind))
+                .Select(b => new ConsumerBinding(b.Id, b.ReadFromDocument, o.PeriodKind, b.SourceState))
                 .ToList();
             if (found.Count > 0)
             {
@@ -237,8 +276,10 @@ public sealed class DocumentSourceMonthGate(EcrDbContext db, bool? readOverride,
     private sealed record OwnTemplate(int PeriodKey, int TemplateId, PeriodKind PeriodKind);
 }
 
-/// <summary>Зв'язка <c>ApprovedOnly</c> документа-споживача.</summary>
+/// <summary>Зв'язка документа-споживача (<c>ApprovedOnly</c>; ✎ F5-R — і <c>Any</c>, коли запитано).</summary>
 /// <param name="Id">Зв'язка.</param>
 /// <param name="ReadFromDocument">Біт «читати з документа».</param>
 /// <param name="PeriodKind">Періодичність проєкту СПОЖИВАЧА (які місяці володіє його період).</param>
-internal sealed record ConsumerBinding(int Id, bool ReadFromDocument, PeriodKind PeriodKind);
+/// <param name="State">Стан-ворота зв'язки.</param>
+internal sealed record ConsumerBinding(
+    int Id, bool ReadFromDocument, PeriodKind PeriodKind, DocumentSourceState State = DocumentSourceState.ApprovedOnly);

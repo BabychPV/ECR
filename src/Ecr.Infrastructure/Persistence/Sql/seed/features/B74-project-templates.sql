@@ -1,0 +1,97 @@
+-- B74:project-templates ── ru/kz: B74 P3/P4 (D-576, рішення людини 13.11) — шаблони проєкту «рік · об'єкт»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRD-0409.templateAlreadyAttached', N'ru', N'Шаблон «{templateCode}» уже есть в этом проекте.'),
+    (N'err.ECR-PRD-0409.templateAlreadyAttached', N'kz', N'«{templateCode}» үлгісі бұл жобада бар.'),
+    (N'err.ECR-PRD-0409.projectArchivedTemplates', N'ru', N'Проект в архиве: состав его шаблонов не меняется.'),
+    (N'err.ECR-PRD-0409.projectArchivedTemplates', N'kz', N'Жоба мұрағатта: оның үлгілерінің құрамы өзгермейді.'),
+    (N'err.ECR-PRD-0409.primaryTemplate', N'ru', N'«{templateCode}» — основной шаблон проекта; его нельзя отсоединить.'),
+    (N'err.ECR-PRD-0409.primaryTemplate', N'kz', N'«{templateCode}» — жобаның негізгі үлгісі; оны ажыратуға болмайды.'),
+    (N'err.ECR-PRD-0409.templateHasDocuments', N'ru', N'В проекте есть документы шаблона «{templateCode}» ({documentCount}): сначала удалите или перенесите их.'),
+    (N'err.ECR-PRD-0409.templateHasDocuments', N'kz', N'Жобада «{templateCode}» үлгісінің құжаттары бар ({documentCount}): алдымен оларды жойыңыз немесе көшіріңіз.'),
+    (N'err.ECR-PRD-0409.templateHasRoute', N'ru', N'У шаблона «{templateCode}» в этом проекте свой маршрут согласования: сначала уберите его.'),
+    (N'err.ECR-PRD-0409.templateHasRoute', N'kz', N'Бұл жобада «{templateCode}» үлгісінің өз келісу бағыты бар: алдымен оны алып тастаңыз.'),
+    (N'err.ECR-TMPL-0404.templateNotInProject', N'ru', N'Этого шаблона нет в проекте.'),
+    (N'err.ECR-TMPL-0404.templateNotInProject', N'kz', N'Бұл үлгі жобада жоқ.'),
+    (N'err.ECR-DOC-0422.templateNotInProject', N'ru', N'Выбранного шаблона нет среди шаблонов проекта. Обновите страницу и выберите шаблон заново.'),
+    (N'err.ECR-DOC-0422.templateNotInProject', N'kz', N'Таңдалған үлгі жоба үлгілерінің арасында жоқ. Бетті жаңартып, үлгіні қайта таңдаңыз.'),
+    (N'err.ECR-TMPL-0422.duplicateTemplate', N'ru', N'Каждый шаблон можно выбрать для проекта только один раз.'),
+    (N'err.ECR-TMPL-0422.duplicateTemplate', N'kz', N'Әр үлгіні жобаға тек бір рет таңдауға болады.'),
+    (N'projects.templates.title', N'ru', N'Шаблоны'),
+    (N'projects.templates.title', N'kz', N'Үлгілер'),
+    (N'projects.templates.hint', N'ru', N'Документы каких шаблонов можно создавать в этом проекте. Новая версия шаблона переносит документы только этого шаблона.'),
+    (N'projects.templates.hint', N'kz', N'Бұл жобада қай үлгілердің құжаттарын құруға болады. Үлгінің жаңа нұсқасы тек осы үлгінің құжаттарын көшіреді.'),
+    (N'projects.templates.empty', N'ru', N'В проекте пока нет шаблонов.'),
+    (N'projects.templates.empty', N'kz', N'Жобада әзірге үлгілер жоқ.'),
+    (N'projects.templates.template', N'ru', N'Шаблон'),
+    (N'projects.templates.template', N'kz', N'Үлгі'),
+    (N'projects.templates.version', N'ru', N'Версия'),
+    (N'projects.templates.version', N'kz', N'Нұсқа'),
+    (N'projects.templates.documents', N'ru', N'Документов'),
+    (N'projects.templates.documents', N'kz', N'Құжаттар'),
+    (N'projects.templates.primary', N'ru', N'Основной'),
+    (N'projects.templates.primary', N'kz', N'Негізгі'),
+    (N'projects.templates.attach', N'ru', N'Добавить шаблон'),
+    (N'projects.templates.attach', N'kz', N'Үлгі қосу'),
+    (N'projects.templates.attachApply', N'ru', N'Добавить'),
+    (N'projects.templates.attachApply', N'kz', N'Қосу'),
+    (N'projects.templates.attached', N'ru', N'Шаблон добавлен в проект'),
+    (N'projects.templates.attached', N'kz', N'Үлгі жобаға қосылды'),
+    (N'projects.templates.detach', N'ru', N'Отсоединить'),
+    (N'projects.templates.detach', N'kz', N'Ажырату'),
+    (N'projects.templates.detachConfirm', N'ru', N'Отсоединить шаблон «{templateCode}» от проекта?'),
+    (N'projects.templates.detachConfirm', N'kz', N'«{templateCode}» үлгісін жобадан ажырату керек пе?'),
+    (N'projects.templates.detached', N'ru', N'Шаблон отсоединён'),
+    (N'projects.templates.detached', N'kz', N'Үлгі ажыратылды'),
+    (N'projects.templates.detachBlockedDocuments', N'ru', N'Есть документы этого шаблона'),
+    (N'projects.templates.detachBlockedDocuments', N'kz', N'Осы үлгінің құжаттары бар'),
+    (N'projects.templates.pickTemplate', N'ru', N'Шаблон и версия'),
+    (N'projects.templates.pickTemplate', N'kz', N'Үлгі және нұсқа'),
+    (N'documents.template', N'ru', N'Шаблон'),
+    (N'documents.template', N'kz', N'Үлгі'),
+    (N'documents.createTemplateStep', N'ru', N'Выберите шаблон нового документа — только шаблоны этого проекта.'),
+    (N'documents.createTemplateStep', N'kz', N'Жаңа құжаттың үлгісін таңдаңыз — тек осы жобаның үлгілері.'),
+    (N'projects.create.templates', N'ru', N'Шаблоны проекта'),
+    (N'projects.create.templates', N'kz', N'Жоба үлгілері'),
+    (N'projects.create.templatesHint', N'ru', N'Первый — основной шаблон. Другие шаблоны можно добавить и позже, в настройках проекта.'),
+    (N'projects.create.templatesHint', N'kz', N'Біріншісі — негізгі үлгі. Басқа үлгілерді кейін жоба баптауларында қосуға болады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- B74:project-templates ── кінець секції ──
+-- B74:project-templates ── en; ru/kz — порцією B74:project-templates вище ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'err.ECR-PRD-0409.templateAlreadyAttached', N'en', N'Template «{templateCode}» is already in this project.', 1),
+    (N'err.ECR-PRD-0409.projectArchivedTemplates', N'en', N'The project is archived: its templates cannot be changed.', 1),
+    (N'err.ECR-PRD-0409.primaryTemplate', N'en', N'«{templateCode}» is the primary template of the project; it cannot be detached.', 1),
+    (N'err.ECR-PRD-0409.templateHasDocuments', N'en', N'The project has documents of template «{templateCode}» ({documentCount}): delete or move them first.', 1),
+    (N'err.ECR-PRD-0409.templateHasRoute', N'en', N'Template «{templateCode}» has its own approval route in this project: remove it first.', 1),
+    (N'err.ECR-TMPL-0404.templateNotInProject', N'en', N'This template is not in the project.', 1),
+    (N'err.ECR-DOC-0422.templateNotInProject', N'en', N'The chosen template is not one of the project templates. Refresh the page and choose the template again.', 1),
+    (N'err.ECR-TMPL-0422.duplicateTemplate', N'en', N'Each template can be chosen for a project only once.', 1),
+    (N'projects.templates.title', N'en', N'Templates', 1),
+    (N'projects.templates.hint', N'en', N'Documents of which templates can be created in this project. A new template version moves the documents of that template only.', 1),
+    (N'projects.templates.empty', N'en', N'The project has no templates yet.', 1),
+    (N'projects.templates.template', N'en', N'Template', 1),
+    (N'projects.templates.version', N'en', N'Version', 1),
+    (N'projects.templates.documents', N'en', N'Documents', 1),
+    (N'projects.templates.primary', N'en', N'Primary', 1),
+    (N'projects.templates.attach', N'en', N'Add template', 1),
+    (N'projects.templates.attachApply', N'en', N'Add', 1),
+    (N'projects.templates.attached', N'en', N'Template added to the project', 1),
+    (N'projects.templates.detach', N'en', N'Detach', 1),
+    (N'projects.templates.detachConfirm', N'en', N'Detach template «{templateCode}» from the project?', 1),
+    (N'projects.templates.detached', N'en', N'Template detached', 1),
+    (N'projects.templates.detachBlockedDocuments', N'en', N'The template has documents', 1),
+    (N'projects.templates.pickTemplate', N'en', N'Template and version', 1),
+    (N'documents.template', N'en', N'Template', 1),
+    (N'documents.createTemplateStep', N'en', N'Choose the template of the new document — only templates of this project.', 1),
+    (N'projects.create.templates', N'en', N'Project templates', 1),
+    (N'projects.create.templatesHint', N'en', N'The first one is the primary template. Other templates can also be added later, in the project settings.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- B74:project-templates ── кінець секції ──

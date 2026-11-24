@@ -88,6 +88,8 @@ public sealed partial class DenyLeakGuardTests
     /// </remarks>
     private static readonly Dictionary<string, (int Count, string Why)> Reviewed = new(StringComparer.Ordinal)
     {
+        ["src/Ecr.Infrastructure/Persistence/DocumentStore.cs | текст | templateCode"] =
+            (1, "✎ B74 P3 (D-576): префікс бізнес-ключа документа `{код шаблону}-P{проєкт}-` (DocumentStore.TemplateKeyPrefix) — код шаблону, структура конфігурації, не колонка і не значення комірки; не текст відмови"),
         ["src/Ecr.Application/Security/DependentMonthsRule.cs | деталь sheetCode | b.SheetCode"] =
             (1, "B79, квіз людини 16.11 («і користувач має побачити чому»): код аркуша-ЧИТАЧА, чиї затверджені місяці залежать від стовпця; DependentMonthsLocked — ОСТАННЄ правило, ПІСЛЯ гранта на стовпець і рядок (NoGrant перемагає), тож читач із забороною на цю колонку цієї деталі не отримує; код аркуша — структура шаблону, не колонка і не значення; аркуш, якого користувач не бачить, — питання до AU в листі готовності"),
         ["src/Ecr.Application/Integration/RawData/PiEventDataHandler.cs | деталь eventMapId | mapId.Value.ToString(CultureInfo.InvariantCulture)"] =
