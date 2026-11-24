@@ -457,12 +457,15 @@ public sealed class DocumentListNoApprovalStoreTests(SqlServerFixture sql)
             (after.WorkflowMode, after.Sheets!.Single().State));
         Assert.Equal(after.Sheets!.Single().State, after.SheetStates.Values.Single());
 
-        // Без періоду картка, як і доти, несе режим ТИПОВОЇ версії проєкту (стану аркушів без періоду немає).
+        // Без періоду картка несе режим ЧИННОЇ версії ШАБЛОНУ ДОКУМЕНТА (стану аркушів без періоду немає).
+        // ✎ B74 P3 (D-576, п. 6): доти — режим типової версії ПРОЄКТУ (основного шаблону) для будь-якого документа; у
+        // проєкті з кількома шаблонами документ приєднаного шаблону показував режим чужого шаблону. Тепер «ownNone» (стала
+        // None власна версія) — None, «projectNone» (None лише основна, власна — з погодженням) — SubmitApprove; випадки
+        // без власного/з тим самим шаблоном — як доти.
         await using var plain = stage.Builder.CreateContext();
         var withoutPeriod = (await new DocumentStore(plain)
             .FindAsync(document, new PeriodKeyFilter(null), CancellationToken.None).ConfigureAwait(true))!;
-        var projectVersionIsNone = mode is WorkflowNoneCase.Plain or WorkflowNoneCase.SameTemplate or WorkflowNoneCase.ProjectNone;
-        Assert.Equal(projectVersionIsNone ? "None" : "SubmitApprove", withoutPeriod.WorkflowMode);
+        Assert.Equal(binding.DocumentBecomesNone ? "None" : "SubmitApprove", withoutPeriod.WorkflowMode);
         Assert.Empty(withoutPeriod.SheetStates);
     }
 
