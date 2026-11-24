@@ -37,7 +37,7 @@ public sealed record FlertRegistryCodes(string Stream, string Case, string Compo
 /// <param name="Created">Коди довідників, створених цим викликом.</param>
 /// <param name="ComponentsAdded">Коди компонентів, доданих цим викликом.</param>
 /// <param name="Problems">Чому дзеркало писати не можна (несумісний наявний довідник); порожньо — можна.</param>
-/// <param name="Warnings">Що варто знати (довідник дзеркала не <c>External</c>).</param>
+/// <param name="Warnings">Що варто знати (колишнє дзеркало <c>External</c> перейшло у власність ECR).</param>
 public sealed record FlertRegistrySet(
     RegistryDef? Stream,
     RegistryDef? Case,
@@ -49,36 +49,41 @@ public sealed record FlertRegistrySet(
     IReadOnlyList<string> Warnings);
 
 /// <summary>
-/// Крок FLERT F0 (<c>D-476</c>): довідники <c>STREAM</c> → <c>STREAM_CASE</c> → <c>GAS_COMPOSITION</c> і
-/// <c>COMPONENT</c> за FEATURE-REGISTRY-TABLES §11.4 з правилом <c>SUM_100</c>, якщо їх немає.
+/// Довідники складу газу <c>STREAM</c> → <c>STREAM_CASE</c> → <c>GAS_COMPOSITION</c> і <c>COMPONENT</c> за
+/// FEATURE-REGISTRY-TABLES §11.4 з правилом <c>SUM_100</c>, якщо їх немає (<c>D-476</c> F0; власник — ECR, D-NEW).
 /// </summary>
 /// <remarks>
 /// ⛔ Не <c>seed/features/*.sql</c>: файл сіду фічі несе лише рядки інтерфейсу, а довідники заводить код
-/// (той самий принцип, що <c>ProvisionAirLimitsHandler.EnsureAreaRegistryAsync</c>). Міграції не потрібно:
-/// «зовнішнє джерело» — це вже наявне <see cref="RegistryDef.SourceKind"/> = <see cref="RegistrySourceKind.External"/>
-/// (ручна правка відхиляється <c>ExternalRegistryGuard</c>, <c>D-211</c>).
+/// (той самий принцип, що <c>ProvisionAirLimitsHandler.EnsureAreaRegistryAsync</c>). Міграції не потрібно.
 /// <para>
-/// ⚠ Ідемпотентно і НЕ руйнівно: наявний довідник не редагується (ні поля, ні ключі, ні джерело) — лише
-/// перевіряється, що в ньому є поля, які пише синк, потрібного типу. Несумісний — <see cref="FlertRegistrySet.Problems"/>,
-/// синк не пише нічого. Наявний довідник дзеркала не <c>External</c> — попередження (перемикання master —
-/// небезпечне право людини, <c>SwitchRegistrySourceHandler</c>). Виняток один: у <c>COMPONENT</c> (master — ECR)
-/// додаються ВІДСУТНІ коди компонентів FLERT, наявні записи не чіпаються.
+/// ⚠ D-NEW (людина 24.11): власник складу — ECR. Довідники заводяться <see cref="RegistrySourceKind.Local"/>; ручні
+/// правки загальними редакторами однаково відхиляються (<c>ExternalRegistryGuard</c> → «сторінка Склад газу»), пише
+/// лише сторінка «Склад газу» і разовий імпорт. Колишнє дзеркало <c>External</c> (стенди до D-NEW) перемикається на
+/// <c>Local</c> рядком журналу структури (<see cref="AdoptOperation"/>).
 /// </para>
 /// <para>
-/// ⚠ Автор — поточний користувач області (<c>svc-integration</c> задачі синку); кожен створений довідник —
-/// рядок <c>aud.StructureChange</c> (<c>ProvisionFlert</c>). Виклик — усередині транзакції задачі.
+/// ⚠ Ідемпотентно і НЕ руйнівно: у наявному довіднику лише перевіряються поля потрібного типу (несумісний —
+/// <see cref="FlertRegistrySet.Problems"/>, не пишеться нічого); додаються лише необов'язкові поля, що з'явилися пізніше.
+/// У <c>COMPONENT</c> додаються ВІДСУТНІ коди компонентів FLERT, наявні записи не чіпаються.
+/// </para>
+/// <para>
+/// ⚠ Автор — поточний користувач області (людина на сторінці або <c>svc-integration</c> задачі імпорту); кожен
+/// створений довідник — рядок <c>aud.StructureChange</c> (<c>ProvisionFlert</c>). Виклик — усередині транзакції.
 /// </para>
 /// <para>
 /// ⚠ Відхилення від §11.4 (див. <see cref="FlertCompositionSchema"/>): <c>STREAM_CASE.STREAM</c> — посилання, а не
 /// композиція (кейс темпоральний); поля <c>MW</c>/<c>N_C</c>/<c>N_S</c> компонента НЕ обов'язкові: значення бібліотеки
-/// HYSYS — факт замовника (§11.4, <c>R-27</c>), їх вносить адміністратор або імпорт Add Stream, а не синк FLERT.
+/// HYSYS — факт замовника (§11.4, <c>R-27</c>), їх вносить адміністратор або імпорт Add Stream.
 /// </para>
 /// </remarks>
 public sealed class FlertRegistryProvisioner(
     EcrDbContext db, IUnitOfWork uow, IClock clock, IAuditWriter audit, Application.Common.ICurrentUser currentUser)
 {
     /// <summary>Операція рядка <c>aud.StructureChange</c> створеного довідника.</summary>
-    public const string ProvisionOperation = "ProvisionFlert";
+public const string ProvisionOperation = "ProvisionFlert";
+
+    /// <summary>Операція рядка <c>aud.StructureChange</c>: колишнє дзеркало перейшло у власність ECR (D-NEW).</summary>
+    public const string AdoptOperation = "AdoptGasComposition";
 
     private static readonly (string Code, string En, string Ru, CellDataType Type, bool Required)[] StreamFields =
     [
@@ -105,7 +110,14 @@ public sealed class FlertRegistryProvisioner(
         (FlertCompositionSchema.CaseLegacyTypeId, "FLERT case Id", "Id кейса FLERT", CellDataType.Int, false),
         (FlertCompositionSchema.CaseLegacyCompositionId, "FLERT composition Id", "Id состава FLERT", CellDataType.Int, false),
         (FlertCompositionSchema.CaseNoComposition, "No composition", "Нет состава", CellDataType.Bool, false),
+        (FlertCompositionSchema.CaseFlertAliases, "FLERT alias values", "Значения дублей FLERT", CellDataType.String, false),
     ];
+
+    /// <summary>
+    /// Поля, що з'явилися після першого випуску дзеркала (D-NEW): у наявному довіднику їх ДОДАЄ провізія (необов'язкові,
+    /// нічого не ламають), а не відмовляє як на несумісність.
+    /// </summary>
+    private static readonly HashSet<string> AddedLaterFields = new(StringComparer.Ordinal) { FlertCompositionSchema.CaseFlertAliases };
 
     private static readonly (string Code, string En, string Ru, CellDataType Type, bool Required)[] CompositionFields =
     [
@@ -151,14 +163,14 @@ public sealed class FlertRegistryProvisioner(
         if (stream is null)
         {
             stream = await CreateAsync(codes.Stream, "FLERT streams", "Потоки FLERT", isTemporal: false,
-                RegistrySourceKind.External, StreamFields, _ => null, userId, ct).ConfigureAwait(false);
+                RegistrySourceKind.Local, StreamFields, _ => null, userId, ct).ConfigureAwait(false);
             await AddKeyAsync(stream, "BY_LEGACY_ID", "By FLERT Id", isPrimary: false,
                 [FlertCompositionSchema.StreamLegacyId], userId, ct).ConfigureAwait(false);
             created.Add(stream.Code);
         }
         else
         {
-            Check(stream, StreamFields, external: true, problems, warnings);
+            await AdoptAsync(stream, StreamFields, problems, warnings, userId, ct).ConfigureAwait(false);
         }
 
         var @case = await FindAsync(codes.Case, ct).ConfigureAwait(false);
@@ -167,7 +179,7 @@ public sealed class FlertRegistryProvisioner(
         {
             var streamId = stream.Id;
             @case = await CreateAsync(codes.Case, "FLERT stream cases", "Кейсы потоков FLERT", isTemporal: true,
-                RegistrySourceKind.External, CaseFields,
+                RegistrySourceKind.Local, CaseFields,
                 f => f == FlertCompositionSchema.CaseStream ? (streamId, false) : null, userId, ct).ConfigureAwait(false);
             await AddKeyAsync(@case, "PK", "Stream + case", isPrimary: true,
                 [FlertCompositionSchema.CaseStream, FlertCompositionSchema.CaseName], userId, ct).ConfigureAwait(false);
@@ -176,7 +188,7 @@ public sealed class FlertRegistryProvisioner(
         }
         else
         {
-            Check(@case, CaseFields, external: true, problems, warnings);
+            await AdoptAsync(@case, CaseFields, problems, warnings, userId, ct).ConfigureAwait(false);
         }
 
         var composition = await FindAsync(codes.Composition, ct).ConfigureAwait(false);
@@ -185,7 +197,7 @@ public sealed class FlertRegistryProvisioner(
             var caseId = @case.Id;
             var componentId = component.Id;
             composition = await CreateAsync(codes.Composition, "FLERT gas composition", "Состав газа FLERT", isTemporal: false,
-                RegistrySourceKind.External, CompositionFields,
+                RegistrySourceKind.Local, CompositionFields,
                 f => f switch
                 {
                     FlertCompositionSchema.RowCase => (caseId, true),
@@ -199,7 +211,7 @@ public sealed class FlertRegistryProvisioner(
         }
         else
         {
-            Check(composition, CompositionFields, external: true, problems, warnings);
+            await AdoptAsync(composition, CompositionFields, problems, warnings, userId, ct).ConfigureAwait(false);
         }
 
         if (caseCreated)
@@ -356,18 +368,32 @@ public sealed class FlertRegistryProvisioner(
         return missing;
     }
 
-    /// <summary>Наявний довідник дзеркала: поля, які пише синк, є й мають потрібний тип.</summary>
-    private static void Check(
+    /// <summary>
+    /// Наявний довідник складу: поля, які пишуть імпорт і сторінка «Склад газу», є й мають потрібний тип. Відсутнє поле з
+    /// <see cref="AddedLaterFields"/> — додається. Колишнє дзеркало FLERT (<c>External</c>) переходить у власність ECR
+    /// (<c>Local</c>, D-NEW) рядком <c>aud.StructureChange</c> <see cref="AdoptOperation"/>.
+    /// </summary>
+    private async Task AdoptAsync(
         RegistryDef def,
         (string Code, string En, string Ru, CellDataType Type, bool Required)[] fields,
-        bool external,
         List<string> problems,
-        List<string> warnings)
+        List<string> warnings,
+        int userId,
+        CancellationToken ct)
     {
-        foreach (var (code, _, _, type, _) in fields)
+        var ordinal = def.Fields.Count == 0 ? 1 : def.Fields.Max(f => f.Ordinal) + 1;
+        var added = false;
+        foreach (var (code, en, ru, type, required) in fields)
         {
             var field = def.Fields.FirstOrDefault(f => string.Equals(f.Code, code, StringComparison.Ordinal));
-            if (field is null)
+            if (field is null && AddedLaterFields.Contains(code))
+            {
+                var created = new RegistryFieldDef(def.Id, EcrCode.Create(code), Text(en, ru), type, ordinal);
+                created.Update(Text(en, ru), ordinal++, required);
+                db.RegistryFieldDefs.Add(created);
+                added = true;
+            }
+            else if (field is null)
             {
                 problems.Add($"{def.Code}.{code}: поля немає");
             }
@@ -377,10 +403,40 @@ public sealed class FlertRegistryProvisioner(
             }
         }
 
-        if (external && def.SourceKind != RegistrySourceKind.External)
+        var switched = def.SourceKind != RegistrySourceKind.Local;
+        if (!switched && !added)
         {
-            warnings.Add($"{def.Code}: джерело {def.SourceKind}, а не External — ручні правки дзеркала не заборонені (D-476)");
+            return;
         }
+
+        var oldKind = def.SourceKind;
+        def.SwitchSource(RegistrySourceKind.Local);
+        def.BumpDefinitionVersion();
+        def.MarkDefinitionUpdated(userId, clock.UtcNow);
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        await audit.WriteStructureChangeAsync(
+            new StructureChangeRecord(
+                clock.UtcNow,
+                TemplateVersionId: 0,
+                EntityType: "cfg.RegistryDef",
+                EntityId: def.Id,
+                ChangeClass.Guarded,
+                AdoptOperation,
+                OldJson: JsonSerializer.Serialize(new { registry = def.Code, sourceKind = oldKind.ToString() }),
+                NewJson: JsonSerializer.Serialize(new { registry = def.Code, sourceKind = def.SourceKind.ToString(), addedFields = added }),
+                ChangeReason: "D-NEW (людина 24.11): склад газу — власність ECR; колишнє дзеркало FLERT редагується на сторінці «Склад газу».",
+                userId,
+                currentUser.CorrelationId),
+            ct).ConfigureAwait(false);
+
+        if (switched)
+        {
+            warnings.Add($"{def.Code}: джерело {oldKind} → Local (власник — ECR, D-NEW)");
+        }
+
+        // Довідник щойно перечитано не буде: у def.Fields нового поля немає, тож читаємо заново.
+        await db.Entry(def).Collection(d => d.Fields).LoadAsync(ct).ConfigureAwait(false);
     }
 
     private static LocalizedText Text(string en, string ru)

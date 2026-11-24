@@ -119,6 +119,44 @@ public sealed class FlertCompositionMappingTests
         var conflict = Assert.Single(mirror.Issues, i => i.Kind == FlertCompositionMapping.AliasConflict);
         Assert.Equal(FlertIssueSeverity.Warning, conflict.Severity);
         Assert.Equal("C10_20220101.CO", conflict.Subject);
+
+        // D-NEW: імпорт без втрат — розбіжне значення довгої колонки FLERT лишається на версії (рівні дублі — ні).
+        Assert.Equal("Carbon_Monoxide=2", Assert.Single(mirror.Cases).FlertAliases);
+    }
+
+    /// <remarks>
+    /// D-NEW, знайдено імпортом на копії live 24.11: прапорці FLERT — <c>smallint</c>, тобто <see cref="short"/> із
+    /// SqlDataReader. Мутація: прибрати гілку <c>short</c> у <c>RowReader.Bool</c> — тест червоний (<c>unreadableValue</c>).
+    /// </remarks>
+    [Fact]
+    [Trait("Requirement", "D-476")]
+    public void Прапорці_smallint_FLERT_читаються_як_bool()
+    {
+        var row = Row(1, 10, "370 Winter", c: new() { ["Methane"] = 100m });
+        row["isOnshore"] = (short)1;
+        row["isSour"] = (short)0;
+        row["isHMB"] = (short)1;
+        row["excludeInListBox"] = (short)0;
+        row["StreamGroup"] = (short)2;
+
+        var mirror = FlertCompositionMapping.Map(Table(row));
+
+        Assert.False(mirror.HasErrors);
+        var stream = Assert.Single(mirror.Streams);
+        Assert.True(stream.IsOnshore);
+        Assert.False(stream.IsSour);
+        Assert.True(stream.IsHmb);
+        Assert.False(stream.ExcludeInList);
+        Assert.Equal(2, stream.Group);
+    }
+
+    [Fact]
+    [Trait("Requirement", "D-476")]
+    public void Без_розбіжних_дублів_FlertAliases_порожнє()
+    {
+        var mirror = FlertCompositionMapping.Map(Table(Row(1, 10, "370 Winter", c: new() { ["Methane"] = 99m, ["CO"] = 1m, ["Carbon_Monoxide"] = 1m })));
+
+        Assert.Null(Assert.Single(mirror.Cases).FlertAliases);
     }
 
     [Fact]

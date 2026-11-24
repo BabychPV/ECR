@@ -392,12 +392,9 @@ public sealed partial class RecurringScheduleService(
             .ScheduleAsync<Infrastructure.Jobs.SupersededResultsSweepJob>(NightlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);
 
-        // D-476: синк складу газу FLERT → дзеркало (людина 11.11: щодня, 02:00 часу сервера). Ставиться завжди:
-        // вимкнений (`Flert:Sync:Enabled=false`, типово) прогін лише пише «вимкнено» в журнал обслуговування.
-        await scheduler
-            .ScheduleAsync<Infrastructure.Jobs.FlertCompositionSyncJob>(
-                Infrastructure.Jobs.FlertCompositionSyncOptions.Cron, null, CancellationToken.None)
-            .ConfigureAwait(false);
+        // D-NEW (людина 24.11): щоденного синку FLERT більше немає — склад газу належить ECR, FLERT читається разово
+        // кнопкою «Імпортувати з FLERT» (FlertCompositionSyncJob без розкладу).
+
 
         await scheduler
             .ScheduleAsync<Infrastructure.Jobs.PeriodStateJob>(TenMinuteCron, null, CancellationToken.None)

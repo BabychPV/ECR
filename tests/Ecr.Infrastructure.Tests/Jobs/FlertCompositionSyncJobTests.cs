@@ -37,8 +37,6 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 public sealed partial class FlertCompositionSyncJobTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2026, 11, 11, 23, 0, 0, DateTimeKind.Utc);
-    private static readonly string[] MirrorCodes = ["STREAM", "STREAM_CASE", "GAS_COMPOSITION"];
-
     private static readonly string[] StreamValidity = ["Stream_ValidFrom", "Stream_ValidTo"];
 
     private static readonly string[] TypeValidity = ["StreamType_ValidFrom", "StreamType_ValidTo"];
@@ -76,8 +74,9 @@ public sealed partial class FlertCompositionSyncJobTests(SqlServerFixture sql)
         await using (var db = Context())
         {
             var defs = await db.RegistryDefs.AsNoTracking().Where(d => d.Code.EndsWith(_tag)).ToListAsync();
-            Assert.Equal(RegistrySourceKind.External, defs.Single(d => d.Code == Codes.Stream).SourceKind);
-            Assert.Equal(RegistrySourceKind.External, defs.Single(d => d.Code == Codes.Composition).SourceKind);
+            // D-NEW: власник складу — ECR (Local); правки загальними редакторами відхиляє ExternalRegistryGuard за кодом.
+            Assert.Equal(RegistrySourceKind.Local, defs.Single(d => d.Code == Codes.Stream).SourceKind);
+            Assert.Equal(RegistrySourceKind.Local, defs.Single(d => d.Code == Codes.Composition).SourceKind);
             Assert.Equal(RegistrySourceKind.Local, defs.Single(d => d.Code == Codes.Component).SourceKind);
             Assert.True(defs.Single(d => d.Code == Codes.Case).IsTemporal);
 
@@ -104,6 +103,9 @@ public sealed partial class FlertCompositionSyncJobTests(SqlServerFixture sql)
         Assert.True(await BoolAsync(Codes.Case, "C12_20220101", FlertCompositionSchema.CaseNoComposition));
         Assert.Equal(new DateOnly(2022, 1, 1), (await EntryAsync(Codes.Case, "C10_20220101")).ValidFrom);
 
+        // D-NEW: без втрат — розбіжний дубль FLERT (Carbon_Monoxide = 2 проти CO = 1) збережено на версії.
+        Assert.Equal("Carbon_Monoxide=2", (await ValueAsync(Codes.Case, "C10_20220101", FlertCompositionSchema.CaseFlertAliases))?.ValueString);
+
         var revisions = await RevisionsAsync();
 
         var second = await RunAsync(provider, source, dataSource);
@@ -129,26 +131,48 @@ public sealed partial class FlertCompositionSyncJobTests(SqlServerFixture sql)
         var revisions = await RevisionsAsync();
 
         source.Table = new ExternalTable(Snapshot().Columns, [], Truncated: false);
+        var refused = await RunAsync(provider, source, dataSource);
+
+        Assert.Equal(FlertCompositionSyncJob.Degraded, refused.Status);
+        Assert.Equal("emptyResult", refused.Reason);
+        Assert.Equal(before, await ActiveCountsAsync());
+        Assert.Equal(revisions, await RevisionsAsync());
+    }
+
+    /// <remarks>
+    /// Мутаційний доказ (локально, не в коміті): <c>AlreadyHasDataAsync</c> завжди <c>false</c> → тест червоний (задача читає
+    /// FLERT і застосовує знімок поверх правок ECR).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-476")]
+    public async Task Задача_імпорту_в_непорожню_базу_відмовляє_не_читаючи_FLERT()
+    {
+        var source = new FakeFlert(Snapshot());
+        var dataSource = await ArrangeSourceAsync();
+        await using var provider = BuildProvider();
+        await RunAsync(provider, source, dataSource);
+        var revisions = await RevisionsAsync();
+
+        // Правка в ECR (Methane 97 → 50) не має бути перетерта; FLERT і не читається.
+        source.Table = Snapshot(methane: 50m);
+        source.Failure = new InvalidOperationException("FLERT не мав читатися: у ECR уже є дані.");
         var runId = await ExecuteAsync(provider, source, dataSource);
 
         await using var db = Context();
         var run = await db.MaintenanceRuns.AsNoTracking().SingleAsync(r => r.Id == runId);
         Assert.Equal(FlertCompositionSyncJob.Degraded, run.Status);
-        Assert.Contains("\"reason\":\"emptyResult\"", run.DetailsJson, StringComparison.Ordinal);
+        Assert.Contains($"\"reason\":\"{FlertCompositionSyncJob.AlreadyImportedReason}\"", run.DetailsJson, StringComparison.Ordinal);
+        Assert.Equal(revisions, await RevisionsAsync());
+        Assert.Equal(97m, await DecimalAsync(Codes.Composition, "C10_20220101_Methane", FlertCompositionSchema.RowMolPct));
 
-        // F3: стан синку для сторінки довідника — той самий прогін, розібраний із журналу.
-        var configuration = Substitute.For<IConfiguration>();
-        configuration[Arg.Any<string>()].Returns((string?)null);
-        var status = await new FlertSyncStatusReader(db, configuration).ReadAsync(CancellationToken.None);
-        Assert.False(status.Enabled);
-        Assert.Equal(MirrorCodes, status.RegistryCodes);
+        // Стан імпорту для сторінки «Склад газу» — той самий прогін, розібраний із журналу.
+        var status = await new FlertSyncStatusReader(db).ReadAsync(CancellationToken.None);
         Assert.NotNull(status.LastRun);
         Assert.Equal(FlertCompositionSyncJob.Degraded, status.LastRun.Status);
-        Assert.Equal("emptyResult", status.LastRun.Reason);
+        Assert.Equal(FlertCompositionSyncJob.AlreadyImportedReason, status.LastRun.Reason);
         Assert.NotNull(status.LastRun.FinishedAt);
-
-        Assert.Equal(before, await ActiveCountsAsync());
-        Assert.Equal(revisions, await RevisionsAsync());
     }
 
     [Fact]
@@ -198,10 +222,8 @@ public sealed partial class FlertCompositionSyncJobTests(SqlServerFixture sql)
         var source = new FakeFlert(Snapshot());
         var dataSource = await ArrangeSourceAsync();
         await using var provider = BuildProvider();
-        await RunAsync(provider, source, dataSource);
-        var before = await ActiveCountsAsync();
-        var revisions = await RevisionsAsync();
 
+        // Порожня база (D-NEW: імпорт лише в неї) — FLERT недоступний, нічого не заведено.
         source.Failure = new BusinessRuleException(
             "ECR-INT-0503",
             "SQL-джерело недоступне.",
@@ -220,8 +242,7 @@ public sealed partial class FlertCompositionSyncJobTests(SqlServerFixture sql)
             Assert.Equal(FlertCompositionSyncJob.Failed, run.Status);
         }
 
-        Assert.Equal(before, await ActiveCountsAsync());
-        Assert.Equal(revisions, await RevisionsAsync());
+        Assert.Empty(await RevisionsAsync());
 
         // Дрейф схеми (зникла колонка) — теж нічого не записано.
         source.Failure = null;
@@ -233,7 +254,7 @@ public sealed partial class FlertCompositionSyncJobTests(SqlServerFixture sql)
         var refused = await RunAsync(provider, source, dataSource);
         Assert.Equal(FlertCompositionSyncJob.Failed, refused.Status);
         Assert.Equal("mappingErrors", refused.Reason);
-        Assert.Equal(revisions, await RevisionsAsync());
+        Assert.Empty(await RevisionsAsync());
     }
 
     [Fact]
@@ -400,7 +421,6 @@ public sealed partial class FlertCompositionSyncJobTests(SqlServerFixture sql)
     {
         var configuration = Substitute.For<IConfiguration>();
         configuration[Arg.Any<string>()].Returns((string?)null);
-        configuration[FlertCompositionSyncOptions.EnabledKey].Returns("true");
         configuration[FlertCompositionSyncOptions.DataSourceCodeKey].Returns(dataSource);
 
         await using var db = Context();

@@ -100,6 +100,13 @@ public static class FlertCompositionSchema
     public const string CaseLegacyCompositionId = "LEGACY_COMPOSITION_ID";
 
     /// <summary>
+    /// STREAM_CASE: значення довгих колонок-дублів FLERT (<c>Carbon_Monoxide</c>, <c>Hydrogen</c>, <c>Oxygen</c>), що
+    /// розійшлися з коротким кодом, — текстом <c>Колонка=значення; …</c>. Імпорт без втрат (D-NEW): у розрахунок іде
+    /// короткий код (людина 11.11), а розбіжне значення FLERT лишається видимим.
+    /// </summary>
+    public const string CaseFlertAliases = "FLERT_ALIASES";
+
+    /// <summary>
     /// STREAM_CASE: складу немає (Σ = 0, кейси «No composition»). Позначка для розрахунку: такий кейс — проблема
     /// (<c>MissingInputs</c>, крок F7), а не нульові викиди (людина 11.11).
     /// </summary>
