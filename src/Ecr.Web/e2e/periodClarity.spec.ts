@@ -226,11 +226,46 @@ test.describe('Pass2 (людський прохід 07.11)', () => {
     await expect(banner).toContainText('This template already has a document in this project');
     await expect(banner).toContainText(card.businessKey);
     await expect(banner).not.toContainText(/press Next|create another/);
+    // Шаблон без прапорця «один документ на проєкт» — другий документ сервер дозволяє, Next доступний.
+    await expect(dialog.getByRole('button', { name: /^Next$/ })).toBeEnabled({ timeout: 60_000 });
 
     await banner.getByRole('button', { name: `Open ${card.businessKey}` }).click();
     await expect(page).toHaveURL(new RegExp(`/documents/${String(id)}(\\?|$)`), { timeout: 60_000 });
     await expect(page.getByRole('dialog')).toHaveCount(0);
     expect(posts, 'документ не мав створюватися').toBe(0);
+  });
+
+  /*
+   * ✎ B74 (24.11): шаблон «один документ на проєкт» (B151) з документом у проєкті — Next вимкнено, причина в банері,
+   * дія — «Open <ключ>» (створення однаково дало б `409 ECR-DOC-4092`). Прапорець — власного шаблону тесту.
+   */
+  test('Pass2: single-document template with a document blocks Next and offers to open it', async ({ page }) => {
+    await signIn(page);
+    const { id, project, card } = await partlySubmittedDocument(page);
+    const templates = await ok<{ templateId: number }[]>(
+      await page.request.get(`/api/v1/projects/${String(project.id)}/templates`),
+      'GET project templates',
+    );
+    expect(templates, 'у власного проєкту тесту один шаблон').toHaveLength(1);
+    await ok(
+      await page.request.put(`/api/v1/templates/${String(templates[0]?.templateId)}/document-policy`, {
+        data: { singleDocumentPerProject: true },
+      }),
+      'PUT document-policy',
+    );
+
+    const dialog = await wizardOnProject(page, project);
+    await expect(dialog.getByRole('button', { name: /^Next$/ })).toBeEnabled({ timeout: 60_000 });
+    await dialog.getByRole('button', { name: /^Next$/ }).click();
+
+    const banner = dialog.getByTestId('create-existing-documents');
+    await expect(banner).toBeVisible({ timeout: 60_000 });
+    await expect(banner).toContainText('allows only one document per project');
+    await expect(banner).toContainText(card.businessKey);
+    await expect(dialog.getByRole('button', { name: /^Next$/ })).toBeDisabled();
+
+    await banner.getByRole('button', { name: `Open ${card.businessKey}` }).click();
+    await expect(page).toHaveURL(new RegExp(`/documents/${String(id)}(\\?|$)`), { timeout: 60_000 });
   });
 
   test('Pass2: Esc in the new document wizard asks to discard what was entered', async ({ page }) => {

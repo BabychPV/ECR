@@ -115,6 +115,9 @@ describe('Pass2 пп. 4–6: нові ключі каталогу', () => {
     'documents.createExistsOpen',
     'documents.createExistsShowAll',
     'documents.createExistsReview',
+    // ✎ B74 (24.11): шаблон «один документ на проєкт» із документом — Next вимкнено.
+    'documents.createExistsSingleText',
+    'documents.createExistsSingleHidden',
     'documents.createDiscardTitle',
     'documents.createDiscardText',
     'documents.createDiscardVerb',
