@@ -18,6 +18,7 @@ namespace Ecr.Api.Controllers;
 public sealed class MethodologyScriptMigrationController(
     ApplyScriptPackageHandler apply,
     SwitchScriptEngineHandler switchEngine,
+    FinalizeFormulasHandler finalizeFormulas,
     ParityMethodologyScriptHandler parity,
     MethodologyVersionScope scope,
     ScriptRunGate gate) : ControllerBase
@@ -63,6 +64,27 @@ public sealed class MethodologyScriptMigrationController(
     public async Task<ActionResult<SwitchScriptEngineResponse>> Switch(
         [FromBody] SwitchScriptEngineRequest request, CancellationToken ct)
         => Ok(await switchEngine.HandleAsync(request, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// ✎ P-1124-2: одноразове остаточне перенесення НЕ чинних версій (витіснених і чернеток) з формул на скрипт тим самим Id
+    /// версії. Право <c>Calculation.Publish</c>.
+    /// </summary>
+    /// <param name="request">Версії з хешем доведеного тексту й джерелом доказу, причина.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// Атомарно: будь-яка проблема (чинна версія, інший хеш, недоведена, не компілюється, інший склад) —
+    /// <c>422 finalizeRefused</c>, нічого не змінено. Перед перемиканням вміст формул пишеться в журнал
+    /// (<c>aud.PublicationEvent</c>, <c>scriptMigration.finalize</c>). Коли версій на формулах немає —
+    /// <c>409 finalizeNothingLeft</c>.
+    /// </remarks>
+    [HttpPost("script-migration/finalize")]
+    [ProducesResponseType<FinalizeFormulasResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<FinalizeFormulasResponse>> Finalize(
+        [FromBody] FinalizeFormulasRequest request, CancellationToken ct)
+        => Ok(await finalizeFormulas.HandleAsync(request, ct).ConfigureAwait(false));
 
     /// <summary>
     /// Паритет версії на документі: збережений (тіньовий) скрипт проти рушія формул на всіх таблицях документа за

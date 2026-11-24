@@ -10157,6 +10157,127 @@
           "Blank"
         ]
       },
+      "FinalizeFormulasEntryDto": {
+        "description": "Версія, яку переносять на скрипт остаточно, і доказ цього тексту.",
+        "properties": {
+          "proof": {
+            "description": "Джерело доказу: `reference` (рядки старої системи), `synthetic` (рядки гілок), `legacy` (результати\nстарої системи), `stored` (збережені `calc.CalculationResult` версії відтворено на тих самих входах), `noRules` (у версії немає правил рядків — ні формули, ні скрипт нічого не рахують),\n`unusedLibrary` (бібліотека, яку ніхто не імпортує).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "provenValues": {
+            "description": "Скільки значень порівняно з 0 розбіжностей (для `reference`/`synthetic`/`legacy` ≥ 1).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "scriptHash": {
+            "description": "SHA-256 (hex) тексту, на якому доведено паритет; має збігатися з `ScriptHash` у базі.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "text": {
+            "description": "Текст скрипта, що стане текстом версії (convert «повного життя»: чернетки, витіснені версії, тінь яких усічена межею наступної\nверсії); `null` — береться тіньовий текст із бази. Хеш цього тексту мусить дорівнювати ScriptHash\n(доведено саме його); попередня тінь іде в журнал.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "versionId": {
+            "description": "Версія (рушій `Formulas`).",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "versionId",
+          "scriptHash",
+          "proof",
+          "provenValues"
+        ],
+        "type": "object"
+      },
+      "FinalizeFormulasRequest": {
+        "description": "Запит остаточного перенесення.",
+        "properties": {
+          "entries": {
+            "description": "Версії.",
+            "items": {
+              "$ref": "#/components/schemas/FinalizeFormulasEntryDto"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "reason": {
+            "description": "Причина (у журнал).",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "reason",
+          "entries"
+        ],
+        "type": "object"
+      },
+      "FinalizeFormulasResponse": {
+        "description": "Відповідь остаточного перенесення.",
+        "properties": {
+          "finalized": {
+            "description": "Перенесені версії.",
+            "items": {
+              "$ref": "#/components/schemas/FinalizedVersionDto"
+            },
+            "type": "array"
+          },
+          "formulasVersionsLeft": {
+            "description": "Скільки версій на `Formulas` лишилось після запиту.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "finalized",
+          "formulasVersionsLeft"
+        ],
+        "type": "object"
+      },
+      "FinalizedVersionDto": {
+        "description": "Перенесена версія.",
+        "properties": {
+          "methodologyCode": {
+            "description": "Код методології.",
+            "type": "string"
+          },
+          "proof": {
+            "description": "Джерело доказу.",
+            "type": "string"
+          },
+          "version": {
+            "description": "Номер версії.",
+            "type": "string"
+          },
+          "versionId": {
+            "description": "Версія.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "versionId",
+          "methodologyCode",
+          "version",
+          "proof"
+        ],
+        "type": "object"
+      },
       "FlertSyncRunDto": {
         "description": "Один прогін синку FLERT (`itg.MaintenanceRun``flert-composition-sync`).",
         "properties": {
@@ -50982,6 +51103,118 @@
           }
         },
         "summary": "Звіряє пакет `package.json` з базою й записує тіньові тексти. Право `Calculation.Publish`.",
+        "tags": [
+          "MethodologyScriptMigration"
+        ]
+      }
+    },
+    "/api/v1/methodologies/script-migration/finalize": {
+      "post": {
+        "description": "Атомарно: будь-яка проблема (чинна версія, інший хеш, недоведена, не компілюється, інший склад) —\n`422 finalizeRefused`, нічого не змінено. Перед перемиканням вміст формул пишеться в журнал\n(`aud.PublicationEvent`, `scriptMigration.finalize`). Коли версій на формулах немає —\n`409 finalizeNothingLeft`.",
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinalizeFormulasRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinalizeFormulasRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinalizeFormulasRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinalizeFormulasResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinalizeFormulasResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinalizeFormulasResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "✎ P-1124-2: одноразове остаточне перенесення НЕ чинних версій (витіснених і чернеток) з формул на скрипт тим самим Id\nверсії. Право `Calculation.Publish`.",
         "tags": [
           "MethodologyScriptMigration"
         ]

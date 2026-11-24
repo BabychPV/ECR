@@ -35,4 +35,8 @@ public interface IScriptMigrationStore
     /// <param name="versionId">Версія (імпортер).</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<DateOnly>> GetLibraryEditionDatesAsync(int versionId, CancellationToken ct);
+
+    /// <summary>✎ P-1124-2: скільки версій методологій (будь-якого стану) ще працюють на рушії <c>Formulas</c>.</summary>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<int> CountFormulasVersionsAsync(CancellationToken ct);
 }

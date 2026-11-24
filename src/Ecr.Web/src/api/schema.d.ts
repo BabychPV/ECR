@@ -11123,6 +11123,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/methodologies/script-migration/finalize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * ✎ P-1124-2: одноразове остаточне перенесення НЕ чинних версій (витіснених і чернеток) з формул на скрипт тим самим Id
+         *     версії. Право `Calculation.Publish`.
+         * @description Атомарно: будь-яка проблема (чинна версія, інший хеш, недоведена, не компілюється, інший склад) —
+         *     `422 finalizeRefused`, нічого не змінено. Перед перемиканням вміст формул пишеться в журнал
+         *     (`aud.PublicationEvent`, `scriptMigration.finalize`). Коли версій на формулах немає —
+         *     `409 finalizeNothingLeft`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["FinalizeFormulasRequest"];
+                    "application/json": components["schemas"]["FinalizeFormulasRequest"];
+                    "text/json": components["schemas"]["FinalizeFormulasRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["FinalizeFormulasResponse"];
+                        "text/json": components["schemas"]["FinalizeFormulasResponse"];
+                        "text/plain": components["schemas"]["FinalizeFormulasResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies/script-migration/switch": {
         parameters: {
             query?: never;
@@ -36082,6 +36167,60 @@ export interface components {
          * @enum {unknown}
          */
         FillDown: "None" | "Merge" | "Blank";
+        /** @description Версія, яку переносять на скрипт остаточно, і доказ цього тексту. */
+        FinalizeFormulasEntryDto: {
+            /** @description Джерело доказу: `reference` (рядки старої системи), `synthetic` (рядки гілок), `legacy` (результати
+             *     старої системи), `stored` (збережені `calc.CalculationResult` версії відтворено на тих самих входах), `noRules` (у версії немає правил рядків — ні формули, ні скрипт нічого не рахують),
+             *     `unusedLibrary` (бібліотека, яку ніхто не імпортує). */
+            proof: null | string;
+            /**
+             * Format: int32
+             * @description Скільки значень порівняно з 0 розбіжностей (для `reference`/`synthetic`/`legacy` ≥ 1).
+             */
+            provenValues: number;
+            /** @description SHA-256 (hex) тексту, на якому доведено паритет; має збігатися з `ScriptHash` у базі. */
+            scriptHash: null | string;
+            /** @description Текст скрипта, що стане текстом версії (convert «повного життя»: чернетки, витіснені версії, тінь яких усічена межею наступної
+             *     версії); `null` — береться тіньовий текст із бази. Хеш цього тексту мусить дорівнювати ScriptHash
+             *     (доведено саме його); попередня тінь іде в журнал. */
+            text?: null | string;
+            /**
+             * Format: int32
+             * @description Версія (рушій `Formulas`).
+             */
+            versionId: number;
+        };
+        /** @description Запит остаточного перенесення. */
+        FinalizeFormulasRequest: {
+            /** @description Версії. */
+            entries: null | components["schemas"]["FinalizeFormulasEntryDto"][];
+            /** @description Причина (у журнал). */
+            reason: null | string;
+        };
+        /** @description Відповідь остаточного перенесення. */
+        FinalizeFormulasResponse: {
+            /** @description Перенесені версії. */
+            finalized: components["schemas"]["FinalizedVersionDto"][];
+            /**
+             * Format: int32
+             * @description Скільки версій на `Formulas` лишилось після запиту.
+             */
+            formulasVersionsLeft: number;
+        };
+        /** @description Перенесена версія. */
+        FinalizedVersionDto: {
+            /** @description Код методології. */
+            methodologyCode: string;
+            /** @description Джерело доказу. */
+            proof: string;
+            /** @description Номер версії. */
+            version: string;
+            /**
+             * Format: int32
+             * @description Версія.
+             */
+            versionId: number;
+        };
         /** @description Один прогін синку FLERT (`itg.MaintenanceRun``flert-composition-sync`). */
         FlertSyncRunDto: {
             /**
