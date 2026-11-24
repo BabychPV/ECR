@@ -20142,6 +20142,10 @@
             "format": "int32",
             "type": "integer"
           },
+          "singleDocumentPerProject": {
+            "description": "✎ B74 (24.11): шаблон дозволяє щонайбільше один документ у проєкті (B151); з `DocumentCount` &gt; 0 майстер\nнового документа замість Next пропонує відкрити наявний — створення однаково дало б `409 ECR-DOC-4092`.",
+            "type": "boolean"
+          },
           "templateCode": {
             "description": "Код шаблону (префікс бізнес-ключа в багатошаблонному проєкті).",
             "type": "string"
@@ -20169,7 +20173,8 @@
           "version",
           "layout",
           "isPrimary",
-          "documentCount"
+          "documentCount",
+          "singleDocumentPerProject"
         ],
         "type": "object"
       },

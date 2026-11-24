@@ -47,7 +47,12 @@ SELECT v.[Key], v.Lang, v.Val
     (N'documents.createDiscardVerb', N'ru', N'Отменить'),
     (N'documents.createDiscardVerb', N'kz', N'Тастау'),
     (N'documents.createKeepEditing', N'ru', N'Продолжить ввод'),
-    (N'documents.createKeepEditing', N'kz', N'Енгізуді жалғастыру')
+    (N'documents.createKeepEditing', N'kz', N'Енгізуді жалғастыру'),
+    -- ✎ B74 (24.11): шаблон «один документ на проєкт» (B151) із документом у проєкті — Next вимкнено, лише «Open»
+    (N'documents.createExistsSingleText', N'ru', N'{key} уже ведётся по этому шаблону в проекте, а шаблон допускает только один документ на проект: откройте его.'),
+    (N'documents.createExistsSingleText', N'kz', N'{key} осы жобада осы үлгі бойынша жүргізіліп жатыр, ал үлгі жобаға тек бір құжатқа рұқсат етеді: оны ашыңыз.'),
+    (N'documents.createExistsSingleHidden', N'ru', N'Этот шаблон допускает только один документ на проект, и в проекте он уже есть, но вам не виден. Попросите доступ у руководителя проекта.'),
+    (N'documents.createExistsSingleHidden', N'kz', N'Бұл үлгі жобаға тек бір құжатқа рұқсат етеді, жобада ол бұрыннан бар, бірақ сізге көрінбейді. Жоба жетекшісінен рұқсат сұраңыз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -79,7 +84,10 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'documents.createDiscardTitle', N'en', N'Discard what you entered?', 1),
     (N'documents.createDiscardText', N'en', N'The document has not been created. The project, sheets and name you chose will be lost.', 1),
     (N'documents.createDiscardVerb', N'en', N'Discard', 1),
-    (N'documents.createKeepEditing', N'en', N'Keep editing', 1)
+    (N'documents.createKeepEditing', N'en', N'Keep editing', 1),
+    -- ✎ B74 (24.11): шаблон «один документ на проєкт» (B151) із документом у проєкті — Next вимкнено, лише «Open»
+    (N'documents.createExistsSingleText', N'en', N'{key} is already kept for this template in this project, and the template allows only one document per project: open it.', 1),
+    (N'documents.createExistsSingleHidden', N'en', N'This template allows only one document per project, and this project already has one that you cannot see. Ask the project manager for access.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

@@ -13,6 +13,10 @@ namespace Ecr.Application.Ports;
 /// <param name="Layout">Розкладка чинної версії.</param>
 /// <param name="IsPrimary">Основний шаблон проєкту (шаблон <c>Project.TemplateVersionId</c> до P6).</param>
 /// <param name="DocumentCount">Скільки документів цього шаблону в проєкті.</param>
+/// <param name="SingleDocumentPerProject">
+/// ✎ B74 (24.11): прапорець шаблону B151 (<c>cfg.Template.SingleDocumentPerProject</c>) — у проєкті щонайбільше один
+/// документ цього шаблону; другий створення відхиляє <c>409 ECR-DOC-4092</c>.
+/// </param>
 public sealed record ProjectTemplateRow(
     int ProjectTemplateId,
     int TemplateId,
@@ -22,7 +26,8 @@ public sealed record ProjectTemplateRow(
     string Version,
     TemplateLayout Layout,
     bool IsPrimary,
-    int DocumentCount);
+    int DocumentCount,
+    bool SingleDocumentPerProject);
 
 /// <summary>Стан проєкту, прочитаний під блоком його рядка (B74 P3).</summary>
 /// <param name="Status">Стан.</param>

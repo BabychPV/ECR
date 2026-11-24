@@ -213,6 +213,14 @@ public sealed partial class ProjectTemplatesApiTests
         var client = await SignInAsync(app, s.UserName).ConfigureAwait(true);
         (await AttachAsync(client, s.A.ProjectId, s.B.TemplateVersionId).ConfigureAwait(true)).EnsureSuccessStatusCode();
 
+        // ✎ B74 (24.11): перелік шаблонів проєкту несе прапорець — майстер документа міняє Next на «Open <ключ>» лише для
+        // прапорцевого шаблону. ⛔ Мутація: `SingleDocumentPerProject` у проєкції `ProjectTemplateStore` → `false` — червоне.
+        var templates = await TemplatesAsync(app, client, s.A.ProjectId).ConfigureAwait(true);
+        Assert.True(templates.Single(t => t.GetProperty("templateId").GetInt32() == s.B.TemplateId)
+            .GetProperty("singleDocumentPerProject").GetBoolean());
+        Assert.False(templates.Single(t => t.GetProperty("templateId").GetInt32() == s.A.TemplateId)
+            .GetProperty("singleDocumentPerProject").GetBoolean());
+
         _ = await CreateDocumentAsync(app, client, s.A.ProjectId, s.B.TemplateId, s.B.SheetDefId).ConfigureAwait(true);
         var second = await PostDocumentAsync(client, s.A.ProjectId, s.B.TemplateId, s.B.SheetDefId).ConfigureAwait(true);
         await AssertErrorAsync(second, HttpStatusCode.Conflict, "ECR-DOC-4092", "err.ECR-DOC-4092.documentExistsForTemplate").ConfigureAwait(true);

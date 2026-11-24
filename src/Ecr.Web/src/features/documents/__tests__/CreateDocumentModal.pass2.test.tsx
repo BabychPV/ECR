@@ -33,8 +33,16 @@ interface ExistingDoc {
 /** Шаблони проєкту 1: код → id; `documentCount` рахується з `existing` (як `GET /projects/{id}/templates`). */
 const TEMPLATE_IDS: Record<string, number> = { 'GEN-UPSTREAM': 4, LAND: 6 };
 
-function mockServer(options: { existing: ExistingDoc[]; templates?: string[] }): void {
+function mockServer(options: {
+  existing: ExistingDoc[];
+  templates?: string[];
+  /** Шаблони з прапорцем «один документ на проєкт» (B151). */
+  single?: string[];
+  /** Документи, яких людина не бачить: рахуються в `documentCount`, але не віддаються переліком. */
+  hidden?: ExistingDoc[];
+}): void {
   const templates = options.templates ?? ['GEN-UPSTREAM'];
+  const hidden = options.hidden ?? [];
   const codeOf = (doc: ExistingDoc): string => doc.templateCode ?? 'GEN-UPSTREAM';
 
   vi.stubGlobal(
@@ -78,7 +86,8 @@ function mockServer(options: { existing: ExistingDoc[]; templates?: string[] }):
           templates.map((code, index) => ({
             projectTemplateId: index + 1, templateId: TEMPLATE_IDS[code], templateCode: code, templateNameL10n: { values: {} },
             currentTemplateVersionId: 5, version: '2.3.0', layout: 'PerMonthCopies', isPrimary: index === 0,
-            documentCount: options.existing.filter((doc) => codeOf(doc) === code).length,
+            documentCount: [...options.existing, ...hidden].filter((doc) => codeOf(doc) === code).length,
+            singleDocumentPerProject: (options.single ?? []).includes(code),
           })),
         );
       }
@@ -140,7 +149,7 @@ afterEach(() => {
 });
 
 /** Project → Template; `code` — шаблон, який обрати (без нього — єдиний шаблон, обраний сам). */
-async function toTemplateStep(code?: string): Promise<void> {
+async function toTemplateStep(code?: string, options: { expectNext?: boolean } = {}): Promise<void> {
   fireEvent.click(next());
   await screen.findByText('⟦documents.createTemplateStep⟧');
 
@@ -149,7 +158,9 @@ async function toTemplateStep(code?: string): Promise<void> {
     fireEvent.click(await screen.findByRole('option', { name: code }));
   }
 
-  await waitFor(() => expect(next().disabled).toBe(false));
+  // Склад шаблону прочитано (рядок версії) — далі Next або доступний, або свідомо вимкнений.
+  await screen.findByText(/ · v2\.3\.0$/);
+  if (options.expectNext !== false) await waitFor(() => expect(next().disabled).toBe(false));
 }
 
 const listRequests = (): string[] =>
@@ -200,6 +211,8 @@ describe('B74: документ цього шаблону в проєкті вж
     expect(banner.textContent).toContain('⟦documents.createExistsText (key=P1-V1-0008)⟧');
     // Один документ — «All documents» не потрібна.
     expect(screen.queryByRole('button', { name: '⟦documents.createExistsShowAll⟧' })).toBeNull();
+    // Шаблон без прапорця «один документ на проєкт»: другий документ сервер дозволяє — Next доступний.
+    expect(next().disabled).toBe(false);
 
     fireEvent.click(screen.getByRole('button', { name: '⟦documents.createExistsOpen (key=P1-V1-0008)⟧' }));
     await waitFor(() => expect((globalThis as { __where?: string }).__where).toBe('/documents/41'));
@@ -207,6 +220,45 @@ describe('B74: документ цього шаблону в проєкті вж
     // ⛔ Відкрити наявний — не «відкинути введене?»: питання не з'являється.
     expect(screen.queryByText('⟦documents.createDiscardTitle⟧')).toBeNull();
     expect(posted).toBe(0);
+  });
+
+  it('B74: шаблон «один документ на проєкт» із документом — Next вимкнено, причина в банері, «Open» відкриває наявний', async () => {
+    mockServer({ existing: [{ id: 41, businessKey: 'P1-V1-0008' }], single: ['GEN-UPSTREAM'] });
+    show();
+    await pickProject();
+
+    await toTemplateStep(undefined, { expectNext: false });
+    const banner = await screen.findByTestId('create-existing-documents');
+    // Причина — що шаблон дозволяє лише один документ; не «створіть ще один».
+    expect(banner.textContent).toContain('⟦documents.createExistsSingleText (key=P1-V1-0008)⟧');
+    expect(banner.textContent).not.toContain('documents.createExistsText');
+    expect(next().disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: '⟦documents.createExistsOpen (key=P1-V1-0008)⟧' }));
+    await waitFor(() => expect((globalThis as { __where?: string }).__where).toBe('/documents/41'));
+    expect(posted).toBe(0);
+  });
+
+  it('B74: шаблон «один документ на проєкт», документ людині невидимий — Next вимкнено, текст без ключа', async () => {
+    mockServer({ existing: [], hidden: [{ id: 50, businessKey: 'P1-V1-0099' }], single: ['GEN-UPSTREAM'] });
+    show();
+    await pickProject();
+
+    await toTemplateStep(undefined, { expectNext: false });
+    const banner = await screen.findByTestId('create-existing-documents');
+    expect(banner.textContent).toContain('⟦documents.createExistsSingleHidden⟧');
+    expect(document.body.textContent).not.toContain('P1-V1-0099');
+    expect(next().disabled).toBe(true);
+  });
+
+  it('B74: прапорцевий шаблон без документа в проєкті — Next доступний, банера немає', async () => {
+    mockServer({ existing: [{ id: 40, businessKey: 'LAND-P1-0001', templateCode: 'LAND' }], templates: ['LAND', 'GEN-UPSTREAM'], single: ['GEN-UPSTREAM'] });
+    show();
+    await pickProject();
+
+    await toTemplateStep('GEN-UPSTREAM');
+    expect(screen.queryByTestId('create-existing-documents')).toBeNull();
+    expect(next().disabled).toBe(false);
   });
 
   it('B74: два документи шаблону — «All documents», підсумок каже про наявний; створення вирішує сервер (B151)', async () => {

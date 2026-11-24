@@ -146,9 +146,9 @@ export function CreateDocumentModal({
    * шаблонів (D-576), тож «у проєкту вже є документ» на кроці Project був шумом — документ іншого шаблону нічого не
    * каже про новий. Попередження — лише про документ ОБРАНОГО шаблону цього проєкту: перелік питається, коли
    * `documentCount` шаблону проєкту > 0, і фільтрується кодом шаблону (`templateCode`, B109).
-   * ⚠ «Один документ на проєкт» — прапорець ШАБЛОНУ (B151, `409 ECR-DOC-4092 documentExistsForTemplate`), якого
-   * `ProjectTemplateDto` не віддає: шаблон без прапорця сервер дозволяє вдруге, тож Next не блокується — відмову
-   * прапорцевого шаблону показує банер кроку Review. Текст не запрошує «створити ще один».
+   * ⚠ «Один документ на проєкт» — прапорець ШАБЛОНУ (B151, `409 ECR-DOC-4092 documentExistsForTemplate`,
+   * `ProjectTemplateDto.singleDocumentPerProject`): прапорцевий шаблон із документом блокує Next (`singleBlocked` нижче),
+   * шаблон без прапорця сервер дозволяє вдруге — Next доступний, текст лише не запрошує «створити ще один».
    * ⚠ Ключ під `['documents', …]`: створення інвалідує його разом із переліком.
    */
   const templateCode = templateRow?.templateCode ?? null;
@@ -261,13 +261,35 @@ export function CreateDocumentModal({
     );
   };
 
-  const existingBanner =
-    firstExisting === null ? null : (
+  /*
+   * ✎ B74 (24.11): шаблон «один документ на проєкт» (B151, `singleDocumentPerProject`) з документом у цьому проєкті —
+   * Next вимкнено, а дія кроку — «Open <ключ>»: сервер другий документ однаково відхилив би `409 ECR-DOC-4092`.
+   * Рахунок — `documentCount` шаблону проєкту (рахує й невидимі людині документи, як і сервер); невидимий документ —
+   * окремий текст без ключа (номер чужого документа не розкривається, як і в деталях 4092).
+   */
+  const singleBlocked = templateRow !== null && templateRow.singleDocumentPerProject && templateRow.documentCount > 0;
+
+  const hiddenSingleBanner =
+    singleBlocked && firstExisting === null && existing.isSuccess ? (
       <Banner
         tone="warning"
         testId="create-existing-documents"
         title={t('documents.createExistsTitle')}
-        text={t('documents.createExistsText', { key: firstExisting.businessKey })}
+        text={t('documents.createExistsSingleHidden')}
+      />
+    ) : null;
+
+  const existingBanner =
+    firstExisting === null ? hiddenSingleBanner : (
+      <Banner
+        tone="warning"
+        testId="create-existing-documents"
+        title={t('documents.createExistsTitle')}
+        text={
+          singleBlocked
+            ? t('documents.createExistsSingleText', { key: firstExisting.businessKey })
+            : t('documents.createExistsText', { key: firstExisting.businessKey })
+        }
         actions={[
           {
             label: t('documents.createExistsOpen', { key: firstExisting.businessKey }),
@@ -335,7 +357,8 @@ export function CreateDocumentModal({
       id: 'template',
       label: t('documents.template'),
       hint: t('documents.createTemplateStep'),
-      canNext: () => templateId !== null && versionId !== null,
+      // ✎ B74: прапорцевий шаблон із документом — далі шляху немає, лише «Open <ключ>» у банері кроку.
+      canNext: () => templateId !== null && versionId !== null && !singleBlocked,
       render: () => (
         <Stack gap="xs">
           {templatesError !== null && (

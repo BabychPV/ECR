@@ -40149,6 +40149,9 @@ export interface components {
              * @description Рядок `doc.ProjectTemplate`.
              */
             projectTemplateId: number;
+            /** @description ✎ B74 (24.11): шаблон дозволяє щонайбільше один документ у проєкті (B151); з `DocumentCount` &gt; 0 майстер
+             *     нового документа замість Next пропонує відкрити наявний — створення однаково дало б `409 ECR-DOC-4092`. */
+            singleDocumentPerProject: boolean;
             /** @description Код шаблону (префікс бізнес-ключа в багатошаблонному проєкті). */
             templateCode: string;
             /**
