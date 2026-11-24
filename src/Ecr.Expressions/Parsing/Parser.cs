@@ -713,33 +713,7 @@ public sealed class Parser
                 position, prefix.Length + name.Length);
         }
 
-        // `@Name` у діалекті звітів — параметр звіту; `!Formula` там немає.
-        if (kind != SymbolKind.Argument)
-        {
-            ForbidInReport(s, $"{prefix}{name}", position, prefix.Length + name.Length);
-        }
-
         return new SymbolReferenceNode(kind, name) { Position = position, IsOptional = optional };
-    }
-
-    /// <summary>Відмова для посилання, якого діалект звітів не має (<c>02b</c> §8a).</summary>
-    /// <remarks>
-    /// ⚠ Код — <see cref="ExpressionErrors.Unresolved"/>, не <c>Syntax</c>: текст
-    /// розібрався, але послатися з правила звіту на це НЕМАЄ на що.
-    /// </remarks>
-    private static void ForbidInReport(State s, string construct, int position, int length)
-    {
-        if (s.Dialect != ExpressionDialect.Report)
-        {
-            return;
-        }
-
-        s.Error(
-            ExpressionErrors.Unresolved,
-            "expr.referenceForbiddenInReport", Param("construct", construct),
-            $"The reference \"{construct}\" is not allowed in the report dialect: a report rule sees only "
-            + "the columns of its own row (\"[Code]\") and the report parameters (\"@Name\").",
-            position, length);
     }
 
     private static AstNode ParseIdentifier(State s)
@@ -783,7 +757,6 @@ public sealed class Parser
                         token.Position, token.Length + 1 + name.Length);
                 }
 
-                ForbidInReport(s, $"{token.Text}.{name}", token.Position, token.Length + 1 + name.Length);
 
                 return new SymbolReferenceNode(kind.Value, name) { Position = token.Position };
             }
@@ -851,7 +824,7 @@ public sealed class Parser
     /// лексична (аргументи агрегатів, правило довідника), тож перевіряє її той,
     /// хто бачить вкладеність, — парсер.
     ///
-    /// ⚠ Розбір після діагностики ПРОДОВЖУЄТЬСЯ, як у <see cref="ForbidInReport"/>:
+    /// ⚠ Розбір після діагностики ПРОДОВЖУЄТЬСЯ:
     /// редактор підсвічує саме посилання, а не «зайвий текст» за ним.
     /// </remarks>
     private static RowFieldNode ParseRowField(State s)
@@ -872,9 +845,7 @@ public sealed class Parser
         var construct = "ROW." + string.Join('.', path);
         var length = end - token.Position;
 
-        ForbidInReport(s, construct, token.Position, length);
-
-        if (s.Dialect != ExpressionDialect.Report && s.Host != ExpressionHost.RegistryRule && s.RowScopeDepth == 0)
+        if (s.Host != ExpressionHost.RegistryRule && s.RowScopeDepth == 0)
         {
             s.Error(
                 ExpressionErrors.Unresolved,
@@ -899,9 +870,7 @@ public sealed class Parser
         var token = s.Current;
         s.Advance();
 
-        ForbidInReport(s, token.Text, token.Position, token.Length);
-
-        if (s.Dialect != ExpressionDialect.Report && s.Host != ExpressionHost.RegistryRule)
+        if (s.Host != ExpressionHost.RegistryRule)
         {
             s.Error(
                 ExpressionErrors.Unresolved,
@@ -994,7 +963,6 @@ public sealed class Parser
         => dialect switch
         {
             ExpressionDialect.Methodology => DialectCatalog.Find(name),
-            ExpressionDialect.Report => ReportFunctions.Find(name),
             _ => Functions.IsAllowed(name) ? Functions.GetSignature(name) : null,
         };
 
@@ -1107,15 +1075,6 @@ public sealed class Parser
             }
 
             break;
-        }
-
-        // ⛔ Діалект звітів знає рівно одну форму — `[Code]`, колонку СВОГО рядка.
-        // Кілька ланок — це комірка документа, `[Period…]` — інший період або
-        // календар: з ними правило звіту почало б рахувати показник (`ФВ-10.3`).
-        if (segments.Count != 1 || segments[0].Period is not null)
-        {
-            ForbidInReport(
-                s, string.Join('.', segments.Select(x => $"[{x.Text ?? "…"}]")), position, 1);
         }
 
         // `[Period].Days` — календарний контекст (02b §10).

@@ -63,7 +63,7 @@ public sealed class GetCampaignSummaryHandler(
         // ⛔ UI-33, D2 / R-8: лічильники АРКУШІВ — лише коли читач не має інструментів, що ховають аркуші
         // (явна заборона / грант None). Інакше `null`: різниця «з забороною / без» розкривала б приховане.
         // R-1: лічильники станів документів (Draft/Submitted/Approved/Rejected) — «найгірший стан серед усіх аркушів», тож
-        // рахують і приховані; для такого читача теж `null`. Кількість документів/зрізів лишається (Q15-07: право без межі проєктів).
+        // рахують і приховані; для такого читача теж `null`. Кількість документів лишається (Q15-07: право без межі проєктів).
         // R-1 (прогрес): Progress/Done/Overdue/AtRisk/InProgress залежать від «усе затверджено» по ВСІХ аркушах, тож теж `null`.
         var allSheets = SheetVisibility.SeesAllSheets(profile);
 
@@ -79,7 +79,7 @@ public sealed class GetCampaignSummaryHandler(
         {
             var zone = Zone(p.TimeZoneId);
             var progress = CampaignProgressRule.Classify(
-                CampaignProgressRule.AllApproved(p.Documents, p.Approved), p.Snapshots > 0,
+                CampaignProgressRule.AllApproved(p.Documents, p.Approved),
                 p.SubmissionDeadlineUtc, zone, now, policy.AtRiskDays);
 
             return new CampaignProjectSummary(
@@ -89,7 +89,6 @@ public sealed class GetCampaignSummaryHandler(
                 allSheets ? p.Submitted : null,
                 allSheets ? p.Approved : null,
                 allSheets ? p.Rejected : null,
-                p.Snapshots,
                 allSheets ? progress : null,
                 p.SubmissionDeadlineUtc is { } deadline ? ToSite(deadline, zone) : null,
                 allSheets ? p.Sheets : null,
@@ -102,7 +101,7 @@ public sealed class GetCampaignSummaryHandler(
         foreach (var bucket in page.Buckets)
         {
             var progress = CampaignProgressRule.Classify(
-                bucket.AllApproved, bucket.HasSnapshot, bucket.SubmissionDeadlineUtc,
+                bucket.AllApproved, bucket.SubmissionDeadlineUtc,
                 Zone(bucket.TimeZoneId), now, policy.AtRiskDays);
             progressCounts[progress] = progressCounts.GetValueOrDefault(progress) + bucket.Projects;
         }
@@ -114,7 +113,6 @@ public sealed class GetCampaignSummaryHandler(
             allSheets ? page.Buckets.Sum(b => b.Submitted) : null,
             allSheets ? page.Buckets.Sum(b => b.Approved) : null,
             allSheets ? page.Buckets.Sum(b => b.Rejected) : null,
-            page.Buckets.Sum(b => b.Snapshots),
             allSheets ? progressCounts.GetValueOrDefault(CampaignProgress.Done) : null,
             allSheets ? progressCounts.GetValueOrDefault(CampaignProgress.Overdue) : null,
             allSheets ? progressCounts.GetValueOrDefault(CampaignProgress.AtRisk) : null,

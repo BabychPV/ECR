@@ -296,6 +296,5 @@ function laggingColumns(): readonly DataTableColumn<CampaignProject>[] {
       // R-1: `null` — читач не бачить частини аркушів, число розкрило б приховане.
       render: (project) => project.rejected ?? '—',
     },
-    { key: 'snapshots', label: t('campaign.snapshots'), num: true },
   ];
 }

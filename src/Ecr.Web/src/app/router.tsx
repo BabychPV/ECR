@@ -4,6 +4,7 @@ import { createBrowserRouter, Navigate, type RouteObject } from 'react-router-do
 import { AdminLayout } from './AdminLayout';
 import { LegacyProjectRedirect, ProjectTab } from './projectRoutes';
 import { AppLayout } from './AppLayout';
+import { HomeRoute } from './HomeRoute';
 import { RouteErrorPage } from './RouteErrorPage';
 import { RouteGuard } from './RouteGuard';
 import {
@@ -285,7 +286,12 @@ export const router = createBrowserRouter([
       // ⛔ FP-1: роль без `Document.View`, але з `Report.ViewRegulatory`, стартує зі зрізів.
       {
         index: true,
-        element: guarded(routes.home.handle, <DocumentsPage />),
+        element: guarded(
+          routes.home.handle,
+          <HomeRoute>
+            <DocumentsPage />
+          </HomeRoute>,
+        ),
         handle: routes.home.handle,
       },
       {

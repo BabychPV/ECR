@@ -1,4 +1,4 @@
-﻿// src/Ecr.Domain/Enums/Enums.cs
+// src/Ecr.Domain/Enums/Enums.cs
 namespace Ecr.Domain.Enums;
 
 /// <summary>Стан версії шаблону.</summary>
@@ -117,11 +117,8 @@ public enum ExpressionDialect : byte
     /// <summary>Формули методології: NCalc-діалект, аргументи <c>@Arg</c>, константи <c>CST.</c>.</summary>
     Methodology = 1,
 
-    /// <summary>
-    /// Правила звіту (<c>D-52a</c>): колонки поточного рядка зрізу <c>[Code]</c> і параметри
-    /// звіту <c>@Name</c>. ⚠ У КІНЦІ: значення лежить байтом у <c>cfg.FormulaDef.Dialect</c>.
-    /// </summary>
-    Report = 2
+    // ✎ P-1124-3 (D-NEW): значення 2 (діалект правил звіту, D-52a) прибрано разом із конструктором звітів. Значення лежить
+    // байтом у cfg.FormulaDef.Dialect — 2 НЕ перевикористовувати.
 }
 
 /// <summary>Рівень результату валідації.</summary>

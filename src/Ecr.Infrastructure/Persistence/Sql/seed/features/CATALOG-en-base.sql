@@ -2760,7 +2760,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'campaign.projectCode',            N'en', N'Project code', 1),
     (N'campaign.projectName',            N'en', N'Project', 1),
     (N'campaign.documents',              N'en', N'Documents', 1),
-    (N'campaign.snapshots',              N'en', N'Snapshots', 1),
     -- ⛔ UI-аудит, lane 6: побудова успішно завершується майже одразу, але
     -- список не оновлювався — ці два рядки супроводжують нове стеження за
     -- задачею (`jobFollow.ts`), не саму постановку в чергу.
@@ -3324,7 +3323,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'expr.ref.reversedRange',                N'en', N'Range "{from}:{to}" is written in reverse order.', 1),
     (N'expr.ref.rangeTableUnavailable',        N'en', N'The range cannot be expanded: its table is not available.', 1),
     -- Діалект Report (`02b` §8a): правило звіту бачить лише свій рядок і параметри.
-    (N'expr.referenceForbiddenInReport',       N'en', N'The reference "{construct}" is not allowed in the report dialect: a report rule sees only the columns of its own row ("[Code]") and the report parameters ("@Name").', 1),
     -- RT-07 (FEATURE-REGISTRY-TABLES §5.5, перевірка 18): `ROW.` лише в області агрегата/правила, `THIS` — лише в правилі довідника.
     (N'expr.rowReferenceOutsideScope',         N'en', N'"{construct}" refers to a registry row and is allowed only inside a registry aggregate (REGSUM, REGAVG, REGMIN, REGMAX, REGCOUNT), REGONE or a registry rule.', 1),
     (N'expr.thisOutsideRule',                  N'en', N'"THIS" is allowed only in a registry rule, where it stands for the entry being checked.', 1),
@@ -3341,14 +3339,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'expr.predicate.nested', N'en', N'A nested predicate is not allowed.', 1),
     (N'expr.predicate.sameRowOnly', N'en', N'A predicate may reference only columns of the same row.', 1),
     (N'expr.predicate.ternary', N'en', N'The ternary operator is not allowed in a predicate.', 1),
-    (N'expr.report.resultType', N'en', N'A result of type {expected} was expected, but the expression gives {actual}.', 1),
-    (N'expr.report.ownRowColumnsOnly', N'en', N'A report rule sees only the columns of its own row: [Code].', 1),
-    (N'expr.report.columnMissing', N'en', N'The report row has no column "{column}".', 1),
-    (N'expr.report.parameterMissing', N'en', N'The report has no parameter "@{name}".', 1),
-    (N'expr.report.scope', N'en', N'A report rule sees only the columns of its own row and the report parameters.', 1),
-    (N'expr.report.unknownColumnType', N'en', N'Unknown type "{type}" of column "{name}".', 1),
-    (N'expr.report.unknownParameterType', N'en', N'Unknown type "{type}" of parameter "{name}".', 1),
-    (N'expr.report.unknownResultType', N'en', N'Unknown expected result type "{type}".', 1),
     (N'expr.type.notNeedsBoolean', N'en', N'Negation applies only to a Boolean value.', 1),
     (N'expr.type.signNeedsNumber', N'en', N'A unary sign applies only to a number.', 1),
     (N'expr.type.datesNotAdded', N'en', N'Dates cannot be added; the difference of two dates is a number of days.', 1),
