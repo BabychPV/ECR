@@ -978,7 +978,8 @@ public sealed class GetTableSliceHandler(
     /// обов'язкові входи НІКОЛИ насправді не enforced. Позначати тут колонку
     /// зірочкою за вимогою, яка ніколи не спрацює, означало б брехати
     /// операторові. Той самий предикат «застосовність», без самого зіставлення
-    /// рядка (воно тут не потрібне).
+    /// рядка (воно тут не потрібне). ✎ P-1124-1: виняток — версія-скрипт (рядки
+    /// вибирає скрипт, gate перевіряє її вимоги на кожному рядку).
     ///
     /// ⛔ Порожній набір через «немає правил» кешується так само, як
     /// непорожній, і це навмисно: це теж незмінна властивість опублікованої
@@ -988,7 +989,7 @@ public sealed class GetTableSliceHandler(
         int methodologyVersionId, int templateVersionId, CancellationToken ct)
     {
         var rules = await methodologies.GetRulesAsync(methodologyVersionId, ct).ConfigureAwait(false);
-        if (rules.Count == 0)
+        if (rules.Count == 0 && !await IsScriptVersionAsync(methodologyVersionId, ct).ConfigureAwait(false))
         {
             return new HashSet<int>();
         }
@@ -999,6 +1000,19 @@ public sealed class GetTableSliceHandler(
         // Колонки без відповідника у версії документа відкидаються: зірочки на неіснуючій колонці немає.
         return await MethodologyKeyLocalizer.LocalizeColumnIdsAsync(
             columnMapper, templateVersionId, [.. requiredInputs.Select(i => i.ColumnDefId)], ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ P-1124-1: версія-скрипт правил відбору не має (рядки вибирає скрипт) — gate
+    /// <c>PatchCellsHandler.ResolveApplicableAsync</c> перевіряє її вимоги на кожному рядку прив'язаної таблиці, тож і
+    /// зірочка в заголовку для неї чесна. Читається лише для версії без правил (рідко) і кешується разом із набором.
+    /// </summary>
+    private async Task<bool> IsScriptVersionAsync(int methodologyVersionId, CancellationToken ct)
+    {
+        var methodology = await methodologies.FindByVersionAsync(methodologyVersionId, ct).ConfigureAwait(false);
+
+        return methodology?.Versions.FirstOrDefault(v => v.Id == methodologyVersionId)?.Engine
+               == Domain.Enums.MethodologyEngine.Script;
     }
 
     /// <summary>Позначення одиниці колонки; <c>null</c> — колонка безрозмірна.</summary>

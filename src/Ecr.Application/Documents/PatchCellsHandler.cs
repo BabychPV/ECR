@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Calculations;
+using Ecr.Application.Calculations;
 using Ecr.Application.Common;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
@@ -1914,7 +1914,7 @@ public sealed partial class PatchCellsHandler(
                 var winner = applied.Rules
                     .FirstOrDefault(rule => MethodologyRuleMatcher.Matches(rule.MatchJson, matchValues));
 
-                if (winner is null)
+                if (winner is null && !applied.MatchesEveryRow)
                 {
                     // Варіант B (рішення людини 11.11): порожній обов'язковий вхід, що сам є КЛЮЧЕМ правил, — причина,
                     // чому правило не збіглося; без цієї гілки його вимога не спрацьовувала ніколи.
@@ -2111,7 +2111,14 @@ public sealed partial class PatchCellsHandler(
             .ToLookup(r => r.MethodologyVersionId);
 
         // Версія без активних правил не перевіряє нічого — вимоги для неї не питаються (як і поштучно).
-        var withRules = versionIds.Where(id => rulesByVersion[id].Any()).ToList();
+        // ✎ P-1124-1 (UI-прохід редактора скрипта, 24.11): ВЕРСІЯ-СКРИПТ правил відбору не має — рядки вибирає сам
+        // скрипт (`rows from …`), і прив'язана таблиця вся в її межах. Без цього винятку вимога, заведена у вкладці
+        // «Required columns» нової версії-скрипта, не блокувала й не попереджала НІКОЛИ (gate тихо пропускав рядок).
+        var scriptWithoutRules = chosen
+            .Where(c => c.Version.Engine == MethodologyEngine.Script && !rulesByVersion[c.Version.Id].Any())
+            .Select(c => c.Version.Id)
+            .ToHashSet();
+        var withRules = versionIds.Where(id => rulesByVersion[id].Any() || scriptWithoutRules.Contains(id)).ToList();
         if (withRules.Count == 0)
         {
             return result;
@@ -2177,19 +2184,24 @@ public sealed partial class PatchCellsHandler(
                 localized.Rules,
                 localized.RequiredInputs,
                 statusColumns,
-                activity?.ActiveEntryIdText));
+                activity?.ActiveEntryIdText,
+                MatchesEveryRow: scriptWithoutRules.Contains(version.Id)));
         }
 
         return result;
     }
 
-    /// <summary>Методологія, чия версія на дату дійсно має що перевіряти в рядку.</summary>
+    /// <summary>
+    /// Методологія, чия версія на дату дійсно має що перевіряти в рядку. <c>MatchesEveryRow</c> — версія-скрипт без
+    /// правил відбору: кожен рядок прив'язаної таблиці в її межах (рядки вибирає скрипт).
+    /// </summary>
     private sealed record ApplicableMethodology(
         string MethodologyCode,
         IReadOnlyList<LocalizedRule> Rules,
         IReadOnlyList<LocalizedRequiredInput> RequiredInputs,
         IReadOnlyList<int> StatusColumnIds,
-        string? ActiveEntryIdText);
+        string? ActiveEntryIdText,
+        bool MatchesEveryRow = false);
 
     // ⚠ Колонки предиката (раніше тут `MatchJsonColumnIds`) беруться з `MethodologyRuleMatcher.ColumnIds` над уже
     // ЛОКАЛІЗОВАНИМ `MatchJson` (C1): зламаний предикат не має жодної потрібної колонки, а не валить обробник.

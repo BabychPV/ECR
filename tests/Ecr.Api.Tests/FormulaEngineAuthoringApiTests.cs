@@ -54,6 +54,26 @@ public sealed class FormulaEngineAuthoringApiTests(SqlServerFixture sql)
         Assert.True(implicitEngine.IsSuccessStatusCode, $"{implicitEngine.StatusCode}: {body}");
         using var created = JsonDocument.Parse(body);
         Assert.Equal("Script", created.RootElement.GetProperty("engine").GetString());
+
+        // ✎ UI-прохід 24.11: свіжа чернетка зі стартової заготовки — 0 проблем у «Problems».
+        var versionId = created.RootElement.GetProperty("id").GetInt32();
+        var script = await client.GetAsync(
+            new Uri($"/api/v1/methodologies/{stand.MethodologyId}/versions/{versionId}/script", UriKind.Relative));
+        var scriptBody = await script.Content.ReadAsStringAsync();
+        Assert.True(script.IsSuccessStatusCode, $"{script.StatusCode}: {scriptBody}");
+        using var starter = JsonDocument.Parse(scriptBody);
+        Assert.Equal(0, starter.RootElement.GetProperty("diagnostics").GetArrayLength());
+
+        // Жива перевірка того самого тексту (її показує редактор) — теж 0.
+        var text = starter.RootElement.GetProperty("text").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(text));
+        var validation = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/methodologies/{stand.MethodologyId}/versions/{versionId}/script/validate", UriKind.Relative),
+            new { text });
+        var validationBody = await validation.Content.ReadAsStringAsync();
+        Assert.True(validation.IsSuccessStatusCode, $"{validation.StatusCode}: {validationBody}");
+        using var checkedStarter = JsonDocument.Parse(validationBody);
+        Assert.Equal(0, checkedStarter.RootElement.GetProperty("diagnostics").GetArrayLength());
     }
 
     [Fact]
