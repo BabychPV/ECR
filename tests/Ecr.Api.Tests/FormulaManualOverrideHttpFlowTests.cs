@@ -217,6 +217,9 @@ public sealed class FormulaManualOverrideHttpFlowTests(SqlServerFixture sql)
 
         // ── Поданий аркуш: автор — DocumentSubmitted; погоджувач поточного кроку з правом — дозволено ──
         await ExpectAsync(app, HttpStatusCode.OK, ToggleAsync(adminClient, s.VersionId, formulaId, true, false)).ConfigureAwait(true);
+
+        // ✎ Подання — після завершення власного перерахунку документа (ворота ownRecalculationPending, 422).
+        await DocumentRecalculationWait.UntilSettledAsync(app, s.Document.DocumentId, s.PeriodKey).ConfigureAwait(true);
         await ExpectAsync(app, HttpStatusCode.NoContent, authorClient.PostAsJsonAsync(
             new Uri($"/api/v1/documents/{s.Document.DocumentId}/submit", UriKind.Relative),
             new { sheetDefId = s.Document.SheetDefId, periodKey = s.PeriodKey })).ConfigureAwait(true);
@@ -302,9 +305,12 @@ public sealed class FormulaManualOverrideHttpFlowTests(SqlServerFixture sql)
         Assert.Equal(1, await MarksAsync(s).ConfigureAwait(true));
 
         // ── Подання й затвердження аркуша ──
+        // ✎ Кожне — після завершення власного перерахунку документа (ворота ownRecalculationPending, 422).
+        await DocumentRecalculationWait.UntilSettledAsync(app, s.Document.DocumentId, s.PeriodKey).ConfigureAwait(true);
         await ExpectAsync(app, HttpStatusCode.NoContent, authorClient.PostAsJsonAsync(
             new Uri($"/api/v1/documents/{s.Document.DocumentId}/submit", UriKind.Relative),
             new { sheetDefId = s.Document.SheetDefId, periodKey = s.PeriodKey })).ConfigureAwait(true);
+        await DocumentRecalculationWait.UntilSettledAsync(app, s.Document.DocumentId, s.PeriodKey).ConfigureAwait(true);
         await ExpectAsync(app, HttpStatusCode.NoContent, approverClient.PostAsJsonAsync(
             new Uri($"/api/v1/documents/{s.Document.DocumentId}/approve", UriKind.Relative),
             new { sheetDefId = s.Document.SheetDefId, periodKey = s.PeriodKey, approved = true })).ConfigureAwait(true);
