@@ -79,6 +79,8 @@ test.describe('Джерело змінено після затвердження
    * панелі жовтня не буде, тест червоний).
    */
   test('документ «рік»: на якорі видно панель жовтня з причиною «джерело змінено» і джерелом', async ({ page }) => {
+    // ⚠ Фікстура — ~35 запитів (шаблон, 13 колонок, проєкт, екземпляри 12 місяців, рядок): типових 30 с не вистачає.
+    test.setTimeout(300_000);
     const request = page.request;
     await signIn(page, Operator.user, Operator.password);
     const arranged = await arrangeYearDocument(request);
