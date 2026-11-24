@@ -421,8 +421,9 @@ public sealed class MethodologiesController(
     {
         ArgumentNullException.ThrowIfNull(request);
         await scope.RequireAsync(id, vid, SaveMethodologyRuleHandler.Permission, ct).ConfigureAwait(false);
-        await scope.RequireHandEditableAsync(vid, ct).ConfigureAwait(false);
 
+        // ✎ c11-10: заборону ручної правки версії-скрипта тримає обробник — він же пропускає єдиний виняток (вимкнення
+        // наявного правила з тим самим предикатом), якого контроллер без читання правила не розрізнив би.
         return Ok(await saveRule
             .HandleAsync(vid, code, request.MatchJson, request.Priority, request.IsActive, ct)
             .ConfigureAwait(false));

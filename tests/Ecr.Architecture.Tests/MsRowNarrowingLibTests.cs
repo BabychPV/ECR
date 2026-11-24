@@ -137,6 +137,55 @@ public sealed class MsRowNarrowingLibTests
         Assert.DoesNotContain("NO-REFUSAL", output, StringComparison.Ordinal);
     }
 
+    /// <remarks>Мутація: не звіряти набір значень (брати будь-яке активне правило) — червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Вимикаються_лише_активні_правила_з_набором_значень_знятої_умови()
+    {
+        var (exit, output) = RunPowerShell("""
+            $r = Remove-MsUnreachableRowClauses -ScriptText $text
+            $rules = @(
+                [pscustomobject]@{ code = 'OWN_0646'; matchJson = '{"1827":"0646"}'; priority = 10; isActive = $true },
+                [pscustomobject]@{ code = 'B_INV1'; matchJson = '{"1822":"INV-1","1827":"6657"}'; priority = 20; isActive = $true },
+                [pscustomobject]@{ code = 'B_INV2'; matchJson = '{"1827":"0640","1822":"INV-2"}'; priority = 30; isActive = $true },
+                [pscustomobject]@{ code = 'B_0880'; matchJson = '{"2119":"0880"}'; priority = 40; isActive = $true },
+                [pscustomobject]@{ code = 'OFF_0880'; matchJson = '{"2119":"0880"}'; priority = 50; isActive = $false },
+                [pscustomobject]@{ code = 'HALF'; matchJson = '{"1827":"6657"}'; priority = 60; isActive = $true })
+            'RETIRE=' + ((Get-MsRulesOfRemovedClauses -Rules $rules -Removed $r.Removed) -join ',')
+            """);
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("RETIRE=B_INV1,B_INV2,B_0880", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("HALF", output.Split("RETIRE=")[1], StringComparison.Ordinal);
+    }
+
+    /// <remarks>Мутація: у <c>Select-MsBorrowableRules</c> не дивитись на категорії (брати все) — червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Позичається_лише_правило_з_NAE_яке_методологія_відносить_до_категорії()
+    {
+        var (exit, output) = RunPowerShell("""
+            $facts = Get-MsScriptCategoryFacts -ScriptText $text
+            $rules = @(
+                [pscustomobject]@{ Methodology = 'M_A'; Table = 'AF_9_04'; Conditions = [ordered]@{ InventoryNumberOfEquipment = 'INV-2'; Land_NAE = '0640' } },
+                [pscustomobject]@{ Methodology = 'M_B'; Table = 'AF_9_07'; Conditions = [ordered]@{ Land_NAE = '0889' } },
+                [pscustomobject]@{ Methodology = 'M_C'; Table = 'AF_9_04'; Conditions = [ordered]@{ Land_NAE = '0647 (001-002)' } },
+                [pscustomobject]@{ Methodology = 'M_D'; Table = 'AF_9_02'; Conditions = [ordered]@{ Status = '1' } })
+            $s = Select-MsBorrowableRules -Rules $rules -Facts $facts
+            'KEPT=' + (($s.Kept | ForEach-Object { $_.Methodology }) -join ',')
+            'REJECTED=' + (($s.Rejected | ForEach-Object { $_.Methodology }) -join ',')
+            $f = Get-MsFormulaCategoryFacts -Expression "if(in(@Land_NAE,'0884','0886'),'0884',@Land_NAE)" -Categories @('0884')
+            'FORMULA=' + (((Select-MsBorrowableRules -Rules $rules -Facts $f).Rejected | ForEach-Object { $_.Methodology }) -join ',')
+            'NOFACTS=' + ((Select-MsBorrowableRules -Rules $rules -Facts $null).Kept.Count)
+            """);
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("KEPT=M_B,M_C,M_D", output, StringComparison.Ordinal);
+        Assert.Contains("REJECTED=M_A", output, StringComparison.Ordinal);
+        Assert.Contains("FORMULA=M_A,M_B,M_C", output, StringComparison.Ordinal);
+        Assert.Contains("NOFACTS=4", output, StringComparison.Ordinal);
+    }
+
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Невідома_форма_виразу_категорії_зупиняє_а_не_вгадує()

@@ -10,6 +10,8 @@
       3. позичене правило в цільовій базі — правило чинної версії тієї іншої методології з тим самим набором значень (MatchJson), тож
          Id колонок і записів довідників уже правильні; його MatchJson додається M новим правилом.
     Рядок, для якого правила не знайдено ні серед власних, ні серед чужих, — у звіті як «без правила» (питання методологу).
+    ✎ c11-10: 4. позичається лише правило, чий NAE M може віднести до категорії (Select-MsBorrowableRules, MsRowNarrowing.Lib.ps1);
+    решта — у unmapped («NAE outside … categories»). Запис результату старої системи без значень ще не означає, що M рахує рядок.
     Значення (НАЕ, інвентарні номери) пишуться лише в -Out (тека фази поза репозиторієм), не в журнал.
 .PARAMETER Methodology  Методології для аналізу (за замовчуванням ECW_C11_10).
 #>
@@ -40,6 +42,7 @@ function Read-Rows([string]$cs, [string]$sql, [hashtable]$params = @{}) {
 }
 
 . (Join-Path $PSScriptRoot 'MsPhase.Lib.ps1')
+. (Join-Path $PSScriptRoot 'MsRowNarrowing.Lib.ps1')
 
 $ruleRows = Read-Rows $refCs "SELECT MInfo_Name AS M, RuleArg_TableLandFromDB AS T, ISNULL(RuleArg_Parameters, '') AS P, ISNULL(RuleArg_Values, '') AS V FROM dbo.AF_EmissionCalculationWork_Rules WITH (NOLOCK) WHERE RInfo_IsAvailable = 1"
 $rules = @($ruleRows | ForEach-Object { ConvertTo-MsLegacyRule -Methodology ([string]$_['M']) -Table ([string]$_['T']) -Parameters ([string]$_['P']) -Values ([string]$_['V']) })
@@ -105,7 +108,21 @@ foreach ($m in $Methodology) {
         $n++
         $mapped.Add([ordered]@{ code = ('R_{0}_E{1:00}' -f ($m -replace '^ECW_', ''), $n); matchJson = ($json | ConvertTo-Json -Compress); priority = $ownMax + 10 * $n; fromMethodology = $m; rows = 0 })
     }
-    foreach ($b in $borrowed.Values) {
+    # ✎ c11-10: позичається лише правило, чиї рядки M може віднести до категорії. Інакше нова версія M відбирає рядки, які її ж
+    # правило категорії відкидає (W15z: 28 правил ECW_C11_10 -> CategoryRuleRejected на live doc 96, жодного значення).
+    $vid = [int]$cur[0]['Id']
+    $engineRows = Read-Rows $tgtCs 'SELECT v.Engine, v.ScriptText, r.Expression FROM calc.MethodologyVersion v LEFT JOIN calc.CategoryRule r ON r.MethodologyVersionId = v.Id WHERE v.Id = @v' @{ '@v' = $vid }
+    $catRows = Read-Rows $tgtCs 'SELECT Code FROM calc.MethodologyCategory WHERE MethodologyVersionId = @v AND IsRetired = 0' @{ '@v' = $vid }
+    $facts = $null
+    if ([int]$engineRows[0]['Engine'] -eq 1) {
+        $text = [string]$engineRows[0]['ScriptText']
+        if ($text -match '(?m)^var Category = ') { $facts = Get-MsScriptCategoryFacts -ScriptText $text }
+    } else {
+        $facts = Get-MsFormulaCategoryFacts -Expression ([string]$engineRows[0]['Expression']) -Categories @($catRows | ForEach-Object { [string]$_['Code'] })
+    }
+    $selection = Select-MsBorrowableRules -Rules @($borrowed.Values | ForEach-Object { $_.Rule }) -Facts $facts
+    foreach ($x in $selection.Rejected) { $unmapped.Add("$($x.Methodology) $($x.Table): NAE outside $m categories (c11-10, rule not borrowed)") }
+    foreach ($b in @($borrowed.Values | Where-Object { $selection.Kept -contains $_.Rule })) {
         $src = Read-Rows $tgtCs "SELECT r.MatchJson FROM calc.MethodologyRule r JOIN calc.MethodologyVersion v ON v.Id = r.MethodologyVersionId JOIN calc.Methodology mm ON mm.Id = v.MethodologyId WHERE mm.Code = @x AND v.Status = 1 AND v.EffectiveFrom = (SELECT MAX(x.EffectiveFrom) FROM calc.MethodologyVersion x WHERE x.MethodologyId = v.MethodologyId AND x.Status = 1)" @{ '@x' = $b.Rule.Methodology }
         $want = @($b.Rule.Conditions.Values | ForEach-Object { [string]$_ } | Sort-Object)
         if ($liveSets -contains (@($want) -join [char]1)) { continue }
