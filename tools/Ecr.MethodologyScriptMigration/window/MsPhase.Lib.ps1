@@ -1,13 +1,16 @@
 ﻿# tools/Ecr.MethodologyScriptMigration/window/MsPhase.Lib.ps1
 # ✎ D-571 (P-1123-4): чиста логіка фази вікна W15z (без бази й API) — щоб її перевіряли тести Architecture.
 #
-#   $MsPermanentExclusions   - методології, які НЕ переносяться ніколи (вода: рахується формулами таблиці, рішення людини 23.11);
+#   $MsPermanentExclusions   - методології, які НЕ переносяться ніколи — ✎ P-1124-2: ПОРОЖНЬО (див. нижче);
 #   Get-MsUnitsStillNeeded   - які накладки land-script-units.json ще потрібні, коли шаблон Land / константи вже несуть одиниці й міст;
-#   Get-MsSwitchPlan         - групи перемикання за джерелом доказу (live / еталон ECR / золотий набір) і що лишається на Formulas.
+#   Get-MsSwitchPlan         - групи перемикання за джерелом доказу (live / еталон ECR / золотий набір) і що лишається на Formulas;
+#   Get-MsFinalizePlan       - ✎ P-1124-2: запит остаточного перенесення НЕ чинних формульних версій (доказ кожної) і що заблоковано.
 
-# Вода ECW_C09_02_01: «Вода має прості формули тому ми їх рахуємо в таблиці і все» (людина 23.11, P-1123-4) — методологію не
-# переносять і не перемикають; колонки T7b_00 рахує формула шаблону (C·V/1e6, B26 7b).
-$script:MsPermanentExclusions = @('ECW_C09_02_01')
+# ✎ P-1124-2 (людина 24.11: «перенести систему на нове представлення без втрат … лише наш новий редактор скриптів»; вода «має бути
+# вирішена, а не виключена»): постійних винятків більше немає. Вода ECW_C09_02_01 переходить на скрипт так само, як решта: доказ —
+# паритет на 25 рядках старої системи (CalcResult_Emissions_Water_Land, 25/25), одиниці точні (мг/л · м3 = г; / 1e6 = т).
+# Колишній виняток (P-1123-4, 23.11) спирався на те, що в T7b_00 Land 1.0.19.0 не було входів Concentration/Volume.
+$script:MsPermanentExclusions = @()
 
 function Get-MsUnitsStillNeeded {
     <#
@@ -107,6 +110,49 @@ function Get-MsSwitchPlan {
         Live = @($groups.live.ToArray()); Reference = @($groups.reference.ToArray()); Synthetic = @($groups.synthetic.ToArray()); Golden = @($groups.golden.ToArray())
         Already = @($already.ToArray()); Stay = @($stay.ToArray())
     }
+}
+
+function Get-MsFinalizePlan {
+    <#
+    .SYNOPSIS
+        ✎ P-1124-2: тіло запиту script-migration/finalize для формульних версій, що НЕ чинні, і перелік заблокованих (з причиною).
+    .PARAMETER Candidates
+        Формульні версії: @{ VersionId; Code; Version; Current ($true — за неї нічого новішого не опубліковано); IsLibrary; RuleCount;
+        Importers (скільки версій імпортують бібліотеку); TextHash (хеш тексту, що піде у finalize: тінь у базі або текст convert);
+        Text ($null — тінь у базі; інакше текст для версії без тіні) }.
+    .PARAMETER Proofs
+        Паритет на рядках: @{ <versionId> = @{ Source ('reference'|'synthetic'|'legacy'); Values; Mismatches; Hash } } (для версії —
+        найсильніший доказ; розбіжність у будь-якому — тут Mismatches > 0).
+    .DESCRIPTION
+        Ворота плану (finalize повторює їх на сервері): чинна — не тут (звичайне перемикання); розбіжність — блок; доказ мусить бути
+        САМЕ цього тексту (Hash = TextHash) і мати ≥ 1 значення; без значень — лише «без правил» (RuleCount = 0, не бібліотека) або
+        «бібліотека без імпортерів». Будь-що інше — блок, і версія лишається на формулах (фаза зупиняється).
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Candidates,
+        [hashtable]$Proofs = @{},
+        [string]$Reason = 'P-1124-2: final transfer of formula versions to ECR Script (parity proven per version)'
+    )
+    $entries = New-Object System.Collections.Generic.List[object]
+    $blocked = New-Object System.Collections.Generic.List[object]
+    foreach ($c in $Candidates) {
+        $id = [int]$c.VersionId
+        $p = $Proofs[$id]
+        $why = $null; $proof = $null; $values = 0
+        if ($c.Current) { $why = 'current version: normal switch with all gates (not finalize)' }
+        elseif ($p -and [int]$p.Mismatches -gt 0) { $why = 'parity mismatch' }
+        elseif ($p -and [int]$p.Values -gt 0 -and [string]$p.Hash -ne [string]$c.TextHash) { $why = 'proven text differs from the text to finalize (hash)' }
+        elseif ($p -and [int]$p.Values -gt 0) { $proof = [string]$p.Source; $values = [int]$p.Values }
+        elseif ($c.IsLibrary -and [int]$c.Importers -eq 0) { $proof = 'unusedLibrary' }
+        elseif (-not $c.IsLibrary -and [int]$c.RuleCount -eq 0) { $proof = 'noRules' }
+        else { $why = 'not proven: no compared value' }
+        if (-not $c.TextHash) { $why = 'no script text (convert failed)' }
+        if ($why) { $blocked.Add([pscustomobject]@{ VersionId = $id; Code = [string]$c.Code; Version = [string]$c.Version; Reason = $why }); continue }
+        $e = [ordered]@{ versionId = $id; scriptHash = [string]$c.TextHash; proof = $proof; provenValues = $values }
+        if ($c.Text) { $e.text = [string]$c.Text }
+        $entries.Add([pscustomobject]$e)
+    }
+    return [pscustomobject]@{ Request = [pscustomobject]@{ reason = $Reason; entries = @($entries.ToArray()) }; Blocked = @($blocked.ToArray()) }
 }
 
 function ConvertTo-MsLegacyRule {

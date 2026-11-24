@@ -77,6 +77,8 @@ public static class CopyHandlerCommands
             await error.WriteLineAsync(
                 command == "apply"
                     ? "apply потребує: --connection, --in <package.json>, --as-user <id> [--dry-run] [--out <result.json>]"
+                    : command == "finalize"
+                    ? "finalize потребує: --connection, --in <finalize-request.json>, --as-user <id> [--out <result.json>]"
                     : "switch потребує: --connection, --in <eligible.json>, --engine Script|Formulas, --reason <текст>, --as-user <id> [--out <result.json>]")
                 .ConfigureAwait(false);
             return MigrationCli.UsageOrEnvironment;
@@ -120,6 +122,18 @@ public static class CopyHandlerCommands
 
                 result = response;
                 code = response.Refused > 0 ? MigrationCli.Failures : MigrationCli.Ok;
+            }
+            else if (command == "finalize")
+            {
+                // ✎ P-1124-2: той самий обробник, що й POST script-migration/finalize; вхід — тіло запиту (reason + entries).
+                var request = JsonSerializer.Deserialize<FinalizeFormulasRequest>(json, Web)
+                              ?? throw new InvalidOperationException("Порожній запит finalize.");
+                var response = await scope.ServiceProvider.GetRequiredService<FinalizeFormulasHandler>()
+                    .HandleAsync(request, ct).ConfigureAwait(false);
+                await output.WriteLineAsync(
+                    $"finalize: перенесено {response.Finalized.Count}, на формулах лишилось {response.FormulasVersionsLeft}").ConfigureAwait(false);
+                result = response;
+                code = MigrationCli.Ok;
             }
             else
             {

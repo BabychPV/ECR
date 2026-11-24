@@ -10,8 +10,9 @@ namespace Ecr.Architecture.Tests;
 /// одиниць/мосту ще потрібні, коли шаблон Land 1.0.20.0 уже їх несе, і хто перемикається на Script за яким доказом. СИНТЕТИЧНІ дані.
 /// </summary>
 /// <remarks>
-/// Мутаційні докази (лише цей клас): прибрати <c>ECW_C09_02_01</c> з <c>$MsPermanentExclusions</c> — червоніє
-/// <c>Вода_не_перемикається_навіть_із_доказом</c>; у <c>Get-MsSwitchPlan</c> не звіряти хеш live — червоніє
+/// Мутаційні докази (лише цей клас): ✎ P-1124-2 повернути <c>ECW_C09_02_01</c> у <c>$MsPermanentExclusions</c> — червоніє
+/// <c>Вода_з_доказом_перемикається_як_будь_яка_інша_постійних_винятків_немає</c>; у <c>Get-MsFinalizePlan</c> не звіряти хеш доказу
+/// чи пустити чинну версію — червоніє <c>План_finalize_бере_лише_не_чинні_й_доведені_саме_цього_тексту</c>; у <c>Get-MsSwitchPlan</c> не звіряти хеш live — червоніє
 /// <c>Змінений_після_паритету_текст_не_перемикається</c>; у <c>Get-MsUnitsStillNeeded</c> вважати аргумент виконаним без звірки
 /// одиниці — червоніє <c>Одиниця_аргументу_пропускається_лише_коли_шаблон_має_саме_її</c>.
 /// </remarks>
@@ -129,7 +130,7 @@ public sealed class MsPhaseLibTests
         var (exit, output) = RunPowerShell(Candidates);
 
         Assert.True(exit == 0, output);
-        Assert.Matches(@"LIVE=1\s", output);
+        Assert.Matches(@"LIVE=1,5\s", output);
         Assert.Contains("REF=2", output, StringComparison.Ordinal);
         Assert.Contains("GOLD=3", output, StringComparison.Ordinal);
         Assert.Matches(@"SYN=11\s", output);
@@ -142,12 +143,50 @@ public sealed class MsPhaseLibTests
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
-    public void Вода_не_перемикається_навіть_із_доказом()
+    public void Вода_з_доказом_перемикається_як_будь_яка_інша_постійних_винятків_немає()
     {
-        var (exit, output) = RunPowerShell(Candidates);
+        // ✎ P-1124-2 (людина 24.11: воду «вирішити, а не виключити»): виняток P-1123-4 знято.
+        var (exit, output) = RunPowerShell(Candidates + "\n'EXCL=' + $MsPermanentExclusions.Count");
 
         Assert.True(exit == 0, output);
-        Assert.Contains("STAY 5 permanent exclusion", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("STAY 5", output, StringComparison.Ordinal);
+        Assert.Contains("EXCL=0", output, StringComparison.Ordinal);
+    }
+
+    private const string FinalizeCandidates = """
+        $c = @(
+            @{ VersionId = 1; Code = 'M_OLD'; Version = 'V1'; Current = $false; IsLibrary = $false; RuleCount = 3; Importers = 0; TextHash = 'h1'; Text = $null },
+            @{ VersionId = 2; Code = 'M_CUR'; Version = 'V2'; Current = $true; IsLibrary = $false; RuleCount = 3; Importers = 0; TextHash = 'h2'; Text = $null },
+            @{ VersionId = 3; Code = 'M_BAD'; Version = 'V1'; Current = $false; IsLibrary = $false; RuleCount = 3; Importers = 0; TextHash = 'h3'; Text = $null },
+            @{ VersionId = 4; Code = 'M_CHG'; Version = 'V1'; Current = $false; IsLibrary = $false; RuleCount = 3; Importers = 0; TextHash = 'NEW'; Text = $null },
+            @{ VersionId = 5; Code = 'M_NONE'; Version = 'V1'; Current = $false; IsLibrary = $false; RuleCount = 3; Importers = 0; TextHash = 'h5'; Text = $null },
+            @{ VersionId = 6; Code = 'M_NORULES'; Version = 'V1'; Current = $false; IsLibrary = $false; RuleCount = 0; Importers = 0; TextHash = 'h6'; Text = 'rows' },
+            @{ VersionId = 7; Code = 'LIB'; Version = 'V1'; Current = $false; IsLibrary = $true; RuleCount = 0; Importers = 0; TextHash = 'h7'; Text = 'lib' },
+            @{ VersionId = 8; Code = 'LIB_USED'; Version = 'V1'; Current = $false; IsLibrary = $true; RuleCount = 0; Importers = 2; TextHash = 'h8'; Text = $null },
+            @{ VersionId = 9; Code = 'M_NOTEXT'; Version = 'V1'; Current = $false; IsLibrary = $false; RuleCount = 0; Importers = 0; TextHash = $null; Text = $null })
+        $pr = @{ 1 = @{ Source = 'reference'; Values = 12; Mismatches = 0; Hash = 'h1' }; 3 = @{ Source = 'reference'; Values = 4; Mismatches = 1; Hash = 'h3' };
+                 4 = @{ Source = 'synthetic'; Values = 9; Mismatches = 0; Hash = 'old' }; 5 = @{ Source = 'reference'; Values = 0; Mismatches = 0; Hash = 'h5' } }
+        $plan = Get-MsFinalizePlan -Candidates $c -Proofs $pr
+        foreach ($e in $plan.Request.entries) { 'GO ' + $e.versionId + ' ' + $e.proof + ' ' + $e.provenValues + ' text=' + [bool]$e.PSObject.Properties['text'] }
+        foreach ($b in $plan.Blocked) { 'BLOCK ' + $b.VersionId + ' ' + $b.Reason }
+        """;
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void План_finalize_бере_лише_не_чинні_й_доведені_саме_цього_тексту()
+    {
+        var (exit, output) = RunPowerShell(FinalizeCandidates);
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("GO 1 reference 12 text=False", output, StringComparison.Ordinal);
+        Assert.Contains("BLOCK 2 current version", output, StringComparison.Ordinal);
+        Assert.Contains("BLOCK 3 parity mismatch", output, StringComparison.Ordinal);
+        Assert.Contains("BLOCK 4 proven text differs", output, StringComparison.Ordinal);
+        Assert.Contains("BLOCK 5 not proven", output, StringComparison.Ordinal);
+        Assert.Contains("GO 6 noRules 0 text=True", output, StringComparison.Ordinal);
+        Assert.Contains("GO 7 unusedLibrary 0 text=True", output, StringComparison.Ordinal);
+        Assert.Contains("BLOCK 8 not proven", output, StringComparison.Ordinal);
+        Assert.Contains("BLOCK 9 no script text", output, StringComparison.Ordinal);
     }
 
     [Fact]
