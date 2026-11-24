@@ -100,12 +100,10 @@ public sealed class ContractIntegrityTests
     /// операції в <c>PatchPresentationHandler</c>. Саме так цей список і має
     /// коротшати — не правкою «щоб зелене», а виконаною вимогою.
     ///
-    /// ⚠ ✎ P-1124-3 (D-NEW): <c>ECR-RPT-0404</c> і <c>ECR-RPT-0422</c> кидали лише обробники конструктора звітів і
-    /// побудови зрізів, прибрані повністю; коди лишаються в каталозі до окремого слова людини про таблиці зрізів
-    /// (тоді — разом із рядками §7 <c>02-contracts.md</c>).
+    /// ✎ P-1124-3 (D-NEW, людина 24.11): коди <c>ECR-RPT-*</c> прибрано з каталогу разом із конструктором звітів і зрізами.
     /// </remarks>
     private static readonly string[] ReservedCodes =
-        ["ECR-CELL-4222", "ECR-RPT-0404", "ECR-RPT-0422"];
+        ["ECR-CELL-4222"];
 
     /// <summary>Шлях каталогу констант відносно кореня репозиторію.</summary>
     private const string CatalogFile = "src/Ecr.Domain/Errors/ErrorCodes.cs";

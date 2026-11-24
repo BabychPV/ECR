@@ -50,8 +50,7 @@ internal sealed record NightlyInputProbe(
 ///   (<c>TemplateVersionId = 0</c>) — лише типи <see cref="GlobalStructureEntityTypes"/> (огляд M2(a): прив'язки, пакети,
 ///   довідники; маршрути погодження, звіти, дозволи, інтеграція — ні). Записи періодів (під версією проєкту) не потрібні — їх
 ///   перехід ловить гілка станів періодів нижче (і B74 не дає читати <c>Project.TemplateVersionId</c>). Крім власних записів перерахунку —
-///   <c>SheetRecalc</c> (журнал пропущених/перерахованих аркушів) і <c>ReportSnapshot</c> (зріз застарів; після P-1124-3 —
-///   лише історичні записи), — і блокувань рядків
+///   <c>SheetRecalc</c> (журнал пропущених/перерахованих аркушів), — і блокувань рядків
 ///   (<c>RowLock</c>: не вхід розрахунку): інакше нічний прогін сам собі давав би «зміну» щоночі;</item>
 ///   <item>перехід стану періоду проєкту (<c>doc.Period.StateChangedAt</c>, зокрема Reopen) і виняток «місяць відкрито для
 ///   документа» (відкрито чи закрито);</item>
@@ -76,15 +75,13 @@ internal sealed record NightlyInputProbe(
 internal static class NightlyInputChangeQuery
 {
     /// <summary>Типи записів журналу структури ВЕРСІЙ ДОКУМЕНТА, які пише сам перерахунок чи які не є входом розрахунку.</summary>
-    /// <summary>Тип записів журналу «зріз звітності застарів» до P-1124-3 (історія; нових записів немає).</summary>
-    internal const string LegacyReportSnapshotEntityType = "ReportSnapshot";
-
+    /// <remarks>
+    /// ✎ P-1124-3 (D-NEW, людина 24.11 «можеш прибрати, якщо не потрібні»): тип <c>ReportSnapshot</c> («зріз застарів»,
+    /// ФВ-10.5) прибрано з переліку разом із таблицями зрізів: записів цього типу на live 0 (перевірено 24.11), нових ніхто не пише.
+    /// </remarks>
     internal static readonly string[] IgnoredStructureEntityTypes =
     [
         RecalculationSkips.AuditEntityType,
-        // ✎ P-1124-3: записи «зріз застарів» (ФВ-10.5) більше не пишуться — зрізи звітності прибрано (D-NEW); тип лишається
-        // в переліку для історичних записів журналу (і три параметри запиту нижче).
-        LegacyReportSnapshotEntityType,
         Ecr.Application.Documents.RowLocks.RowLockRules.AuditEntityType,
     ];
 
@@ -94,8 +91,7 @@ internal static class NightlyInputChangeQuery
     /// ієрархія, зовнішні ключі синку).
     /// </summary>
     /// <remarks>
-    /// Поза переліком — свідомо, бо до розрахунку не доходять: маршрути погодження (<c>wf.ApprovalRoute</c>), версії звітів
-    /// (<c>ReportVersion</c>), адміністрування дозволів (<c>cfg.PermitTypeDef</c>, <c>cfg.PermitGroup</c> — значення дозволів
+    /// Поза переліком — свідомо, бо до розрахунку не доходять: маршрути погодження (<c>wf.ApprovalRoute</c>), адміністрування дозволів (<c>cfg.PermitTypeDef</c>, <c>cfg.PermitGroup</c> — значення дозволів
     /// доходять у комірки записом <c>Permit</c>, гілка правок), налаштування інтеграції й політика реєстру джерел (збір пише
     /// комірки — гілка правок), політика періодів проєкту (переходи станів — гілка періодів), чернетки опису довідника
     /// (<c>cfg.RegistryDefinitionDraft</c>, до публікації не діють), видалення рядка синком подій (<c>ext.SourceEventLink</c> —
@@ -151,8 +147,7 @@ internal static class NightlyInputChangeQuery
 
         // ⚠ Переліки рядків — окремими параметрами, а не OPENJSON: значення OPENJSON мають колацію бази, і порівняння з
         // колонкою іншої колації дало б 468 замість відповіді.
-        var (ignored0, ignored1, ignored2) =
-            (IgnoredStructureEntityTypes[0], IgnoredStructureEntityTypes[1], IgnoredStructureEntityTypes[2]);
+        var (ignored0, ignored1) = (IgnoredStructureEntityTypes[0], IgnoredStructureEntityTypes[1]);
         var (global0, global1, global2, global3, global4) = (
             GlobalStructureEntityTypes[0], GlobalStructureEntityTypes[1], GlobalStructureEntityTypes[2],
             GlobalStructureEntityTypes[3], GlobalStructureEntityTypes[4]);
@@ -186,7 +181,7 @@ internal static class NightlyInputChangeQuery
                                   AND ((sc.TemplateVersionId = 0
                                         AND sc.EntityType IN ({global0}, {global1}, {global2}, {global3}, {global4}))
                                        OR (sc.TemplateVersionId IN (SELECT CAST([value] AS int) FROM OPENJSON({versions}))
-                                           AND sc.EntityType NOT IN ({ignored0}, {ignored1}, {ignored2}))))
+                                           AND sc.EntityType NOT IN ({ignored0}, {ignored1}))))
                     THEN 5
                   WHEN EXISTS (SELECT 1 FROM doc.Period AS pp
                                 WHERE pp.ProjectId = {probe.ProjectId} AND pp.StateChangedAt >= {since})

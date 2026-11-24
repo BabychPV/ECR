@@ -74,7 +74,6 @@ public sealed class ProjectStore(EcrDbContext db) : IProjectStore
                         p.TemplateVersionId AS TemplateVersionId,
                         (SELECT COUNT(*) FROM doc.Document d WHERE d.ProjectId = p.Id) AS DocumentCount,
                         (SELECT COUNT(*) FROM calc.CalculationRun r WHERE r.ProjectId = p.Id)
-                      + (SELECT COUNT(*) FROM rpt.ReportSnapshot s WHERE s.ProjectId = p.Id)
                       + (SELECT COUNT(*) FROM itg.ArchiveRun a WHERE a.ProjectId = p.Id)
                       + (SELECT COUNT(*) FROM calc.RecalculationApproval ra WHERE ra.ProjectId = p.Id) AS HistoryCount
                    FROM doc.Project p

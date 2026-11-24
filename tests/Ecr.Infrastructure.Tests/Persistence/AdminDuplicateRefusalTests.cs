@@ -1,7 +1,6 @@
 using Ecr.Application.Errors;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
-using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
@@ -111,28 +110,6 @@ public sealed class AdminDuplicateRefusalTests(SqlServerFixture sql)
             new RegistryDefinitionDraft(registryId, 1, "{}", "B158d", userId, Now)));
 
         AssertConcurrent(thrown);
-    }
-
-    [Fact]
-    [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Finding", "B158d")]
-    public async Task d6_Дубль_номера_версії_звіту_дає_version_а_не_сирий_виняток_бази()
-    {
-        int reportDefId;
-        await using (var db = Context())
-        {
-            var report = new ReportDef(EcrCode.Create(NewCode("RV")), Name("B158d"), isRegulatory: false);
-            db.ReportDefs.Add(report);
-            await db.SaveChangesAsync();
-            reportDefId = report.Id;
-        }
-
-        var thrown = await LoseRaceAsync<BusinessRuleException>(
-            db => db.ReportVersions.Add(new ReportVersion(reportDefId, "2.0", "[]", "{}", Now)));
-
-        Assert.Equal("ECR-RPT-4091", thrown.ErrorCode);
-        Assert.Equal("err.ECR-RPT-4091.version", thrown.Details!["messageKey"]);
-        Assert.Equal("2.0", thrown.Details["version"]);
     }
 
     [Fact]

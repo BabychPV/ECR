@@ -1,6 +1,5 @@
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Documents;
-using Ecr.Domain.Entities.Reporting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
@@ -58,7 +57,6 @@ public static class UtcDateTimeColumns
             (typeof(DocumentHeaderValue), nameof(DocumentHeaderValue.ValueDate)),
             (typeof(DocumentIndexValue), nameof(DocumentIndexValue.ValueDate)),
             (typeof(RegistryValue), nameof(RegistryValue.ValueDate)),
-            (typeof(ReportRow), nameof(ReportRow.ValueDate)),
         };
 
     /// <summary>Єдиний екземпляр конвертера: він без стану.</summary>

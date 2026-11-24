@@ -8,12 +8,11 @@ namespace Ecr.Architecture.Tests;
 /// Числа статусів у <c>05-rpt-views.sql</c> відповідають енумам, з яких їх читає код.
 /// </summary>
 /// <remarks>
-/// ⛔ Є ДВІ нумерації, і числа в них означають різне: <see cref="DocumentStatus"/>
-/// (<c>wf.ApprovalState.Status</c>, колонка <c>Status</c>/<c>_Status</c> у сирих вʼюхах:
-/// 1 = Submitted, 2 = Approved) і <see cref="SnapshotStatus"/>
-/// (<c>rpt.ReportSnapshot.Status</c>, фільтр вʼюхи зрізу: 1 = Approved, 2 = Submitted).
-/// Звіт регулятора, що взяв число з «не того» енума, мовчки віддав би чернетку
-/// чи відхилене. Зміна нумерації будь-якого енума ламає цей тест, доки SQL не збігся.
+/// ⛔ Нумерація <see cref="DocumentStatus"/> (<c>wf.ApprovalState.Status</c>, колонка <c>Status</c>/<c>_Status</c> у
+/// сирих вʼюхах: 1 = Submitted, 2 = Approved). Звіт регулятора, що взяв не те число, мовчки віддав би чернетку чи
+/// відхилене. Зміна нумерації енума ламає цей тест, доки SQL не збігся.
+/// ✎ P-1124-3 (D-NEW): друга нумерація (<c>SnapshotStatus</c>, вʼюха зрізу <c>rpt.v_WaterReport_v1</c>) прибрана разом
+/// зі зрізами звітності.
 /// </remarks>
 public sealed class StatusNumberingTests
 {
@@ -30,24 +29,6 @@ public sealed class StatusNumberingTests
         Assert.Equal(
             [(0, "Draft"), (1, "Submitted"), (2, "Approved"), (3, "Rejected")],
             Enum.GetValues<DocumentStatus>().OrderBy(v => (byte)v).Select(v => ((int)(byte)v, v.ToString())).ToArray());
-        Assert.Equal(
-            [(0, "Draft"), (1, "Approved"), (2, "Submitted")],
-            Enum.GetValues<SnapshotStatus>().OrderBy(v => (byte)v).Select(v => ((int)(byte)v, v.ToString())).ToArray());
-    }
-
-    /// <remarks>
-    /// Мутація: змінити в SQL <c>IN (1, 2)</c> на <c>IN (0, 1)</c> або переставити
-    /// значення енума — тест червоніє.
-    /// </remarks>
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage1)]
-    [Trait(TestCategories.Category, TestCategories.Architecture)]
-    public void Вʼюха_зрізу_бере_Approved_і_Submitted_за_нумерацією_SnapshotStatus()
-    {
-        var expected = $"s.Status IN ({(byte)SnapshotStatus.Approved}, {(byte)SnapshotStatus.Submitted});   -- Approved, Submitted";
-        Assert.Contains(expected, Sql(), StringComparison.Ordinal);
-        Assert.Contains(
-            "0 Draft, 1 Approved, 2 Submitted", Sql(), StringComparison.Ordinal);
     }
 
     [Fact]

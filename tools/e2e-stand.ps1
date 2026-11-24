@@ -659,7 +659,7 @@ try {
             'Calculation.RecalculateApprovedDependents',
             'Security.ManageUsers', 'Security.ManageRoles', 'Security.ViewAudit',
             'Security.Simulate',
-            'Report.ViewRegulatory', 'Report.BuildSnapshot', 'Report.ViewCampaign',
+            'Report.ViewRegulatory', 'Report.ViewCampaign',
             # ✎ Q-2 (06.11): `Integration.EditSchedule` — частота синку подій PI (`piEventFrequencyLive.spec`): без нього
             # перелік розкладів `403`, а поля частоти на «Events from PI» немає.
             'Integration.View', 'Integration.Manage', 'Integration.EditSchedule', 'System.ViewHealth', 'System.ManageLocalization',

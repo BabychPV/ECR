@@ -45,6 +45,10 @@ DELETE FROM sec.Permission     WHERE Code           = N'Template.Migrate';
 -- наслідок подання аркуша, ручна позначка дала б позначити поданим неподане.
 DELETE FROM sec.RolePermission WHERE PermissionCode IN (N'Calculation.EditScript', N'Report.MarkSubmitted');
 DELETE FROM sec.Permission     WHERE Code           IN (N'Calculation.EditScript', N'Report.MarkSubmitted');
+-- ✎ P-1124-3 (D-NEW, людина 24.11 «можеш прибрати, якщо не потрібні»): права зрізів звітності й конструктора звітів.
+-- Те саме робить міграція P1124RemoveReportSnapshots; тут — на випадок бази, де їх повернули руками після оновлення.
+DELETE FROM sec.RolePermission WHERE PermissionCode IN (N'Report.BuildSnapshot', N'Report.ViewSnapshot', N'Report.Export', N'Report.EditDefinition');
+DELETE FROM sec.Permission     WHERE Code           IN (N'Report.BuildSnapshot', N'Report.ViewSnapshot', N'Report.Export', N'Report.EditDefinition');
 GO
 
 -- Функціональні права
@@ -63,29 +67,11 @@ USING (VALUES
   (N'Calculation.EditConstant', N'Calculation', 0), (N'Calculation.EditRule',     N'Calculation', 0),
   (N'Calculation.Publish',      N'Calculation', 1),
   (N'Calculation.Recalculate',  N'Calculation', 0), (N'Calculation.ManageRequiredInputs', N'Calculation', 0),
-  (N'Report.ViewRegulatory',    N'Report',      0), (N'Report.BuildSnapshot', N'Report',      0),
-  (N'Report.Export',            N'Report',      0),
-  -- SEC: рішення людини 2026-09-29 — вміст регуляторного зрізу (рядки й книга)
-  -- за окремим проєктним правом; роль «Переглядач звітів» — секція `SEC:RPT`
-  -- нижче. Рядок стоїть ТУТ, а не в секції: цей MERGE — єдиний каталог прав,
-  -- його читають сторожі (`UncheckedPermissionTests`, `EndpointCoverageTests`),
-  -- і він виконується ДО шаблонних роздач, тож `Approver` (`Report.%`) і
-  -- `SystemAdministrator` (`%`) отримують право тим самим MERGE і на наявній базі.
-  (N'Report.ViewSnapshot',      N'Report',      0),
-  -- ⚠ НЕБЕЗПЕЧНЕ (1) навмисно, і не через ризик втратити дані. Причина в
-  -- фільтрі нижче: `Approver` має шаблон `Report.%`, виданий тоді, коли всі
-  -- права цієї родини були «дивитися, будувати, подавати, вивантажувати».
-  -- `Report.EditDefinition` — інша річ: це авторство ДЕРЖАВНОЇ ФОРМИ
-  -- (`ФВ-10.4`), і мовчки роздати його кожному погоджувачу лише тому, що воно
-  -- починається на `Report.`, означало б змінити повноваження людей правкою
-  -- одного рядка каталогу. Адміністратор видає його свідомо, і в журналі
-  -- безпеки видно, хто це зробив (`DangerousPermissionsGranted`).
-  -- ✎ 2026-09-28: рішення людини на Q-153 — Approver отримує право явно
-  -- (окремий MERGE після ролі первинного налаштування, `D-203`); для решти
-  -- ролей воно й далі видається свідомо. Позначку (1) НЕ знімати: саме вона
-  -- тримає право поза шаблонами `Report.%` і `%` інших ролей.
-  (N'Report.EditDefinition',    N'Report',      1),
-  -- ⚠ НЕБЕЗПЕЧНЕ (1) з тієї самої причини, що й рядок вище, і це — механізм,
+  (N'Report.ViewRegulatory',    N'Report',      0),
+  -- ✎ P-1124-3 (D-NEW, людина 24.11): `Report.BuildSnapshot`, `Report.ViewSnapshot`, `Report.Export` і
+  -- `Report.EditDefinition` прибрано разом зі зрізами й конструктором звітів (рядки й роздачі на наявній базі видаляє
+  -- міграція P1124RemoveReportSnapshots). Звіти будує SSRS із сирого шару `rpt.*`.
+  -- ⚠ НЕБЕЗПЕЧНЕ (1) навмисно, і це — механізм,
   -- яким виконано рішення людини на `Q15-07`: «окреме право, ВИДАЄТЬСЯ ЯВНО».
   -- Шаблон `Report.%` складеної ролі `Approver` бере лише `IsDangerous = 0`,
   -- тож огляд кампанії не приїде разом із рештою родини. Право відкриває коди
@@ -564,8 +550,7 @@ GO
 -- а фільтр не забудеш (ФВ-6.12, D-40). Такі права адміністратор додає
 -- окремою свідомою дією, і в аудиті видно, хто це зробив.
 -- ✎ 2026-09-28: поіменні винятки живуть ОКРЕМИМИ MERGE нижче (роль
--- первинного налаштування; `Approver` × `Report.EditDefinition`, Q-153 /
--- D-203) — фільтр цього блоку вони не послаблюють.
+-- первинного налаштування) — фільтр цього блоку вони не послаблюють.
 --
 -- ⛔ U1-04: усі MERGE прав вбудованих ролей беруть роль лише з `IsBuiltIn = 1`. Власна роль, яку адміністратор
 -- створив із кодом вбудованої (`ReportViewer` до появи сіду, `Viewer` тощо), раніше отримувала її права на
@@ -608,7 +593,6 @@ USING (
         (N'DataEntry', N'Document.Export'),
         (N'DataEntry', N'Registry.View'),
         (N'DataEntry', N'Calculation.View'),
-        (N'DataEntry', N'Report.Export'),
 
         -- Погоджувач: усе, що вміє DataEntry, плюс відповідальність за подане.
         (N'Approver', N'Document.View'),
@@ -623,7 +607,6 @@ USING (
         (N'Viewer', N'Registry.View'),
         (N'Viewer', N'Calculation.View'),
         (N'Viewer', N'Report.ViewRegulatory'),
-        (N'Viewer', N'Report.Export'),
 
         -- Аудитор: бачить усе і не змінює нічого.
         (N'Auditor', N'Document.View'),
@@ -644,7 +627,7 @@ WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.Permis
 GO
 
 -- PERMITS: permissions ── роздача ролям ──
--- Поіменно й окремим MERGE (як `Approver` × `Report.EditDefinition`), щоб блок вище не міняти: обидві вбудовані ролі
+-- Поіменно й окремим MERGE, щоб блок вище не міняти: обидві вбудовані ролі
 -- керують типами дозволів. Права не небезпечні, тож `SystemAdministrator` отримав би їх і шаблоном `%`; явна пара
 -- тримає роздачу незалежною від того, чи каталог прав був заповнений до першого MERGE ролей.
 MERGE sec.RolePermission AS t
@@ -683,43 +666,12 @@ ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
 GO
 
--- ── Погоджувач: авторство описів державних звітів (Q-153, D-203) ────────
--- ✎ 2026-09-28, рішення людини: «Чи може погоджувач (Approver) редагувати
--- описи державних звітів (Report.EditDefinition) — ТАК».
---
--- ⛔ Окремим MERGE і поіменно, а НЕ зняттям `IsDangerous` з права і НЕ
--- рядком у переліку вище: фільтр `IsDangerous = 0` там лишається цілим, тож
--- шаблони `Report.%` і `%` інших ролей небезпечного права як не роздавали,
--- так і не роздають. Видано рівно одній ролі рівно одне право.
---
--- ⚠ MERGE … WHEN NOT MATCHED додає відсутню пару і на ВЖЕ розгорнутій базі:
--- `SeedRunner` виконує seed на кожному старті, тож наявний погоджувач
--- отримає право після оновлення без окремого скрипта.
-MERGE sec.RolePermission AS t
-USING (
-    SELECT r.Id AS RoleId, p.Code AS PermissionCode
-    FROM sec.Role AS r
-    JOIN sec.Permission AS p ON p.Code = N'Report.EditDefinition'
-    WHERE r.Code = N'Approver' AND r.IsBuiltIn = 1 -- U1-04
-) AS s
-ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
-WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
-GO
-
 -- SEC:RPT ── Переглядач звітів (рішення людини 2026-09-29) ─────────────────
--- ✎ Питання: «Регуляторний звіт і далі бачать усі з доступом до проєкту?» —
--- відповідь: «ні, додай роль». Вміст зрізу (`GET …/snapshots/{id}/rows`,
--- `…/export.xlsx`) вимагає `Report.ViewSnapshot` у проєкті зрізу плюс грант
--- Read на проєкт. `Viewer` і `DataEntry` цього права НЕ отримують:
--- перелік зрізів і перевірка суми їм лишаються (`Report.ViewRegulatory`),
--- вміст — ні. ✎ `Auditor` — отримує (окремий MERGE нижче, рішення людини
--- 2026-09-29, 15:29). `Approver` і `SystemAdministrator` отримують право шаблонами
--- `Report.%` / `%` вище (право безпечне, рядок каталогу — у MERGE прав).
---
--- ⚠ Роль — лише те, без чого зріз не переглянути: сторінка зрізів і перелік
--- (`Report.ViewRegulatory`), вміст (`Report.ViewSnapshot`) і книга
--- (`Report.Export`). Проєкти ролі задає адміністратор грантом Read і, за
--- потреби, областю призначення — роль без гранта не бачить нічого.
+-- ✎ P-1124-3 (D-NEW, людина 24.11 «можеш прибрати, якщо не потрібні»): зрізи звітності, їхній вміст і книга
+-- прибрані разом із правами `Report.ViewSnapshot`/`Report.Export`/`Report.BuildSnapshot`/`Report.EditDefinition`
+-- (міграція P1124RemoveReportSnapshots видаляє їх і їхні роздачі на наявній базі). Роль `ReportViewer` ЛИШАЄТЬСЯ:
+-- на live її мають 2 користувачі (перевірено read-only 24.11). Її право — `Report.ViewRegulatory`: головна показує
+-- пояснення «звіти — у SSRS» (`HomeRoute.tsx`) замість відмови переліку документів.
 --
 -- ⚠ MERGE … WHEN NOT MATCHED: наявна база отримує роль і її права на
 -- наступному старті (`SeedRunner`), і правку адміністратора не перезаписує.
@@ -733,7 +685,7 @@ GO
 MERGE sec.RolePermission AS t
 USING (
     SELECT r.Id AS RoleId, p.Code AS PermissionCode
-    FROM (VALUES (N'Report.ViewRegulatory'), (N'Report.ViewSnapshot'), (N'Report.Export')) AS m (Code)
+    FROM (VALUES (N'Report.ViewRegulatory')) AS m (Code)
     JOIN sec.Permission AS p ON p.Code = m.Code AND p.IsDangerous = 0
     CROSS JOIN sec.Role AS r
     WHERE r.Code = N'ReportViewer' AND r.IsBuiltIn = 1 -- U1-04
@@ -742,22 +694,6 @@ ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
 GO
 
--- ✎ Рішення людини 2026-09-29, 15:29: «Чи бачить «Аудитор» вміст регуляторних
--- зрізів за замовчуванням — так». Лише вміст (`Report.ViewSnapshot`):
--- `Report.Export` аудитору не додається, книга лишається за ним закритою.
--- ⚠ MERGE … WHEN NOT MATCHED: наявна база отримує пару на наступному старті;
--- якщо адміністратор право в аудитора зняв — повторний seed його поверне
--- (так само, як і решту вбудованих пар).
-MERGE sec.RolePermission AS t
-USING (
-    SELECT r.Id AS RoleId, p.Code AS PermissionCode
-    FROM sec.Role AS r
-    JOIN sec.Permission AS p ON p.Code = N'Report.ViewSnapshot' AND p.IsDangerous = 0
-    WHERE r.Code = N'Auditor' AND r.IsBuiltIn = 1 -- U1-04
-) AS s
-ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
-WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
-GO
 -- SEC:RPT ── кінець секції ───────────────────────────────────────────────────
 
 -- SEC:SUBMIT ── DataEntry подає свої форми (D-285, рішення людини 2026-10-05) ─
@@ -1693,7 +1629,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-CALC-0422.constantNoUnit', N'ru', N'Числовой константе нужна единица измерения: без неё проверка размерности невозможна.'),
     (N'err.ECR-CALC-0422.constantSubstanceNotFound', N'ru', N'Константа «{constantCode}»: вещество (запись справочника) {substanceEntryId} не существует.'),
     (N'err.ECR-CALC-0422.simulatePeriodInvalid', N'ru', N'Ключ периода {periodKey} не является месяцем: ожидается YYYYMM, например 202609.'),
-    (N'err.ECR-RPT-4091.code', N'ru', N'Отчёт с кодом «{code}» уже описан.'),
     (N'err.ECR-AUTH-0401.anonymousWrite', N'ru', N'Анонимный запрос не может изменять данные: войдите снова.'),
     (N'err.ECR-ROW-0409.fixedRowMode', N'ru', N'У таблицы «{tableCode}» RowMode = {rowMode}: её строки берутся из шаблона, поэтому произвольный ключ не принимается.'),
     (N'err.ECR-ROW-0409.dynamicRowLimit', N'ru', N'Создание новых строк ({adding}) превысит ограничение динамических строк таблицы «{tableCode}»: {existing} существующих + {adding} новых > {max}.'),
@@ -2078,9 +2013,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-AUTH-0401.securityStampStale', N'ru', N'Ваш сеанс больше недействителен: ваши права изменились. Войдите снова.'),
     (N'err.ECR-REG-0422.selfParent', N'ru', N'Запись {entryId} не может быть собственным родителем.'),
     (N'err.ECR-INT-0422.materializationRequiresAggregation', N'ru', N'Сопоставление поля «{sourceField}» указывает строку «{targetRowKey}», но не задаёт, как сворачивать точки периода: система не знает, является ли значение мгновенным или накопленным.'),
-    (N'err.ECR-RPT-0409.versionNotDraft', N'ru', N'Версия отчёта {version} — {status}: публиковать нечего.'),
-    (N'err.ECR-RPT-0409.snapshotSubmittedContent', N'ru', N'Срез {snapshotId} подан: его содержимое не перестраивается, нужен новый срез.'),
-    (N'err.ECR-RPT-0409.snapshotSubmittedStatus', N'ru', N'Срез {snapshotId} подан: его статус не меняется, нужен новый срез.'),
     (N'err.ECR-USR-0422.receivesAlertsRequiresEmail', N'ru', N'У пользователя «{userName}» нет адреса электронной почты: включать оповещения некуда.'),
     (N'err.ECR-PRD-4224.countOutOfRange', N'ru', N'Количество периодов {count} вне диапазона 1..{max}.'),
     (N'err.ECR-PRD-4224.countNotDivisor', N'ru', N'Количество периодов {count} не делит год без остатка: 12 должно делиться на него, иначе часть года осталась бы без периода.'),
@@ -2160,10 +2092,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-INT-0503', N'ru', N'Источник данных недоступен'),
     (N'err.ECR-JOB-0404', N'ru', N'Фоновая задача не найдена'),
     (N'err.ECR-JOB-0409', N'ru', N'Конфликт состояний'),
-    (N'err.ECR-RPT-0404', N'ru', N'Отчёт не найден'),
-    (N'err.ECR-RPT-0409', N'ru', N'Уже опубликован: нужна новая версия'),
-    (N'err.ECR-RPT-4091', N'ru', N'Код отчёта уже занят'),
-    (N'err.ECR-RPT-0422', N'ru', N'Некорректное описание отчёта'),
     (N'err.ECR-SYS-0500', N'ru', N'Внутренняя ошибка'),
     (N'err.ECR-SYS-0503', N'ru', N'Система выполняет архивацию'),
     (N'err.ECR-SYS-5031', N'ru', N'База данных или сервер несовместимы с этой сборкой'),
@@ -4272,9 +4200,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permission.Calculation.Recalculate', N'ru', N'Запуск пересчёта'),
     (N'permission.Calculation.ManageRequiredInputs', N'ru', N'Управление обязательными входными столбцами'),
     (N'permission.Report.ViewRegulatory', N'ru', N'Просмотр регламентированных отчётов'),
-    (N'permission.Report.BuildSnapshot', N'ru', N'Формирование среза отчёта'),
-    (N'permission.Report.Export', N'ru', N'Экспорт отчётов'),
-    (N'permission.Report.EditDefinition', N'ru', N'Разработка описаний регламентированных отчётов'),
     (N'permission.Report.ViewCampaign', N'ru', N'Просмотр сводки кампании по всем проектам'),
     (N'permission.Integration.View', N'ru', N'Просмотр источников сбора данных'),
     (N'permission.Integration.Manage', N'ru', N'Управление источниками сбора данных и их секретами'),
@@ -4522,7 +4447,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-HDR-4223.entryNotValidInWindow', N'ru', N'Запись, выбранная для поля шапки «{headerFieldCode}», недействительна ни в один день периода документа ({windowFrom} — {windowTo}).'),
     (N'err.ECR-REQ-0429.tooManyPasswordChanges', N'ru', N'Слишком много попыток смены пароля. Повторите попытку через минуту.'),
     (N'err.ECR-SUB-4221.hiddenIssues', N'ru', N'Есть замечания вне вашей области видимости — подача заблокирована. Обратитесь к владельцу проекта.'),
-    (N'permission.Report.ViewSnapshot', N'ru', N'Просмотр содержимого срезов регламентированных отчётов'),
     (N'grants.projectsCatalogHint', N'ru', N'Все проекты перечислены по коду и названию. Доступ открывает проект для роли, но не показывает вам его данные. Листы, таблицы и столбцы выбираются в той версии шаблона, к которой они относятся.'),
     (N'grants.conflict', N'ru', N'Кто-то другой сохранил доступы этой роли после того, как вы их открыли. Ваши изменения не потеряны; сохранение сейчас заменит чужую версию. Отмените свои изменения, чтобы увидеть текущее сохранённое состояние.'),
     (N'err.ECR-REQ-0422.roleGrantsIfMatch', N'ru', N'Для этого запроса нужен заголовок If-Match с ETag прочитанных вами доступов роли.'),
@@ -4650,7 +4574,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-CALC-0422.constantNoUnit', N'kz', N'Сандық константаға өлшем бірлігі қажет: онсыз өлшемділікті тексеру мүмкін емес.'),
     (N'err.ECR-CALC-0422.constantSubstanceNotFound', N'kz', N'«{constantCode}» константасы: {substanceEntryId} заты (анықтамалық жазбасы) жоқ.'),
     (N'err.ECR-CALC-0422.simulatePeriodInvalid', N'kz', N'{periodKey} кезең кілті ай емес: YYYYMM күтіледі, мысалы 202609.'),
-    (N'err.ECR-RPT-4091.code', N'kz', N'«{code}» коды бар есеп бұрыннан сипатталған.'),
     (N'err.ECR-AUTH-0401.anonymousWrite', N'kz', N'Анонимді сұрау деректерді өзгерте алмайды: қайта кіріңіз.'),
     (N'err.ECR-ROW-0409.fixedRowMode', N'kz', N'«{tableCode}» кестесінде RowMode = {rowMode}: оның жолдары үлгіден алынады, сондықтан еркін кілт қабылданбайды.'),
     (N'err.ECR-ROW-0409.dynamicRowLimit', N'kz', N'{adding} жол құру «{tableCode}» кестесінің динамикалық жолдар шегінен асып кетеді: {existing} бар + {adding} жаңа > {max}.'),
@@ -5035,9 +4958,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-AUTH-0401.securityStampStale', N'kz', N'Сеансыңыз енді жарамсыз: құқықтарыңыз өзгерді. Қайта кіріңіз.'),
     (N'err.ECR-REG-0422.selfParent', N'kz', N'{entryId} жазбасы өзінің аталық жазбасы бола алмайды.'),
     (N'err.ECR-INT-0422.materializationRequiresAggregation', N'kz', N'«{sourceField}» өрісінің сәйкестендіруі «{targetRowKey}» жолын көрсетеді, бірақ кезең нүктелерін қалай біріктіру керектігін айтпайды: жүйе мәннің лездік пе, әлде жинақталған ба екенін білмейді.'),
-    (N'err.ECR-RPT-0409.versionNotDraft', N'kz', N'Есептің {version} нұсқасы — {status}: жариялайтын ештеңе жоқ.'),
-    (N'err.ECR-RPT-0409.snapshotSubmittedContent', N'kz', N'{snapshotId} кесіндісі тапсырылған: оның мазмұны қайта құрылмайды, жаңа кесінді қажет.'),
-    (N'err.ECR-RPT-0409.snapshotSubmittedStatus', N'kz', N'{snapshotId} кесіндісі тапсырылған: оның күйі өзгермейді, жаңа кесінді қажет.'),
     (N'err.ECR-USR-0422.receivesAlertsRequiresEmail', N'kz', N'«{userName}» пайдаланушысының электрондық поштасы жоқ: хабарландыруларды қосатын жер жоқ.'),
     (N'err.ECR-PRD-4224.countOutOfRange', N'kz', N'Кезеңдер саны {count} 1..{max} ауқымынан тыс.'),
     (N'err.ECR-PRD-4224.countNotDivisor', N'kz', N'Кезеңдер саны {count} жылды тең бөлмейді: 12 оған қалдықсыз бөлінуі керек, әйтпесе жылдың бір бөлігі кезеңсіз қалар еді.'),
@@ -5117,10 +5037,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-INT-0503', N'kz', N'Деректер көзі қолжетімсіз'),
     (N'err.ECR-JOB-0404', N'kz', N'Фондық тапсырма табылмады'),
     (N'err.ECR-JOB-0409', N'kz', N'Күйлер қайшылығы'),
-    (N'err.ECR-RPT-0404', N'kz', N'Есеп табылмады'),
-    (N'err.ECR-RPT-0409', N'kz', N'Жарияланып қойған: жаңа нұсқа қажет'),
-    (N'err.ECR-RPT-4091', N'kz', N'Есеп коды бос емес'),
-    (N'err.ECR-RPT-0422', N'kz', N'Есеп сипаттамасы жарамсыз'),
     (N'err.ECR-SYS-0500', N'kz', N'Ішкі қате'),
     (N'err.ECR-SYS-0503', N'kz', N'Жүйе мұрағаттау жүргізуде'),
     (N'err.ECR-SYS-5031', N'kz', N'Дерекқор немесе сервер осы жинақпен үйлесімсіз'),
@@ -7220,9 +7136,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permission.Calculation.Recalculate', N'kz', N'Қайта есептеуді іске қосу'),
     (N'permission.Calculation.ManageRequiredInputs', N'kz', N'Міндетті кіріс бағандарын басқару'),
     (N'permission.Report.ViewRegulatory', N'kz', N'Реттелетін есептерді қарау'),
-    (N'permission.Report.BuildSnapshot', N'kz', N'Есеп кесіндісін қалыптастыру'),
-    (N'permission.Report.Export', N'kz', N'Есептерді экспорттау'),
-    (N'permission.Report.EditDefinition', N'kz', N'Реттелетін есептердің сипаттамаларын әзірлеу'),
     (N'permission.Report.ViewCampaign', N'kz', N'Барлық жобалар бойынша науқан шолуын қарау'),
     (N'permission.Integration.View', N'kz', N'Деректерді жинау көздерін қарау'),
     (N'permission.Integration.Manage', N'kz', N'Деректерді жинау көздерін және олардың құпияларын басқару'),
@@ -7470,7 +7383,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-HDR-4223.entryNotValidInWindow', N'kz', N'«{headerFieldCode}» тақырып өрісі үшін таңдалған жазба құжат кезеңінің бірде-бір күнінде жарамды емес ({windowFrom} — {windowTo}).'),
     (N'err.ECR-REQ-0429.tooManyPasswordChanges', N'kz', N'Құпиясөзді өзгерту әрекеттері тым көп. Бір минуттан кейін қайталаңыз.'),
     (N'err.ECR-SUB-4221.hiddenIssues', N'kz', N'Сіздің көру аймағыңыздан тыс ескертпелер бар — тапсыру бұғатталған. Жоба иесіне хабарласыңыз.'),
-    (N'permission.Report.ViewSnapshot', N'kz', N'Реттелетін есептер кесінділерінің мазмұнын қарау'),
     (N'grants.projectsCatalogHint', N'kz', N'Барлық жобалар коды мен атауы бойынша тізімделген. Қолжетімділік жобаны рөл үшін ашады, бірақ оның деректерін Сізге көрсетпейді. Парақтар, кестелер мен бағандар өздері тиесілі үлгі нұсқасында таңдалады.'),
     (N'grants.conflict', N'kz', N'Сіз ашқаннан кейін басқа біреу осы рөлдің қолжетімділіктерін сақтады. Сіздің өзгерістеріңіз жоғалған жоқ; қазір сақтау оның нұсқасын ауыстырады. Қазір не сақталғанын көру үшін өзгерістеріңізді тастаңыз.'),
     (N'err.ECR-REQ-0422.roleGrantsIfMatch', N'kz', N'Бұл сұрауға Сіз оқыған рөл қолжетімділіктерінің ETag мәні бар If-Match тақырыбы қажет.'),

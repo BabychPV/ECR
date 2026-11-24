@@ -47,7 +47,6 @@ public sealed class NumericColumnScaleTests(SqlServerFixture sql)
     {
         { "doc.CellValue", "ValueNumeric", "decimal(34,16)" },
         { "doc.DocumentIndexValue", "ValueNumeric", "decimal(34,16)" },
-        { "rpt.ReportRow", "ValueNumeric", "decimal(34,16)" },
         { "ext.RawDataPoint", "ValueNumeric", "decimal(34,16)" },
         { "dic.RegistryValue", "ValueNumeric", "decimal(34,16)" },
         { "calc.CalculationResult", "Value", "decimal(34,16)" },

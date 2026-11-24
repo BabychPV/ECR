@@ -63,7 +63,6 @@ public static class D148ScalePrecheck
         ("calc", "MethodologyConstant", "Value"),
         ("calc", "CalculationStep", "Value"),
         ("calc", "CalculationInput", "Value"),
-        ("rpt", "ReportRow", "ValueNumeric"),
         ("dic", "RegistryValue", "ValueNumeric"),
         ("ext", "RawDataPoint", "ValueNumeric"),
         ("doc", "DocumentIndexValue", "ValueNumeric"),

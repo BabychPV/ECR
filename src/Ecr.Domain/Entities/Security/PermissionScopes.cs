@@ -51,7 +51,6 @@ public static class PermissionScopes
         "Calculation.ManageRequiredInputs",
         "Calculation.ManageSourceBinding", // B80 N1: зв'язки документа-джерела — системне налаштування
         "Calculation.RecalculateApprovedDependents", // B80 N5 (D-554): явний перерахунок і ЗАТВЕРДЖЕНИХ залежних — лише адміністратор
-        "Report.EditDefinition",
         "Report.ViewCampaign",
     };
 

@@ -613,14 +613,6 @@ public enum TraceLevel : byte
     Full = 2
 }
 
-/// <summary>Статус зрізу звітності (D-65).</summary>
-public enum SnapshotStatus : byte
-{
-    Draft = 0,
-    Approved = 1,
-    Submitted = 2
-}
-
 /// <summary>Транспорт до зовнішнього джерела (ФВ-11.2).</summary>
 /// <remarks>
 /// ⚠ Не всі значення ведуть у PI, і це головне, що тут варто знати.
