@@ -80,7 +80,7 @@ public sealed class ApproverEditHttpFlowTests(SqlServerFixture sql)
 
         // Draft: автор пише й подає.
         await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(author, s, rowKey, column, 10m, null)).ConfigureAwait(true);
-        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(author, s, "submit")).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(app, author, s, "submit")).ConfigureAwait(true);
         Assert.Equal(DocumentStatus.Submitted, await StatusAsync(s).ConfigureAwait(true));
         Assert.Single(await SnapshotsAsync(s).ConfigureAwait(true));
 
@@ -108,7 +108,7 @@ public sealed class ApproverEditHttpFlowTests(SqlServerFixture sql)
             await LastChangeAsync(s).ConfigureAwait(true));
 
         // Крок 1 погоджено: новий зріз містить правку погоджувача; черга (і право правити) — у другого.
-        await ExpectAsync(app, HttpStatusCode.NoContent, ApproveAsync(firstClient, s)).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, ApproveAsync(app, firstClient, s)).ConfigureAwait(true);
         Assert.Equal(DocumentStatus.Submitted, await StatusAsync(s).ConfigureAwait(true));
         var afterStep = await SnapshotsAsync(s).ConfigureAwait(true);
         Assert.Equal(2, afterStep.Count);
@@ -129,7 +129,7 @@ public sealed class ApproverEditHttpFlowTests(SqlServerFixture sql)
             await LastChangeAsync(s).ConfigureAwait(true));
 
         // Остаточне затвердження: зріз — з правкою другого; далі не править ніхто.
-        await ExpectAsync(app, HttpStatusCode.NoContent, ApproveAsync(secondClient, s)).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, ApproveAsync(app, secondClient, s)).ConfigureAwait(true);
         Assert.Equal(DocumentStatus.Approved, await StatusAsync(s).ConfigureAwait(true));
         var afterApprove = await SnapshotsAsync(s).ConfigureAwait(true);
         Assert.Equal(3, afterApprove.Count);
@@ -162,10 +162,10 @@ public sealed class ApproverEditHttpFlowTests(SqlServerFixture sql)
         var rowKey = $"AN{Guid.NewGuid():N}"[..12];
 
         await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(author, s, rowKey, column, 7m, null)).ConfigureAwait(true);
-        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(author, s, "submit")).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(app, author, s, "submit")).ConfigureAwait(true);
         var submitted = await SnapshotsAsync(s).ConfigureAwait(true);
 
-        await ExpectAsync(app, HttpStatusCode.NoContent, ApproveAsync(approverClient, s)).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, ApproveAsync(app, approverClient, s)).ConfigureAwait(true);
 
         Assert.Equal(DocumentStatus.Approved, await StatusAsync(s).ConfigureAwait(true));
         Assert.Equal(submitted, await SnapshotsAsync(s).ConfigureAwait(true));
@@ -217,7 +217,7 @@ public sealed class ApproverEditHttpFlowTests(SqlServerFixture sql)
         Assert.Equal(1, authorDraft.GetProperty("changes").GetArrayLength());
         Assert.Equal(1, outsiderDraft.GetProperty("changes").GetArrayLength());
 
-        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(author, s, "submit")).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(app, author, s, "submit")).ConfigureAwait(true);
 
         // Поданий: автор, сторонній і погоджувач ДРУГОГО кроку — перегляд без змін, відмова «подано».
         foreach (var (client, who) in new[] { (author, "автор"), (outsiderClient, "сторонній"), (secondClient, "погоджувач іншого кроку") })
@@ -284,12 +284,12 @@ public sealed class ApproverEditHttpFlowTests(SqlServerFixture sql)
         var rowKey = $"AQ{Guid.NewGuid():N}"[..12];
 
         await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(author, s, rowKey, column, 10m, null)).ConfigureAwait(true);
-        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(author, s, "submit")).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(app, author, s, "submit")).ConfigureAwait(true);
 
         // Перегляд погоджувача першого кроку — зміна; далі він погоджує крок, і черга переходить до другого.
         var firstPlan = await PreviewAsync(app, firstClient, s, Book(s, column, rowKey, 55m)).ConfigureAwait(true);
         Assert.Equal(1, firstPlan.GetProperty("changes").GetArrayLength());
-        await ExpectAsync(app, HttpStatusCode.NoContent, ApproveAsync(firstClient, s)).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, ApproveAsync(app, firstClient, s)).ConfigureAwait(true);
 
         var stale = await ExpectAsync(app, HttpStatusCode.Forbidden, ApplyAsync(firstClient, s, firstPlan)).ConfigureAwait(true);
         Assert.Contains(nameof(EditDenyReason.DocumentSubmitted), stale, StringComparison.Ordinal);
@@ -298,7 +298,7 @@ public sealed class ApproverEditHttpFlowTests(SqlServerFixture sql)
         // Другий крок: перегляд — зміна; аркуш затверджено до застосування — план відмовляє «затверджено».
         var secondPlan = await PreviewAsync(app, secondClient, s, Book(s, column, rowKey, 66m)).ConfigureAwait(true);
         Assert.Equal(1, secondPlan.GetProperty("changes").GetArrayLength());
-        await ExpectAsync(app, HttpStatusCode.NoContent, ApproveAsync(secondClient, s)).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, ApproveAsync(app, secondClient, s)).ConfigureAwait(true);
         Assert.Equal(DocumentStatus.Approved, await StatusAsync(s).ConfigureAwait(true));
 
         var approved = await ExpectAsync(app, HttpStatusCode.Forbidden, ApplyAsync(secondClient, s, secondPlan)).ConfigureAwait(true);
@@ -338,7 +338,7 @@ public sealed class ApproverEditHttpFlowTests(SqlServerFixture sql)
         var rowKey = $"AL{Guid.NewGuid():N}"[..12];
 
         await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(author, s, rowKey, column, 10m, null)).ConfigureAwait(true);
-        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(author, s, "submit")).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(app, author, s, "submit")).ConfigureAwait(true);
 
         var plan = await PreviewAsync(app, approverClient, s, Book(s, column, rowKey, 55m)).ConfigureAwait(true);
         Assert.Equal(1, plan.GetProperty("changes").GetArrayLength());
@@ -374,7 +374,7 @@ public sealed class ApproverEditHttpFlowTests(SqlServerFixture sql)
         var rowKey = $"AN{Guid.NewGuid():N}"[..12];
 
         await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(author, s, rowKey, column, 10m, null)).ConfigureAwait(true);
-        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(author, s, "submit")).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(app, author, s, "submit")).ConfigureAwait(true);
 
         var plan = await PreviewAsync(app, secondClient, s, Book(s, column, rowKey, 77m)).ConfigureAwait(true);
         AssertRejected(plan, rowKey, EditDenyReason.DocumentSubmitted, "погоджувач іншого кроку");
@@ -569,13 +569,13 @@ public sealed class ApproverEditHttpFlowTests(SqlServerFixture sql)
         // Чернетка: правку значень вирішує не роль кроку — підказка «ні» навіть погоджувачу.
         Assert.False(await CanApproverEditAsync(app, firstClient, s).ConfigureAwait(true));
 
-        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(author, s, "submit")).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(app, author, s, "submit")).ConfigureAwait(true);
 
         Assert.False(await CanApproverEditAsync(app, author, s).ConfigureAwait(true), "автор");
         Assert.True(await CanApproverEditAsync(app, firstClient, s).ConfigureAwait(true), "погоджувач поточного кроку");
         Assert.False(await CanApproverEditAsync(app, secondClient, s).ConfigureAwait(true), "погоджувач іншого кроку");
 
-        await ExpectAsync(app, HttpStatusCode.NoContent, ApproveAsync(firstClient, s)).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, ApproveAsync(app, firstClient, s)).ConfigureAwait(true);
 
         Assert.False(await CanApproverEditAsync(app, firstClient, s).ConfigureAwait(true), "крок 1 уже погоджено");
         Assert.True(await CanApproverEditAsync(app, secondClient, s).ConfigureAwait(true), "черга перейшла до другого");
@@ -623,15 +623,26 @@ public sealed class ApproverEditHttpFlowTests(SqlServerFixture sql)
             : $"немає reason у відповіді: {body}";
     }
 
-    private static Task<HttpResponseMessage> WorkflowAsync(HttpClient client, Scenario s, string action)
-        => client.PostAsJsonAsync(
+    /// <remarks>
+    /// ✎ Подання/затвердження — лише коли власний перерахунок документа після попереднього запису завершився
+    /// (<see cref="DocumentRecalculationWait"/>): інакше гонитва з воротами <c>ownRecalculationPending</c> (422).
+    /// </remarks>
+    private static async Task<HttpResponseMessage> WorkflowAsync(EcrApiFactory app, HttpClient client, Scenario s, string action)
+    {
+        await DocumentRecalculationWait.UntilSettledAsync(app, s.Document.DocumentId, s.PeriodKey).ConfigureAwait(false);
+        return await client.PostAsJsonAsync(
             new Uri($"/api/v1/documents/{s.Document.DocumentId}/{action}", UriKind.Relative),
-            new { sheetDefId = s.Document.SheetDefId, periodKey = s.PeriodKey });
+            new { sheetDefId = s.Document.SheetDefId, periodKey = s.PeriodKey }).ConfigureAwait(false);
+    }
 
-    private static Task<HttpResponseMessage> ApproveAsync(HttpClient client, Scenario s)
-        => client.PostAsJsonAsync(
+    private static async Task<HttpResponseMessage> ApproveAsync(EcrApiFactory app, HttpClient client, Scenario s)
+    {
+        await DocumentRecalculationWait.UntilSettledAsync(app, s.Document.DocumentId, s.PeriodKey).ConfigureAwait(false);
+        return await client.PostAsJsonAsync(
             new Uri($"/api/v1/documents/{s.Document.DocumentId}/approve", UriKind.Relative),
-            new { sheetDefId = s.Document.SheetDefId, periodKey = s.PeriodKey, approved = true, reason = (string?)null });
+            new { sheetDefId = s.Document.SheetDefId, periodKey = s.PeriodKey, approved = true, reason = (string?)null })
+            .ConfigureAwait(false);
+    }
 
     private static Task<HttpResponseMessage> PatchAsync(
         HttpClient client, Scenario s, string rowKey, string columnCode, decimal value, string? baseVersion)
