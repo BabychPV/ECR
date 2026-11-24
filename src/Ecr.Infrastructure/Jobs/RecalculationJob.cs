@@ -400,7 +400,8 @@ public sealed partial class RecalculationJob(
                         .FirstOrDefaultAsync(ct)
                         .ConfigureAwait(false);
                     previousInputsWatermarks[periodKey] = previous?.InputsCellChangeWatermark;
-                    previousSourceStates[periodKey] = previous?.SourceStateJson;
+                    // ✎ Огляд b11 №5: попереднього документного прогону немає — числа, яких неповний прогін не чіпав, невідомо звідки.
+                    previousSourceStates[periodKey] = previous is null ? DocumentSourceIssues.UnknownState : previous.SourceStateJson;
                 }
 
                 entry = (NewRun(periodKey), new ModuleProfile());
@@ -3445,13 +3446,14 @@ public sealed partial class RecalculationJob(
 
     /// <summary>
     /// ✎ P-1123-20: стан джерел документа запиту за його роки (<c>DocumentSourceIssues.SourceStatesJsonAsync</c>) — ДО читання
-    /// входів; <c>null</c> — невідомо (без графа, збій запиту): позначка тоді лише за журналом комірок, як доти.
+    /// входів. ✎ Огляд b11 №5 (HIGH): не вдалося (без графа, будь-який збій) — явне «невідомо»
+    /// (<see cref="DocumentSourceIssues.UnknownState"/>), яке позначку ставить, а не гасить; скасування — далі.
     /// </summary>
-    private async Task<string?> SourceStatesAsync(RecalculationRequest request, CancellationToken ct)
+    private async Task<string> SourceStatesAsync(RecalculationRequest request, CancellationToken ct)
     {
         if (dependencyGraph is null)
         {
-            return null;
+            return DocumentSourceIssues.UnknownState;
         }
 
         try
@@ -3468,9 +3470,11 @@ public sealed partial class RecalculationJob(
                 .SourceStatesJsonAsync(request.DocumentId, years, ct)
                 .ConfigureAwait(false);
         }
-        catch (Microsoft.Data.SqlClient.SqlException)
+#pragma warning disable CA1031 // Будь-який збій знімка — «невідомо» (позначка), а не зупинка перерахунку.
+        catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
         {
-            return null;
+            return DocumentSourceIssues.UnknownState;
         }
     }
 
