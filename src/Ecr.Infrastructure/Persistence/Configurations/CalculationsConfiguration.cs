@@ -674,6 +674,17 @@ public sealed class CalculationIssueConfiguration : IEntityTypeConfiguration<Cal
         // Читання аркуша й заміна проходу йдуть за однією адресою: документ × період × таблиця × копія.
         builder.HasIndex(x => new { x.DocumentId, x.PeriodKey, x.TableDefId, x.SheetCopyId })
                .HasDatabaseName("IX_CalculationIssue_Address");
+
+        // ✎ P-1124 (сироти calc.CalculationIssue): проблема не переживає свого прогону. Доти FK не було, і шляхи видалення
+        // прогону (D-560/D-575 через SupersededResultsPurger, нічна задача, видалення документа, «зайвий» прогін задачі)
+        // таблицю забували — 323 сироти на копії live. FK (NO ACTION, як FK_CRes_Run/FK_CStep_Run/FK_CIn_Run; каскад
+        // заборонено ФВ-7.6, сторож DeleteBehaviorTests) робить сироту неможливою: шлях, що забув проблеми, падає 547,
+        // а не смітить. Видалення — `CalculationIssueRunCleanup` перед рядком прогону. Проблеми, які прохід НЕ перерахував
+        // (перенесені аркуші), переходять на новий прогін у транзакції перемикання (`CalculationIssueStore.CarryOverAsync`),
+        // тож зі старим прогоном зникає лише мертве. Індекс — під перевірку FK, видалення й перенесення (seek, не скан).
+        builder.HasIndex(x => x.CalculationRunId).HasDatabaseName("IX_CalculationIssue_Run");
+        builder.HasOne<CalculationRun>().WithMany().HasForeignKey(x => x.CalculationRunId)
+               .HasConstraintName("FK_CIssue_Run");
     }
 }
 
