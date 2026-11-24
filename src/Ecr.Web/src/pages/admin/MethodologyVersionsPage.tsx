@@ -170,7 +170,10 @@ export function MethodologyVersionsPage(): JSX.Element {
                 {t('methodologyScript.versions.openEditor')}
               </Button>
             </Group>
-            <Text size="sm">{t('methodologies.currentScript.hint')}</Text>
+            {/* ⛔ UI-прохід 24.11: чернетка ще нічим не рахує — «розрахунки використовують цю версію» було б неправдою. */}
+            <Text size="sm" data-testid="current-script-hint">
+              {t(current.status === 'Published' ? 'methodologies.currentScript.hint' : 'methodologies.currentScript.draftHint')}
+            </Text>
           </Stack>
         </Alert>
       )}
