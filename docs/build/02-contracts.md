@@ -6784,6 +6784,10 @@ public sealed record RowDto(
   зміну до періоду (`D-567`). Крок, що завершився, знімає свій період із плану — відмова зникає. Без живих задач — як
   доти (один запит; розширений ланками джерел, лише коли в графі є ребра «джерело → споживач»). «З затвердженими» (`-dependents-approved`), відхилення, відкликання і
   повернення в роботу не блокуються.
+  ✎ b11 (огляд b11-2 (A) + огляд координатора 24.11): ворота тримають рік і тоді, коли жива ВЛАСНА задача перерахунку чи
+  формул документа (натискання, `-auto`, прохід читача, формули, SHEETNAME); тоді той самий 422 `ECR-SUB-4221` несе
+  `messageKey` **`err.ECR-SUB-4221.ownRecalculationPending`** («триває перерахунок цього документа»). Каскад залежних
+  документа (`-dependents…`) і ланки джерел — як доти, `sourceCascadePending` (текст `D-567` без змін).
 - ✎ B80 N4 (R3.2) — `GET /documents/{id}/calculation-issues` (і `?year=true`): нове необов'язкове поле
   **`sourceIssues`** (`SourceIssueDto[] | null`, лише додаванням) у `CalculationIssuesDto`. Запис: `kind`, `monthNumber`
   (місяць споживача 1–12), `sourcePeriodKey` (`yyyyMM`), `sourceDocumentId`, `sourceProjectCode`, `sourceDocumentKey`,

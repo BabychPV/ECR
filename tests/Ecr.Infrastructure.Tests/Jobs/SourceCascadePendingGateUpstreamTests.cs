@@ -44,6 +44,7 @@ public sealed class SourceCascadePendingGateUpstreamTests(SqlServerFixture sql)
         try
         {
             Assert.True(await PendingAsync(w, w.Consumer));
+            Assert.Equal(CascadePendingReason.SourceCascade, await ReasonAsync(w, w.Consumer));
             Assert.False(await PendingAsync(w, w.Other)); // парно: шаблон-не-споживач
 
             // Виконується — так само.
@@ -87,6 +88,8 @@ public sealed class SourceCascadePendingGateUpstreamTests(SqlServerFixture sql)
         try
         {
             Assert.True(await PendingAsync(w, w.Consumer));
+            // ✎ b11: власний перерахунок ДЖЕРЕЛА для споживача — ланка джерела (ключ D-567), не власний перерахунок споживача.
+            Assert.Equal(CascadePendingReason.SourceCascade, await ReasonAsync(w, w.Consumer));
             Assert.False(await PendingAsync(w, w.Other)); // парно
 
             // Зв'язка не ставить каскаду з -auto (ApprovedOnly чи читання з документа вимкнено) — не тримає.
@@ -330,6 +333,12 @@ public sealed class SourceCascadePendingGateUpstreamTests(SqlServerFixture sql)
     private async Task<bool> PendingAsync(
         World w, TestDocument document, IReadOnlyCollection<int>? autoBindings = null, IReadOnlyList<TemplateDependency>? edges = null,
         IReadOnlyDictionary<(int Binding, int Year), long>? chosen = null)
+        => await ReasonAsync(w, document, autoBindings, edges, chosen) != CascadePendingReason.None;
+
+    /// <summary>✎ b11 (огляд координатора 24.11): причина утримання — ланка джерела дає ключ D-567, не «власний перерахунок».</summary>
+    private async Task<CascadePendingReason> ReasonAsync(
+        World w, TestDocument document, IReadOnlyCollection<int>? autoBindings = null, IReadOnlyList<TemplateDependency>? edges = null,
+        IReadOnlyDictionary<(int Binding, int Year), long>? chosen = null)
     {
         // ✎ Огляд b11 №3: справжнє джерело зв'язки за рік (вибір документа року); за замовчуванням — документ-джерело світу.
         chosen ??= new Dictionary<(int, int), long> { [(w.BindingId, w.Year)] = w.Source.DocumentId };
@@ -348,7 +357,7 @@ public sealed class SourceCascadePendingGateUpstreamTests(SqlServerFixture sql)
             ChosenSourcesProbe = (_, _) => Task.FromResult<IReadOnlyDictionary<(int Binding, int Year), long>>(
                 chosen.ToDictionary(p => (p.Key.Binding, p.Key.Year), p => p.Value)),
         };
-        return await gate.IsPendingAsync(document.DocumentId, document.PeriodKey.Value, CancellationToken.None);
+        return await gate.GetPendingReasonAsync(document.DocumentId, document.PeriodKey.Value, CancellationToken.None);
     }
 
     /// <summary>Шаблон документа за період — те саме правило, що у воротах (власний шаблон чи версії проєкту за період).</summary>

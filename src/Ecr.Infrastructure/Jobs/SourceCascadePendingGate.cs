@@ -168,6 +168,10 @@ public sealed class SourceCascadePendingGate(
 
     /// <inheritdoc />
     public async Task<bool> IsPendingAsync(long documentId, int periodKey, CancellationToken ct)
+        => await GetPendingReasonAsync(documentId, periodKey, ct).ConfigureAwait(false) != CascadePendingReason.None;
+
+    /// <inheritdoc />
+    public async Task<CascadePendingReason> GetPendingReasonAsync(long documentId, int periodKey, CancellationToken ct)
     {
         var year = periodKey / 100;
         var documentPrefix = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"doc{documentId}-");
@@ -188,14 +192,20 @@ public sealed class SourceCascadePendingGate(
             .ConfigureAwait(false);
 
         // ✎ Огляд b11/b11-2: будь-яка жива задача перерахунку чи формул документа, що може змінити числа року, — чекає ввесь рік.
-        if (rows.Exists(r => r.Kind is "R" or "F" && HoldsYear(r, documentPrefix, year)))
+        // ✎ b11 (огляд координатора 24.11): причина — для тексту відмови. Каскад залежних документа (`-dependents…`) —
+        // це каскад від зміни джерела (D-567); будь-яка інша власна задача (натискання, -auto, прохід читача, формули,
+        // SHEETNAME) — власний перерахунок документа.
+        var own = rows.Where(r => r.Kind is "R" or "F" && HoldsYear(r, documentPrefix, year)).ToList();
+        if (own.Count > 0)
         {
-            return true;
+            return own.Exists(r => IsDependentsCascade(r, documentPrefix))
+                ? CascadePendingReason.SourceCascade
+                : CascadePendingReason.OwnRecalculation;
         }
 
         if (upstream is null || rows.Find(r => r.Kind == "T") is not { ConsumerTemplateId: { } consumer } self)
         {
-            return false;
+            return CascadePendingReason.None;
         }
 
         var consumerKind = (PeriodKind)(self.ConsumerPeriodKind ?? 0);
@@ -203,7 +213,7 @@ public sealed class SourceCascadePendingGate(
         // Пряма задача впливу зв'язки до шаблону споживача — її каскад перераховує кожен документ шаблону: рішення без запитів.
         if (rows.Exists(r => r.Kind == "S" && DirectSourceChange(upstream, r, consumer, consumerKind, periodKey)))
         {
-            return true;
+            return CascadePendingReason.SourceCascade;
         }
 
         // ✎ Огляд b11 №3 (MEDIUM): через предків — лише СПРАВЖНІ документи-джерела споживача (вибір документа року зв'язки,
@@ -217,12 +227,23 @@ public sealed class SourceCascadePendingGate(
             .ToList();
         if (candidates.Count == 0)
         {
-            return false;
+            return CascadePendingReason.None;
         }
 
         var sources = await ActualSourcesAsync(upstream, templates, consumer, year, ct).ConfigureAwait(false);
-        return candidates.Exists(r => ResolvedPends(upstream, sources, r));
+        return candidates.Exists(r => ResolvedPends(upstream, sources, r)) ? CascadePendingReason.SourceCascade : CascadePendingReason.None;
     }
+
+    /// <summary>
+    /// Чи власна задача документа — каскад залежних від зміни джерела (<c>doc{id}-y{рік}-dependents…</c>,
+    /// <c>doc{id}-p{період}-dependents…</c>, <c>D-566</c>), а не власний перерахунок.
+    /// </summary>
+    private static bool IsDependentsCascade(GateRow row, string documentPrefix)
+        => row.Kind == "R"
+           && row.TargetKey is { } key
+           && BareTarget(key) is var bare
+           && bare.StartsWith(documentPrefix, StringComparison.Ordinal)
+           && bare.Contains("-dependents", StringComparison.Ordinal);
 
     /// <summary>
     /// ✎ Огляд b11 №3 (MEDIUM): справжні документи-джерела споживача (шаблон <paramref name="consumerTemplateId"/>, рік

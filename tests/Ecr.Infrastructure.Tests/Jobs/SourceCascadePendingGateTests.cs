@@ -176,6 +176,48 @@ public sealed class SourceCascadePendingGateTests(SqlServerFixture sql)
         Assert.True(await PendingAsync(user, 202611));
         Assert.True(await PendingAsync(user, 202601));
     }
+    /// <summary>
+    /// ✎ b11 (огляд координатора 24.11): причина для тексту відмови. Каскад залежних документа (рік і поперіодний) — каскад від
+    /// джерела (ключ D-567); власний перерахунок (<c>-auto</c>, натискання, формули людини й системні, SHEETNAME) —
+    /// <see cref="CascadePendingReason.OwnRecalculation"/>; обидва разом — каскад джерела.
+    /// </summary>
+    /// <remarks>Мутація: <c>IsDependentsCascade</c> → <c>false</c> — червоні рядки каскаду; → <c>true</c> — червоні власні.</remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "F5")]
+    public async Task Причина_каскад_джерела_чи_власний_перерахунок()
+    {
+        var cascade = NextDocument();
+        await InsertAsync(cascade, Target(cascade), "Queued", Payload(cascade, cascade: [202603]));
+        Assert.Equal(CascadePendingReason.SourceCascade, await ReasonAsync(cascade, 202603));
+
+        var perPeriod = NextDocument();
+        await InsertAsync(
+            perPeriod, Key(CalculationTrigger.DependentsTargetOf(perPeriod, new PeriodKey(202604))), "Running",
+            $$"""{"projectId":0,"documentId":{{perPeriod}},"periodKey":202604}""");
+        Assert.Equal(CascadePendingReason.SourceCascade, await ReasonAsync(perPeriod, 202604));
+
+        var auto = NextDocument();
+        await InsertAsync(auto, Key($"doc{auto}-p202604-auto"), "Queued", $$"""{"projectId":0,"documentId":{{auto}},"periodKey":202604}""");
+        Assert.Equal(CascadePendingReason.OwnRecalculation, await ReasonAsync(auto, 202604));
+
+        var press = NextDocument();
+        await InsertAsync(press, Key($"doc{press}-p202611"), "Running", $$"""{"projectId":0,"documentId":{{press}},"periodKey":202611,"triggeredByUserId":5}""");
+        Assert.Equal(CascadePendingReason.OwnRecalculation, await ReasonAsync(press, 202611));
+
+        var formula = NextDocument();
+        await InsertAsync(
+            formula, DbBackgroundJobScheduler.TargetKeyOf<IFormulaRecalculationJob>(FormulaRecalculationTarget.OfDocument(formula, null)), "Queued",
+            $$"""{"documentId":{{formula}},"tableInstanceId":0,"periodKey":202611,"cells":[{"rowId":0,"columnDefId":1,"tableDefId":1,"periodKey":202611}]}""");
+        Assert.Equal(CascadePendingReason.OwnRecalculation, await ReasonAsync(formula, 202611));
+
+        // Каскад і власний разом — текст про джерело (саме каскад закріпив би застарілі числа джерела).
+        await InsertAsync(auto, Target(auto), "Queued", Payload(auto, cascade: [202604]));
+        Assert.Equal(CascadePendingReason.SourceCascade, await ReasonAsync(auto, 202604));
+
+        Assert.Equal(CascadePendingReason.None, await ReasonAsync(NextDocument(), 202604));
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
 
     private static long NextDocument() => Interlocked.Increment(ref _doc);
@@ -220,6 +262,13 @@ public sealed class SourceCascadePendingGateTests(SqlServerFixture sql)
         await using var db = new EcrDbContext(
             new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
         return await new SourceCascadePendingGate(db).IsPendingAsync(doc, periodKey, CancellationToken.None);
+    }
+
+    private async Task<CascadePendingReason> ReasonAsync(long doc, int periodKey)
+    {
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+        return await new SourceCascadePendingGate(db).GetPendingReasonAsync(doc, periodKey, CancellationToken.None);
     }
 
     private async Task InsertAsync(long doc, string target, string state, string payload)
