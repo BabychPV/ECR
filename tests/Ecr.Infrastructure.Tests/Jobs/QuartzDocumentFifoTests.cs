@@ -6,6 +6,7 @@ using Ecr.Infrastructure.Jobs;
 using Ecr.TestKit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
 using Quartz;
 using Quartz.Impl;
 using Quartz.Spi;
@@ -127,6 +128,51 @@ public sealed class QuartzDocumentFifoTests : IAsyncLifetime
         await job.Finished("H", 6).WaitAsync(Safety);
     }
 
+    /// <summary>
+    /// ✎ Огляд b11 (MEDIUM-3): перевірка — голова індексу документа, без перебору ключів планувальника й без
+    /// <c>GetJobDetail</c> на кожен; голова, що вже не чекає (без триґера й не виконується), випадає, і береться наступна.
+    /// </summary>
+    /// <remarks>Мутації: <c>Track</c> — порожній (раніша не знайдена) — червоний; не викидати мертву голову — червоний (зависання).</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "M11")]
+    public async Task Перевірка_бере_голову_індексу_без_перебору_ключів()
+    {
+        var scheduler = Substitute.For<IScheduler>();
+        scheduler.SchedulerName.Returns($"ecr-fifo-index-{Guid.NewGuid():N}");
+        scheduler.GetCurrentlyExecutingJobs(Arg.Any<CancellationToken>()).Returns(Array.Empty<IJobExecutionContext>());
+
+        var document = Random.Shared.NextInt64(1_000_000, 9_000_000);
+        IJobDetail Detail(string id, long sequence) => JobBuilder.Create<QuartzJobAdapter>()
+            .WithIdentity(id)
+            .UsingJobData(QuartzDocumentFifo.DocumentKey, document)
+            .UsingJobData(QuartzDocumentFifo.SequenceKey, sequence)
+            .StoreDurably()
+            .Build();
+
+        var dead = Detail("IRecalculationJob-dead", 1);
+        var alive = Detail("IRecalculationJob-alive", 2);
+        var me = Detail("IRecalculationJob-me", 3);
+        foreach (var detail in new[] { dead, alive, me })
+        {
+            QuartzDocumentFifo.Track(scheduler.SchedulerName, detail);
+        }
+
+        scheduler.GetTriggersOfJob(dead.Key, Arg.Any<CancellationToken>()).Returns(Array.Empty<ITrigger>());
+        scheduler.GetTriggersOfJob(alive.Key, Arg.Any<CancellationToken>())
+            .Returns(new[] { TriggerBuilder.Create().ForJob(alive.Key).StartNow().Build() });
+
+        Assert.Equal(alive.Key.Name, await QuartzDocumentFifo.EarlierPendingAsync(scheduler, me, CancellationToken.None).WaitAsync(Safety));
+        Assert.Null(await QuartzDocumentFifo.EarlierPendingAsync(scheduler, dead, CancellationToken.None));
+
+        await scheduler.DidNotReceive().GetJobKeys(Arg.Any<Quartz.Impl.Matchers.GroupMatcher<JobKey>>(), Arg.Any<CancellationToken>());
+        await scheduler.DidNotReceive().GetJobDetail(Arg.Any<JobKey>(), Arg.Any<CancellationToken>());
+
+        // Мертва голова випала з індексу; живу знято — далі нікого.
+        QuartzDocumentFifo.Forget(scheduler.SchedulerName, alive.Key.Name);
+        Assert.Null(await QuartzDocumentFifo.EarlierPendingAsync(scheduler, me, CancellationToken.None).WaitAsync(Safety));
+        QuartzDocumentFifo.Forget(scheduler.SchedulerName, me.Key.Name);
+    }
     private async Task<(ServiceProvider Provider, QuartzJobScheduler Jobs)> StartAsync(LockingRecalculationJob job, TimeSpan? fifoDelay = null)
     {
         var factory = new StdSchedulerFactory(new System.Collections.Specialized.NameValueCollection

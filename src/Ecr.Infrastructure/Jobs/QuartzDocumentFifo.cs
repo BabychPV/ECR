@@ -1,7 +1,6 @@
 // src/Ecr.Infrastructure/Jobs/QuartzDocumentFifo.cs
 using Ecr.Application.Ports;
 using Quartz;
-using Quartz.Impl.Matchers;
 
 namespace Ecr.Infrastructure.Jobs;
 
@@ -54,12 +53,87 @@ public static class QuartzDocumentFifo
         => string.Equals(jobCode, JobListKinds.RecalculationJobCode, StringComparison.Ordinal);
 
     /// <summary>
+    /// ✎ Огляд b11 (MEDIUM-3): індекс задач, що чекають, — планувальник × документ → номери постановки за зростанням. Доти
+    /// кожен старт (і кожна повторна перевірка за 2 с) перебирав УСІ ключі планувальника з <c>GetJobDetail</c> на кожен —
+    /// O(N²) під замком <c>RAMJobStore</c> на 200 споживачах × 12 періодах.
+    /// </summary>
+    private static readonly Lock IndexGate = new();
+
+    private static readonly Dictionary<(string Scheduler, long Document), SortedDictionary<long, string>> Index = [];
+
+    private static readonly Dictionary<(string Scheduler, string JobId), (long Document, long Sequence)> ByJob = [];
+
+    /// <summary>Скільки задач у індексі (тести).</summary>
+    internal static int IndexedCount
+    {
+        get
+        {
+            lock (IndexGate)
+            {
+                return ByJob.Count;
+            }
+        }
+    }
+
+    /// <summary>Задача стала в чергу (постановка чи ручний перезапуск).</summary>
+    /// <param name="scheduler">Ім'я планувальника.</param>
+    /// <param name="detail">Деталь задачі з документом і номером (<see cref="DocumentKey"/>, <see cref="SequenceKey"/>).</param>
+    public static void Track(string scheduler, IJobDetail detail)
+    {
+        ArgumentNullException.ThrowIfNull(detail);
+        if (!TryRead(detail.JobDataMap, out var document, out var sequence))
+        {
+            return;
+        }
+
+        lock (IndexGate)
+        {
+            if (!Index.TryGetValue((scheduler, document), out var queue))
+            {
+                Index[(scheduler, document)] = queue = [];
+            }
+
+            queue[sequence] = detail.Key.Name;
+            ByJob[(scheduler, detail.Key.Name)] = (document, sequence);
+        }
+    }
+
+    /// <summary>Задача більше не чекає й не виконується (успіх, скасування, остаточний провал, зняття).</summary>
+    /// <param name="scheduler">Ім'я планувальника.</param>
+    /// <param name="jobId">Задача.</param>
+    public static void Forget(string scheduler, string jobId)
+    {
+        lock (IndexGate)
+        {
+            if (!ByJob.Remove((scheduler, jobId), out var entry))
+            {
+                return;
+            }
+
+            if (Index.TryGetValue((scheduler, entry.Document), out var queue)
+                && queue.TryGetValue(entry.Sequence, out var id) && string.Equals(id, jobId, StringComparison.Ordinal))
+            {
+                queue.Remove(entry.Sequence);
+                if (queue.Count == 0)
+                {
+                    Index.Remove((scheduler, entry.Document));
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// Раніше поставлена задача перерахунку того самого документа, що ще чекає чи виконується; <c>null</c> — немає
     /// (задача може стартувати).
     /// </summary>
     /// <param name="scheduler">Планувальник задачі.</param>
     /// <param name="detail">Деталь задачі, що стартує.</param>
     /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// Голова індексу документа — O(log n); перевіряється ЛИШЕ вона (є триґер чи виконується). Голова, що вже не чекає (зникла,
+    /// впала остаточно без триґера, зняття пройшло повз <see cref="Forget"/>), з індексу випадає, і береться наступна — мертва
+    /// голова нікого не тримає.
+    /// </remarks>
     public static async Task<string?> EarlierPendingAsync(IScheduler scheduler, IJobDetail detail, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(scheduler);
@@ -70,36 +144,45 @@ public static class QuartzDocumentFifo
             return null;
         }
 
-        HashSet<JobKey>? executing = null;
-
-        foreach (var key in await scheduler.GetJobKeys(GroupMatcher<JobKey>.AnyGroup(), ct).ConfigureAwait(false))
+        var name = scheduler.SchedulerName;
+        while (true)
         {
-            // Усі ключі разових перерахунків починаються з імені маркера (`EnqueueAsync`, ціль `~`, злиття).
-            if (key.Equals(detail.Key) || !key.Name.StartsWith(nameof(IRecalculationJob), StringComparison.Ordinal))
+            string? head = null;
+            lock (IndexGate)
             {
-                continue;
+                if (Index.TryGetValue((name, documentId), out var queue))
+                {
+                    foreach (var (number, jobId) in queue)
+                    {
+                        if (number >= sequence)
+                        {
+                            break;
+                        }
+
+                        if (!string.Equals(jobId, detail.Key.Name, StringComparison.Ordinal))
+                        {
+                            head = jobId;
+                            break;
+                        }
+                    }
+                }
             }
 
-            var other = await scheduler.GetJobDetail(key, ct).ConfigureAwait(false);
-            if (other is null
-                || !TryRead(other.JobDataMap, out var otherDocument, out var otherSequence)
-                || otherDocument != documentId
-                || otherSequence >= sequence)
+            if (head is null)
             {
-                continue;
+                return null;
             }
 
-            executing ??= [.. (await scheduler.GetCurrentlyExecutingJobs(ct).ConfigureAwait(false)).Select(c => c.JobDetail.Key)];
-
-            if (executing.Contains(key) || (await scheduler.GetTriggersOfJob(key, ct).ConfigureAwait(false)).Count > 0)
+            var key = new JobKey(head);
+            if ((await scheduler.GetTriggersOfJob(key, ct).ConfigureAwait(false)).Count > 0
+                || (await scheduler.GetCurrentlyExecutingJobs(ct).ConfigureAwait(false)).Any(c => c.JobDetail.Key.Equals(key)))
             {
-                return key.Name;
+                return head;
             }
+
+            Forget(name, head);
         }
-
-        return null;
     }
-
     private static bool TryRead(JobDataMap map, out long documentId, out long sequence)
     {
         documentId = 0;

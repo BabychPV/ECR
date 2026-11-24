@@ -16,25 +16,68 @@ namespace Ecr.Infrastructure.Persistence;
 /// </remarks>
 public static class MonthOwnerRouting
 {
-    /// <summary>Ребра зв'язки до шаблону-споживача — усі «комірка періоду-власника місяця», без методологій.</summary>
+    /// <summary>
+    /// ✎ W15z M1: версії шаблону-споживача, на яких КОЖНЕ читання довідника формулами шаблону — «комірка періоду-власника
+    /// місяця» (перетин <see cref="TemplateDependency.OwnedVersions"/> ребер з формулами); ребро з формулами без таких версій —
+    /// порожньо. Ребра лише з методологіями версій не обмежують (їх перевіряє <see cref="RefusalReason"/>).
+    /// </summary>
     /// <param name="edges">Ребра зв'язки (згорнуті) до одного шаблону-споживача.</param>
-    public static bool EdgesOwned(IEnumerable<TemplateDependency> edges)
+    public static IReadOnlySet<int> OwnedVersions(IEnumerable<TemplateDependency> edges)
     {
         ArgumentNullException.ThrowIfNull(edges);
-        var any = false;
-        foreach (var edge in edges)
+        HashSet<int>? owned = null;
+        foreach (var edge in edges.Where(e => e.ViaTemplateFormula))
         {
-            if (!edge.MonthOwned || edge.ViaMethodology)
+            if (edge.OwnedVersions is not { Count: > 0 } versions)
             {
-                return false;
+                return new HashSet<int>();
             }
 
-            any = true;
+            if (owned is null)
+            {
+                owned = [.. versions];
+            }
+            else
+            {
+                owned.IntersectWith(versions);
+            }
         }
 
-        return any;
+        return owned ?? [];
     }
 
+    /// <summary>
+    /// Чому звуження до власника місяця не діє (для журналу й рішення); <c>null</c> — діє для періодів на версіях
+    /// <see cref="OwnedVersions"/>.
+    /// </summary>
+    /// <param name="edges">Ребра зв'язки до шаблону-споживача.</param>
+    /// <remarks>
+    /// Методологія, що читає довідник обсягом «місяць» (місяць споживача = місяць джерела), сумісна: зміна місяця m
+    /// зачіпає її результат лише в періоді-власнику m (W15z: методології Land 15/16/23/40/42 читають HSE400 саме так).
+    /// «Рік», «усе» чи похідний довідник — увесь рік.
+    /// </remarks>
+    public static string? RefusalReason(IReadOnlyCollection<TemplateDependency> edges)
+    {
+        ArgumentNullException.ThrowIfNull(edges);
+        if (edges.Count == 0)
+        {
+            return "no edges";
+        }
+
+        if (edges.Any(e => e.ViaMethodology && e.MethodologyScope?.Kind != Ecr.Expressions.Binding.PeriodScopeKind.Month))
+        {
+            return "a methodology reads the registry beyond the consumer's own month (or via a derived registry)";
+        }
+
+        if (!edges.Any(e => e.ViaTemplateFormula))
+        {
+            return "no template formula reads the registry (month-scope methodologies only)";
+        }
+
+        return OwnedVersions(edges).Count == 0
+            ? "no template version reads the registry only in month-owner cells"
+            : null;
+    }
     /// <summary>
     /// Чи звужується набір періодів споживача до власника місяця: лише місячний проєкт, у календарі якого є рядок періоду
     /// <c>(рік, m)</c> (будь-який стан). Інакше — увесь рік.

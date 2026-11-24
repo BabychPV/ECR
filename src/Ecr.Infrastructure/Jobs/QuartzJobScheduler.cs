@@ -249,6 +249,9 @@ public sealed partial class QuartzJobScheduler(
 
         await instance.ScheduleJob(detail, trigger, ct).ConfigureAwait(false);
 
+        // ✎ Огляд b11 (MEDIUM-3): індекс черги документа (QuartzDocumentFifo) — замість перебору всіх ключів на старті.
+        QuartzDocumentFifo.Track(instance.SchedulerName, detail);
+
         return jobId;
     }
 
@@ -954,6 +957,7 @@ public sealed partial class QuartzJobScheduler(
         if (!IsRecurring(await instance.GetJobDetail(jobKey, ct).ConfigureAwait(false)))
         {
             await instance.DeleteJob(jobKey, ct).ConfigureAwait(false);
+            QuartzDocumentFifo.Forget(instance.SchedulerName, jobId);
 
             // Знята з черги задача злиття більше не приймає масивів — наступна постановка стане новою.
             if (!executingHere)
@@ -1098,6 +1102,10 @@ public sealed partial class QuartzJobScheduler(
             .Build();
 
         await instance.ScheduleJob(trigger, ct).ConfigureAwait(false);
+        if (await instance.GetJobDetail(jobKey, ct).ConfigureAwait(false) is { } restarted)
+        {
+            QuartzDocumentFifo.Track(instance.SchedulerName, restarted);
+        }
 
         if (progress is not null && clock is not null)
         {

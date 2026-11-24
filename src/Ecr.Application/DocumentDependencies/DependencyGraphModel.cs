@@ -92,6 +92,15 @@ public sealed record DependencyEdge(
 /// методологій і похідних довідників немає. Тоді зміна місяця m джерела будить у МІСЯЧНОМУ проєкті споживача лише
 /// період m (пізніших читачів його чисел будить прогін цього періоду — <c>CrossPeriodFanOut</c>).
 /// </param>
+/// <param name="OwnedVersions">
+/// ✎ PERF-06b (W15z M1): версії шаблону-споживача, у яких КОЖНЕ читання довідника зв'язки — комірка періоду-власника
+/// місяця (як <paramref name="MonthOwned"/>, але по версії): періоди документа на такій версії звужуються до власника місяця,
+/// на інших — увесь рік. Порожньо — жодної (похідний довідник, усі версії читають поза власником); <c>null</c> — формул немає.
+/// </param>
+/// <param name="MethodologyScope">
+/// ✎ W15z M1: обсяг читання довідника МЕТОДОЛОГІЯМИ, що пишуть у шаблон (об'єднання); <c>null</c> — методологій немає.
+/// «Місяць» (<c>REGFIND(…, [Period].Year, [Period].Sequence, …)</c>) — період-власник місяця зміни, сумісно зі звуженням.
+/// </param>
 public sealed record TemplateDependency(
     int SourceTemplateId,
     int ConsumerTemplateId,
@@ -100,7 +109,9 @@ public sealed record TemplateDependency(
     PeriodScope Scope,
     bool ViaTemplateFormula,
     bool ViaMethodology,
-    bool MonthOwned = false);
+    bool MonthOwned = false,
+    IReadOnlyList<int>? OwnedVersions = null,
+    PeriodScope? MethodologyScope = null);
 
 /// <summary>Зауваження побудови (ключ — для екрана L5).</summary>
 /// <param name="Key"><c>cycle</c>, <c>astFallback</c>, <c>parseFailed</c>, <c>unknownRegistry</c>.</param>

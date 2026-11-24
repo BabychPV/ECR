@@ -177,6 +177,7 @@ public sealed partial class QuartzJobAdapter(
             LogJobSkippedCancelled(logger, jobId, typeName ?? "—");
             await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None).ConfigureAwait(false);
             QuartzPayloadMerges.Forget(jobId);
+            QuartzDocumentFifo.Forget(context.Scheduler.SchedulerName, jobId);
             return;
         }
 
@@ -223,6 +224,7 @@ public sealed partial class QuartzJobAdapter(
                 await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None)
                     .ConfigureAwait(false);
                 QuartzPayloadMerges.Forget(jobId);
+                QuartzDocumentFifo.Forget(context.Scheduler.SchedulerName, jobId);
             }
         }
         catch (OperationCanceledException)
@@ -238,6 +240,7 @@ public sealed partial class QuartzJobAdapter(
                 await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None)
                     .ConfigureAwait(false);
                 QuartzPayloadMerges.Forget(jobId);
+                QuartzDocumentFifo.Forget(context.Scheduler.SchedulerName, jobId);
             }
 
             throw;
@@ -280,6 +283,7 @@ public sealed partial class QuartzJobAdapter(
 
                 await RequeueExhaustedAsync(context, jobId, typeName, payload, progress, clock).ConfigureAwait(false);
                 QuartzPayloadMerges.MarkFailed(jobId);
+                QuartzDocumentFifo.Forget(context.Scheduler.SchedulerName, jobId);
 
                 // ⚠ Деталь лишається (дурабельна) — для ручного перезапуску, як у провалу нижче.
                 throw new JobExecutionException(deferred, refireImmediately: false);
@@ -347,6 +351,7 @@ public sealed partial class QuartzJobAdapter(
 
             // Тіло задачі злиття — для ручного перезапуску, але в межах (огляд O1, косметика).
             QuartzPayloadMerges.MarkFailed(jobId);
+            QuartzDocumentFifo.Forget(context.Scheduler.SchedulerName, jobId);
 
             // ⛔ Деталь задачі НЕ видаляється тут. Дурабельна саме на цей
             // випадок (QuartzJobScheduler.EnqueueCoreAsync): без неї

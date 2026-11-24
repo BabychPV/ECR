@@ -36,7 +36,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// <remarks>
 /// МУТАЦІЇ (локально): (1) <c>QuartzJobScheduler.MergesSourceMonths</c> → <c>false</c> — червоні «злиття», «несе місяці»
 /// й «лише період власника»; (2) у <c>RegistryImpactRecalculationJob</c> <c>routedMonth</c> → завжди <c>null</c> — червоний
-/// «лише період власника» і F5; (3) <c>SourceCascadePendingGate.Affects</c> без <c>monthOwned</c> — червоний F5;
+/// «лише період власника» і F5; (3) ворота F5 звужують рік (огляд b11) — червоний F5;
 /// (4) <c>QuartzSourceMonths.AccumulateDirty</c> повертає лише нове тіло — червоний «злиття з виконуваною».
 /// </remarks>
 [Collection("SqlServer")]
@@ -121,15 +121,19 @@ public sealed class SourceMonthsQuartzTests(SqlServerFixture sql) : IAsyncLifeti
     /// <summary>
     /// Повний шлях Quartz: правка місяця 10 річного джерела → <c>-auto</c> з місяцями [10] → доведені місяці → задача зв'язки
     /// <c>-m10</c> → залежні споживача лише за період 10. Контролі: місяці невідомі (правка не-місячної колонки) і читання
-    /// місяця 10 у колонці M11 — увесь рік.
+    /// місяця 10 у колонці M11 — увесь рік. ✎ W15z M1 (репетиція на справжніх даних): ще одна ОПУБЛІКОВАНА стара версія
+    /// шаблону-споживача (PerMonthCopies, як Land 1.0.8–1.0.18) читає довідник поза власником — періоди документа на новій
+    /// версії однаково звужуються (рішення по версії, не по шаблону).
     /// </summary>
+    /// <remarks>Мутація: звуження по шаблону (AND по всіх версіях, <c>OwnedVersions</c> ігнорується) — червоний «old-version».</remarks>
     [Theory]
     [InlineData("owned", new[] { 10 })]
+    [InlineData("old-version", new[] { 10 })]
     [InlineData("unknown-months", new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 })]
     [InlineData("misplaced", new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 })]
     public async Task Правка_місяця_джерела_будить_лише_період_власника(string arrangement, int[] expected)
     {
-        var w = await ArrangeAsync(misplaced: arrangement == "misplaced");
+        var w = await ArrangeAsync(misplaced: arrangement == "misplaced", oldVersion: arrangement == "old-version");
         var (jobs, _) = await StandbyAsync();
 
         await RunSourceEditAsync(w, jobs, monthEdit: arrangement != "unknown-months");
@@ -170,11 +174,16 @@ public sealed class SourceMonthsQuartzTests(SqlServerFixture sql) : IAsyncLifeti
     }
 
     /// <summary>
-    /// F5: поки задача зв'язки <c>-m10</c> жива — чекають період 10 і пізніші (їх може дописати прогін власника), раніший — ні;
-    /// після неї — лише поставлений період 10.
+    /// ✎ Огляд b11 (HIGH-1/2), Quartz: будиться лише період 10, а тримається ВЕСЬ рік документа — поки жива задача зв'язки
+    /// <c>-m10</c> (зокрема січень-якір і раніший вересень), поки чекають залежні періоду 10 і поки чекає задача формул
+    /// документа (читачі <c>CrossPeriodFanOut</c>: пізніші місяці й якір). Нічого живого — рік вільний.
     /// </summary>
+    /// <remarks>
+    /// Мутації: (1) <c>Affects</c> — «власник і пізніші» — червоні січень і вересень; (2) ворота не дивляться на задачу формул
+    /// документа — червоний листопад/січень після залежних.
+    /// </remarks>
     [Fact]
-    public async Task F5_тримає_лише_звужений_набір()
+    public async Task F5_тримає_весь_рік_поки_живий_будь_який_крок_каскаду()
     {
         var w = await ArrangeAsync(misplaced: false);
         var (jobs, _) = await StandbyAsync();
@@ -183,9 +192,10 @@ public sealed class SourceMonthsQuartzTests(SqlServerFixture sql) : IAsyncLifeti
         var parents = await KeysAsync($"{nameof(IRegistryImpactRecalculationJob)}~source-change-b{w.BindingId}-");
         Assert.Equal($"{nameof(IRegistryImpactRecalculationJob)}~source-change-b{w.BindingId}-y{SourceDependencyWorld.Year}-m10", Assert.Single(parents)[..^33]);
 
-        Assert.False(await PendingAsync(w, 9));
-        Assert.True(await PendingAsync(w, 10));
-        Assert.True(await PendingAsync(w, 11));
+        foreach (var month in new[] { 1, 9, 10, 11 })
+        {
+            Assert.True(await PendingAsync(w, month), $"місяць {month} під час задачі зв'язки");
+        }
 
         await RunParentsAsync(w, jobs);
         foreach (var parent in parents)
@@ -193,11 +203,34 @@ public sealed class SourceMonthsQuartzTests(SqlServerFixture sql) : IAsyncLifeti
             await jobs.CancelAsync(parent, CancellationToken.None);
         }
 
-        Assert.False(await PendingAsync(w, 9));
-        Assert.True(await PendingAsync(w, 10));
-        Assert.False(await PendingAsync(w, 11));
-    }
+        var dependents = Assert.Single(await KeysAsync(
+            $"{nameof(IRecalculationJob)}~{CalculationTrigger.DependentsTargetOf(w.Consumer.DocumentId, new PeriodKey(SourceDependencyWorld.Period(10)))}~"));
+        foreach (var month in new[] { 1, 9, 11 })
+        {
+            Assert.True(await PendingAsync(w, month), $"місяць {month} поки чекають залежні періоду 10");
+        }
 
+        // Залежні періоду 10 завершились і поставили читачів (fan-out) — задача формул документа: листопад і якір чекають.
+        await jobs.CancelAsync(dependents, CancellationToken.None);
+        var readers = await jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+            FormulaRecalculationTarget.Of(w.Consumer.DocumentId, SourceDependencyWorld.Period(11), createdByUserId: null),
+            new
+            {
+                DocumentId = w.Consumer.DocumentId,
+                TableInstanceId = 0L,
+                PeriodKey = SourceDependencyWorld.Period(11),
+                Cells = new[] { new { RowId = 0L, ColumnDefId = w.Consumer.MonthColumnDefIds[9], TableDefId = w.Consumer.TableDefId, PeriodKey = SourceDependencyWorld.Period(11) } },
+            },
+            CancellationToken.None);
+        Assert.True(await PendingAsync(w, 11));
+        Assert.True(await PendingAsync(w, 1));
+
+        await jobs.CancelAsync(readers, CancellationToken.None);
+        foreach (var month in new[] { 1, 9, 10, 11 })
+        {
+            Assert.False(await PendingAsync(w, month), $"місяць {month} без живих задач");
+        }
+    }
     /// <summary>
     /// Прогін ОДНОГО періоду поза ланцюжком (залежні періоду 10 після звуження) будить і пізніших читачів своїх змінених чисел
     /// (листопад, що читає жовтень); рік, каскад і крок ланцюжка — як доти, лише раніших.
@@ -215,19 +248,38 @@ public sealed class SourceMonthsQuartzTests(SqlServerFixture sql) : IAsyncLifeti
                 new RecalculationRequest(0, 1, period, TriggeredByUserId: null) { CascadePeriods = cascade ? [209910] : null },
                 chain));
 
-    /// <summary>Відображення воріт для ребра «комірка періоду-власника» — консервативне поза місячним проєктом.</summary>
-    [Theory]
-    [InlineData(9, PeriodKind.Monthly, true, false)]
-    [InlineData(10, PeriodKind.Monthly, true, true)]
-    [InlineData(11, PeriodKind.Monthly, true, true)]
-    [InlineData(9, PeriodKind.Monthly, false, true)]
-    [InlineData(1, PeriodKind.Yearly, true, true)]
-    public void Ворота_для_ребра_власника_місяця(int month, PeriodKind kind, bool owned, bool expected)
-        => Assert.Equal(
-            expected,
-            SourceCascadePendingGate.Affects(
-                new PeriodScope(PeriodScopeKind.Year, 0b1_1111_1111_1110), 2099, 10, SourceDependencyWorld.Period(month), kind, owned));
+    /// <summary>
+    /// ✎ W15z M1: звуження до власника місяця — лише для періодів на версії з <c>OwnedVersions</c>; період на іншій версії
+    /// шаблону — увесь рік (консервативно).
+    /// </summary>
+    /// <remarks>Мутація: сховище не перевіряє версію періоду — червоний (звужено й на чужій версії).</remarks>
+    [Fact]
+    public async Task Звуження_лише_для_періодів_на_версії_власника()
+    {
+        var w = await ArrangeAsync(misplaced: false);
+        await using var db = Context();
+        var store = new RegistryImpactStore(db);
+        var first = SourceDependencyWorld.Period(1) / 100 * 100;
 
+        var owned = await store.ListTemplateConsumersRoutedAsync(
+            [w.Consumer.TemplateId], first, first + 99, null, 10, new HashSet<int> { w.Consumer.TemplateVersionId }, CancellationToken.None);
+        Assert.Equal([SourceDependencyWorld.Period(10)], owned.Select(r => r.PeriodKey));
+
+        var other = await store.ListTemplateConsumersRoutedAsync(
+            [w.Consumer.TemplateId], first, first + 99, null, 10, new HashSet<int> { -1 }, CancellationToken.None);
+        Assert.Equal(12, other.Count);
+    }
+    /// <summary>✎ Огляд b11 (HIGH-1): ланка джерела з місяцем у масці тримає ВЕСЬ рік споживача, зокрема раніші місяці й якір.</summary>
+    [Theory]
+    [InlineData(1, PeriodKind.Monthly)]
+    [InlineData(9, PeriodKind.Monthly)]
+    [InlineData(10, PeriodKind.Monthly)]
+    [InlineData(11, PeriodKind.Monthly)]
+    [InlineData(1, PeriodKind.Yearly)]
+    public void Ворота_тримають_увесь_рік_для_місяця_в_масці(int month, PeriodKind kind)
+        => Assert.True(
+            SourceCascadePendingGate.Affects(
+                new PeriodScope(PeriodScopeKind.Year, 0b1_1111_1111_1110), 2099, 10, SourceDependencyWorld.Period(month), kind));
     /// <summary>
     /// Контроль черги в базі (не погіршено): той самий звужений набір — каскад споживача лише за період 10; без місяця — рік.
     /// </summary>
@@ -380,7 +432,7 @@ public sealed class SourceMonthsQuartzTests(SqlServerFixture sql) : IAsyncLifeti
     /// Джерело — річний документ із M1..M12 і зв'язкою; споживач — місячний, версія <c>YearWithMonthColumns</c>, таблиця
     /// «місяці в колонках», обчислювані M1..M12 з <c>REGFIND(код, [Period].Year, m, …)</c> (misplaced — місяць 10 у M11 і навпаки).
     /// </summary>
-    private async Task<World> ArrangeAsync(bool misplaced, int? skipMonth = null)
+    private async Task<World> ArrangeAsync(bool misplaced, int? skipMonth = null, bool oldVersion = false)
     {
         var world = new SourceDependencyWorld(sql);
         var (registryId, code) = await world.RegistryAsync();
@@ -426,6 +478,38 @@ public sealed class SourceMonthsQuartzTests(SqlServerFixture sql) : IAsyncLifeti
             }
 
             await db.SaveChangesAsync();
+
+            if (oldVersion)
+            {
+                // Опублікована стара версія того самого шаблону (не на періодах документа): читає місяць 10 у не-місячній колонці.
+                var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+                var old = new TemplateVersion(consumer.TemplateId, $"0.9.0.{tag}", 1, Now);
+                db.TemplateVersions.Add(old);
+                await db.SaveChangesAsync();
+                var name = new LocalizedText(new Dictionary<string, string> { ["en"] = "old" });
+                var sheet = new SheetDef(old.Id, EcrCode.Create($"OLDS{tag}"), name, 1);
+                db.SheetDefs.Add(sheet);
+                await db.SaveChangesAsync();
+                var table = new TableDef(sheet.Id, EcrCode.Create($"OLDT{tag}"), name, 1, TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
+                db.TableDefs.Add(table);
+                await db.SaveChangesAsync();
+                var column = new ColumnDef(table.Id, EcrCode.Create($"OLDC{tag}"), name, 1, CellDataType.Formula);
+                db.ColumnDefs.Add(column);
+                await db.SaveChangesAsync();
+                var formula = new FormulaDef(
+                    table.Id, FormulaScope.Column, $"REGFIELD(REGFIND('{code}', [Period].Year, 10, 'S', 'I'), 'VALUE')",
+                    ExpressionDialect.Template);
+                formula.AssignColumn(column.Id);
+                db.FormulaDefs.Add(formula);
+                await db.SaveChangesAsync();
+
+                // Публікація — після структури (опублікована версія заморожена, ECR-TMPL-0409).
+                await db.TemplateVersions.Where(v => v.Id == old.Id)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(v => v.Status, TemplateVersionStatus.Published)
+                        .SetProperty(v => v.PublishedAt, Now)
+                        .SetProperty(v => v.PublishedByUserId, 1));
+            }
         }
 
         var bindingId = await world.BindingAsync(source.TemplateId, registryId);

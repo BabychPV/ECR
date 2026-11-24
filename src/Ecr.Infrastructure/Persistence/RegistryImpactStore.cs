@@ -88,11 +88,12 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
     /// </remarks>
     public Task<IReadOnlyList<RegistryImpactRow>> ListTemplateConsumersAsync(
         IReadOnlyCollection<int> templateIds, int firstPeriod, int lastPeriod, int? month, CancellationToken ct)
-        => ListTemplateConsumersRoutedAsync(templateIds, firstPeriod, lastPeriod, month, routedMonth: null, ct);
+        => ListTemplateConsumersRoutedAsync(templateIds, firstPeriod, lastPeriod, month, routedMonth: null, routedVersions: null, ct);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<RegistryImpactRow>> ListTemplateConsumersRoutedAsync(
-        IReadOnlyCollection<int> templateIds, int firstPeriod, int lastPeriod, int? month, int? routedMonth, CancellationToken ct)
+        IReadOnlyCollection<int> templateIds, int firstPeriod, int lastPeriod, int? month, int? routedMonth,
+        IReadOnlySet<int>? routedVersions, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(templateIds);
         if (templateIds.Count == 0)
@@ -111,12 +112,15 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
                     on new { d.ProjectId, PeriodKey = instance.PeriodKeyValue }
                     equals new { period.ProjectId, PeriodKey = period.PeriodKeyValue }
                 where period.State == PeriodState.Open || period.State == PeriodState.Grace
-                where db.TemplateVersions.Any(v =>
-                    consumers.Contains(v.TemplateId)
-                    && v.Id == (d.TemplateId == null
-                        ? EcrDbContext.VersionOf(d.ProjectId, instance.PeriodKeyValue)
-                        : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, instance.PeriodKeyValue)))
-                select new { d.Id, d.BusinessKey, d.ProjectId, PeriodKey = instance.PeriodKeyValue, period.State, project.PeriodKind })
+                let versionId = d.TemplateId == null
+                    ? EcrDbContext.VersionOf(d.ProjectId, instance.PeriodKeyValue)
+                    : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, instance.PeriodKeyValue)
+                where db.TemplateVersions.Any(v => consumers.Contains(v.TemplateId) && v.Id == versionId)
+                select new
+                {
+                    d.Id, d.BusinessKey, d.ProjectId, PeriodKey = instance.PeriodKeyValue, period.State, project.PeriodKind,
+                    VersionId = versionId,
+                })
             .Distinct()
             .OrderBy(r => r.Id).ThenBy(r => r.PeriodKey)
             .ToListAsync(ct)
@@ -125,7 +129,7 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
         // ✎ PERF-06b (D-572): ребро «комірка періоду-власника місяця» — у місячному проєкті лише період (рік, m), якщо він є в
         // календарі проєкту (будь-який стан: закритий власник не рахується, а інші періоди цю комірку не рахують). Без
         // рядка календаря маршрутизація віддає комірку екземпляру перегляду — тоді всі періоди, як доти. Рішення — спільне з
-        // воротами F5 (MonthOwnerRouting).
+        // воротами F5 (MonthOwnerRouting). ✎ W15z M1: і лише для періоду на версії з routedVersions (версія за періодом — B74).
         HashSet<(int ProjectId, int PeriodKey)> owners = [];
         if (routedMonth is { } rm && rows.Exists(r => r.PeriodKind == PeriodKind.Monthly))
         {
@@ -141,6 +145,8 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
         return [.. rows
             .Where(r => month is not { } m || DocumentSourceGate.OwnedMonths(r.PeriodKind, r.PeriodKey % 100).Contains(m))
             .Where(r => routedMonth is not { } owned
+                        || routedVersions is null
+                        || !routedVersions.Contains(r.VersionId)
                         || !MonthOwnerRouting.Narrows(r.PeriodKind, owners.Contains((r.ProjectId, (r.PeriodKey / 100 * 100) + owned)))
                         || r.PeriodKey % 100 == owned)
             .Select(r => new RegistryImpactRow(r.Id, r.BusinessKey, r.ProjectId, r.PeriodKey, r.State, string.Empty))];
