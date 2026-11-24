@@ -166,6 +166,58 @@ public sealed class SourceMonthsQuartzTests(SqlServerFixture sql) : IAsyncLifeti
         Assert.True(requeued < finished, string.Join(" | ", order));
     }
     /// <summary>
+    /// ✎ Огляд b11 №3 (LOW): задача, що вичерпала стелю відкладення, ставить злиту під час прогону роботу в чергу ДО запису
+    /// <c>Failed</c> — так само без шпарини для воріт F5, як і успіх.
+    /// </summary>
+    /// <remarks>Мутація: перепостановку на шляху вичерпання — після <c>FinishAsync(Failed)</c> (як доти) — червоний.</remarks>
+    [Fact]
+    public async Task Вичерпане_відкладення_ставить_злиту_роботу_до_Failed()
+    {
+        var job = new DeferringRecalculationJob();
+        var events = new ConcurrentQueue<string>();
+        var progress = Substitute.For<IJobProgressStore>();
+        progress.When(p => p.QueueAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>(), Arg.Any<int?>(),
+                Arg.Any<string?>(), Arg.Any<long?>(), Arg.Any<string?>()))
+            .Do(c => events.Enqueue("queue:" + c.ArgAt<string>(0)));
+        progress.When(p => p.FinishAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>(), Arg.Any<string?>()))
+            .Do(c => events.Enqueue("finish:" + c.ArgAt<string>(0) + ":" + c.ArgAt<string>(1)));
+
+        var factory = Factory();
+        quartz = await factory.GetScheduler();
+        var services = new ServiceCollection();
+        services.AddSingleton<Ecr.Domain.Abstractions.IClock, SystemClock>();
+        services.AddSingleton<IRecalculationJob>(job);
+        services.AddSingleton(progress);
+        services.AddSingleton(new JobWorkerOptions { Lanes = [JobLanes.Default], MaxDeferral = TimeSpan.Zero });
+        await using var provider = services.BuildServiceProvider();
+        quartz.JobFactory = new AdapterFactory(provider);
+        await quartz.Start();
+
+        var jobs = new QuartzJobScheduler(factory, progress, new SystemClock());
+        var document = Random.Shared.NextInt64(1_000_000_000, 9_000_000_000);
+        var target = CalculationTrigger.AutoTargetOf(document, new PeriodKey(YearKey));
+
+        var running = await jobs.EnqueueCoalescedAsync<IRecalculationJob>(target, Auto(document, [3]), CancellationToken.None);
+        await job.FirstStarted.Task.WaitAsync(Safety);
+        Assert.Equal(running, await jobs.EnqueueCoalescedAsync<IRecalculationJob>(target, Auto(document, [5]), CancellationToken.None));
+        job.Release.TrySetResult();
+
+        var deadline = DateTime.UtcNow + Safety;
+        while (!events.Contains($"finish:{running}:Failed") && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(20);
+        }
+
+        var order = events.ToList();
+        var failed = order.IndexOf($"finish:{running}:Failed");
+        var requeued = order.FindIndex(e => e.StartsWith("queue:", StringComparison.Ordinal) && e != $"queue:{running}");
+        Assert.True(failed >= 0 && requeued >= 0, string.Join(" | ", order));
+        Assert.True(requeued < failed, string.Join(" | ", order));
+    }
+
+    /// <summary>
     /// Повний шлях Quartz: правка місяця 10 річного джерела → <c>-auto</c> з місяцями [10] → доведені місяці → задача зв'язки
     /// <c>-m10</c> → залежні споживача лише за період 10. Контролі: місяці невідомі (правка не-місячної колонки) і читання
     /// місяця 10 у колонці M11 — увесь рік. ✎ W15z M1 (репетиція на справжніх даних): ще одна ОПУБЛІКОВАНА стара версія
@@ -667,6 +719,24 @@ public sealed class SourceMonthsQuartzTests(SqlServerFixture sql) : IAsyncLifeti
     }
 
     /// <summary>Перший прогін чекає бар'єра; другий віддає свій payload.</summary>
+    /// <summary>Перший прогін чекає <see cref="Release"/>; кожен прогін — ресурс зайнятий (відкладення).</summary>
+    private sealed class DeferringRecalculationJob : IRecalculationJob
+    {
+        public TaskCompletionSource FirstStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
+        {
+            if (FirstStarted.TrySetResult())
+            {
+                await Release.Task.WaitAsync(ct).ConfigureAwait(false);
+            }
+
+            throw new JobDeferredException(TimeSpan.FromMilliseconds(50), "busy", "test-lock");
+        }
+    }
+
     private sealed class RecordingRecalculationJob : IRecalculationJob
     {
         private int runs;

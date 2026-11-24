@@ -70,15 +70,27 @@ public sealed class DocumentSourceIssuesAnyTests(SqlServerFixture sql)
     }
 
     /// <summary>
-    /// ✎ W15z M7 (репетиція b11 @dc1b38cba): затверджено → правка джерела (T) → повернути → F9 (прогін споживача стартував після T)
-    /// → подати й затвердити через ~65 с після T. Правка в межах запасу ДО повторного затвердження, але її вже порахував чинний
-    /// прогін — позначку знято (і в панелі, і в переліку документів). Контроль: прогону після правки немає — названо (гонитва D-567 (6б)).
+    /// ✎ W15z M7 (репетиція b11 @dc1b38cba; огляд b11 №3): затверджено → правка джерела (T, <c>aud.CellChange.Id</c> = E) →
+    /// повернути → F9 → подати й затвердити через ~65 с після T. Позначку знято, лише коли межа входів чинного прогону споживача
+    /// (<c>InputsCellChangeWatermark</c>) ≥ E — годинники (StartedAt воркера проти ChangedAt Api) не рахуються.
     /// </summary>
-    /// <remarks>Мутація: не перевіряти чинний прогін споживача — червоний «прогін після правки».</remarks>
+    /// <remarks>
+    /// Рядки: (1) M7 — межа покриває правку → знято. (2) (d) годинник воркера ВІДСТАЄ (StartedAt раніше ChangedAt), межа покриває
+    /// → знято. (3) (a)/(c)/(d) за часом «прогін після правки», а межа — ні: прогін переніс затверджені результати, правка була в
+    /// польоті на старті прогону (мітка — початок транзакції), годинник воркера поспішає → лишається. (4) (b) перенесення з
+    /// <c>InputsAsOfUtc</c> до правки → лишається. (5) прогін до міграції (межі немає) → лишається. (6) контроль: повторне
+    /// затвердження БЕЗ перерахунку (чинний прогін до правки) → лишається (гонитва D-567 (6б)).
+    /// Мутація: <c>@covered</c> → <c>long.MaxValue</c> — червоні (3)–(6); межу не читати (<c>0</c>) — червоні (1), (2).
+    /// </remarks>
     [Theory]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    public async Task Повторне_затвердження_після_перерахунку_знімає_позначку_в_межах_запасу(bool runAfterChange, bool expected)
+    [InlineData(8, 0, true, false, false)]
+    [InlineData(-30, 0, true, false, false)]
+    [InlineData(8, -1, true, false, true)]
+    [InlineData(8, -1, true, true, true)]
+    [InlineData(8, 0, false, false, true)]
+    [InlineData(-30, -1, true, false, true)]
+    public async Task Повторне_затвердження_знімає_позначку_лише_за_межею_входів_прогону(
+        int runStartSeconds, int watermarkDelta, bool hasWatermark, bool carried, bool expected)
     {
         var w = await ArrangeAsync();
         await ApproveLandAsync(w);
@@ -86,15 +98,30 @@ public sealed class DocumentSourceIssuesAnyTests(SqlServerFixture sql)
         await ChangeAsync(w.World.Source.DocumentId, w.BoundColumnId, change);
         Assert.Single(await ListAsync(w.World.Land.DocumentId));
 
-        // F9: чинний прогін споживача за період (після правки чи — контроль — до неї), далі повторне затвердження через 65 с.
+        // F9: чинний прогін споживача за період, далі повторне затвердження через 65 с після правки.
         await using (var db = sql.CreateContext())
         {
+            var edit = (await db.Database
+                .SqlQuery<long>($"SELECT MAX(Id) AS Value FROM aud.CellChange WHERE DocumentId = {w.World.Source.DocumentId}")
+                .ToListAsync()).Single();
             var run = new Ecr.Domain.Entities.Calculations.CalculationRun(
-                w.World.Land.ProjectId, March, 5, runAfterChange ? change.AddSeconds(8) : change.AddSeconds(-30), w.World.Land.DocumentId);
+                w.World.Land.ProjectId, March, 5, change.AddSeconds(runStartSeconds), w.World.Land.DocumentId);
+            if (carried)
+            {
+                run.LimitInputsAsOf(change.AddHours(-1));
+            }
+
             db.CalculationRuns.Add(run);
             await db.SaveChangesAsync();
             run.Complete(Ecr.Domain.Entities.Calculations.CalculationRun.CurrentStatus, change.AddSeconds(53), null, null);
             await db.SaveChangesAsync();
+            if (hasWatermark)
+            {
+                var watermark = edit + watermarkDelta;
+                await db.Database.ExecuteSqlAsync(
+                    $"UPDATE calc.CalculationRun SET InputsCellChangeWatermark = {watermark} WHERE Id = {run.Id}");
+            }
+
             await db.ApprovalStates.Where(s => s.DocumentId == w.World.Land.DocumentId && s.PeriodKey == March)
                 .ExecuteUpdateAsync(s => s.SetProperty(a => a.ApprovedAt, change.AddSeconds(65)));
         }

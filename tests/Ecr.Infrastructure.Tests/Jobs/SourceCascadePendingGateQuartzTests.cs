@@ -211,7 +211,13 @@ public sealed class SourceCascadePendingGateQuartzTests(SqlServerFixture sql)
 
         await using var db = Context();
         var bindings = autoBindings ?? [w.BindingId];
-        var gate = new SourceCascadePendingGate(db, gateCache: null, graph) { AutoBindingsProbe = _ => Task.FromResult(bindings) };
+        var gate = new SourceCascadePendingGate(db, gateCache: null, graph)
+        {
+            AutoBindingsProbe = _ => Task.FromResult(bindings),
+            // ✎ Огляд b11 №3: справжнє джерело зв'язки за рік — документ-джерело світу (вибір документа року).
+            ChosenSourcesProbe = (_, _) => Task.FromResult<IReadOnlyDictionary<(int Binding, int Year), long>>(
+                new Dictionary<(int Binding, int Year), long> { [(w.BindingId, w.Year)] = w.Source.DocumentId }),
+        };
         return await gate.IsPendingAsync(document.DocumentId, document.PeriodKey.Value, CancellationToken.None);
     }
 

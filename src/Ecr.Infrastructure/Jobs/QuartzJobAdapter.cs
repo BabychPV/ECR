@@ -266,6 +266,11 @@ public sealed partial class QuartzJobAdapter(
                 LogDeferralExhausted(logger, jobId, typeName ?? "—", deferred.Resource ?? "—", JobDeferral.Format(waited));
                 Observability.InfrastructureMetrics.RecordJobFailed(typeName, "deferral_exhausted");
 
+                // ✎ Огляд b11 №3 (LOW): злиття, що прийшли під час виконання, і комірки самої задачі — у чергу ДО запису
+                // Failed: інакше між Failed і перепостановкою ворота F5 не бачили б живої задачі документа.
+                await QuartzJobScheduler.RequeueDirtyBeforeFinishAsync(context.Scheduler, jobId).ConfigureAwait(false);
+                await RequeueExhaustedAsync(context, jobId, typeName, payload, progress, clock).ConfigureAwait(false);
+
                 if (progress is not null)
                 {
                     await WriteProgressAsync(
@@ -284,7 +289,6 @@ public sealed partial class QuartzJobAdapter(
                         .ConfigureAwait(false);
                 }
 
-                await RequeueExhaustedAsync(context, jobId, typeName, payload, progress, clock).ConfigureAwait(false);
                 QuartzPayloadMerges.MarkFailed(jobId);
                 QuartzDocumentFifo.Forget(context.Scheduler.SchedulerName, jobId);
 

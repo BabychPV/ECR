@@ -374,10 +374,27 @@ public sealed partial class RecalculationJob(
                 projectId, periodKey, request.TriggeredByUserId, startedAt,
                 documentId: request.DocumentId > 0 ? request.DocumentId : null);
 
+        // ✎ W15z M7 (огляд b11 №3): межа входів прогону документа — закомічений журнал комірок до читання входів; періоди, які
+        // прогін перерахував ЦІЛКОМ (решта — min з межею попереднього актуального прогону), і ця попередня межа.
+        long? inputsWatermark = null;
+        var fullPeriods = new HashSet<int>();
+        var previousInputsWatermarks = new Dictionary<int, long?>();
+        var partialAll = request.SheetDefId is not null || request.IncludeApproved || request.ForeignOwnerPass;
+
         async Task<(Domain.Entities.Calculations.CalculationRun Run, ModuleProfile Profile)> RunForAsync(int periodKey)
         {
             if (!periodRuns.TryGetValue(periodKey, out var entry))
             {
+                if (request.DocumentId > 0)
+                {
+                    previousInputsWatermarks[periodKey] = await db.CalculationRuns.AsNoTracking()
+                        .Where(r => r.DocumentId == request.DocumentId && r.PeriodKey == periodKey
+                                    && r.Status == Domain.Entities.Calculations.CalculationRun.CurrentStatus)
+                        .Select(r => r.InputsCellChangeWatermark)
+                        .FirstOrDefaultAsync(ct)
+                        .ConfigureAwait(false);
+                }
+
                 entry = (NewRun(periodKey), new ModuleProfile());
                 periodRuns.Add(periodKey, entry);
                 db.CalculationRuns.Add(entry.Run);
@@ -395,6 +412,12 @@ public sealed partial class RecalculationJob(
             // нижче — і задача лишалася `Running` назавжди, хоча catch
             // виглядав так, ніби мав це перехопити.
             //
+            // ✎ W15z M7 (огляд b11 №3): межа — ДО першого читання входів (формули, методології); лише прогін документа.
+            if (request.DocumentId > 0)
+            {
+                inputsWatermark = await CellChangeWatermarks.CommittedAsync(db, ct).ConfigureAwait(false);
+            }
+
             // ⚠ Названий період — прогін створюється ОДРАЗУ, як і завжди.
             if (request.PeriodKey is { } requestedPeriod)
             {
@@ -586,6 +609,12 @@ public sealed partial class RecalculationJob(
                     LogSkippedSheets(logger, documentId, skippedPairs);
                 }
 
+                // ✎ W15z M7 (огляд b11 №3): періоди з будь-яким затвердженим станом (оригінал чи копія) — їхні числа прогін
+                // не переписує, тож межа входів періоду не вища за межу попереднього актуального прогону.
+                var approvedStatePeriods = request.DocumentId > 0
+                    ? await ApprovedStatePeriodsAsync(documentId, ct).ConfigureAwait(false)
+                    : [];
+
                 var bindingPlan = await BindingsAsync(docRequest, methodologyScope, skippedSheets, ct).ConfigureAwait(false);
                 var bindingsByPeriod = bindingPlan.Bindings;
                 blockedReaders[documentId] = bindingPlan.BlockedReaders;
@@ -684,6 +713,12 @@ public sealed partial class RecalculationJob(
 
                     var (run, runProfile) = await RunForAsync(period).ConfigureAwait(false);
 
+                    if (periods.Contains(period) && !approvedStatePeriods.Contains(period)
+                        && !bindingPlan.CarryOver.ContainsKey(period) && !bindingPlan.CarryOverInstances.ContainsKey(period))
+                    {
+                        fullPeriods.Add(period);
+                    }
+
                     if (!completionGuards.TryGetValue(period, out var periodGuards))
                     {
                         completionGuards[period] = periodGuards = [];
@@ -781,6 +816,27 @@ public sealed partial class RecalculationJob(
             // пораховано, і ретрай усієї задачі перерахував би їх заново саме в пік дедлайну. Відмова
             // відкочує перемикання цілком (перевірка — перша в транзакції), тож повтор безпечний.
             // Вичерпано — задача відкладається (нижче, `catch`), а не падає.
+            // ✎ W15z M7 (огляд b11 №3): межа входів — ДО перемикання актуальності (актуальний прогін без межі лише тримав би
+            // позначку). Не цілком перерахований період — min з межею попереднього актуального прогону; невідома — NULL.
+            if (request.DocumentId > 0)
+            {
+                foreach (var (period, (run, _)) in periodRuns)
+                {
+                    var watermark = EffectiveInputsWatermark(
+                        inputsWatermark,
+                        partialAll || !fullPeriods.Contains(period),
+                        previousInputsWatermarks.GetValueOrDefault(period));
+                    if (watermark is { } value)
+                    {
+                        await db.Database
+                            .ExecuteSqlAsync(
+                                $"UPDATE calc.CalculationRun SET InputsCellChangeWatermark = {value} WHERE Id = {run.Id}",
+                                ct)
+                            .ConfigureAwait(false);
+                    }
+                }
+            }
+
             foreach (var (period, (run, profile)) in periodRuns)
             {
                 var guards = completionGuards.GetValueOrDefault(period) ?? [];
@@ -3358,6 +3414,29 @@ public sealed partial class RecalculationJob(
 
         return [.. rows.Select(r => (r.PeriodKey, r.SheetDefId, r.SheetCopyId ?? 0L))];
     }
+
+    /// <summary>
+    /// ✎ W15z M7 (огляд b11 №3): межа входів чисел документа × періоду після прогону. Цілком перерахований період — межа
+    /// старту прогону; не цілком (затверджені стани, перенесення, область аркуша, без формул) — <c>min</c> із межею
+    /// попереднього актуального прогону: числа, яких прогін не чіпав, лишилися звідти. Будь-яка невідома — <c>null</c>.
+    /// </summary>
+    /// <param name="start">Закомічена межа журналу на старті прогону.</param>
+    /// <param name="partial">Чи період перераховано не цілком.</param>
+    /// <param name="previous">Межа попереднього актуального прогону тієї ж осі (немає — <c>null</c>).</param>
+    /// <returns>Межа або <c>null</c>.</returns>
+    internal static long? EffectiveInputsWatermark(long? start, bool partial, long? previous)
+        => !partial ? start
+            : start is { } own && previous is { } before ? Math.Min(own, before)
+            : null;
+
+    /// <summary>✎ W15z M7: періоди документа з будь-яким затвердженим станом аркуша (оригінал чи копія).</summary>
+    private async Task<HashSet<int>> ApprovedStatePeriodsAsync(long documentId, CancellationToken ct)
+        => [.. await db.ApprovalStates.AsNoTracking()
+            .Where(s => s.DocumentId == documentId && s.Status == Domain.Enums.DocumentStatus.Approved)
+            .Select(s => s.PeriodKey)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false)];
 
     /// <summary>Аркуші документа за періодами, які прогін ПРОПУСКАЄ: лише затверджені (ФВ-9.17, ✎ B79).</summary>
     /// <param name="request">Завдання.</param>
