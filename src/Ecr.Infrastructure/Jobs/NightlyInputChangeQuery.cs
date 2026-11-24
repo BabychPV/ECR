@@ -50,8 +50,8 @@ internal sealed record NightlyInputProbe(
 ///   (<c>TemplateVersionId = 0</c>) — лише типи <see cref="GlobalStructureEntityTypes"/> (огляд M2(a): прив'язки, пакети,
 ///   довідники; маршрути погодження, звіти, дозволи, інтеграція — ні). Записи періодів (під версією проєкту) не потрібні — їх
 ///   перехід ловить гілка станів періодів нижче (і B74 не дає читати <c>Project.TemplateVersionId</c>). Крім власних записів перерахунку —
-///   <c>SheetRecalc</c> (журнал пропущених/перерахованих аркушів; запис «зріз застарів» прибрано разом зі зрізами звітності,
-///   P-1124-3), — і блокувань рядків
+///   <c>SheetRecalc</c> (журнал пропущених/перерахованих аркушів) і <c>ReportSnapshot</c> (зріз застарів; після P-1124-3 —
+///   лише історичні записи), — і блокувань рядків
 ///   (<c>RowLock</c>: не вхід розрахунку): інакше нічний прогін сам собі давав би «зміну» щоночі;</item>
 ///   <item>перехід стану періоду проєкту (<c>doc.Period.StateChangedAt</c>, зокрема Reopen) і виняток «місяць відкрито для
 ///   документа» (відкрито чи закрито);</item>
@@ -76,9 +76,15 @@ internal sealed record NightlyInputProbe(
 internal static class NightlyInputChangeQuery
 {
     /// <summary>Типи записів журналу структури ВЕРСІЙ ДОКУМЕНТА, які пише сам перерахунок чи які не є входом розрахунку.</summary>
+    /// <summary>Тип записів журналу «зріз звітності застарів» до P-1124-3 (історія; нових записів немає).</summary>
+    internal const string LegacyReportSnapshotEntityType = "ReportSnapshot";
+
     internal static readonly string[] IgnoredStructureEntityTypes =
     [
         RecalculationSkips.AuditEntityType,
+        // ✎ P-1124-3: записи «зріз застарів» (ФВ-10.5) більше не пишуться — зрізи звітності прибрано (D-NEW); тип лишається
+        // в переліку для історичних записів журналу (і три параметри запиту нижче).
+        LegacyReportSnapshotEntityType,
         Ecr.Application.Documents.RowLocks.RowLockRules.AuditEntityType,
     ];
 
