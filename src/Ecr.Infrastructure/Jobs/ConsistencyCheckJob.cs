@@ -210,14 +210,27 @@ public sealed class ConsistencyCheckJob(
         // (`03-archive-proc.sql`), а не ця задача, і видаляти їх вона не має права.
         var evaluated = new List<(string RuleCode, string EntityType)>();
         var periodsComplete = periodKeys.Count < MaxPeriods;
+        var checks = new Dictionary<string, RuleTally>(StringComparer.Ordinal);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
 
         void Collect(List<ConsistencyIssue> found, string ruleCode, string entityType, bool complete)
         {
             issues.AddRange(found);
-            if (complete && found.Count < MaxIssues)
+            var fullyChecked = complete && found.Count < MaxIssues;
+            if (fullyChecked)
             {
                 evaluated.Add((ruleCode, entityType));
             }
+
+            // Підсумок правила для «Перевірки цього проходу» на екрані (код × знахідки × повнота × час).
+            var tally = checks.GetValueOrDefault(ruleCode) ?? new RuleTally(0, true, false, 0);
+            checks[ruleCode] = tally with
+            {
+                Found = tally.Found + found.Count,
+                Complete = tally.Complete && fullyChecked,
+                Ms = tally.Ms + watch.ElapsedMilliseconds,
+            };
+            watch.Restart();
         }
 
         await progress.ReportKeyAsync(10, "jobs.consistencyOrphanedCells", ct).ConfigureAwait(false);
@@ -240,9 +253,33 @@ public sealed class ConsistencyCheckJob(
 
         var nonCurrent = await NonCurrentRunRowsAsync(periodKeys, ct).ConfigureAwait(false);
         Collect(nonCurrent.Issues, NonCurrentRunRowsRule, "calc.CalculationRun", nonCurrent.Evaluated && periodsComplete);
+        if (!nonCurrent.Evaluated)
+        {
+            checks[NonCurrentRunRowsRule] = checks[NonCurrentRunRowsRule] with { Skipped = true };
+        }
 
         // B80 N4: затверджений місяць споживача зв'язки ApprovedOnly, чиє джерело змінилося після затвердження.
         Collect(await StaleApprovedDependentsAsync(ct).ConfigureAwait(false), StaleApprovedDependentRule, StaleApprovedDependentCheck.EntityType, true);
+
+        // ✎ 24.11 (аудит «Consistency issues»): результати розрахунку й методології — R1–R5, R7, R8.
+        var calculations = await new CalculationConsistencyChecks(db, clock.UtcNow)
+            .RunAllAsync(MaxIssues, ct)
+            .ConfigureAwait(false);
+        foreach (var outcome in calculations)
+        {
+            foreach (var entityType in CalculationConsistencyChecks.EntityTypesOf(outcome.RuleCode))
+            {
+                Collect(
+                    [.. outcome.Findings
+                        .Where(f => string.Equals(f.EntityType, entityType, StringComparison.Ordinal))
+                        .Select(f => new ConsistencyIssue(f.RuleCode, f.Severity, f.EntityType, f.EntityId, f.Message, f.PeriodKey))],
+                    outcome.RuleCode,
+                    entityType,
+                    outcome.Complete);
+            }
+
+            checks[outcome.RuleCode] = checks[outcome.RuleCode] with { Ms = outcome.ElapsedMs };
+        }
 
         // ⚠ Перерахунок ознаки IsOrphaned — В ОБИДВА боки (ФВ-8.13a). Задача
         // симетрична: те, що ставить ознаку, її ж і знімає. Асиметрія тут не
@@ -284,7 +321,9 @@ public sealed class ConsistencyCheckJob(
             + $"\"archiveNoReference\":{tamper.NoReference},"
             // B87: скільки еталонів до B87 доповнено частинами місяця, стилями й перевизначеннями формул.
             + $"\"archiveReferencesExtended\":{tamper.ReferencesExtended},"
-            + $"\"archiveCheckComplete\":{(tamper.Complete ? "true" : "false")}}}",
+            + $"\"archiveCheckComplete\":{(tamper.Complete ? "true" : "false")},"
+            // ✎ 24.11: правила проходу з кількістю знахідок — екран показує «перевірено N правил», а не лише «0 знахідок».
+            + $"\"checks\":{ChecksJson(checks)}}}",
             clock.UtcNow);
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -617,14 +656,7 @@ public sealed class ConsistencyCheckJob(
     /// </remarks>
     private async Task<List<ConsistencyIssue>> UnboundCalculatedColumnsAsync(CancellationToken ct)
     {
-        var liveVersions = db.Projects
-            .AsNoTracking()
-            .Where(p => p.Status != ProjectStatus.Archived)
-            .Select(p => p.TemplateVersionId)
-            // ✎ B74 P3 (D-576): і чинні версії ПРИЄДНАНИХ шаблонів живих проєктів (doc.ProjectTemplate).
-            .Concat(db.ProjectTemplates.AsNoTracking()
-                .Where(pt => db.Projects.Any(p => p.Id == pt.ProjectId && p.Status != ProjectStatus.Archived))
-                .Select(pt => pt.CurrentTemplateVersionId));
+        var liveVersions = LiveTemplateVersions(db);
 
         var query =
             from column in db.ColumnDefs.AsNoTracking()
@@ -659,6 +691,21 @@ public sealed class ConsistencyCheckJob(
                 ("version", f.TemplateVersionId),
                 ("columnId", f.ColumnDefId))));
     }
+
+    /// <summary>
+    /// Версії шаблонів, за якими живуть проєкти не в архіві: основна (<c>Project.TemplateVersionId</c>) і чинні версії
+    /// приєднаних шаблонів (<c>doc.ProjectTemplate</c>, B74 P3, D-576). Спільне коло для <c>UNBOUND_CALCULATED_COLUMN</c> і
+    /// правил розрахунку <see cref="CalculationConsistencyChecks"/> (R7, R8).
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    internal static IQueryable<int> LiveTemplateVersions(EcrDbContext db)
+        => db.Projects
+            .AsNoTracking()
+            .Where(p => p.Status != ProjectStatus.Archived)
+            .Select(p => p.TemplateVersionId)
+            .Concat(db.ProjectTemplates.AsNoTracking()
+                .Where(pt => db.Projects.Any(p => p.Id == pt.ProjectId && p.Status != ProjectStatus.Archived))
+                .Select(pt => pt.CurrentTemplateVersionId));
 
     /// <summary>
     /// Колонки типу <c>Formula</c> на опублікованій або виведеній з обігу
@@ -1025,6 +1072,47 @@ public sealed class ConsistencyCheckJob(
     /// </param>
     private sealed record ConsistencyIssue(
         string RuleCode, byte Severity, string EntityType, long EntityId, string Message, int? PeriodKey = null);
+
+    /// <summary>
+    /// Правила проходу в порядку показу (екран «Перевірки цього проходу»). ⚠ Новий код правила — сюди, у ключ каталогу
+    /// <c>consistency.rule.&lt;CODE&gt;</c> (en/ru/kz) і в перелік клієнта.
+    /// </summary>
+    public static IReadOnlyList<string> KnownRules { get; } =
+    [
+        OrphanedCellRule,
+        BrokenFkRule,
+        ArchiveChecksumRule,
+        UnboundCalculatedRule,
+        UnsourcedFormulaRule,
+        NonCurrentRunRowsRule,
+        StaleApprovedDependentRule,
+        CalculationConsistencyChecks.ResultVersionNotEffectiveRule,
+        CalculationConsistencyChecks.EffectiveVersionFormulasRule,
+        CalculationConsistencyChecks.RowInputsCompleteNoResultRule,
+        CalculationConsistencyChecks.CurrentRunNoResultsRule,
+        CalculationConsistencyChecks.IssueWithoutRunRule,
+        CalculationConsistencyChecks.OutputWithoutBindingRule,
+        CalculationConsistencyChecks.BindingDeadColumnRule,
+    ];
+
+    /// <summary>Масив <c>checks</c> деталей прогону: правило, знахідок, повнота, пропуск, час (мс).</summary>
+    /// <param name="checks">Підсумки правил проходу.</param>
+    /// <returns>JSON-масив у порядку <see cref="KnownRules"/>.</returns>
+    private static string ChecksJson(Dictionary<string, RuleTally> checks)
+        => System.Text.Json.JsonSerializer.Serialize(
+            KnownRules
+                .Where(checks.ContainsKey)
+                .Select(code => new
+                {
+                    code,
+                    found = checks[code].Found,
+                    complete = checks[code].Complete,
+                    skipped = checks[code].Skipped,
+                    ms = checks[code].Ms,
+                }));
+
+    /// <summary>Підсумок одного правила проходу.</summary>
+    private sealed record RuleTally(int Found, bool Complete, bool Skipped, long Ms);
 
     private sealed record OrphanRow(int PeriodKey, long TableRowId, long RegistryEntryId);
 
