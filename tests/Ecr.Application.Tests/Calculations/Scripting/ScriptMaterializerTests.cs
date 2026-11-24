@@ -140,9 +140,9 @@ public sealed class ScriptMaterializerTests
 
         var library = ScriptTestKit.NewMethodology("COMMON", 9, MethodologyKind.Library);
         _drafts.FindByCodeAsync("COMMON", Arg.Any<CancellationToken>()).Returns(library);
-        _store.FindSubstanceEntryIdsAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyDictionary<string, long>>(
-                new Dictionary<string, long> { ["301"] = 301, ["304"] = 304 }));
+        _store.FindSubstanceCandidatesAsync(Arg.Any<IReadOnlyCollection<string>>(), MethodologyId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<SubstanceCandidate>>(
+                [new SubstanceCandidate("301", 301, "E301", "SUBST", false), new SubstanceCandidate("304", 304, "E304", "SUBST", false)]));
 
         var libraryCompiled = ScriptTestKit.Compile("const k = 1;", isLibrary: true).Script!;
         var text = "import COMMON;\nrows from T1;\ntable Src = T2;\nvar total = Sum(Src.Amount);\n"
@@ -182,9 +182,15 @@ public sealed class ScriptMaterializerTests
         _store.GetSubstanceCodesAsync(VersionId, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyDictionary<long, string>>(
                 new Dictionary<long, string> { [6044] = "333", [6051] = "415" }));
-        _store.FindSubstanceEntryIdsAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyDictionary<string, long>>(
-                new Dictionary<string, long> { ["333"] = 642, ["415"] = 651, ["416"] = 652 }));
+        _store.FindSubstanceCandidatesAsync(Arg.Any<IReadOnlyCollection<string>>(), MethodologyId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<SubstanceCandidate>>(
+            [
+                new SubstanceCandidate("333", 642, "C333", "LAND_HSE400_SUBSTANCE", false),
+                new SubstanceCandidate("333", 6044, "E333", "LAND_AIR_SUBSTANCE", false),
+                new SubstanceCandidate("415", 651, "C415", "LAND_HSE400_SUBSTANCE", false),
+                new SubstanceCandidate("415", 6051, "E415", "LAND_AIR_SUBSTANCE", false),
+                new SubstanceCandidate("416", 652, "C416", "LAND_HSE400_SUBSTANCE", false),
+            ]));
         var (script, environment) = Prepare(
             "rows from T1;\nforeach substance S in (\"333\", \"415\", \"416\") {\n output OUT_A per S : t = row.Hours;\n}", Table());
 
