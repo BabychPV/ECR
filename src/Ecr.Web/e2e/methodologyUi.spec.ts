@@ -251,13 +251,15 @@ test.describe('Methodology page UI: script versions only, new version is a scrip
     await page.keyboard.press('Enter');
     await expect(bindings).toHaveAttribute('aria-expanded', 'true');
 
-    // Згорнути «трасування» і перезавантажити — вибір пам'ятається.
+    // «Трасування» згорнуте за замовчуванням (`defaultExpanded={false}`): пробіл розгортає, вибір переживає
+    // перезавантаження.
     const trace = page.getByTestId('methodology-section-toggle-traceSteps');
+    await expect(trace).toHaveAttribute('aria-expanded', 'false');
     await trace.focus();
     await page.keyboard.press('Space');
-    await expect(trace).toHaveAttribute('aria-expanded', 'false');
+    await expect(trace).toHaveAttribute('aria-expanded', 'true');
     await page.reload();
-    await expect(page.getByTestId('methodology-section-toggle-traceSteps')).toHaveAttribute('aria-expanded', 'false', { timeout: 30_000 });
+    await expect(page.getByTestId('methodology-section-toggle-traceSteps')).toHaveAttribute('aria-expanded', 'true', { timeout: 30_000 });
     await expect(page.getByTestId('methodology-section-toggle-bindings')).toHaveAttribute('aria-expanded', 'true');
     // Журнал публікацій — згорнутий за замовчуванням.
     await expect(page.getByTestId('methodology-section-toggle-publications')).toHaveAttribute('aria-expanded', 'false');
@@ -265,11 +267,10 @@ test.describe('Methodology page UI: script versions only, new version is a scrip
     // Заголовки секцій — h2 з кнопкою всередині.
     await expect(page.getByTestId('methodology-section-toggle-traceSteps').locator('xpath=ancestor::h2')).toHaveCount(1);
 
-    // Повернути стан, щоб наступні тести бачили розгорнуту сторінку.
+    // Повернути типовий стан для наступних тестів.
     await page.getByTestId('methodology-section-toggle-traceSteps').click();
-    await expect(page.getByTestId('methodology-section-toggle-traceSteps')).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByTestId('methodology-section-toggle-traceSteps')).toHaveAttribute('aria-expanded', 'false');
   });
-
   for (const scheme of ['light', 'dark'] as const) {
     test(`${scheme}: real axe color-contrast at 1440 and 500 px, no horizontal scroll, screenshots`, async ({ page }, testInfo) => {
       const data = seed!;

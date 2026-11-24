@@ -216,16 +216,14 @@ public sealed class MethodologyScriptApiTests(SqlServerFixture sql)
         var (editor, _) = await SignInAsync(app, Editor).ConfigureAwait(true);
         var created = await CreateScriptVersionAsync(editor).ConfigureAwait(true);
 
-        // Заготовка нової порожньої версії-скрипта; лише одна діагностика — «немає rows».
+        // Заготовка нової порожньої версії-скрипта; ✎ P-1124-1: жодної діагностики (людина 24.11: «свіжа чернетка — 0 проблем»).
         using (var starter = await JsonAsync(await GetAsync(editor, Script(created.MethodologyId, created.VersionId)).ConfigureAwait(true), HttpStatusCode.OK).ConfigureAwait(true))
         {
             Assert.Equal("Script", starter.RootElement.GetProperty("engine").GetString());
             Assert.True(starter.RootElement.GetProperty("isDraft").GetBoolean());
             Assert.Contains("rows from", starter.RootElement.GetProperty("text").GetString(), StringComparison.Ordinal);
             Assert.Equal(64, starter.RootElement.GetProperty("hash").GetString()!.Length);
-            Assert.Equal(
-                ["missingRows"],
-                starter.RootElement.GetProperty("diagnostics").EnumerateArray().Select(d => d.GetProperty("code").GetString()));
+            Assert.Equal(0, starter.RootElement.GetProperty("diagnostics").GetArrayLength());
         }
 
         // PUT з помилкою: 200, діагностика з рядком/колонкою/довжиною і ключем каталогу; нічого не матеріалізовано.

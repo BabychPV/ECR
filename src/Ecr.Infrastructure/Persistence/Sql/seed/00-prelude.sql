@@ -767,6 +767,10 @@ UPDATE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
     (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
+    -- P-1124-1 (24.11, «має бути тільки наш новий редакор»): сторінка версій більше не про формули.
+    (N'methodologies.versionsTitle', N'en', N'Versions and formulas', N'Versions'),
+    (N'methodologies.versionsTitle', N'ru', N'Версии и формулы', N'Версии'),
+    (N'methodologies.versionsTitle', N'kz', N'Нұсқалар мен формулалар', N'Нұсқалар'),
     -- AN-158 (людина 04.11): район NAE вибирається зі списку; одна назва дії AF — «Load from PI AF».
     (N'permits.nae.manual.areaHint', N'en', N'Area code under the region, for example OFFSHORE. Leave empty to add only the region.', N'The area is chosen from the «Air permit areas» list. Choose «No area» to add only the region.'),
     (N'permits.nae.manual.areaHint', N'ru', N'Код района под регионом, например OFFSHORE. Оставьте пустым, чтобы добавить только регион.', N'Район выбирается из справочника «Air permit areas». Выберите «Без района», чтобы добавить только регион.'),
@@ -2971,7 +2975,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'methodologies.reasonHint', N'ru', N'Записывается в журнал изменений: объясняет, почему прошлые значения были пересчитаны.'),
     (N'methodologies.effectiveFrom', N'ru', N'Действует с'),
     (N'methodologies.effectiveFromHint', N'ru', N'Периоды начиная с этой даты рассчитываются по этой версии; более ранние — по прежней.'),
-    (N'methodologies.versionsTitle', N'ru', N'Версии и формулы'),
+    (N'methodologies.versionsTitle', N'ru', N'Версии'),
     (N'methodologies.version', N'ru', N'Версия'),
     (N'methodologies.status', N'ru', N'Статус'),
     (N'methodologies.modes', N'ru', N'Режимы'),
@@ -5819,7 +5823,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'methodologies.reasonHint', N'kz', N'Өзгерістер журналына жазылады: өткен мәндердің неліктен қайта есептелгенін түсіндіреді.'),
     (N'methodologies.effectiveFrom', N'kz', N'Күшіне енетін күні'),
     (N'methodologies.effectiveFromHint', N'kz', N'Осы күннен бастап кезеңдер осы нұсқа бойынша есептеледі; ертеректегілері — бұрынғы нұсқа бойынша.'),
-    (N'methodologies.versionsTitle', N'kz', N'Нұсқалар мен формулалар'),
+    (N'methodologies.versionsTitle', N'kz', N'Нұсқалар'),
     (N'methodologies.version', N'kz', N'Нұсқа'),
     (N'methodologies.status', N'kz', N'Мәртебесі'),
     (N'methodologies.modes', N'kz', N'Режимдер'),

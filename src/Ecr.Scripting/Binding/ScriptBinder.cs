@@ -234,7 +234,10 @@ internal sealed class ScriptBinder
 
         CheckRecursion();
 
-        if (!options.IsLibrary && !options.IsModuleLevel && rows.Count == 0)
+        // ✎ P-1124-1 (UI-прохід 24.11, вимога людини «свіжа чернетка — 0 проблем»): текст без жодної конструкції
+        // (лише коментарі — стартова заготовка `ScriptStarter`) не має проблем; порожню версію однаково не
+        // опублікувати — публікація відмовляє `noBoundOutput` (жоден вихід не прив'язано).
+        if (!options.IsLibrary && !options.IsModuleLevel && rows.Count == 0 && program.Items.Count > 0)
         {
             Report(ScriptDiagnosticCodes.MissingRows, new ScriptSpan(0, 0, 1, 1),
                 "A script must contain at least one 'rows from …;' clause.");
