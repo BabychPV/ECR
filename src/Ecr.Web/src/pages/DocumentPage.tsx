@@ -644,14 +644,15 @@ export function DocumentPage(): JSX.Element {
     const { findHse400Document } = await import('@/features/documents/findHse400Document');
     const found = await findHse400Document(projectId, Math.trunc(target / 100), documentId, target);
     if (found === null) return false;
-    void navigate(`/documents/${String(found)}?periodKey=${String(target)}`);
+    // ✎ Огляд b11 (G): місяць — явно (`focusMonth`): річний документ веде до колонки й тоді, коли місяць — якір.
+    void navigate(`/documents/${String(found)}?periodKey=${String(target)}&focusMonth=${String(target % 100)}`);
 
     return true;
   }, [documentId, navigate, periodKey, projectId]);
   // ✎ B80 N4: «Відкрити HSE400» причини джерела — місяць документа-джерела, який назвав сервер.
   const openSource = useCallback(
     (sourceId: number, sourcePeriod: number) =>
-      void navigate(`/documents/${String(sourceId)}?periodKey=${String(sourcePeriod)}`),
+      void navigate(`/documents/${String(sourceId)}?periodKey=${String(sourcePeriod)}&focusMonth=${String(sourcePeriod % 100)}`),
     [navigate],
   );
 
@@ -681,11 +682,16 @@ export function DocumentPage(): JSX.Element {
   const pickablePeriods = yearLayout ? yearAnchors(projectPeriods) : projectPeriods;
   // ✎ LAND-YEAR L7a (координатор 17.11): місяці року документа «рік» для «Reopen … for this document» — з правом
   // `Period.Reopen` і лише коли в році є закритий місяць; інакше вибору немає (копія на місяць — банер, як було).
-  const yearMonths = yearLayout
-    ? (calendar.data?.periods ?? [])
-        .filter((period) => Math.floor(period.periodKey / 100) === Math.floor(periodKey / 100))
-        .sort((a, b) => a.periodKey - b.periodKey)
-    : [];
+  // ✎ Огляд b11 (G): мемоізовано — від нього залежать запити місяців за стелею записів року.
+  const yearMonths = useMemo(
+    () =>
+      yearLayout
+        ? (calendar.data?.periods ?? [])
+            .filter((period) => Math.floor(period.periodKey / 100) === Math.floor(periodKey / 100))
+            .sort((a, b) => a.periodKey - b.periodKey)
+        : [],
+    [yearLayout, calendar.data, periodKey],
+  );
   const yearReopenMonths =
     yearLayout && can(session.data, 'Period.Reopen') && yearMonths.some((period) => period.state === 'Closed')
       ? yearMonths
@@ -706,14 +712,24 @@ export function DocumentPage(): JSX.Element {
    */
   const yearAnchor = yearLayout ? yearAnchorOf(projectPeriods, periodKey) : null;
   // ✎ Огляд M4 (4): явний місяць в адресі (не умовчання) — у `focusMonth`, тим самим переходом адреси.
+  // ✎ Огляд b11 (G): посилання на САМ якір (`?periodKey=січень`) — теж місяць: перехід до його колонки, одноразово на
+  // документ (прибирання `focusMonth` з адреси і власні переходи сторінки не запускають його вдруге).
+  const arrivalHandled = useRef<number | null>(null);
   useEffect(() => {
-    if (yearAnchor === null || yearAnchor === periodKey) return;
-    if (urlPeriod === null) {
-      setPeriodKey(yearAnchor);
+    if (yearAnchor === null) return;
+    if (yearAnchor !== periodKey) {
+      if (urlPeriod === null) {
+        setPeriodKey(yearAnchor);
+        return;
+      }
+      arrivalHandled.current = documentId;
+      setUrlParams({ periodKey: String(yearAnchor), focusMonth: String(urlPeriod % 100) });
       return;
     }
-    setUrlParams({ periodKey: String(yearAnchor), focusMonth: String(urlPeriod % 100) });
-  }, [yearAnchor, periodKey, setPeriodKey, urlPeriod, setUrlParams]);
+    if (arrivalHandled.current === documentId) return;
+    arrivalHandled.current = documentId;
+    if (urlPeriod !== null && focusMonth === null) setFocusMonth(yearAnchor % 100);
+  }, [yearAnchor, periodKey, setPeriodKey, urlPeriod, setUrlParams, documentId, focusMonth, setFocusMonth]);
 
   // Адреса з періодом поза проєктом (сервер його відхилив) сама веде на найближчий допустимий; кнопка в стані
   // помилки нижче - запасний шлях, якщо календар не завантажився.
@@ -883,12 +899,18 @@ export function DocumentPage(): JSX.Element {
     () => new Set((calendar.data?.periods ?? []).filter((period) => period.state === 'Scheduled').map((period) => period.periodKey)),
     [calendar.data],
   );
+  // ✎ Огляд b11 (G): місяці року з календаря, крім Scheduled, — для окремого читання місяців за стелею записів року.
+  const openYearMonths = useMemo(
+    () => yearMonths.filter((period) => period.state !== 'Scheduled').map((period) => period.periodKey),
+    [yearMonths],
+  );
   const yearIssues = useYearUnmatchedRows(
     documentId,
     periodKey,
     active?.sheetCopyId ?? null,
     yearLayout && yearAnchor === periodKey,
     unmatchedRows.finishedAt,
+    openYearMonths,
   );
   const issuePanels: readonly MonthUnmatchedRows[] =
     yearLayout && yearAnchor !== null && !yearIssues.failed
@@ -901,16 +923,28 @@ export function DocumentPage(): JSX.Element {
   // ✎ Огляд M4 (4): посилання на місяць річного документа — сітка переходить до колонки цього місяця в першій таблиці
   // аркуша, що її має (місяці колонок — з `submission-target` аркуша, той самий запит, що в рядку дій), на перший рядок.
   const focusPending = yearLayout && focusMonth !== null && yearAnchor === periodKey && active !== undefined;
+  const focusIssued = useRef<string | null>(null);
   const focusTarget = useQuery({
     queryKey: submissionTargetKey(documentId, active?.sheetDefId ?? 0, periodKey, active?.sheetCopyId ?? null),
     queryFn: () => fetchSubmissionTarget(documentId, active?.sheetDefId ?? 0, periodKey, active?.sheetCopyId ?? null),
     enabled: focusPending,
   });
   useEffect(() => {
-    if (!focusPending || active === undefined) return;
-    const months = focusTarget.data?.monthColumns;
+    // ✎ Огляд b11 (G): `submission-target` відмовив — прибрати `focusMonth`, щоб він не спрацював пізніше (інший аркуш).
+    if (focusPending && focusTarget.isError) {
+      setFocusMonth(null);
+      return;
+    }
+    if (!focusPending || active === undefined || focusTarget.data === undefined) return;
+    // ✎ W15z M4 (репетиція): статуси `monthColumns` має лише МІСЯЧНИЙ календар — річний проєкт HSE400 (PeriodKind.Yearly)
+    // їх не має (порожньо), тож місяць колонки — з `monthColumnCodes` (факт шаблону); старіший сервер — `monthColumns`.
+    const months = focusTarget.data.monthColumnCodes ?? focusTarget.data.monthColumns;
     if (!Array.isArray(months)) return;
     setFocusMonth(null);
+    // Одноразово: поки адреса ще несе `focusMonth` (оновлення не застосовано), ефект може спрацювати вдруге.
+    const issued = `${String(documentId)}:${String(periodKey)}:${String(focusMonth)}`;
+    if (focusIssued.current === issued) return;
+    focusIssued.current = issued;
     const table = active.tables.find((candidate) =>
       months.some((month) => month.tableDefId === candidate.tableDefId && month.monthNumber === focusMonth),
     );
@@ -924,7 +958,16 @@ export function DocumentPage(): JSX.Element {
         columnCode: column.columnCode,
       }),
     );
-  }, [focusPending, focusTarget.data, active, focusMonth, setFocusMonth]);
+  }, [focusPending, focusTarget.data, focusTarget.isError, active, focusMonth, setFocusMonth, documentId, periodKey]);
+  // Новий запит переходу (інша адреса з `focusMonth`) — знову дозволено.
+  useEffect(() => {
+    if (focusMonth === null) focusIssued.current = null;
+  }, [focusMonth]);
+  // ✎ Огляд b11 (G): документ не «рік» — `focusMonth` нічого не значить, прибрати з адреси.
+  const layoutKnown = (summary.data ?? baseSummary.data) !== undefined;
+  useEffect(() => {
+    if (layoutKnown && !yearLayout && focusMonth !== null) setFocusMonth(null);
+  }, [layoutKnown, yearLayout, focusMonth, setFocusMonth]);
 
   const refetchBoth = (): void => {
     void summary.refetch();

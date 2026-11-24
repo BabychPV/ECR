@@ -164,6 +164,26 @@ public sealed class SubmissionPeriodSelectorTests
             calendar, Sheet(TableLayoutKind.MonthsInColumns, tableId: 7), year: 2026, id => id != 7));
     }
 
+    /// <summary>
+    /// ✎ W15z M4: місяць колонки — факт шаблону, без календаря: річний проєкт (HSE400, <c>PeriodKind.Yearly</c>) статусів
+    /// не має (<see cref="SubmissionPeriodSelector.MonthColumns"/> порожній), а коди місячних колонок — є; немісячна колонка
+    /// й схована таблиця — ні. Мутації: прибрати фільтр <c>IsMonthColumn</c> — червоніє (TOTAL); прибрати
+    /// <c>canReadTable</c> — червоніє (схована таблиця).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void Коди_місячних_колонок_є_і_для_річного_календаря_без_статусів()
+    {
+        var yearly = Calendar(PeriodKind.Yearly, ProjectStatus.Active, (Jan, PeriodState.Open, DocumentStatus.Approved));
+        var sheet = Sheet(TableLayoutKind.MonthsInColumns, tableId: 7);
+
+        Assert.Empty(SubmissionPeriodSelector.MonthColumns(yearly, sheet, year: 2026, _ => true));
+        Assert.Equal(
+            [(7, "JAN", (byte)1), (7, "FEB", (byte)2), (7, "MAR", (byte)3)],
+            SubmissionPeriodSelector.MonthColumnCodes(sheet, _ => true).Select(c => (c.TableDefId, c.ColumnCode, c.MonthNumber)));
+        Assert.Empty(SubmissionPeriodSelector.MonthColumnCodes(sheet, id => id != 7));
+    }
+
     /// <summary>Аркуш з однією таблицею: колонки JAN/FEB/MAR (місяці 1–3) і немісячна TOTAL.</summary>
     private static SheetDef Sheet(TableLayoutKind layout, int tableId)
     {

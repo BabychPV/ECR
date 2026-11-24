@@ -83,7 +83,15 @@ test.describe('Джерело змінено після затвердження
     test.setTimeout(300_000);
     const request = page.request;
     await signIn(page, Operator.user, Operator.password);
-    const arranged = await arrangeYearDocument(request);
+    const arranged = await arrangeYearDocument(request, 'Monthly');
+    // ✎ Репетиція W15z: джерело — як справжній HSE400: річний проєкт (PeriodKind.Yearly), документ «рік».
+    const hse = await arrangeYearDocument(request, 'Yearly');
+    // Фікстура як справжній HSE400: статусів місячних колонок немає, коди місячних колонок — є.
+    const target = (await (
+      await request.get(`/api/v1/documents/${String(hse.documentId)}/submission-target?sheetDefId=${String(hse.sheetDefId)}&periodKey=${String(hse.anchor)}`)
+    ).json()) as { monthColumns?: unknown[]; monthColumnCodes?: unknown[] };
+    expect(target.monthColumns ?? [], 'річний проєкт дав статуси місячних колонок — фікстура не як HSE400').toHaveLength(0);
+    expect(target.monthColumnCodes ?? []).toHaveLength(12);
 
     let yearRead = false;
     await page.route(/\/api\/v1\/documents\/\d+\/calculation-issues/, async (route) => {
@@ -91,12 +99,21 @@ test.describe('Джерело змінено після затвердження
       const body = (await response.json()) as Record<string, unknown>;
       if (route.request().url().includes('year=true')) {
         yearRead = true;
+        // ✎ Огляд b11 (F): StepError рядка R40 жовтня — «Show rows» веде до рядка за межами вікна сітки (вертикаль).
+        body['items'] = [
+          ...((body['items'] as unknown[] | undefined) ?? []),
+          {
+            tableCode: 'T1', sheetCopyId: null, rowNumber: 40, rowKey: 'R40', kind: 'StepError', methodologyCode: 'E2E',
+            detectedAt: '2026-04-03T08:00:00Z', monthNumber: 10, stepCode: 'S1', errorCode: '#VALUE', affectedCount: 1,
+            methodologyId: null,
+          },
+        ];
         body['sourceIssues'] = [
           {
             kind: 'SourceChangedAfterApproval',
             monthNumber: 10,
             sourcePeriodKey: arranged.october,
-            sourceDocumentId: arranged.documentId,
+            sourceDocumentId: hse.documentId,
             sourceProjectCode: 'HSE',
             sourceDocumentKey: 'HSE400-E2E',
             sourceApprovedAt: '2026-04-01T08:00:00Z',
@@ -121,10 +138,14 @@ test.describe('Джерело змінено після затвердження
     await expect(cause.getByTestId('document-calc-issue-source-hint')).not.toContainText('document.calcIssues');
     await expect(cause.getByTestId('document-calc-issue-open-source')).toBeVisible();
 
+    // ✎ Огляд b11 (F): `scrollToCoordinate({ y })` RevoGrid — пікселі; рядок R40 за межами вікна сітки має стати видимим.
+    await panel.locator('[data-kind="stepError"]').getByTestId('document-calc-issue-show').click();
+    await expect(page.locator('.ecr-cell-nav-target'), 'сітка не прокрутилась до рядка R40').toBeInViewport({ timeout: 30_000 });
+
     // ✎ Огляд M4 (4): «Open HSE400» веде на МІСЯЦЬ річного документа (`?periodKey=жовтень`) — сторінка лишається на якорі
     // для даних, але сітка переходить до колонки жовтня (підсвічена комірка, заголовок «Month M10» у вікні).
     await cause.getByTestId('document-calc-issue-open-source').click();
-    await expect(page).toHaveURL(new RegExp(`periodKey=${String(arranged.anchor)}`), { timeout: 90_000 });
+    await expect(page).toHaveURL(new RegExp(`/documents/${String(hse.documentId)}\\?periodKey=${String(hse.anchor)}`), { timeout: 90_000 });
     await expect(page.locator('.ecr-cell-nav-target'), 'сітка не перейшла до колонки місяця').toHaveCount(1, { timeout: 60_000 });
     await expect(page.getByText('Month M10', { exact: true }).first()).toBeInViewport();
   });
@@ -134,16 +155,21 @@ interface YearDocument {
   readonly documentId: number;
   readonly anchor: number;
   readonly october: number;
+  readonly sheetDefId: number;
 }
 
-/** Документ «рік» на одноразовій базі стенда: шаблон `YearWithMonthColumns` (аркуш S1, 12 місячних колонок), проєкт року. */
-async function arrangeYearDocument(request: APIRequestContext): Promise<YearDocument> {
+/**
+ * Документ «рік» на одноразовій базі стенда: шаблон `YearWithMonthColumns` (аркуш S1, таблиця `MonthsInColumns`, 12
+ * місячних колонок). `Monthly` — як Land (споживач), `Yearly` — як HSE400 (джерело: річний проєкт, `monthColumns`
+ * у `submission-target` порожні, місяць колонки — лише в `monthColumnCodes`).
+ */
+async function arrangeYearDocument(request: APIRequestContext, periodKind: 'Monthly' | 'Yearly'): Promise<YearDocument> {
   const ok = async <T,>(response: APIResponse, what: string): Promise<T> => {
     const body = await response.text();
     expect(response.status(), `${what}: ${String(response.status())} ${body.slice(0, 1000)}`).toBeLessThan(300);
     return (body.length > 0 ? JSON.parse(body) : {}) as T;
   };
-  const stamp = String(Date.now());
+  const stamp = `${String(Date.now())}${periodKind === 'Yearly' ? 'Y' : 'M'}`;
   const year = new Date().getUTCFullYear() - 1;
 
   const template = await ok<{ templateId: number }>(
@@ -162,7 +188,7 @@ async function arrangeYearDocument(request: APIRequestContext): Promise<YearDocu
   );
   const table = await ok<{ id: number }>(
     await request.put(`${base}/sheets/S1/tables/T1`, {
-      data: { nameL10n: { en: 'Year table' }, ordinal: 0, layoutKind: 'MonthsInColumns', rowMode: 'Dynamic', maxDynamicRows: 20 },
+      data: { nameL10n: { en: 'Year table' }, ordinal: 0, layoutKind: 'MonthsInColumns', rowMode: 'Dynamic', maxDynamicRows: 60 },
     }),
     'таблиця',
   );
@@ -188,7 +214,7 @@ async function arrangeYearDocument(request: APIRequestContext): Promise<YearDocu
   const project = await ok<{ projectId: number }>(
     await request.post('/api/v1/projects', {
       data: {
-        code: `E2EF5RPrj${stamp}`, nameL10n: { en: `E2E F5-R year ${stamp}` }, periodKind: 'Monthly', timeZoneId: 'UTC',
+        code: `E2EF5RPrj${stamp}`, nameL10n: { en: `E2E F5-R year ${stamp}` }, periodKind, timeZoneId: 'UTC',
         templateVersionId: version.versionId, periodPolicyId: policy.id, year,
       },
     }),
@@ -204,9 +230,10 @@ async function arrangeYearDocument(request: APIRequestContext): Promise<YearDocu
   );
 
   // Екземпляри всіх місяців (власники місячних колонок) і рядок R1 — щоб було куди перейти в колонці жовтня.
-  let anchorTables: { tableInstanceId: number; tableCode: string }[] = [];
-  for (let m = 1; m <= 12; m += 1) {
-    const rows = await ok<{ tableInstanceId: number; tableCode: string }[]>(
+  // ⚠ Річний проєкт (як HSE400, PeriodKind.Yearly) має лише період якоря — місяців як періодів немає.
+  let anchorTables: { tableInstanceId: number; tableCode: string; sheetDefId: number }[] = [];
+  for (let m = 1; m <= (periodKind === 'Yearly' ? 1 : 12); m += 1) {
+    const rows = await ok<{ tableInstanceId: number; tableCode: string; sheetDefId: number }[]>(
       await request.get(`/api/v1/documents/${String(document.documentId)}/tables?periodKey=${String(year * 100 + m)}`),
       `таблиці ${String(m)}`,
     );
@@ -214,12 +241,15 @@ async function arrangeYearDocument(request: APIRequestContext): Promise<YearDocu
   }
   const t1 = anchorTables.find((t) => t.tableCode === 'T1');
   if (t1 === undefined) throw new Error('у якоря немає таблиці T1');
-  await ok(
-    await request.post(`/api/v1/documents/${String(document.documentId)}/rows`, { data: { tableInstanceId: t1.tableInstanceId, rowKey: 'R1' } }),
-    'рядок R1',
-  );
+  // ✎ Огляд b11 (F): у споживача — 40 рядків, щоб перехід до R40 вимагав вертикальної прокрутки сітки (70vh).
+  for (let r = 1; r <= (periodKind === 'Yearly' ? 1 : 40); r += 1) {
+    await ok(
+      await request.post(`/api/v1/documents/${String(document.documentId)}/rows`, { data: { tableInstanceId: t1.tableInstanceId, rowKey: `R${String(r)}` } }),
+      `рядок R${String(r)}`,
+    );
+  }
 
-  return { documentId: document.documentId, anchor: year * 100 + 1, october: year * 100 + 10 };
+  return { documentId: document.documentId, anchor: year * 100 + 1, october: year * 100 + 10, sheetDefId: t1.sheetDefId };
 }
 
 async function signIn(page: Page, user: string, password: string): Promise<void> {

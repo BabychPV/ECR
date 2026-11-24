@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import type { CalculationRunStatusDto } from '@/api/types';
 import { apiFetch } from '@/api/client';
 import type {
@@ -8,7 +8,7 @@ import type {
   FormulaErrorIssue,
   SourceIssue,
 } from '@/features/calculationIssues/api';
-import type { CalculationIssues } from '@/features/calculationIssues/api';
+import { calculationIssuesKey, getCalculationIssues, type CalculationIssues } from '@/features/calculationIssues/api';
 import { useCalculationIssues, useYearCalculationIssues } from '@/features/calculationIssues/useCalculationIssues';
 import { calculationResultsKey } from '@/features/methodologies/calculationResultsKey';
 
@@ -149,6 +149,7 @@ export function splitIssuesByMonth(
   copy: CalculationIssues | undefined,
   activeCopyId: number | null,
   anchorFinishedAt: string | null,
+  tail: ReadonlyMap<number, CalculationIssues> = new Map(),
 ): MonthUnmatchedRows[] {
   const year = Math.floor(anchorPeriodKey / 100);
   const monthOf = (monthNumber: number | null | undefined): number =>
@@ -179,6 +180,16 @@ export function splitIssuesByMonth(
   );
   const cutFrom = cuts.length === 0 ? null : Math.min(...cuts);
 
+  // ✎ Огляд b11 (G): місяць зрізу й пізніші — власний запит місяця (`tail`, своя стеля й свій підсумок): місяць, чиї
+  // записи стеля року відкинула ЦІЛКОМ, теж отримує панель. Записи оригіналу цього місяця беруться з нього.
+  const fromTail = new Map<number, { errors: FormulaErrorIssue[]; truncated: boolean }>();
+  for (const [periodKey, response] of tail) {
+    const errors = (response.formulaErrors ?? []).filter((error) => (error.sheetCopyId ?? null) === null);
+    fromTail.set(periodKey, { errors, truncated: (response.formulaErrorTotal ?? 0) > representedFormulaCells(errors) });
+    const month = bucket(periodKey);
+    month.formulaErrors = [...errors, ...month.formulaErrors.filter((error) => (error.sheetCopyId ?? null) !== null)];
+  }
+
   return [...months.entries()]
     .sort(([a], [b]) => a - b)
     .map(([periodKey, month]) => ({
@@ -190,10 +201,21 @@ export function splitIssuesByMonth(
         formulaErrors: month.formulaErrors,
         formulaErrorTotal: month.formulaErrors.length,
         sourceIssues: month.sourceIssues,
-        truncatedFormulaErrors: cutFrom !== null && periodKey >= cutFrom,
+        truncatedFormulaErrors: fromTail.has(periodKey)
+          ? fromTail.get(periodKey)!.truncated
+          : cutFrom !== null && periodKey >= cutFrom,
       },
     }))
     .filter((month) => hasCalculationIssues(month.rows));
+}
+
+/** ✎ Огляд b11 (G): з якого місяця (`yyyyMM`) записи «Помилок формул» відповіді року обрізано; `null` — повна. */
+export function yearTruncatedFrom(anchorPeriodKey: number, response: CalculationIssues | undefined): number | null {
+  const year = Math.floor(anchorPeriodKey / 100);
+
+  return truncatedFrom(response, (monthNumber) =>
+    monthNumber === null || monthNumber === undefined ? anchorPeriodKey : year * 100 + monthNumber,
+  );
 }
 
 /**
@@ -209,12 +231,33 @@ export function useYearUnmatchedRows(
   activeCopyId: number | null,
   enabled: boolean,
   anchorFinishedAt: string | null,
+  yearMonths: readonly number[] = [],
 ): YearUnmatchedRows {
   const originals = useYearCalculationIssues(documentId, anchorPeriodKey, null, enabled);
   const copy = useYearCalculationIssues(documentId, anchorPeriodKey, activeCopyId, enabled);
+  // ✎ Огляд b11 (G): стеля записів року — місяць зрізу й пізніші (з календаря року) читаються кожен окремо.
+  const cutFrom = enabled ? yearTruncatedFrom(anchorPeriodKey, originals.data) : null;
+  const tailMonths = cutFrom === null ? [] : yearMonths.filter((periodKey) => periodKey >= cutFrom);
+  const tailData = useQueries({
+    queries: tailMonths.map((periodKey) => ({
+      queryKey: calculationIssuesKey(documentId, periodKey, null),
+      queryFn: () => getCalculationIssues(documentId, periodKey, null),
+      retry: false,
+    })),
+    combine: (results) => results.map((result) => result.data ?? null),
+  });
+  const tail = useMemo(() => {
+    const map = new Map<number, CalculationIssues>();
+    tailMonths.forEach((periodKey, index) => {
+      const data = tailData[index];
+      if (data !== undefined && data !== null) map.set(periodKey, data);
+    });
+    return map;
+    // `tailMonths` — похідне від `cutFrom` і `yearMonths`; `tailData` структурно спільний (`combine`).
+  }, [tailData, cutFrom, yearMonths]);
   const months = useMemo(
-    () => (enabled ? splitIssuesByMonth(anchorPeriodKey, originals.data, copy.data, activeCopyId, anchorFinishedAt) : []),
-    [enabled, anchorPeriodKey, originals.data, copy.data, activeCopyId, anchorFinishedAt],
+    () => (enabled ? splitIssuesByMonth(anchorPeriodKey, originals.data, copy.data, activeCopyId, anchorFinishedAt, tail) : []),
+    [enabled, anchorPeriodKey, originals.data, copy.data, activeCopyId, anchorFinishedAt, tail],
   );
 
   // ✎ Огляд M4 (1): відмова запиту року — сторінка повертається до панелі одного періоду (не ховає проблем).

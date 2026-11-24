@@ -38008,6 +38008,21 @@ export interface components {
              */
             row: number;
         };
+        /** @description ✎ W15z M4: місячна колонка таблиці аркуша — код і місяць (без стану). */
+        MonthColumnRefDto: {
+            /** @description Код колонки. */
+            columnCode: string;
+            /**
+             * Format: uint8
+             * @description Місяць колонки 1..12.
+             */
+            monthNumber: number;
+            /**
+             * Format: int32
+             * @description Таблиця.
+             */
+            tableDefId: number;
+        };
         /** @description Статус місячної колонки (D-441): стан аркуша за період місяця колонки. */
         MonthColumnStatusDto: {
             /**
@@ -45438,6 +45453,8 @@ export interface components {
              * @description ✎ D-6: аркуш за період запиту поданий (у будь-якому стані періоду, зокрема закритому) — місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить його затвердження; null — перешкоди немає.
              */
             anchorUnapprovedSourcePeriodKey?: null | number;
+            /** @description ✎ W15z M4: місяць кожної місячної колонки аркуша (`IsMonthColumn`/`MonthNumber`) — факт шаблону, незалежно від календаря й розкладки таблиці (річний проєкт HSE400 статусів `MonthColumns` не має): куди вести посилання на місяць річного документа. Схованих таблиць немає; `null` — аркуша немає у версії. */
+            monthColumnCodes?: null | components["schemas"]["MonthColumnRefDto"][];
             /** @description Місячні колонки таблиць `MonthsInColumns` аркуша зі станом свого періоду. */
             monthColumns: components["schemas"]["MonthColumnStatusDto"][];
             /**
