@@ -127,23 +127,6 @@ public sealed class TraversalStackGuardTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void ReportExpressionChecker_на_надглибокому_дереві_дає_зауваження_а_не_падіння()
-    {
-        var root = LeftComb(Depth);
-        var parsed = new ParsedExpression("1+1", ExpressionDialect.Report, root, ExpressionValueType.Number);
-
-        var diagnostics = OnSmallStack(() =>
-        {
-            var found = new List<ExpressionDiagnostic>();
-            ReportExpressionChecker.Check(parsed, new ReportExpressionScope([], []), null, found);
-            return found;
-        });
-
-        Assert.Contains(diagnostics, d => d.MessageKey == TraversalStackGuard.MessageKey);
-    }
-
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void DependencyExtractor_на_надглибокому_дереві_дає_зауваження_а_не_падіння()
     {
         var builder = new TemplateBuilder();

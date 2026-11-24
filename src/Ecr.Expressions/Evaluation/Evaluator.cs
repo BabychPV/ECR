@@ -856,19 +856,6 @@ public sealed class Evaluator(
     private ExpressionValue TemplateCall(
         FunctionNode node, IEvaluationContext context, ExpressionDialect dialect, EvaluationBudget budget)
     {
-        // `IN` діалекту звітів — та сама належність множині, що `in` методологій.
-        if (dialect == ExpressionDialect.Report
-            && node.Name.Equals("IN", StringComparison.OrdinalIgnoreCase))
-        {
-            var members = new List<ExpressionValue>(node.Arguments.Count);
-            foreach (var argument in node.Arguments)
-            {
-                members.Add(EvaluateScalar(argument, context, dialect, budget));
-            }
-
-            return Functions.MethodologyFunctions.Invoke("in", members, arithmetic, context);
-        }
-
         // IFERROR обчислює запасну гілку тільки за потреби — інакше вона могла б
         // сама впасти й перетворити перехоплення на нову помилку.
         if (node.Name.Equals("IFERROR", StringComparison.OrdinalIgnoreCase) && node.Arguments.Count == 2)

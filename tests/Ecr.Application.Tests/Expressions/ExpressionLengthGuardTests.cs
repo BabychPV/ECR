@@ -29,7 +29,7 @@ public sealed class ExpressionLengthGuardTests
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
 
     public static TheoryData<ExpressionDialect> Dialects =>
-        [ExpressionDialect.Template, ExpressionDialect.Methodology, ExpressionDialect.Report];
+        [ExpressionDialect.Template, ExpressionDialect.Methodology];
 
     [Theory]
     [MemberData(nameof(Dialects))]
@@ -49,7 +49,6 @@ public sealed class ExpressionLengthGuardTests
 
     [Theory]
     [InlineData(ExpressionDialect.Template)]
-    [InlineData(ExpressionDialect.Report)]
     public async Task Вираз_правила_чи_формули_понад_2000_відхиляється_а_2000_проходить(ExpressionDialect dialect)
     {
         // a4-03b: колонки cfg.ValidationRule/cfg.FormulaDef вміщують 2000; раніше межа 4000

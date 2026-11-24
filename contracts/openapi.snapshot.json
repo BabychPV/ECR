@@ -3204,11 +3204,6 @@
               "integer"
             ]
           },
-          "snapshots": {
-            "description": "Скільки ПОТОЧНИХ зрізів звітності побудовано за цей період\n(`rpt.ReportSnapshot.IsCurrent`). Останній етап кампанії: документи\nзатверджено, але доки зрізу немає — регулятор не отримав нічого.",
-            "format": "int32",
-            "type": "integer"
-          },
           "submissionDeadline": {
             "description": "Строк подання в поясі проєкту, ВИКЛЮЧНО: це момент переходу періоду\n`Open → Grace` (`Period.ComputedGraceAt`, опівніч\n`PeriodEnd + GraceOffsetDays`), після якого правки позначаються\nпізніми (`D-70`). Останній день подання — доба ПЕРЕД цим моментом.\n`null` — межі періоду ще не пораховано.",
             "format": "date-time",
@@ -3235,7 +3230,6 @@
           "submitted",
           "approved",
           "rejected",
-          "snapshots",
           "progress",
           "submissionDeadline"
         ],
@@ -3359,11 +3353,6 @@
               "integer"
             ]
           },
-          "snapshots": {
-            "description": "Сума поточних зрізів.",
-            "format": "int32",
-            "type": "integer"
-          },
           "submitted": {
             "description": "Сума `Submitted`.",
             "format": "int32",
@@ -3380,7 +3369,6 @@
           "submitted",
           "approved",
           "rejected",
-          "snapshots",
           "done",
           "overdue",
           "atRisk",
@@ -9782,8 +9770,7 @@
         "description": "Діалект виразу. Визначає набір дозволених функцій і посилань.",
         "enum": [
           "Template",
-          "Methodology",
-          "Report"
+          "Methodology"
         ]
       },
       "ExpressionFunctionDto": {
@@ -23859,62 +23846,6 @@
         ],
         "type": "object"
       },
-      "ReportExpressionContext": {
-        "description": "На що може послатися правило звіту і що воно має повернути.",
-        "properties": {
-          "columns": {
-            "description": "Колонки рядка зрізу — `[Code]`.",
-            "items": {
-              "$ref": "#/components/schemas/ReportSymbolDeclaration"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "expectedType": {
-            "description": "Очікуваний тип результату: `Boolean` для умови `when`; `null` — довільний.",
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "parameters": {
-            "description": "Параметри звіту — `@Name`.",
-            "items": {
-              "$ref": "#/components/schemas/ReportSymbolDeclaration"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          }
-        },
-        "required": [
-          "columns",
-          "parameters",
-          "expectedType"
-        ],
-        "type": "object"
-      },
-      "ReportSymbolDeclaration": {
-        "description": "Оголошення колонки або параметра.",
-        "properties": {
-          "name": {
-            "description": "Код колонки або ім'я параметра (без `@`).",
-            "type": "string"
-          },
-          "type": {
-            "description": "`Number`, `Text`, `Boolean` або `Date`.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "type"
-        ],
-        "type": "object"
-      },
       "RequiredInputSeverity": {
         "description": "Критичність незаповненої обов'язкової вхідної колонки методології\n(директива «обов'язкові вхідні колонки методології», gate перед\nзбереженням).",
         "enum": [
@@ -34021,17 +33952,6 @@
           "expression": {
             "description": "Текст виразу.",
             "type": "string"
-          },
-          "report": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ReportExpressionContext",
-                "description": "Оточення діалекту `Report`: колонки, параметри, очікуваний тип."
-              }
-            ]
           },
           "rowKey": {
             "description": "Рядок формули; `null` для формул рівня колонки.",

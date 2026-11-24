@@ -74,15 +74,6 @@ public sealed class AbsolutePeriodParsingTests
     }
 
     [Fact]
-    public void Діалект_звітів_забороняє_абсолютний_період()
-    {
-        // G5: звіт не читає інших періодів — як і з відносним зсувом.
-        var result = Expr.Parse("[Period:#3].[Value]", ExpressionDialect.Report);
-
-        Assert.NotEmpty(result.Diagnostics);
-    }
-
-    [Fact]
     public void Діалект_методології_забороняє_посилання_на_комірки_разом_з_абсолютним_періодом()
     {
         var result = Expr.Parse("[Period:#3].[Main].[7001001].[Total]", ExpressionDialect.Methodology);

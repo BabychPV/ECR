@@ -32,7 +32,7 @@ public sealed class ExpressionNestingRejectionTests
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
 
-    public static TheoryData<ExpressionDialect> Dialects => [ExpressionDialect.Template, ExpressionDialect.Report];
+    public static TheoryData<ExpressionDialect> Dialects => [ExpressionDialect.Template];
 
     /// <summary>Унарний ланцюг із <paramref name="signs"/> мінусів: глибина = мінуси + 1.</summary>
     private static string Minuses(int signs) => string.Concat(Enumerable.Repeat("- ", signs)) + "1";

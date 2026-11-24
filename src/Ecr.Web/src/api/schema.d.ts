@@ -32140,13 +32140,6 @@ export interface components {
              */
             sheetsTotal?: null | number;
             /**
-             * Format: int32
-             * @description Скільки ПОТОЧНИХ зрізів звітності побудовано за цей період
-             *     (`rpt.ReportSnapshot.IsCurrent`). Останній етап кампанії: документи
-             *     затверджено, але доки зрізу немає — регулятор не отримав нічого.
-             */
-            snapshots: number;
-            /**
              * Format: date-time
              * @description Строк подання в поясі проєкту, ВИКЛЮЧНО: це момент переходу періоду
              *     `Open → Grace` (`Period.ComputedGraceAt`, опівніч
@@ -32242,11 +32235,6 @@ export interface components {
              *     аркуші (явна заборона чи грант рівня `None`), і число розкрило б приховане (R-8, `SheetVisibility`).
              */
             sheetsTotal?: null | number;
-            /**
-             * Format: int32
-             * @description Сума поточних зрізів.
-             */
-            snapshots: number;
             /**
              * Format: int32
              * @description Сума `Submitted`.
@@ -35329,7 +35317,7 @@ export interface components {
          * @description Діалект виразу. Визначає набір дозволених функцій і посилань.
          * @enum {unknown}
          */
-        ExpressionDialect: "Template" | "Methodology" | "Report";
+        ExpressionDialect: "Template" | "Methodology";
         /** @description Функція діалекту та її сигнатура. */
         ExpressionFunctionDto: {
             /** @description Чи приймає діапазон рядків замість скалярів. */
@@ -41846,22 +41834,6 @@ export interface components {
                 [key: string]: components["schemas"]["RoleValidityWindow"];
             };
         };
-        /** @description На що може послатися правило звіту і що воно має повернути. */
-        ReportExpressionContext: {
-            /** @description Колонки рядка зрізу — `[Code]`. */
-            columns: null | components["schemas"]["ReportSymbolDeclaration"][];
-            /** @description Очікуваний тип результату: `Boolean` для умови `when`; `null` — довільний. */
-            expectedType: null | string;
-            /** @description Параметри звіту — `@Name`. */
-            parameters: null | components["schemas"]["ReportSymbolDeclaration"][];
-        };
-        /** @description Оголошення колонки або параметра. */
-        ReportSymbolDeclaration: {
-            /** @description Код колонки або ім'я параметра (без `@`). */
-            name: string;
-            /** @description `Number`, `Text`, `Boolean` або `Date`. */
-            type: string;
-        };
         /**
          * @description Критичність незаповненої обов'язкової вхідної колонки методології
          *     (директива «обов'язкові вхідні колонки методології», gate перед
@@ -46540,7 +46512,6 @@ export interface components {
             dialect: components["schemas"]["ExpressionDialect"];
             /** @description Текст виразу. */
             expression: string;
-            report?: null | components["schemas"]["ReportExpressionContext"];
             /** @description Рядок формули; `null` для формул рівня колонки. */
             rowKey: null | string;
             /**
