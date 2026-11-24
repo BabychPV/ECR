@@ -1,4 +1,4 @@
-﻿import { vi, beforeEach, afterEach } from 'vitest';
+import { vi, beforeEach, afterEach } from 'vitest';
 import type { JSX, ReactNode } from 'react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -609,12 +609,18 @@ export const TableRelationsFixture = {
   ],
 };
 
-/** Версії методології (`/methodologies/<id>/versions`) — одна чернетка. */
+/**
+ * Версії методології (`/methodologies/<id>/versions`): чернетка-скрипт і опублікована формульна версія.
+ *
+ * ✎ 24.11: сторінка методології показує лише скрипти, формульні — у згорнутій історії; формульна версія тут, щоб
+ * гейт сканував і таблицю історії (розгорнуту тест `MethodologyUi.a11y` сканує окремо).
+ */
 export const MethodologyVersionsFixture = [
   {
     calendarMode: 'Actual',
     createdByUserId: 1,
     effectiveFrom: null,
+    engine: 'Script',
     id: 1,
     isEditable: true,
     level: 'Configuration',
@@ -623,6 +629,19 @@ export const MethodologyVersionsFixture = [
     traceLevel: 'ErrorsOnly',
     versionNumber: '2026.1',
   },
+  {
+    calendarMode: 'Actual',
+    createdByUserId: 1,
+    effectiveFrom: '2024-01-01',
+    engine: 'Formulas',
+    id: 2,
+    isEditable: false,
+    level: 'Configuration',
+    numericMode: 'Strict',
+    status: 'Published',
+    traceLevel: 'ErrorsOnly',
+    versionNumber: 'V1',
+  },
 ];
 
 /**
@@ -630,62 +649,9 @@ export const MethodologyVersionsFixture = [
  * попереднього єдиного файлу).
  */
 /**
- * Матриця покриття «рядки × правила» версії методології (`ФВ-13.9`).
- *
- * ⛔ Усі ТРИ стани, а не один: колір позначки бере тон із `toneFills`
- * (`danger`/`warning`/`muted`), і фікстура з самими покритими комбінаціями
- * лишила б два тони з трьох поза перевіркою контрасту взагалі.
- *
- * ⚠ `truncated: false` — звичайний випадок; смуга усічення малюється тим самим
- * `Banner tone="warning"`, який гейт уже сканує на огляді кампанії.
- *
- * ⚠ `null` у `values` — комірки немає; саме на ньому перевіряється, що приглушений
- * підпис «немає комірки» читається в обох темах.
- */
-export const RuleCoverageFixture = {
-  methodologyVersionId: 1,
-  periodFrom: 202501,
-  periodTo: 202699,
-  tableDefIds: [1],
-  columnDefIds: [101],
-  rules: [
-    { code: 'CO2_A', priority: 10 },
-    { code: 'NOX', priority: 20 },
-  ],
-  combinations: [
-    {
-      values: ['SO2'],
-      state: 'Gap',
-      winnerRuleCode: null,
-      matchedRuleCodes: [],
-      rows: 1,
-      documents: 1,
-    },
-    {
-      values: ['CO2'],
-      state: 'Conflict',
-      winnerRuleCode: 'CO2_A',
-      matchedRuleCodes: ['CO2_A', 'CO2_B'],
-      rows: 3,
-      documents: 2,
-    },
-    {
-      values: [null],
-      state: 'Covered',
-      winnerRuleCode: 'NOX',
-      matchedRuleCodes: ['NOX'],
-      rows: 1,
-      documents: 1,
-    },
-  ],
-  truncated: false,
-};
-
-/**
  * Покриття «виходи → колонки» версії методології (`BE-25`).
  *
- * ⛔ Той самий привід, що в `RuleCoverageFixture` вище: ОБ'ЄКТ, а не `[]` за
- * замовчуванням — `MethodologyCoveragePanel` читає `outputs`/`waitingBindings`,
+ * ⛔ ОБ'ЄКТ, а не `[]` за замовчуванням — вкладка «Входи й виходи» редактора скрипта читає `outputs`/`waitingBindings`,
  * і на масиві маршрут упав би в екран помилки замість того, щоб намалювати
  * панель (та сама пастка, що з `/tables/status`).
  *
@@ -961,19 +927,11 @@ export function emptyBodyFor(url: string): unknown {
   // адресі цей запит був вимкнений (`enabled: Number.isFinite(...)`).
   if (/\/templates\/\d+\/versions(\?|$)/.test(url)) return TemplateVersionListFixture;
 
-  // ⚠ Версії методології — одна чернетка: без неї `MethodologyVersionsPage`
-  // показує `EmptyState` і не монтує жодної панелі обраної версії.
+  // ⚠ Версії методології — чернетка-скрипт і формульна історія: без них `MethodologyVersionsPage` показує лише
+  // «немає версії-скрипта».
   if (/\/methodologies\/\d+\/versions$/.test(url)) return MethodologyVersionsFixture;
 
-  // ⛔ Матриця покриття правил — ОБ'ЄКТ, а не `[]` за замовчуванням: панель
-  // читає `combinations.length`, і на масиві маршрут замінювався б екраном
-  // помилки (та сама пастка, що з `/tables/status` вище).
-  if (url.includes('/rule-coverage')) return RuleCoverageFixture;
 
-  // ⚠ `/coverage`, ПІСЛЯ перевірки `/rule-coverage` вище: та адреса теж
-  // закінчується на «coverage», але не містить `/coverage` (там
-  // `rule-coverage` одним словом через дефіс) — порядок тут не рятує від
-  // цього, а лише документує, що колізії немає (перевірено `git grep`).
   if (/\/versions\/\d+\/coverage$/.test(url)) return MethodologyCoverageFixture;
 
   if (/\/templates\/\d+$/.test(url)) {

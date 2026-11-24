@@ -24,6 +24,9 @@ import {
   type ScriptEditorHandle,
 } from '@/features/methodologyScript/ScriptEditor';
 import { ScriptProblemsList } from '@/features/methodologyScript/ScriptProblemsList';
+import { ScriptFullScreenToggle } from '@/features/methodologyScript/ScriptFullScreenToggle';
+import { scriptStatusText } from '@/features/methodologyScript/scriptStatus';
+import { useScriptFullScreen } from '@/features/methodologyScript/useScriptFullScreen';
 import {
   canSaveScript,
   EmptyScriptEditorState,
@@ -352,6 +355,16 @@ export function MethodologyScriptPage(): JSX.Element {
 
   const problemCount = diagnostics.length;
 
+  // ── Код на весь екран (✎ 24.11) ───────────────────────────────────────────
+  // ⛔ Той самий екземпляр редактора: змінюється лише рамка, тож курсор, виділення, прокрутка й незбережене живуть.
+  const fullScreen = useScriptFullScreen({
+    onEnter: () => {
+      editor.current?.layout();
+      editor.current?.focus();
+    },
+    onExit: () => editor.current?.layout(),
+  });
+
   if (!known) {
     return <Alert color="statusError">{t('nav.notFound.title')}</Alert>;
   }
@@ -467,7 +480,62 @@ export function MethodologyScriptPage(): JSX.Element {
       )}
 
       <Group align="flex-start" wrap="wrap" gap="md">
-        <Box style={{ flex: '1 1 480px', minWidth: 0 }}>
+        <Box
+          data-testid="script-editor-pane"
+          data-fullscreen={fullScreen.full}
+          {...(fullScreen.full ? { bg: 'var(--mantine-color-body)', p: 'sm' } : {})}
+          style={
+            fullScreen.full
+              ? {
+                  // ⚠ Нижче за модалки Mantine (200): «таблиця коефіцієнтів» і діалоги лишаються поверх.
+                  position: 'fixed',
+                  inset: 0,
+                  zIndex: 190,
+                  overflow: 'hidden',
+                }
+              : { flex: '1 1 480px', minWidth: 0 }
+          }
+        >
+          {/* ⚠ Смуга над редактором стоїть В ОБОХ режимах (та сама кнопка — на неї повертається фокус після виходу);
+              на весь екран вона ще й несе назву, лічильник проблем і «Save». */}
+          <Group justify="space-between" gap="xs" mb="xs" wrap="nowrap">
+            <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+              {fullScreen.full && (
+                <>
+                  <Text fw={600} truncate>
+                    {title}
+                  </Text>
+                  <Badge
+                    size="sm"
+                    color={problemCount > 0 ? 'statusError' : 'gray'}
+                    variant="light"
+                    data-testid="script-fullscreen-problems"
+                  >
+                    {problemCount === 0
+                      ? t('methodologyScript.problems.none')
+                      : t('methodologyScript.problemCount', { count: problemCount })}
+                  </Badge>
+                  {dirty && !readOnly && (
+                    <Text size="xs" c="dimmed">
+                      {t('methodologyScript.unsaved')}
+                    </Text>
+                  )}
+                </>
+              )}
+            </Group>
+            <Group gap="xs" wrap="nowrap">
+              {fullScreen.full && !readOnly && (
+                <Button size="xs" loading={saveLoading} disabled={!canSaveScript(state, readOnly)} onClick={saveNow}>
+                  {t('methodologies.save')}
+                </Button>
+              )}
+              <ScriptFullScreenToggle
+                full={fullScreen.full}
+                onToggle={fullScreen.toggle}
+                buttonRef={fullScreen.button}
+              />
+            </Group>
+          </Group>
           <ScriptEditor
             ref={editor}
             value={state.text}
@@ -478,20 +546,15 @@ export function MethodologyScriptPage(): JSX.Element {
             completion={() => completionRef.current}
             ariaLabel={t('methodologyScript.editorLabel')}
             readOnly={readOnly}
-            height="calc(100vh - 280px)"
+            height={fullScreen.full ? 'calc(100vh - 110px)' : 'calc(100vh - 280px)'}
           />
           <Text size="xs" c="dimmed" mt="xs" aria-live="polite" data-testid="script-status">
-            {pausedSeconds !== null
-              ? t('methodologyScript.checksPaused', { seconds: pausedSeconds })
-              : checking
-                ? t('methodologyScript.checking')
-                : problemCount === 0
-                  ? t('methodologyScript.problems.none')
-                  : t('methodologyScript.problemCount', { count: problemCount })}
+            {scriptStatusText({ pausedSeconds, checking, diagnostics })}
           </Text>
         </Box>
 
-        <Box style={{ flex: '1 1 420px', minWidth: 0 }}>
+        {/* Бічні вкладки лишаються змонтованими й на весь екран (стан перегляду й тестів живе), лише ховаються. */}
+        <Box style={{ flex: '1 1 420px', minWidth: 0, display: fullScreen.full ? 'none' : undefined }}>
           <Tabs
             value={tab}
             onChange={(value) => {

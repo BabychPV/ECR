@@ -29,14 +29,11 @@ import { testTheme } from '@/test/render';
  */
 
 vi.mock('@/features/methodologies/MethodologyContentPanels', () => ({
-  MethodologyConstantsPanel: () => null,
-  MethodologyOutputsPanel: () => null,
-  MethodologyRulesPanel: () => null,
-  MethodologyRequiredInputsPanel: () => null,
-  MethodologyTestsPanel: () => null,
   MethodologyBindingsPanel: () => null,
   MethodologyModesForm: () => null,
 }));
+vi.mock('@/features/methodologies/MethodologyPublicationsPanel', () => ({ MethodologyPublicationsPanel: () => null }));
+vi.mock('@/features/methodologies/TraceStepsPanel', () => ({ MethodologyTraceStepsPanel: () => null }));
 
 const DraftVersion: {
   id: number;
@@ -49,6 +46,7 @@ const DraftVersion: {
   traceLevel: string;
   createdByUserId: number;
   level: string;
+  engine: string;
 } = {
   id: 10,
   versionNumber: '1.0',
@@ -60,6 +58,8 @@ const DraftVersion: {
   traceLevel: 'Off',
   createdByUserId: 1,
   level: 'Configuration',
+  // ✎ 24.11: робочі версії — лише скрипти; формульна версія публікації з екрана не має.
+  engine: 'Script',
 };
 
 const PublishedVersion = {
@@ -79,11 +79,6 @@ const Strings = {
   'methodologies.effectiveFrom': 'Effective from',
   'methodologies.effectiveFromHint': 'Periods from this date on are calculated by this version.',
   'methodologies.openVersion': 'Open',
-  'methodologies.noVersions': 'This methodology has no versions',
-  'methodologies.noVersionsHint': 'A version is what actually calculates.',
-  'methodologies.formulas': 'Formulas',
-  'methodologies.noFormulas': 'This version has no formulas',
-  'methodologies.noFormulasHint': 'Add one.',
   'methodologies.readOnly': 'Read only',
   'methodologies.readOnlyHint': 'This version is published.',
   'methodologies.publish': 'Publish',
@@ -209,7 +204,7 @@ describe('MethodologyVersionsPage: публікація версії', () => {
       await loadCatalog('en', 'private');
       show();
 
-      await screen.findByText('1.0');
+      await screen.findByTestId('script-versions');
 
       // ⛔ ГОЛОВНЕ твердження регресії: до фіксу цей запит не знаходив
       // жодної кнопки «Publish» на цьому екрані взагалі.
@@ -227,7 +222,7 @@ describe('MethodologyVersionsPage: публікація версії', () => {
       await loadCatalog('en', 'private');
       show();
 
-      await screen.findByText('1.0');
+      await screen.findByTestId('script-versions');
       expect(screen.queryByRole('button', { name: 'Publish' })).toBeNull();
     },
     30_000,
@@ -241,7 +236,7 @@ describe('MethodologyVersionsPage: публікація версії', () => {
       await loadCatalog('en', 'private');
       show();
 
-      await screen.findByText('0.9');
+      await screen.findByTestId('script-versions');
       expect(screen.queryByRole('button', { name: 'Publish' })).toBeNull();
     },
     30_000,
@@ -260,7 +255,7 @@ describe('MethodologyVersionsPage: публікація версії', () => {
       const user = userEvent.setup();
       show();
 
-      await screen.findByText('1.0');
+      await screen.findByTestId('script-versions');
 
       const [publishButton] = await screen.findAllByRole('button', { name: 'Publish' });
       await user.click(publishButton!);

@@ -20,7 +20,7 @@ export function ScriptOutlinePanel({
   versionId,
   outline,
 }: ScriptOutlinePanelProps): JSX.Element {
-  // ⚠ Той самий ключ, що в `MethodologyCoveragePanel`: кеш спільний.
+  // ⚠ Ключ покриття версії «виходи → колонки» (`scriptKeys.coverage`): збереження скрипта його інвалідує.
   const coverage = useQuery({
     queryKey: scriptKeys.coverage(methodologyId, versionId),
     queryFn: () => methodologyCoverage(methodologyId, versionId),

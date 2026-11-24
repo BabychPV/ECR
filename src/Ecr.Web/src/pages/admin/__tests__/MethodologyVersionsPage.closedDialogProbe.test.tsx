@@ -14,8 +14,6 @@ import { gateReads, probeThreeWindows } from '@/test/stillOpenProbe';
  *   `if (create.isPending) return`; вікно 3: номер версії скинуто → `disabled`. ЗАКРИТО, один `POST …/versions`.
  * - «Publish» (та сама група) — вікно 2: `if (publish.isPending) return`; вікно 3: причину й дату скинуто →
  *   `disabled` (ціль `publishing?.versionId ?? 0` уже не досяжна). ЗАКРИТО, один `POST …/versions/10/publish`.
- * - «Remove formula» (група «null-захист в обробнику») — вікно 2: `!remove.isPending`; вікно 3:
- *   `deleteTarget === null` → обробник нічого не шле. ЗАКРИТО, один `DELETE …/formulas/F1`.
  *
  * F13 (база 0c1ec8ad9): «New version» і «Publish», закриті БЕЗ запису, були ВІДКРИТІ — діалоги змонтовані завжди,
  * «Cancel» поля не скидає, кнопка закритого `Modal` слала `POST …/versions` / `POST …/publish`. Захист в обробниках
@@ -23,11 +21,6 @@ import { gateReads, probeThreeWindows } from '@/test/stillOpenProbe';
  */
 
 vi.mock('@/features/methodologies/MethodologyContentPanels', () => ({
-  MethodologyConstantsPanel: () => null,
-  MethodologyOutputsPanel: () => null,
-  MethodologyRulesPanel: () => null,
-  MethodologyRequiredInputsPanel: () => null,
-  MethodologyTestsPanel: () => null,
   MethodologyBindingsPanel: () => null,
   MethodologyModesForm: () => null,
 }));
@@ -43,16 +36,7 @@ const Version = {
   traceLevel: 'Off',
   createdByUserId: 1,
   level: 'Configuration',
-};
-
-const Formula = {
-  id: 1,
-  code: 'F1',
-  expression: '1 + 1',
-  resultType: 'Number',
-  evaluationOrder: 1,
-  outputUnitId: null,
-  argumentsCsv: null,
+  engine: 'Script',
 };
 
 function read(url: string): unknown {
@@ -70,9 +54,6 @@ function read(url: string): unknown {
     };
   }
   if (url.endsWith('/api/v1/methodologies/1/versions')) return [Version];
-  if (url.endsWith('/formulas')) return [Formula];
-  // Панелі покриття — поза предметом зонда; порожні відповіді правильної форми.
-  if (url.endsWith('/rule-coverage') || url.endsWith('/coverage')) return { combinations: [], outputs: [], waitingBindings: [] };
 
   return [];
 }
@@ -81,6 +62,7 @@ function show(): void {
   renderKeepMounted(
     <Routes>
       <Route path="/admin/methodologies/:id/versions" element={<MethodologyVersionsPage />} />
+      <Route path="/admin/methodologies/:id/versions/:vid/script" element={<div data-testid="script-editor-route" />} />
     </Routes>,
     '/admin/methodologies/1/versions',
   );
@@ -90,17 +72,14 @@ const dialogOpen = (name: string) => (): boolean => screen.queryByRole('dialog',
 
 /*
  * ⛔ Правило 386 / F13: зонд плавав під навантаженням. Причина — холодні ліниві чанки сторінки (поле дати діалогу
- * «Publish», панелі публікацій/покриття/правил категорій, довідка синтаксису): перше `import()` під навантаженням
+ * «Publish», панелі публікацій і трасування): перше `import()` під навантаженням
  * з'їдало бюджет `findBy` і межу тесту. Прогрів — до тестів; сторінка далі бере їх тим самим `lazy()`.
  */
 beforeAll(async () => {
   await Promise.all([
     import('@/shared/dates/DateInputWithStyles'),
     import('@/features/methodologies/MethodologyPublicationsPanel'),
-    import('@/features/methodologies/RuleCoveragePanel'),
-    import('@/features/methodologies/CategoryRulePanel'),
-    import('@/features/methodologies/FormulaSyntaxHelp'),
-    import('@/features/methodologies/MethodologyCoveragePanel'),
+    import('@/features/methodologies/TraceStepsPanel'),
   ]);
 }, 60_000);
 
@@ -136,7 +115,9 @@ describe('B149: MethodologyVersionsPage — один запит на відкр�
       isOpen: dialogOpen('⟦methodologies.newVersionTitle⟧'),
       expected: ['POST /api/v1/methodologies/1/versions'],
       awaitedRead: '/api/v1/methodologies/1/versions',
+      afterClose: 'detached',
     });
+    expect(await screen.findByTestId('script-editor-route')).toBeTruthy();
   });
 
   it('«Publish»: один POST …/versions/10/publish у всіх трьох вікнах', async () => {
@@ -157,7 +138,7 @@ describe('B149: MethodologyVersionsPage — один запит на відкр�
     const user = userEvent.setup();
     show();
 
-    await screen.findByText('F1');
+    await screen.findByTestId('script-versions');
     fireEvent.click(screen.getAllByRole('button', { name: '⟦methodologies.publish⟧' })[0] as HTMLElement);
     const dialog = await screen.findByRole('dialog', { name: '⟦methodologies.publishTitle⟧' });
     fireEvent.change(within(dialog).getByLabelText('⟦methodologies.reason⟧'), { target: { value: 'Новий коефіцієнт' } });
@@ -205,7 +186,7 @@ describe('B149: MethodologyVersionsPage — один запит на відкр�
     const user = userEvent.setup();
     show();
 
-    await screen.findByText('F1');
+    await screen.findByTestId('script-versions');
     fireEvent.click(screen.getAllByRole('button', { name: '⟦methodologies.publish⟧' })[0] as HTMLElement);
     const dialog = await screen.findByRole('dialog', { name: '⟦methodologies.publishTitle⟧' });
     fireEvent.change(within(dialog).getByLabelText('⟦methodologies.reason⟧'), { target: { value: 'Новий коефіцієнт' } });
@@ -223,24 +204,5 @@ describe('B149: MethodologyVersionsPage — один запит на відкр�
     fireEvent.click(publish);
     await settle();
     expect(server.sent).toEqual([]);
-  });
-
-  it('«Remove formula»: один DELETE …/formulas/F1 у всіх трьох вікнах', async () => {
-    const server = holdWrites({ read, write: () => ({ status: 204 }) });
-    const gate = gateReads();
-    show();
-
-    fireEvent.click(await screen.findByRole('button', { name: '⟦methodologies.deleteFormula⟧' }));
-    const dialog = await screen.findByRole('dialog', { name: '⟦methodologies.deleteFormulaConfirmTitle⟧' });
-    const remove = within(dialog).getByRole('button', { name: '⟦methodologies.deleteFormulaConfirmTitle⟧' });
-
-    await probeThreeWindows({
-      server,
-      gate,
-      button: () => remove,
-      isOpen: dialogOpen('⟦methodologies.deleteFormulaConfirmTitle⟧'),
-      expected: ['DELETE /api/v1/methodologies/1/versions/10/formulas/F1'],
-      awaitedRead: '/formulas',
-    });
   });
 });

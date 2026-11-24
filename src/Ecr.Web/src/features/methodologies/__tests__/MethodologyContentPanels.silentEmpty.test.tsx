@@ -10,7 +10,7 @@ import { testTheme } from '@/test/render';
  * Відмова допоміжного довідника робила перелік у `Select` ПОРОЖНІМ — і мовчала
  * (директива №15, §0, `L10`: «немає прав» ≠ «порожньо» ≠ «сервер відмовив»).
  *
- * ⛔ Три джерела збиралися через `?? []`, і всі три — переліки, з яких людина
+ * ⛔ Джерела збиралися через `?? []` — переліки, з яких людина
  * ЧИТАЄ ФАКТ ПРО СВІТ:
  *
  * 1. `GET /api/v1/column-defs/search` живить вибір колонки у ДВОХ діалогах —
@@ -18,14 +18,6 @@ import { testTheme } from '@/test/render';
  *    колонки в шаблонах немає»; пошук за назвою при цьому відповідає «нічого
  *    не знайдено» на будь-який запит. Конфігуратор іде перевіряти, чи
  *    опублікована версія шаблону, — замість повторити запит.
- * 2. `GET /api/v1/units` у діалозі КОНСТАНТ. Порожній перелік читається як
- *    «одиниць у системі немає», і константа зберігається БЕЗ одиниці —
- *    сервер це приймає (`unitId` там необов'язковий), тобто відмова читання
- *    перетворюється на тихо безрозмірний коефіцієнт.
- * 3. `GET /api/v1/units` у діалозі ВИХОДІВ. Там одиниця обов'язкова
- *    (`disabled={… || editing.unitId === null}`), тож кнопка «Зберегти»
- *    лишалася недоступною, НЕ назвавши причини: порожній перелік + мертва
- *    кнопка = «виходи тут завести неможливо».
  *
  * ⚠ Кожен випадок має ДЗЕРКАЛО «усе приїхало»: інакше «полагодити» можна було
  * б назавжди схованим `Select`, і перший випадок лишався б зеленим.
@@ -44,18 +36,6 @@ const Strings: Record<string, string> = {
   'methodologies.outputCode': 'Output',
   'methodologies.matchJson': 'Match',
   'methodologies.active': 'Active',
-  'methodologies.constants': 'Constants',
-  'methodologies.addConstant': 'Add constant',
-  'methodologies.constantKind': 'Kind',
-  'methodologies.resultNumber': 'Number',
-  'methodologies.resultText': 'Text',
-  'methodologies.categoryLabel': 'Category label',
-  'methodologies.value': 'Value',
-  'methodologies.outputUnit': 'Unit',
-  'methodologies.constantUnit': 'Unit',
-  'methodologies.outputs': 'Outputs',
-  'methodologies.addOutput': 'Add output',
-  'methodologies.ordinal': 'Ordinal',
   'methodologies.code': 'Code',
   'methodologies.save': 'Save',
   'state.errorTitle': 'The request failed',
@@ -82,7 +62,6 @@ function refusal(detail: string, correlationId: string): Record<string, unknown>
 }
 
 const ColumnsRefusal = refusal('перелік колонок прочитати не вдалося', 'cid-columns-1');
-const UnitsRefusal = refusal('довідник одиниць прочитати не вдалося', 'cid-units-1');
 
 const columnResults = [
   {
@@ -97,8 +76,6 @@ const columnResults = [
   },
 ];
 
-const units = [{ id: 7, code: 't' }];
-
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -109,7 +86,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 /** Сервер, у якому падає рівно один довідник — або жоден. */
-function mockApi(fails: 'columns' | 'units' | 'nothing'): void {
+function mockApi(fails: 'columns' | 'nothing'): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -123,10 +100,6 @@ function mockApi(fails: 'columns' | 'units' | 'nothing'): void {
         return fails === 'columns' ? json(ColumnsRefusal, 500) : json(columnResults);
       }
 
-      if (url.includes('/api/v1/units')) {
-        return fails === 'units' ? json(UnitsRefusal, 500) : json(units);
-      }
-
       // Власний перелік панелі приїжджає ЗАВЖДИ: перевіряється відмова
       // допоміжного довідника, а не порожня панель.
       if (url.includes('/api/v1/methodologies/1/')) {
@@ -138,7 +111,7 @@ function mockApi(fails: 'columns' | 'units' | 'nothing'): void {
   );
 }
 
-type Panel = 'requiredInputs' | 'bindings' | 'constants' | 'outputs';
+type Panel = 'requiredInputs' | 'bindings';
 
 async function show(panel: Panel): Promise<void> {
   await loadCatalog('en', 'public');
@@ -150,18 +123,13 @@ async function show(panel: Panel): Promise<void> {
   const body =
     panel === 'requiredInputs' ? (
       <panels.MethodologyRequiredInputsPanel methodologyId={1} versionId={2} editable />
-    ) : panel === 'bindings' ? (
-      <panels.MethodologyBindingsPanel methodologyId={1} editable />
-    ) : panel === 'constants' ? (
-      <panels.MethodologyConstantsPanel methodologyId={1} versionId={2} editable />
     ) : (
-      <panels.MethodologyOutputsPanel methodologyId={1} versionId={2} editable />
+      <panels.MethodologyBindingsPanel methodologyId={1} editable />
     );
 
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
-        {/* План CONST-CATEGORY: фільтр категорії констант живе в адресі — потрібен роутер. */}
         <MemoryRouter>{body}</MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
@@ -275,92 +243,6 @@ describe('MethodologyContentPanels: відмова довідника ≠ «ні
       await waitFor(
         () => {
           expect(within(dialog).getByLabelText('Column')).toHaveProperty('disabled', false);
-        },
-        { timeout: AssertTimeout },
-      );
-
-      expect(within(dialog).queryByRole('alert')).toBeNull();
-    },
-    SlowEnvTimeout,
-  );
-
-  it(
-    'константи: довідник одиниць відмовив — причина в діалозі, вибору одиниці НЕМАЄ',
-    async () => {
-      mockApi('units');
-      await show('constants');
-
-      const dialog = await openDialog('Add constant');
-      const alert = await waitFor(() => within(dialog).getByRole('alert'), {
-        timeout: AssertTimeout,
-      });
-
-      expect(alert.textContent ?? '').toContain('довідник одиниць прочитати не вдалося');
-      expect(alert.textContent ?? '').toContain('cid-units-1');
-
-      // ⛔ Інакше константа зберігалася б безрозмірною, і сервер це прийняв би.
-      expect(within(dialog).queryByLabelText('Unit')).toBeNull();
-
-      // ⚠ Решта діалогу ЛИШАЄТЬСЯ робочою: відмова одного довідника не забирає
-      // форму — безрозмірна константа є законною, коли це ВИБІР, а не наслідок
-      // відмови.
-      expect(within(dialog).getByLabelText('Code')).toBeDefined();
-    },
-    SlowEnvTimeout,
-  );
-
-  it(
-    'константи: одиниці приїхали — вибір доступний, банера немає',
-    async () => {
-      mockApi('nothing');
-      await show('constants');
-
-      const dialog = await openDialog('Add constant');
-
-      await waitFor(
-        () => {
-          expect(within(dialog).getByLabelText('Unit')).toHaveProperty('disabled', false);
-        },
-        { timeout: AssertTimeout },
-      );
-
-      expect(within(dialog).queryByRole('alert')).toBeNull();
-    },
-    SlowEnvTimeout,
-  );
-
-  it(
-    'виходи: довідник одиниць відмовив — причина в діалозі, вибору одиниці НЕМАЄ',
-    async () => {
-      mockApi('units');
-      await show('outputs');
-
-      const dialog = await openDialog('Add output');
-      const alert = await waitFor(() => within(dialog).getByRole('alert'), {
-        timeout: AssertTimeout,
-      });
-
-      expect(alert.textContent ?? '').toContain('довідник одиниць прочитати не вдалося');
-      expect(alert.textContent ?? '').toContain('cid-units-1');
-
-      // ⛔ Тут одиниця ОБОВ'ЯЗКОВА, тож кнопка «Зберегти» й так недоступна —
-      // дефектом була саме мовчазність: недоступна кнопка без причини.
-      expect(within(dialog).queryByLabelText('Unit')).toBeNull();
-    },
-    SlowEnvTimeout,
-  );
-
-  it(
-    'виходи: одиниці приїхали — вибір доступний, банера немає',
-    async () => {
-      mockApi('nothing');
-      await show('outputs');
-
-      const dialog = await openDialog('Add output');
-
-      await waitFor(
-        () => {
-          expect(within(dialog).getByLabelText('Unit')).toHaveProperty('disabled', false);
         },
         { timeout: AssertTimeout },
       );

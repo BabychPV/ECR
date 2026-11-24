@@ -37,6 +37,10 @@ export interface ScriptEditorHandle {
   readonly replaceRange: (start: number, end: number, text: string) => void;
   /** Зміщення курсора в тексті. */
   readonly cursorOffset: () => number;
+  /** Фокус у редактор (курсор і виділення лишаються). */
+  readonly focus: () => void;
+  /** Перерозкладка під нову рамку (вхід/вихід «на весь екран»). */
+  readonly layout: () => void;
 }
 
 export interface ScriptEditorProps {
@@ -188,6 +192,12 @@ export function ScriptEditor(props: ScriptEditorProps): JSX.Element {
           return 0;
         }
         return model.getOffsetAt(position);
+      },
+      focus() {
+        editor.current?.focus();
+      },
+      layout() {
+        editor.current?.layout();
       },
     }),
     [],
