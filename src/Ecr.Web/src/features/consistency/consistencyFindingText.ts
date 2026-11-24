@@ -74,7 +74,35 @@ function render(key: string, params: Record<string, string>): string | null {
     // (`reason`: `notApproved` | `reapproved`) — «більше не затверджено або затверджено повторно пізніше».
     case 'consistency.finding.STALE_APPROVED_DEPENDENT':
       return t('consistency.finding.STALE_APPROVED_DEPENDENT', params);
+    // ✎ 24.11 (аудит «Consistency issues»): правила результатів розрахунку й методологій.
+    case 'consistency.finding.CALC_RESULT_VERSION_NOT_EFFECTIVE':
+      return t('consistency.finding.CALC_RESULT_VERSION_NOT_EFFECTIVE', params);
+    case 'consistency.finding.CALC_RESULT_VERSION_NOT_EFFECTIVE_APPROVED':
+      return t('consistency.finding.CALC_RESULT_VERSION_NOT_EFFECTIVE_APPROVED', params);
+    case 'consistency.finding.EFFECTIVE_VERSION_FORMULAS':
+      return t('consistency.finding.EFFECTIVE_VERSION_FORMULAS', params);
+    case 'consistency.finding.ROW_INPUTS_COMPLETE_NO_RESULT':
+      return t('consistency.finding.ROW_INPUTS_COMPLETE_NO_RESULT', params);
+    case 'consistency.finding.ROW_INPUTS_COMPLETE_NO_RESULT_MORE':
+      return t('consistency.finding.ROW_INPUTS_COMPLETE_NO_RESULT_MORE', params);
+    case 'consistency.finding.CURRENT_RUN_NO_RESULTS_WITH_BINDINGS':
+      return t('consistency.finding.CURRENT_RUN_NO_RESULTS_WITH_BINDINGS', params);
+    case 'consistency.finding.CALC_ISSUE_WITHOUT_RUN':
+      return t('consistency.finding.CALC_ISSUE_WITHOUT_RUN', params);
+    case 'consistency.finding.OUTPUT_WITHOUT_BINDING':
+      return t('consistency.finding.OUTPUT_WITHOUT_BINDING', params);
+    case 'consistency.finding.BINDING_DEAD_COLUMN':
+      return t('consistency.finding.BINDING_DEAD_COLUMN', params);
     default:
       return null;
   }
+}
+
+/**
+ * Підстановки конверта знахідки (`documentId`, `period`, `methodologyId`…) — для посилань із журналу на місце знахідки;
+ * `null` — не конверт (старий текст).
+ */
+export function consistencyFindingParams(raw: string): Readonly<Record<string, string>> | null {
+  const envelope = decode(raw);
+  return envelope === null ? null : { ...envelope.p };
 }

@@ -4,7 +4,10 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { ConsistencyIssue, ConsistencyIssuePage } from '@/api/types';
 import type { components } from '@/api/schema';
+import { ChecksPerformed } from '@/features/consistency/ChecksPerformed';
 import { consistencyFindingText } from '@/features/consistency/consistencyFindingText';
+import { ConsistencyRuleCodes, ruleLabel } from '@/features/consistency/consistencyRules';
+import { FindingLinks } from '@/features/consistency/FindingLinks';
 import { useLastConsistencyCheck } from '@/features/consistency/lastCheck';
 import {
   ConsistencyIssuesKey,
@@ -22,7 +25,6 @@ import type { StatItem, StatStripItems } from '@/shared/ui/StatStrip';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { TwoLine } from '@/shared/ui/TwoLine';
-import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
 import { InfiniteListFooter } from '@/features/common/infiniteList/InfiniteListFooter';
 import { mergePages, nextCursorOf } from '@/features/common/infiniteList/mergePages';
 import { useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
@@ -92,11 +94,9 @@ export function ConsistencyIssuesPage(): JSX.Element {
   // (контракт той самий; закритих рядків задача не пише).
   const openOnly = true;
   const lastCheck = useLastConsistencyCheck();
-  const rule = ruleCode ?? '';
-  // ⛔ Код правила набирається з клавіатури — у запит після паузи, а не на
-  // кожну літеру (той самий дефект, що в журналі змін, `useDebouncedFilter`).
-  // Саме поле (з власною чернеткою, `useFieldDraft`) — пошук `FilterBar`.
-  const appliedRule = useDebouncedFilter(rule);
+  // ✎ 24.11 (аудит): правило — перелік відомих кодів (`consistencyRules.ts`), а не вільний текст: з нулем знахідок
+  // людина не мала звідки дізнатися, які правила існують. Вибір зі списку — одразу в запит, без паузи набору.
+  const appliedRule = ruleCode ?? '';
   // ✎ W-3c: курсор — параметр сторінки `useInfiniteQuery`; ключ — застосовані фільтри (вага — теж фільтр СЕРВЕРА, LS-E).
 
   // ⚠ Дія «перевірити зараз» — лише з правом, яке вимагає сам ендпоінт
@@ -157,6 +157,8 @@ export function ConsistencyIssuesPage(): JSX.Element {
   const severityFilter = severityCode === undefined ? null : severity;
   const shown = items;
   const filtered = severityFilter !== null || appliedRule.length > 0;
+  // Правила останнього завершеного прогону (сервер, `lastRun.checks`); прогону ще не було — блоку немає.
+  const checks = summary.data?.lastRun?.checks ?? [];
 
   const openIssue = items?.find((issue) => issuePanelId(issue.id) === panel);
 
@@ -194,7 +196,14 @@ export function ConsistencyIssuesPage(): JSX.Element {
               {consistencyFindingText(issue.message).text}
             </UnstyledButton>
           }
-          secondary={<span data-allow-dotted>{issue.ruleCode}</span>}
+          secondary={
+            <>
+              <span>{ruleLabel(issue.ruleCode)}</span>
+              {' · '}
+              <span data-allow-dotted>{issue.ruleCode}</span>
+              <FindingLinks message={issue.message} />
+            </>
+          }
           mono
         />
       ),
@@ -243,7 +252,14 @@ export function ConsistencyIssuesPage(): JSX.Element {
            * сторінковий, і пошук по завантаженій сотні пропускав би решту.
            * Пояснення — підказкою в порожньому полі.
            */
-          search={{ param: 'ruleCode', label: t('consistency.rule'), placeholder: t('consistency.ruleHint') }}
+          filters={[
+            {
+              id: 'ruleCode',
+              label: t('consistency.rule'),
+              placeholder: t('consistency.ruleHint'),
+              options: ConsistencyRuleCodes.map((code) => ({ value: code, label: ruleLabel(code) })),
+            },
+          ]}
           clearLabel={t('filters.clear')}
         />
       }
@@ -259,6 +275,13 @@ export function ConsistencyIssuesPage(): JSX.Element {
               {t('consistency.lastCheck')} <Timestamp value={lastCheck} />
             </Text>
           )}
+          {checks.length > 0 && (
+            <ChecksPerformed
+              checks={checks}
+              active={appliedRule.length === 0 ? null : appliedRule}
+              onSelect={(code) => setParams({ ruleCode: code })}
+            />
+          )}
 
           <DataTable<ConsistencyIssue>
             columns={columns}
@@ -267,7 +290,13 @@ export function ConsistencyIssuesPage(): JSX.Element {
             isPending={issues.isPending}
             error={issues.isFetchNextPageError ? null : issues.error}
             onRetry={() => void issues.refetch()}
-            emptyTitle={t('consistency.empty')}
+            // ⛔ Аудит 24.11: порожній журнал казав лише «замечаний нет» — не ЩО перевірено. Із підсумком прогону —
+            // «Остання перевірка виконала N перевірок — знахідок немає»; без нього (прогону ще не було) — як було.
+            emptyTitle={
+              checks.length > 0
+                ? t('consistency.emptyChecked', { count: String(checks.length) })
+                : t('consistency.empty')
+            }
             emptyHint={t('consistency.emptyHint')}
             filtered={filtered}
             noMatchTitle={t('consistency.noMatch')}
@@ -285,7 +314,7 @@ export function ConsistencyIssuesPage(): JSX.Element {
           ? undefined
           : {
               panelId: issuePanelId(openIssue.id),
-              title: openIssue.ruleCode,
+              title: ruleLabel(openIssue.ruleCode),
               subtitle: `#${String(openIssue.id)}`,
               badge: <StatusBadge kind="severity" state={severityState(openIssue.severity)} />,
               closeLabel: t('common.close'),
