@@ -5300,6 +5300,35 @@
         ],
         "type": "object"
       },
+      "ConsistencyCheckTally": {
+        "description": "Одне правило прогону.",
+        "properties": {
+          "complete": {
+            "description": "Перевірено повністю (D-480); `false` — уперлося в стелю, старі знахідки правила лишились.",
+            "type": "boolean"
+          },
+          "found": {
+            "description": "Знахідок цього прогону.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "ruleCode": {
+            "description": "Код правила.",
+            "type": "string"
+          },
+          "skipped": {
+            "description": "Не виконувалось (умова вимкнена, напр. прибирання витіснених прогонів).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ruleCode",
+          "found",
+          "complete",
+          "skipped"
+        ],
+        "type": "object"
+      },
       "ConsistencyIssuePage": {
         "description": "Сторінка знахідок із загальними лічильниками.",
         "properties": {
@@ -5477,6 +5506,39 @@
         ],
         "type": "object"
       },
+      "ConsistencyLastRun": {
+        "description": "Останній завершений прогін перевірки узгодженості (`itg.MaintenanceRun`, `consistency-check`).",
+        "properties": {
+          "checks": {
+            "description": "Правила прогону в порядку показу; порожньо — прогін до 24.11 (деталі без переліку) або збій.",
+            "items": {
+              "$ref": "#/components/schemas/ConsistencyCheckTally"
+            },
+            "type": "array"
+          },
+          "finishedAt": {
+            "description": "Кінець, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "startedAt": {
+            "description": "Старт, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "description": "`Succeeded` (знахідок немає), `Degraded` (є знахідки) або `Failed`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "startedAt",
+          "finishedAt",
+          "status",
+          "checks"
+        ],
+        "type": "object"
+      },
       "ConsistencySeverityTotals": {
         "description": "Лічильники знахідок за вагою в межах фільтра переліку (без фільтра ваги).",
         "properties": {
@@ -5522,6 +5584,17 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "lastRun": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConsistencyLastRun",
+                "description": "✎ 24.11: останній ЗАВЕРШЕНИЙ прогін перевірки з переліком правил і кількістю знахідок кожного — екран показує,\nЩО перевірено, а не лише «0 знахідок»; `null` — завершених прогонів ще не було."
+              }
             ]
           },
           "total": {

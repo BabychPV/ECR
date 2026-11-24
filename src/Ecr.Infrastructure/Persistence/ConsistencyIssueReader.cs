@@ -167,15 +167,93 @@ public sealed class ConsistencyIssueReader(EcrDbContext db) : IConsistencyIssueR
                    {(openOnly ? "AND ResolvedAt IS NULL" : string.Empty)};
             """;
 
-        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        await reader.ReadAsync(ct).ConfigureAwait(false);
+        ConsistencySummary summary;
+        await using (var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false))
+        {
+            await reader.ReadAsync(ct).ConfigureAwait(false);
 
-        return new ConsistencySummary(
-            reader.GetInt32(0),
-            reader.GetInt32(1),
-            reader.GetInt32(2),
-            reader.GetInt32(3),
-            reader.IsDBNull(4) ? null : DateTime.SpecifyKind(reader.GetDateTime(4), DateTimeKind.Utc));
+            summary = new ConsistencySummary(
+                reader.GetInt32(0),
+                reader.GetInt32(1),
+                reader.GetInt32(2),
+                reader.GetInt32(3),
+                reader.IsDBNull(4) ? null : DateTime.SpecifyKind(reader.GetDateTime(4), DateTimeKind.Utc));
+        }
+
+        return summary with { LastRun = await LastRunAsync(connection, ct).ConfigureAwait(false) };
+    }
+
+    /// <summary>
+    /// Останній завершений прогін перевірки з правилами з деталей (<c>checks</c>, ✎ 24.11).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Код задачі — <c>ConsistencyCheckJob.Code</c> (<c>consistency-check</c>). Деталі — JSON, який пише задача; старі
+    /// (без <c>checks</c>) чи нерозбірні дають порожній перелік, а не відмову екрана.
+    /// </remarks>
+    private static async Task<ConsistencyLastRun?> LastRunAsync(SqlConnection connection, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT TOP (1) StartedAt, FinishedAt, Status, DetailsJson
+              FROM itg.MaintenanceRun
+             WHERE JobCode = N'consistency-check' AND FinishedAt IS NOT NULL
+             ORDER BY Id DESC;
+            """;
+
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        return new ConsistencyLastRun(
+            DateTime.SpecifyKind(reader.GetDateTime(0), DateTimeKind.Utc),
+            DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc),
+            reader.GetString(2),
+            ParseChecks(reader.IsDBNull(3) ? null : reader.GetString(3)));
+    }
+
+    /// <summary>Масив <c>checks</c> деталей прогону; що не розбирається — порожньо.</summary>
+    /// <param name="details">Деталі прогону.</param>
+    /// <returns>Правила прогону в порядку запису.</returns>
+    internal static IReadOnlyList<ConsistencyCheckTally> ParseChecks(string? details)
+    {
+        if (string.IsNullOrWhiteSpace(details))
+        {
+            return [];
+        }
+
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(details);
+            if (!document.RootElement.TryGetProperty("checks", out var checks)
+                || checks.ValueKind != System.Text.Json.JsonValueKind.Array)
+            {
+                return [];
+            }
+
+            var result = new List<ConsistencyCheckTally>();
+            foreach (var check in checks.EnumerateArray())
+            {
+                if (check.TryGetProperty("code", out var code) && code.ValueKind == System.Text.Json.JsonValueKind.String
+                    && check.TryGetProperty("found", out var found) && found.TryGetInt32(out var count))
+                {
+                    result.Add(new ConsistencyCheckTally(
+                        code.GetString()!,
+                        count,
+                        !check.TryGetProperty("complete", out var complete)
+                        || complete.ValueKind != System.Text.Json.JsonValueKind.False,
+                        check.TryGetProperty("skipped", out var skipped)
+                        && skipped.ValueKind == System.Text.Json.JsonValueKind.True));
+                }
+            }
+
+            return result;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return [];
+        }
     }
 
     /// <inheritdoc />

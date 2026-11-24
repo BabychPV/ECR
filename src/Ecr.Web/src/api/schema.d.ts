@@ -33281,6 +33281,20 @@ export interface components {
              */
             recalculateApproved: boolean;
         };
+        /** @description Одне правило прогону. */
+        ConsistencyCheckTally: {
+            /** @description Перевірено повністю (D-480); `false` — уперлося в стелю, старі знахідки правила лишились. */
+            complete: boolean;
+            /**
+             * Format: int32
+             * @description Знахідок цього прогону.
+             */
+            found: number;
+            /** @description Код правила. */
+            ruleCode: string;
+            /** @description Не виконувалось (умова вимкнена, напр. прибирання витіснених прогонів). */
+            skipped: boolean;
+        };
         /** @description Сторінка знахідок із загальними лічильниками. */
         ConsistencyIssuePage: {
             /** @description Елементи сторінки. */
@@ -33361,6 +33375,23 @@ export interface components {
             /** @description Код таблиці. */
             tableCode: null | string;
         };
+        /** @description Останній завершений прогін перевірки узгодженості (`itg.MaintenanceRun`, `consistency-check`). */
+        ConsistencyLastRun: {
+            /** @description Правила прогону в порядку показу; порожньо — прогін до 24.11 (деталі без переліку) або збій. */
+            checks: components["schemas"]["ConsistencyCheckTally"][];
+            /**
+             * Format: date-time
+             * @description Кінець, UTC.
+             */
+            finishedAt: string;
+            /**
+             * Format: date-time
+             * @description Старт, UTC.
+             */
+            startedAt: string;
+            /** @description `Succeeded` (знахідок немає), `Degraded` (є знахідки) або `Failed`. */
+            status: string;
+        };
         /** @description Лічильники знахідок за вагою в межах фільтра переліку (без фільтра ваги). */
         ConsistencySeverityTotals: {
             /**
@@ -33396,6 +33427,7 @@ export interface components {
              * @description Момент найновішої знахідки в UTC; `null` — журнал порожній.
              */
             lastDetectedAt: null | string;
+            lastRun?: null | components["schemas"]["ConsistencyLastRun"];
             /**
              * Format: int32
              * @description Усього (інша вага, якщо така з'явиться, потрапляє лише сюди).

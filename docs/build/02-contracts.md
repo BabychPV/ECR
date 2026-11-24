@@ -6809,6 +6809,26 @@ public sealed record RowDto(
   (лише біт зв'язки; ключ `Calculations:Hse400CompositionFromDocument` виведено, P-0118-31/33); за `any` знахідок немає, а старі знахідки
   правила закриваються (прохід повний). Тексти en/ru/kz — сід `B80-stale-approved-dependent.sql`; переклад на клієнті —
   N6.
+- ✎ 2026-11-24 (аудит «Consistency issues», lane `integ-consistency-checks`) — правила результатів розрахунку й
+  методологій (`CalculationConsistencyChecks`; чинна версія — правило оркестратора: Published, `EffectiveFrom ≤ кінець
+  періоду`, `MethodologyVersionKey.Currency`). Код → вага, сутність, підстановки конверта `consistency.finding.<CODE>`:
+  - `CALC_RESULT_VERSION_NOT_EFFECTIVE` — 2, `calc.CalculationResult` (найменший id групи прогін × документ × період ×
+    версія); `documentId`, `period`, `methodology`, `methodologyId`, `resultVersion`, `effectiveVersion`, `results`,
+    `runId`. Місяць із затвердженим аркушем оригіналу — ключ `…_APPROVED` (та сама вага 2, рішення людини 24.11).
+  - `EFFECTIVE_VERSION_FORMULAS` — 2, `calc.MethodologyVersion`; `methodology`, `methodologyId`, `version`, `effectiveFrom`.
+  - `ROW_INPUTS_COMPLETE_NO_RESULT` — 2, `doc.TableRow` (≤ 50 на документ × період); `documentId`, `period`, `table`,
+    `row`, `methodology`, `methodologyId`, `runId`; надлишок — одна знахідка `calc.CalculationRun` з ключем `…_MORE`
+    (`documentId`, `period`, `more`, `runId`).
+  - `CURRENT_RUN_NO_RESULTS_WITH_BINDINGS` — 3, `calc.CalculationRun`; `runId`, `documentId`, `period`, `tables`,
+    `methodologies`.
+  - `CALC_ISSUE_WITHOUT_RUN` — 3, `calc.CalculationRun` (id зниклого прогону); `runId`, `documentId`, `period`, `issues`.
+  - `OUTPUT_WITHOUT_BINDING` — 1, `calc.MethodologyOutput`; `methodology`, `methodologyId`, `version`, `output`.
+  - `BINDING_DEAD_COLUMN` — 1, `cfg.CalculationBinding` (лише живі версії шаблонів); `methodology`, `methodologyId`,
+    `table`, `column`, `version`, `bindingId`.
+  Деталі прогону (`itg.MaintenanceRun.DetailsJson`) — масив `checks` (`code`, `found`, `complete`, `skipped`, `ms`) у
+  порядку `ConsistencyCheckJob.KnownRules`; `GET /api/v1/consistency/summary` віддає його як `lastRun`
+  (`startedAt`, `finishedAt`, `status`, `checks[]` — `ruleCode`, `found`, `complete`, `skipped`; `null` — завершених
+  прогонів ще не було). Тексти — сід `CONS-calc-checks.sql`; назви правил `consistency.rule.<CODE>`.
 
 ## ✎ 2026-11-18 B179 L1: граф залежностей документів (без ендпоінтів, міграцій і сіду)
 
