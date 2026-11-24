@@ -234,8 +234,7 @@ public sealed class RecalculationJobNoMatchingRuleTests(SqlServerFixture sql)
             Substitute.For<IUnitOfWork>(),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
-            new TestClock(DateTime.UtcNow),
-            Substitute.For<IAuditWriter>());
+            new TestClock(DateTime.UtcNow));
 
     /// <summary>Оркестратор, що повертає профіль із заданими рядками без правила.</summary>
     private sealed class UnmatchedRunner(

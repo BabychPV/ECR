@@ -142,8 +142,7 @@ public sealed partial class YearLayoutTailSqlTests(SqlServerFixture sql)
             Substitute.For<IUnitOfWork>(),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<Ecr.Application.Common.ICurrentUser>(),
-            new TestClock(JobNow),
-            Substitute.For<IAuditWriter>());
+            new TestClock(JobNow));
 
     /// <summary>Оркестратор без прив'язок: тест про фазу формул і скоуп періодів.</summary>
     private sealed class NoBindingsRunner : ICalculationRunner

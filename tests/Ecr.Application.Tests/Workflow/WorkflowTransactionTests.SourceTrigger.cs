@@ -1,6 +1,5 @@
 // tests/Ecr.Application.Tests/Workflow/WorkflowTransactionTests.SourceTrigger.cs
 using Ecr.Application.Ports;
-using Ecr.Application.Reporting;
 using Ecr.Application.Security;
 using Ecr.Application.Workflow;
 using Ecr.Domain.Enums;
@@ -113,8 +112,7 @@ public sealed partial class WorkflowTransactionTests
         await using (var db = CreateContext())
         {
             await new ApproveSheetHandler(
-                    new WorkflowStore(db), access, new ReportSnapshotSync(NoSnapshots(), documents),
-                    new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db), documents,
+                    new WorkflowStore(db), access, new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db), documents,
                     sourceTrigger: trigger)
                 .HandleAsync(world.DocumentId, world.SheetDefId, PeriodKeyValue, approved: true, reason: null, copyId, CancellationToken.None)
                 .ConfigureAwait(true);
@@ -129,7 +127,7 @@ public sealed partial class WorkflowTransactionTests
         {
             await new ReopenDocumentHandler(
                     new WorkflowStore(db), reopenAccess, new UnitOfWork(db), User(), new TestClock(Now), documents,
-                    new ReportSnapshotSync(NoSnapshots(), documents), sourceTrigger: trigger)
+                    sourceTrigger: trigger)
                 .HandleAsync(world.DocumentId, world.SheetDefId, PeriodKeyValue, "уточнення копії", copyId, CancellationToken.None)
                 .ConfigureAwait(true);
         }
@@ -154,8 +152,7 @@ public sealed partial class WorkflowTransactionTests
             });
 
         await new ApproveSheetHandler(
-                new WorkflowStore(db), AccessAt(step), new ReportSnapshotSync(NoSnapshots(), Documents(world)),
-                new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db), Documents(world),
+                new WorkflowStore(db), AccessAt(step), new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db), Documents(world),
                 sourceTrigger: trigger)
             .HandleAsync(world.DocumentId, world.SheetDefId, PeriodKeyValue, approved: true, reason: null, CancellationToken.None)
             .ConfigureAwait(false);
@@ -166,7 +163,7 @@ public sealed partial class WorkflowTransactionTests
         await using var db = CreateContext();
         await new ReopenDocumentHandler(
                 new WorkflowStore(db), AccessAt(step: null), new UnitOfWork(db), User(), new TestClock(Now), Documents(world),
-                new ReportSnapshotSync(NoSnapshots(), Documents(world)), sourceTrigger: trigger)
+                sourceTrigger: trigger)
             .HandleAsync(world.DocumentId, world.SheetDefId, PeriodKeyValue, "уточнення джерела", CancellationToken.None)
             .ConfigureAwait(false);
     }

@@ -8,8 +8,7 @@ namespace Ecr.Application.Ports;
 /// один, або батько й частини композиції (<c>includeChildren</c>, ФВ-8.16).
 /// </summary>
 /// <remarks>
-/// ⚠ Окремий порт, а не <see cref="ISnapshotWorkbookWriter"/>: там колонки й підсумки звіту, тут —
-/// типи полів довідника і правило «число без втрати знаків».
+/// ⚠ Типи полів довідника і правило «число без втрати знаків».
 /// </remarks>
 public interface IRegistryWorkbookWriter
 {

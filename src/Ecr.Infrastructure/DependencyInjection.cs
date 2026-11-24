@@ -533,7 +533,6 @@ public static class DependencyInjection
         services.AddScoped<Jobs.ConsistencyCheckJob>();
         services.AddScoped<Jobs.PartitionCheckJob>();
         services.AddScoped<Jobs.ReportRetentionJob>();
-        services.AddScoped<Jobs.ReportSnapshotFormatJob>();
         services.AddScoped<Jobs.SubmissionSnapshotRetentionJob>();
         services.AddScoped<Jobs.SupersededResultsSweepJob>();
 
@@ -605,10 +604,9 @@ public static class DependencyInjection
             .ConfigurePrimaryHttpMessageHandler(Notifications.TeamsWebhookSender.CreateHandler); // S9: без редиректів
 
         // ⚠ Задачі, які use-case називає МАРКЕРОМ, реєструються ще й за ним:
-        // `EnqueueAsync<IReportSnapshotJob>` кладе в JobDataMap повне імʼя
+        // `EnqueueAsync<ICollectionJob>` кладе в JobDataMap повне імʼя
         // саме маркера, і без цієї реєстрації адаптер Quartz не знайшов би
         // виконавця — черга приймала б завдання і не робила нічого.
-        services.AddScoped<IReportSnapshotJob, Jobs.ReportSnapshotJob>();
         services.AddScoped<ICollectionJob, Jobs.CollectionJob>();
 
         // HSE301 A5b: синк подій джерела в рядки таблиць. Ставить його `CollectionJob` (сутність із
@@ -657,8 +655,6 @@ public static class DependencyInjection
         services.AddScoped<Ecr.Application.Integration.RawData.ISourceEventViewStore, SourceEventViewStore>(); // D-465
         services.AddScoped<IStyleCatalog, StyleCatalog>();
         services.AddScoped<IConditionalFormatStore, ConditionalFormatStore>();
-        services.AddScoped<IReportDefinitionStore, ReportDefinitionStore>();
-        services.AddScoped<IReportSnapshotBuilder, Reporting.ReportSnapshotBuilder>();
         services.AddSingleton<IReportViewStatus, Reporting.ReportViewStatus>();
         services.AddScoped<IReportViewGenerator, Reporting.ReportViewGenerator>();
 

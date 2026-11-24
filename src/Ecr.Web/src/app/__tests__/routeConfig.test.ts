@@ -106,7 +106,6 @@ describe('app/routes — реєстр маршрутів', () => {
         'operate',
         [
           '/admin/jobs',
-          '/admin/snapshots',
           '/admin/audit',
           '/admin/consistency',
           '/admin/ui-strings',
@@ -143,7 +142,6 @@ describe('app/routes — реєстр маршрутів', () => {
         '/admin/pi-data',
         '/projects',
         '/admin/jobs',
-        '/admin/snapshots',
         '/admin/audit',
         '/admin/consistency',
         '/admin/ui-strings',

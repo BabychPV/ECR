@@ -24,10 +24,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'jobs.kind.periodState', N'kz', N'Кезеңдер күйін жаңарту'),
     (N'jobs.kind.registrySync', N'ru', N'Синхронизация справочников из источника'),
     (N'jobs.kind.registrySync', N'kz', N'Анықтамалықтарды дереккөзден синхрондау'),
-    (N'jobs.kind.reportRetention', N'ru', N'Хранение срезов отчётов'),
-    (N'jobs.kind.reportRetention', N'kz', N'Есеп кесінділерін сақтау'),
-    (N'jobs.kind.reportSnapshotFormat', N'ru', N'Обновление формата срезов отчётов'),
-    (N'jobs.kind.reportSnapshotFormat', N'kz', N'Есеп кесінділерінің пішімін жаңарту'),
+    (N'jobs.kind.reportRetention', N'ru', N'Хранение результатов проверки документов'),
+    (N'jobs.kind.reportRetention', N'kz', N'Құжатты тексеру нәтижелерін сақтау'),
     (N'jobs.kind.submissionSnapshotRetention', N'ru', N'Очистка старых срезов подачи'),
     (N'jobs.kind.submissionSnapshotRetention', N'kz', N'Ескі тапсыру кесінділерін тазарту'),
     (N'jobs.kind.rowWindowRefetch', N'ru', N'Повторная выборка окон строк'),
@@ -51,8 +49,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'jobs.kind.partitionCheck', N'en', N'Partition reserve check', 1),
     (N'jobs.kind.periodState', N'en', N'Period state update', 1),
     (N'jobs.kind.registrySync', N'en', N'Registry sync from source', 1),
-    (N'jobs.kind.reportRetention', N'en', N'Report snapshot retention', 1),
-    (N'jobs.kind.reportSnapshotFormat', N'en', N'Report snapshot format upgrade', 1),
+    (N'jobs.kind.reportRetention', N'en', N'Validation result retention', 1),
     (N'jobs.kind.submissionSnapshotRetention', N'en', N'Submission snapshot retention', 1),
     (N'jobs.kind.rowWindowRefetch', N'en', N'Row window refetch', 1)
        ) AS v ([Key], Lang, Val, Scope)

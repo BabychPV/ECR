@@ -42,7 +42,6 @@ export const Routes = [
   { path: '/admin/pi-data', name: 'pi-data' },
   { path: '/admin/jobs', name: 'jobs' },
   { path: '/admin/health', name: 'health' },
-  { path: '/admin/snapshots', name: 'snapshots' },
   { path: '/admin/audit', name: 'audit' },
   { path: '/admin/consistency', name: 'consistency' },
   { path: '/admin/ui-strings', name: 'ui-strings' },

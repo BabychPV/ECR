@@ -2,7 +2,6 @@
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Ports;
-using Ecr.Application.Reporting;
 using Ecr.Application.Security;
 using Ecr.Application.Workflow;
 using Ecr.Domain.Abstractions;
@@ -48,7 +47,6 @@ public sealed class PeriodKeyValidationConsistencyTests
             Substitute.For<IAccessDecisionService>(),
             new Ecr.Application.Validation.ValidationEngine(Substitute.For<IFormulaEngine>()),
             Substitute.For<IDocumentHeaderStore>(),
-            new ReportSnapshotSync(Substitute.For<IReportSnapshotBuilder>(), Substitute.For<IDocumentStore>()),
             Substitute.For<IUnitOfWork>(),
             User(),
             Substitute.For<IClock>(),
@@ -74,8 +72,7 @@ public sealed class PeriodKeyValidationConsistencyTests
             Substitute.For<IUnitOfWork>(),
             User(),
             Substitute.For<IClock>(),
-            Substitute.For<IDocumentStore>(),
-            new ReportSnapshotSync(Substitute.For<IReportSnapshotBuilder>(), Substitute.For<IDocumentStore>()));
+            Substitute.For<IDocumentStore>());
 
         var error = await Assert.ThrowsAsync<DomainException>(
             () => handler.HandleAsync(documentId: 1, sheetDefId: 1, InvalidPeriodKey, "причина", CancellationToken.None));
@@ -90,7 +87,6 @@ public sealed class PeriodKeyValidationConsistencyTests
             Substitute.For<IWorkflowStore>(),
             Substitute.For<IDocumentStore>(),
             Substitute.For<IAccessDecisionService>(),
-            new ReportSnapshotSync(Substitute.For<IReportSnapshotBuilder>(), Substitute.For<IDocumentStore>()),
             Substitute.For<IUnitOfWork>(),
             User(),
             Substitute.For<IClock>());
@@ -107,7 +103,6 @@ public sealed class PeriodKeyValidationConsistencyTests
         var handler = new ApproveSheetHandler(
             Substitute.For<IWorkflowStore>(),
             Substitute.For<IAccessDecisionService>(),
-            new ReportSnapshotSync(Substitute.For<IReportSnapshotBuilder>(), Substitute.For<IDocumentStore>()),
             Substitute.For<IUnitOfWork>(),
             User(),
             Substitute.For<IClock>(),

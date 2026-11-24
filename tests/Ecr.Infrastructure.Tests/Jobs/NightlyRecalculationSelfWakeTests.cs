@@ -129,8 +129,7 @@ public sealed class NightlyRecalculationSelfWakeTests(SqlServerFixture sql)
             new UnitOfWork(db),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
-            clock,
-            new AuditWriter(db));
+            clock);
         return new RecalculationJob(
             db, new NoBindingsRunner(), runs, Formulas(db, doc, clock), clock, audit: new AuditWriter(db));
     }

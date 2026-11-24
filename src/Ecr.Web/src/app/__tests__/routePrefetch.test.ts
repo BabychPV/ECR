@@ -168,7 +168,6 @@ describe('prefetchRoute — прогрів даних (лише фабричні
       routes.adminSources,
       routes.adminMapping,
       routes.adminJobs,
-      routes.adminSnapshots,
       routes.adminAudit,
       routes.adminUnits,
       routes.adminUiStrings,

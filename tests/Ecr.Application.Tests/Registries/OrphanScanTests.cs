@@ -354,9 +354,6 @@ public sealed class OrphanScanTests
             _access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
             Headers(),
-            new Ecr.Application.Reporting.ReportSnapshotSync(
-                NSubstitute.Substitute.For<IReportSnapshotBuilder>(),
-                NSubstitute.Substitute.For<IDocumentStore>()),
             _uow, _user, _clock, NSubstitute.Substitute.For<ISheetEditGate>(),
             NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
             _methodologies,

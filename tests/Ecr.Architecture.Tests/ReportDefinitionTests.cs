@@ -54,6 +54,7 @@ public sealed partial class ReportDefinitionTests
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     [Trait("Requirement", "ФВ-10.4")]
     [Trait("Requirement", "ФВ-5.12")]
+    [Trait("Requirement", "ФВ-10.11")]
     public void Фільтр_за_статусом_стоїть_у_вьюсі_а_не_в_RDL()
     {
         // ⛔ `ФВ-10.11`: звіти для регулятора читають лише `Approved` і

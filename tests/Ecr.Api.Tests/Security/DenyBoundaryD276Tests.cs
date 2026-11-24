@@ -5,13 +5,11 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
-using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -19,9 +17,9 @@ namespace Ecr.Api.Tests.Security;
 
 /// <summary>
 /// Межа <c>D-276</c> наскрізно (HTTP, справжній SQL): <c>Deny</c> на колонку чи таблицю ДЖЕРЕЛА закриває саме
-/// джерело (зріз таблиці, експорт), але НЕ ховає (а) Rollup-агрегат у видимій таблиці-приймачі і (б) вміст
-/// регуляторного зрізу (<c>Report.ViewSnapshot</c> + грант на проєкт). Тест фіксує ПОТОЧНУ поведінку: будь-яка
-/// випадкова зміна межі в будь-який бік червоніє.
+/// джерело (зріз таблиці, експорт), але НЕ ховає Rollup-агрегат у видимій таблиці-приймачі. Тест фіксує ПОТОЧНУ
+/// поведінку: будь-яка випадкова зміна межі в будь-який бік червоніє. ✎ P-1124-3: частину (б) — вміст регуляторного
+/// зрізу звітності — прибрано разом зі зрізами.
 /// </summary>
 /// <remarks>
 /// Заборонний бік (клітинки, експорт, validate/validation, Check із забороненим джерелом T1-01) детально
@@ -30,8 +28,7 @@ namespace Ecr.Api.Tests.Security;
 /// <para>
 /// ⛔ МУТАЦІЙНІ ДОКАЗИ (локально, не в коміті):
 /// (1) у <c>DocumentReadScope.CanReadColumn</c> ховати колонки основної таблиці (приймача), щойно в профілі є будь-яка
-/// заборона, — червоніє «агрегат Rollup зник із приймача»; (2) у <c>GetSnapshotRowsHandler</c> відповідати 404, щойно
-/// в профілі є будь-яка заборона, — червоніє регуляторна частина; (3) <c>EditRules.CanReadIn</c> повертає <c>true</c> —
+/// заборона, — червоніє «агрегат Rollup зник із приймача»; (2) <c>EditRules.CanReadIn</c> повертає <c>true</c> —
 /// червоніє контраст «джерело закрите».
 /// </para>
 /// </remarks>
@@ -43,7 +40,6 @@ public sealed class DenyBoundaryD276Tests(SqlServerFixture sql)
     // Значення, які не можуть випадково збігтися ні з чим у відповіді.
     private const decimal SourceSecret = 246813.5m;
     private const decimal RollupAggregate = 975311.5m;
-    private const decimal ReportValue = 864209.5m;
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -93,42 +89,6 @@ public sealed class DenyBoundaryD276Tests(SqlServerFixture sql)
             var export = await ExportJsonAsync(app, client, s).ConfigureAwait(true);
             Assert.True(export.Contains(Digits(RollupAggregate), StringComparison.Ordinal), $"{key}: агрегат Rollup зник з експорту");
             Assert.Equal(key == "plain", export.Contains(Digits(SourceSecret), StringComparison.Ordinal));
-        }
-    }
-
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage8)]
-    [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-6.14")]
-    [Trait("Decision", "D-276")]
-    public async Task Регуляторний_зріз_з_правом_на_вміст_повний_попри_Deny_на_колонку_й_таблицю()
-    {
-        var s = await ArrangeAsync().ConfigureAwait(true);
-        var snapshotId = await SnapshotAsync(s).ConfigureAwait(true);
-        await GrantReportViewerAsync(s).ConfigureAwait(true);
-
-        using var app = new EcrApiFactory(sql);
-
-        foreach (var (key, user) in s.Users)
-        {
-            using var client = await SignedInAsync(app, user).ConfigureAwait(true);
-
-            // (б) D-276: рядки зрізу — повністю, однаково для всіх трьох.
-            var (rowsStatus, rows) = await GetAsync(client, $"/api/v1/reports/snapshots/{snapshotId}/rows?limit=10")
-                .ConfigureAwait(true);
-            Assert.True(rowsStatus == HttpStatusCode.OK, $"{key}: рядки {rowsStatus}: {rows}\n{app.ErrorsText}");
-            var row = Assert.Single(JsonDocument.Parse(rows).RootElement.GetProperty("rows").EnumerateArray());
-            Assert.Equal(s.SourceColumnCode, row.GetProperty("cells").GetProperty("OutputCode").GetString());
-            Assert.True(rows.Contains(Digits(ReportValue), StringComparison.Ordinal), $"{key}: значення зникло з рядків зрізу: {rows}");
-
-            // Книга зрізу — так само.
-            using var book = await client
-                .GetAsync(new Uri($"/api/v1/reports/snapshots/{snapshotId}/export.xlsx", UriKind.Relative))
-                .ConfigureAwait(true);
-            Assert.True(book.StatusCode == HttpStatusCode.OK, $"{key}: книга {book.StatusCode}\n{app.ErrorsText}");
-            var text = ZipText(await book.Content.ReadAsByteArrayAsync().ConfigureAwait(true));
-            Assert.True(text.Contains(Digits(ReportValue), StringComparison.Ordinal), $"{key}: значення зникло з книги зрізу");
-            Assert.Contains(s.SourceColumnCode, text, StringComparison.Ordinal);
         }
     }
 
@@ -202,47 +162,6 @@ public sealed class DenyBoundaryD276Tests(SqlServerFixture sql)
             [.. users.Values.Select(u => u.Id)]);
     }
 
-    /// <summary>Регуляторний зріз проєкту документа: рядок несе код і значення ЗАБОРОНЕНОЇ колонки джерела.</summary>
-    private async Task<long> SnapshotAsync(Scenario s)
-    {
-        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
-        var version = await db.ReportVersions.AsNoTracking().OrderBy(v => v.Id).FirstAsync().ConfigureAwait(false);
-        var snapshot = new ReportSnapshot(
-            version.Id, s.Doc.ProjectId, s.Doc.PeriodKey.Value, SnapshotStatus.Draft, DateTime.UtcNow, null);
-        db.ReportSnapshots.Add(snapshot);
-        await db.SaveChangesAsync().ConfigureAwait(false);
-
-        var code = new ReportRow(snapshot.Id, 1, "OutputCode");
-        code.SetValue(s.SourceColumnCode, null, null);
-        var value = new ReportRow(snapshot.Id, 1, "Value");
-        value.SetValue(null, ReportValue, null);
-        db.ReportRows.AddRange(code, value);
-        await db.SaveChangesAsync().ConfigureAwait(false);
-
-        return snapshot.Id;
-    }
-
-    /// <summary>Вбудована роль «Переглядач звітів» (<c>Report.ViewRegulatory</c> + <c>Report.ViewSnapshot</c> + книга) усім трьом.</summary>
-    private async Task GrantReportViewerAsync(Scenario s)
-    {
-        int roleId;
-        await using (var connection = new SqlConnection(sql.ConnectionString))
-        {
-            await connection.OpenAsync().ConfigureAwait(false);
-            await using var command = connection.CreateCommand();
-            command.CommandText = "SELECT Id FROM sec.Role WHERE Code = N'ReportViewer' AND IsBuiltIn = 1";
-            roleId = (int)(await command.ExecuteScalarAsync().ConfigureAwait(false))!;
-        }
-
-        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
-        foreach (var userId in s.UserIds)
-        {
-            db.RoleAssignments.Add(new RoleAssignment(roleId, userId, null));
-        }
-
-        await db.SaveChangesAsync().ConfigureAwait(false);
-    }
-
     // ────────────────────────────── HTTP ────────────────────────────
 
     /// <summary>Вивантаження документа в json — справжня задача в черзі, справжній файл.</summary>
@@ -277,19 +196,6 @@ public sealed class DenyBoundaryD276Tests(SqlServerFixture sql)
             .ConfigureAwait(false);
         Assert.True(download.StatusCode == HttpStatusCode.OK, $"файл: {download.StatusCode}: {app.ErrorsText}");
         return await download.Content.ReadAsStringAsync().ConfigureAwait(false);
-    }
-
-    private static string ZipText(byte[] bytes)
-    {
-        using var zip = new System.IO.Compression.ZipArchive(new MemoryStream(bytes));
-        var all = new System.Text.StringBuilder();
-        foreach (var entry in zip.Entries)
-        {
-            using var stream = new StreamReader(entry.Open());
-            all.Append(entry.FullName).Append('\n').Append(stream.ReadToEnd());
-        }
-
-        return all.ToString();
     }
 
     private static List<string?> ColumnCodes(string slice)

@@ -145,8 +145,7 @@ public sealed class RecalculationJobDocumentSerializationTests(SqlServerFixture 
             new UnitOfWork(db),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
-            clock,
-            Substitute.For<IAuditWriter>());
+            clock);
 
     /// <summary>Фаза формул шаблону нічого не пише — тест про прогони.</summary>
     private static RecalculationService FormulaService()

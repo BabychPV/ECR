@@ -1,15 +1,12 @@
 // tests/Ecr.Infrastructure.Tests/Persistence/Period0SupersedeSeedTests.cs
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Calculations;
-using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
-using Ecr.Infrastructure.Reporting;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Memory;
 using Xunit;
 
 namespace Ecr.Infrastructure.Tests.Persistence;
@@ -17,7 +14,7 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// <summary>
 /// Секція <c>COLL:period0-supersede</c> у <c>09-seed.sql</c>: старі річні прогони
 /// нічного перерахунку, що лишили результати в «періоді 0», стають
-/// <c>Superseded</c>, і річний зріз <c>rpt.*</c> їх більше не підхоплює.
+/// <c>Superseded</c> (✎ P-1124-3: перевірку через річний зріз звітності прибрано разом зі зрізами).
 /// </summary>
 /// <remarks>
 /// ⛔ Скрипт виконується тим самим шляхом, що й у розгортанні: <see cref="SeedRunner"/>
@@ -36,12 +33,11 @@ public sealed class Period0SupersedeSeedTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2026, 9, 29, 10, 0, 0, DateTimeKind.Utc);
 
-
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.11")]
-    public async Task Старий_річний_прогін_з_результатами_періоду_0_стає_Superseded_і_річний_зріз_їх_не_бачить()
+    public async Task Старий_річний_прогін_з_результатами_періоду_0_стає_Superseded()
     {
         var chain = new TestDocumentBuilder(sql.ConnectionString);
         var document = await chain.BuildAsync();
@@ -62,13 +58,6 @@ public sealed class Period0SupersedeSeedTests(SqlServerFixture sql)
             2,
             await db.CalculationResults.AsNoTracking().CountAsync(r => r.CalculationRunId == yearRun && r.PeriodKey == 0));
 
-        var report = await PublishedAsync(db);
-        var builder = new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()));
-
-        // До скрипта річний зріз бере і «період 0», і січень — саме це й дефект.
-        var before = await BuildYearAsync(builder, db, report.Id, document.ProjectId);
-        Assert.Equal(3, before.RowCount);
-
         var messages = await RunSeedAsync();
 
         // Скрипт звітує кількість у журнал; щонайменше наш прогін.
@@ -82,9 +71,6 @@ public sealed class Period0SupersedeSeedTests(SqlServerFixture sql)
         Assert.Equal(
             2,
             await db.CalculationResults.AsNoTracking().CountAsync(r => r.CalculationRunId == yearRun));
-
-        var after = await BuildYearAsync(builder, db, report.Id, document.ProjectId);
-        Assert.Equal(1, after.RowCount);
     }
 
     [Fact]
@@ -121,7 +107,7 @@ public sealed class Period0SupersedeSeedTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.11")]
-    public async Task Скрипт_не_чіпає_поперіодні_й_нові_порожні_річні_прогони_і_річний_зріз_не_змінюється()
+    public async Task Скрипт_не_чіпає_поперіодні_й_нові_порожні_річні_прогони()
     {
         var chain = new TestDocumentBuilder(sql.ConnectionString);
         var document = await chain.BuildAsync();
@@ -143,21 +129,11 @@ public sealed class Period0SupersedeSeedTests(SqlServerFixture sql)
         // Річний прогін після фіксу: «рік без періодів у скоупі» — без результатів.
         var emptyYearRun = await CurrentRunAsync(db, document.ProjectId, periodKey: null);
 
-        var report = await PublishedAsync(db);
-        var builder = new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()));
-
-        var before = await BuildYearAsync(builder, db, report.Id, document.ProjectId);
-        Assert.Equal(3, before.RowCount);
-
         await RunSeedAsync();
 
         Assert.Equal(CalculationRun.CurrentStatus, await StatusAsync(januaryRun));
         Assert.Equal(CalculationRun.CurrentStatus, await StatusAsync(februaryRun));
         Assert.Equal(CalculationRun.CurrentStatus, await StatusAsync(emptyYearRun));
-
-        // ⛔ Річний зріз даних, яких скрипт не стосується, — побайтно той самий.
-        var after = await BuildYearAsync(builder, db, report.Id, document.ProjectId);
-        Assert.Equal(before, after);
     }
 
     [Fact]
@@ -264,40 +240,5 @@ public sealed class Period0SupersedeSeedTests(SqlServerFixture sql)
 
         var unit = await db.Units.AsNoTracking().OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
         return (version.Id, unit);
-    }
-
-    private static async Task<(int RowCount, string Hash)> BuildYearAsync(
-        ReportSnapshotBuilder builder, EcrDbContext db, int reportVersionId, int projectId)
-    {
-        var id = await builder.BuildAsync(
-            reportVersionId, projectId, periodKey: null, parametersJson: null, CancellationToken.None);
-
-        var snapshot = await db.ReportSnapshots.AsNoTracking().SingleAsync(s => s.Id == id);
-        return (snapshot.RowCount, Convert.ToHexString(snapshot.ContentHash!));
-    }
-
-    private static async Task<ReportVersion> PublishedAsync(EcrDbContext db)
-    {
-        var def = new ReportDef(
-            EcrCode.Create($"RP0{Guid.NewGuid().ToString("N")[..8]}"),
-            new LocalizedText(new Dictionary<string, string> { ["en"] = "Period 0 supersede test" }),
-            isRegulatory: true);
-        db.ReportDefs.Add(def);
-        await db.SaveChangesAsync();
-
-        var version = new ReportVersion(
-            def.Id,
-            "1.0",
-            """
-            [{"code":"RowKey","kind":"text"},{"code":"OutputCode","kind":"text"},
-             {"code":"Value","kind":"number"},{"code":"SubstanceEntryId","kind":"number"}]
-            """,
-            """{"rowSource":"CalculationResults"}""",
-            Now);
-        version.Publish();
-        db.ReportVersions.Add(version);
-        await db.SaveChangesAsync();
-
-        return version;
     }
 }

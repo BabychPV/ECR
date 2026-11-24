@@ -64,8 +64,6 @@ public sealed partial class ProjectTemplateVersionReadGuardTests
         ["src/Ecr.Application/Workflow/ApprovalQueue/ListMyApprovalQueueHandler.cs"] = (1, Kind.Current),
         ["src/Ecr.Application/Workflow/ReturnedSheets/ListMyReturnedSheetsHandler.cs"] = (1, Kind.Current),
 
-        // Зріз звіту без періоду (річний/проєктний) - чинна версія; із періодом - doc.fn_VersionOf.
-        ["src/Ecr.Infrastructure/Persistence/CalculationResultStore.cs"] = (1, Kind.Current),
 
         // AccessDecisionService: (1) знімки читання документа/правок - обʼєднання ВСІХ версій шкали (чинна + ознака Multi,
         // ProjectReadSnapshotAsync), 3 запити × 2 читання; (2) дійсність надання учасника - зріз за КОДАМИ аркуша/таблиці, а

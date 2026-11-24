@@ -65,7 +65,9 @@ public sealed partial class SinglePageApplicationTests
         {
             ("робота з даними", "/documents/:id"),
             ("конфігурування", "/admin/templates"),
-            ("звіти", "/admin/snapshots"),
+            // ✎ P-1124-3 (D-NEW): зрізи звітів (/admin/snapshots) прибрано — звітна область у застосунку тепер огляд
+            // звітної кампанії; самі звіти — SSRS над сирим шаром rpt.*.
+            ("звіти", "/admin/campaign"),
             ("адміністрування", "/admin/security"),
             ("експлуатація", "/admin/health"),
         };

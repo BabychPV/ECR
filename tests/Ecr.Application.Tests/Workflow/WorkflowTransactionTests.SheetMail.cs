@@ -1,6 +1,5 @@
 // tests/Ecr.Application.Tests/Workflow/WorkflowTransactionTests.SheetMail.cs
 using Ecr.Application.Ports;
-using Ecr.Application.Reporting;
 using Ecr.Application.Security;
 using Ecr.Application.Workflow;
 using Ecr.Domain.Abstractions;
@@ -55,17 +54,11 @@ public sealed partial class WorkflowTransactionTests
         var world = await ArrangeAsync(submitted: true).ConfigureAwait(true);
 
         await using var db = CreateContext();
-        var snapshots = Substitute.For<IReportSnapshotBuilder>();
-        snapshots.ListAsync(
-                     Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<IReadOnlyCollection<int>?>(),
-                     Arg.Any<CancellationToken>())
-                 .Returns<IReadOnlyList<ReportSnapshotSummary>>([]);
         var documents = Substitute.For<IDocumentStore>();
         documents.FindProjectIdAsync(world.DocumentId, Arg.Any<CancellationToken>()).Returns(world.ProjectId);
 
         var handler = new ApproveSheetHandler(
-            new WorkflowStore(db), Access(), new ReportSnapshotSync(snapshots, documents),
-            new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db), documents,
+            new WorkflowStore(db), Access(), new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db), documents,
             snapshotRefresh: null, notifier: FailingNotifier(db, world));
 
         await handler.HandleAsync(

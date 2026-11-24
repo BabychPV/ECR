@@ -217,11 +217,6 @@ const expected: readonly (readonly [StatusKind, string, StatusTone])[] = [
   ['coverage', 'PartialCoverage', 'warning'],
   ['coverage', 'SkippedNoData', 'warning'],
 
-  // `SnapshotStatus` (`Enums.cs`, `D-65`): `Rejected` у зрізі немає.
-  ['snapshot', 'Draft', 'muted'],
-  ['snapshot', 'Approved', 'neutral'],
-  ['snapshot', 'Submitted', 'neutral'],
-
   // `NotificationDeliveryStatus` (`BE-33`): `Suppressed` — навмисно не
   // надіслане (дедуплікація), тобто нормальна робота, а не привід розбиратися.
   ['notificationDelivery', 'Sent', 'neutral'],
@@ -240,8 +235,9 @@ describe('StatusBadge: стан → тон', () => {
    * коли й тут забули рядок: два переліки розійшлися б, а тест лишився б
    * зеленим на тому, що від них лишилося.
    */
-  it('перелік вичерпний: 60 пар, і таблиця компонента не має жодної зайвої', () => {
-    expect(expected).toHaveLength(60);
+  it('перелік вичерпний: 57 пар, і таблиця компонента не має жодної зайвої', () => {
+    // ✎ P-1124-3: −3 пари різновиду `snapshot` (зрізи звітності прибрано).
+    expect(expected).toHaveLength(57);
     expect(expected.every(([kind, state]) => isKnownStatus(kind, state))).toBe(true);
 
     const inComponent = Object.entries(statusTable).flatMap(([kind, states]) =>

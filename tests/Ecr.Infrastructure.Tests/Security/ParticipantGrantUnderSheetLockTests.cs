@@ -2,7 +2,6 @@
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
-using Ecr.Application.Reporting;
 using Ecr.Application.Security;
 using Ecr.Application.Workflow;
 using Ecr.Domain.Entities.Documents;
@@ -134,7 +133,7 @@ public sealed class ParticipantGrantUnderSheetLockTests(SqlServerFixture sql) : 
         var documents = Composition(scene);
         var metadata = new MetadataCache(_memory, db);
         var handler = new ApproveSheetHandler(
-            new WorkflowStore(db), access, Reports(documents), new UnitOfWork(db), User(scene.ParticipantId), clock,
+            new WorkflowStore(db), access, new UnitOfWork(db), User(scene.ParticipantId), clock,
             new AuditWriter(db), documents,
             new ApprovalSnapshotRefresh(
                 new SheetEditGate(db), new NormalizedCellStore(db), new RowStore(db, bulk, clock), new DocumentStore(db), metadata,
@@ -202,7 +201,7 @@ public sealed class ParticipantGrantUnderSheetLockTests(SqlServerFixture sql) : 
             new NormalizedCellStore(db), new RowStore(db, bulk, clock), new WorkflowStore(db), documents,
             new MetadataCache(_memory, db), access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-            headers, Reports(documents), new UnitOfWork(db), User(scene.ParticipantId), clock, new SheetEditGate(db),
+            headers, new UnitOfWork(db), User(scene.ParticipantId), clock, new SheetEditGate(db),
             Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
             Substitute.For<IMethodologyStore>(), new TemplateVersionStore(db), new RegistryStore(db), new AuditWriter(db));
 
@@ -326,15 +325,6 @@ public sealed class ParticipantGrantUnderSheetLockTests(SqlServerFixture sql) : 
         documents.GetTemplateVersionIdAsync(scene.Doc.DocumentId, Arg.Any<CancellationToken>())
                  .Returns(scene.Doc.TemplateVersionId);
         return documents;
-    }
-
-    private static ReportSnapshotSync Reports(IDocumentStore documents)
-    {
-        var snapshots = Substitute.For<IReportSnapshotBuilder>();
-        snapshots.ListAsync(
-                     Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
-                 .Returns<IReadOnlyList<ReportSnapshotSummary>>([]);
-        return new ReportSnapshotSync(snapshots, documents);
     }
 
     private static ICurrentUser User(int userId)

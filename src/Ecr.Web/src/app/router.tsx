@@ -1,10 +1,9 @@
-﻿import { Suspense, createElement, lazy, type JSX } from 'react';
+import { Suspense, createElement, lazy, type JSX } from 'react';
 import { Loader, Center } from '@mantine/core';
 import { createBrowserRouter, Navigate, type RouteObject } from 'react-router-dom';
 import { AdminLayout } from './AdminLayout';
 import { LegacyProjectRedirect, ProjectTab } from './projectRoutes';
 import { AppLayout } from './AppLayout';
-import { HomeRoute } from './HomeRoute';
 import { RouteErrorPage } from './RouteErrorPage';
 import { RouteGuard } from './RouteGuard';
 import {
@@ -32,7 +31,6 @@ import {
   RegistriesPage,
   RegistryConstructorPage,
   SecurityPage,
-  SnapshotsPage,
   SourcesPage,
   TableRelationsPage,
   TemplateVersionPage,
@@ -57,9 +55,8 @@ import { childPath, relativePath, routes, type RouteHandle } from './routes';
  * (`useRoutePrefetch.ts`) — одна фабрика `import()` на сторінку, а не дві
  * незалежні (по одній на "монтування" і на "прогрів"), які могли б розійтися.
  *
- * ⛔ Маршрутів `/reports/*` НЕМАЄ: звітність лишається в SSRS (D-52).
- * `/admin/snapshots` — не виняток із цього правила, а його межа: там
- * будують і бачать ЗРІЗ (`rpt.*`), який SSRS читає, а не сам звіт.
+ * ⛔ Маршрутів `/reports/*` НЕМАЄ: звітність лишається в SSRS (D-52) над сирим шаром `rpt.*`.
+ * ✎ P-1124-3 (D-NEW, людина 24.11): `/admin/snapshots` (зрізи звітів) прибрано повністю.
  */
 const LoginPage = lazy(async () => ({ default: (await import('@/pages/LoginPage')).LoginPage }));
 // ✎ b4b: 403/404 за макетом стали більшими (піктограма, «Did you mean», копіювання) —
@@ -288,12 +285,7 @@ export const router = createBrowserRouter([
       // ⛔ FP-1: роль без `Document.View`, але з `Report.ViewRegulatory`, стартує зі зрізів.
       {
         index: true,
-        element: guarded(
-          routes.home.handle,
-          <HomeRoute>
-            <DocumentsPage />
-          </HomeRoute>,
-        ),
+        element: guarded(routes.home.handle, <DocumentsPage />),
         handle: routes.home.handle,
       },
       {
@@ -580,11 +572,6 @@ export const router = createBrowserRouter([
             path: relativePath(routes.adminJobs, 'admin'),
             element: guarded(routes.adminJobs.handle, <JobsPage />),
             handle: routes.adminJobs.handle,
-          },
-          {
-            path: relativePath(routes.adminSnapshots, 'admin'),
-            element: guarded(routes.adminSnapshots.handle, <SnapshotsPage />),
-            handle: routes.adminSnapshots.handle,
           },
           {
             path: relativePath(routes.adminCampaign, 'admin'),

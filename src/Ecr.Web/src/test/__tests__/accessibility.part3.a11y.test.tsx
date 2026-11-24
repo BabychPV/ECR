@@ -21,7 +21,6 @@ import { MappingPreviewPage } from '@/pages/admin/MappingPreviewPage';
 import { PiDataPage } from '@/pages/admin/PiDataPage';
 import { PipelinePage } from '@/pages/admin/PipelinePage';
 import { JobsPage } from '@/pages/admin/JobsPage';
-import { SnapshotsPage } from '@/pages/admin/SnapshotsPage';
 import { NotificationsPage } from '@/pages/admin/NotificationsPage';
 import { CampaignOverviewPage } from '@/pages/admin/CampaignOverviewPage';
 
@@ -47,7 +46,6 @@ const Pages: [string, () => JSX.Element][] = [
   // ⚠ Редактор конвеєра (`ФВ-14.3`, область 9) — сюди ж: частина найлегша.
   ['/admin/pipeline', PipelinePage],
   ['/admin/jobs', JobsPage],
-  ['/admin/snapshots', SnapshotsPage],
 
   // ⚠ Новий маршрут (`BE-33`) додано саме сюди: ця частина найлегша, і жодного
   // з трьох найповільніших маршрутів у ній немає.

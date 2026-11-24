@@ -47,7 +47,6 @@ public static class NightlyCatchUp
         Infrastructure.Jobs.SupersededResultsSweepJob.Code,
         Infrastructure.Jobs.PartitionCheckJob.Code,
         Infrastructure.Jobs.ReportRetentionJob.Code,
-        Infrastructure.Jobs.ReportSnapshotFormatJob.Code,
         Infrastructure.Jobs.SubmissionSnapshotRetentionJob.Code,
         Infrastructure.Jobs.ConsistencyCheckJob.Code,
     ];
@@ -151,8 +150,6 @@ public static class NightlyCatchUp
                 => scheduler.EnqueueCoalescedAsync<Infrastructure.Jobs.PartitionCheckJob>(key, null, ct),
             _ when code == Infrastructure.Jobs.ReportRetentionJob.Code
                 => scheduler.EnqueueCoalescedAsync<Infrastructure.Jobs.ReportRetentionJob>(key, null, ct),
-            _ when code == Infrastructure.Jobs.ReportSnapshotFormatJob.Code
-                => scheduler.EnqueueCoalescedAsync<Infrastructure.Jobs.ReportSnapshotFormatJob>(key, null, ct),
             _ when code == Infrastructure.Jobs.SubmissionSnapshotRetentionJob.Code
                 => scheduler.EnqueueCoalescedAsync<Infrastructure.Jobs.SubmissionSnapshotRetentionJob>(key, null, ct),
             _ when code == Infrastructure.Jobs.ConsistencyCheckJob.Code
