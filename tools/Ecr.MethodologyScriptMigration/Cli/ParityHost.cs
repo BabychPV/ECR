@@ -45,7 +45,14 @@ public static class ParityHost
         services.AddScoped<IParityTargetSource, EfParityTargetSource>();
         services.AddScoped<ParityRunner>();
 
-        return services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = false, ValidateOnBuild = false });
+        var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = false, ValidateOnBuild = false });
+
+        // ✎ P-1124-2 (F-3): реєстр розкладок шаблонів у хості API наповнює фонова служба (TemplateLayoutRegistryRefresher),
+        // якої тут немає. Без неї реєстр порожній, і для річних версій (YearWithMonthColumns, Land 1.0.19+) читання йде
+        // ФІЗИЧНИМ зрізом періоду, а не логічним (Q-17): не-місячні колонки якоря (статус D-425, коди) «зникають», і
+        // паритет/прогони інструмента бачать інші входи, ніж прогін API. Тому реєстр наповнюється один раз тут.
+        provider.GetRequiredService<ITemplateLayoutRegistry>().RefreshAsync(CancellationToken.None).GetAwaiter().GetResult();
+        return provider;
     }
 
     private sealed class ToolUser(int? userId) : ICurrentUser

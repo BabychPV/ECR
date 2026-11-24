@@ -53,7 +53,7 @@ public static class MigrationCli
 
     private const string Usage = """
         Використання:
-          Ecr.MethodologyScriptMigration convert --connection <рядок> --out <тека> [--methodology <код>]
+          Ecr.MethodologyScriptMigration convert --connection <рядок> --out <тека> [--methodology <код>] [--include-drafts] [--full-life]
           Ecr.MethodologyScriptMigration shadow  --connection <рядок> --in <тека> [--i-know-this-is-a-copy]
           Ecr.MethodologyScriptMigration pack    --connection <рядок> --in <тека> --out <package.json>
           Ecr.MethodologyScriptMigration parity  --connection <рядок> --out <report.json> [--methodology <код>] [--document <id>] [--allow-unproven] [--eligible-out <ids.json>]
@@ -61,6 +61,8 @@ public static class MigrationCli
           Ecr.MethodologyScriptMigration golden-versions --connection <рядок копії> --in <golden-proposals.json> --as-user <id> [--out <f>]
           Ecr.MethodologyScriptMigration apply   --connection <рядок> --in <package.json> --as-user <id> [--dry-run] [--out <result.json>]
           Ecr.MethodologyScriptMigration switch  --connection <рядок> --in <eligible.json> --engine Script|Formulas --reason <текст> --as-user <id>
+          Ecr.MethodologyScriptMigration finalize --connection <рядок копії> --in <finalize-request.json> --as-user <id> [--out <f>]
+          Ecr.MethodologyScriptMigration script-version --connection <рядок копії> --from <versionId> --text <ecrs> --golden <proposal.json> --reason <текст> --as-user <id> [--out <f>]
 
         convert — для кожної версії рівня Configuration з рушієм Formulas пише <Код>/<Версія>.ecrs і convert-report.json.
         shadow  — записує тексти як тіньові (SetScript) у базу; лише в базу з "copy|test|upg|dev|stand" в імені
@@ -111,7 +113,25 @@ public static class MigrationCli
             }
         }
 
-        if (command is "apply" or "switch")
+        if (command == "script-version")
+        {
+            try
+            {
+                return await ScriptVersionCommand.RunAsync(args, output, error, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is SqlException or InvalidOperationException or IOException or JsonException)
+            {
+                await error.WriteLineAsync($"Помилка середовища: {ex.Message}").ConfigureAwait(false);
+                return UsageOrEnvironment;
+            }
+        }
+
+        if (command == "p11242-evidence")
+        {
+            return await P11242EvidenceCommand.RunAsync(args, output, error, ct).ConfigureAwait(false);
+        }
+
+        if (command is "apply" or "switch" or "finalize")
         {
             try
             {
@@ -176,7 +196,7 @@ public static class MigrationCli
         foreach (var reference in versions)
         {
             ct.ThrowIfCancellationRequested();
-            entries.Add(await ConvertOneAsync(loader, reference, options.Out!, ct).ConfigureAwait(false));
+            entries.Add(await ConvertOneAsync(loader, reference, options.Out!, ct, options.IncludeDrafts, options.FullLife).ConfigureAwait(false));
         }
 
         var report = new ConvertReport(
@@ -204,7 +224,7 @@ public static class MigrationCli
     }
 
     private static async Task<ReportEntry> ConvertOneAsync(
-        VersionSourceLoader loader, VersionRef reference, string outDirectory, CancellationToken ct)
+        VersionSourceLoader loader, VersionRef reference, string outDirectory, CancellationToken ct, bool includeDrafts = false, bool fullLife = false)
     {
         ReportEntry Skipped(string reason) => new(
             reference.MethodologyCode, reference.Version, reference.VersionId, ReportStatus.Skipped, null, null, reason, []);
@@ -214,7 +234,9 @@ public static class MigrationCli
             return Skipped("already Script");
         }
 
-        if (reference.EffectiveFrom is null)
+        // ✎ P-1124-2: --include-drafts — чернетки (Common, «test») теж мають перейти на скрипт без втрат; дата чинності чернетки —
+        // умовна (VersionSource.EffectiveFrom за замовчуванням), бібліотеки розв'язуються на неї.
+        if (reference.EffectiveFrom is null && !includeDrafts)
         {
             return Skipped("draft without EffectiveFrom");
         }
@@ -235,7 +257,10 @@ public static class MigrationCli
             fingerprint = Fingerprint.ComputeHex(loaded.Source);
             if (!loaded.HasErrors)
             {
-                var result = ScriptConverter.Convert(loaded.Source);
+                // ✎ P-1124-2: --full-life — без межі «до наступної версії»: константи з періодами чинності переносяться ВСІ. Витіснена
+                // версія рахувала періоди і ПІСЛЯ дати наступної (поки була чинною), і формули беруть значення за датою періоду, а не за
+                // межею життя (C08_04_02 V1: k9 0.4 до 2026 і 1 з 2026 — усічений текст давав 0.4 на 202609, збережене — 1).
+                var result = ScriptConverter.Convert(fullLife ? loaded.Source with { NextEffectiveFrom = null } : loaded.Source);
                 issues.AddRange(result.Issues);
                 text = result.Text;
             }
@@ -556,7 +581,7 @@ public static class MigrationCli
 
     private sealed record Options(
         string? Connection, string? Out, string? In, string? Methodology, bool IKnowThisIsACopy, long? Document = null,
-        bool AllowUnproven = false, string? EligibleOut = null)
+        bool AllowUnproven = false, string? EligibleOut = null, bool IncludeDrafts = false, bool FullLife = false)
     {
         public static Options? Parse(string command, string[] args, TextWriter error)
         {
@@ -566,6 +591,8 @@ public static class MigrationCli
             string? methodology = null;
             var copy = false;
             var allowUnproven = false;
+            var includeDrafts = false;
+            var fullLife = false;
             string? eligibleOut = null;
             long? document = null;
             for (var i = 1; i < args.Length; i++)
@@ -595,6 +622,12 @@ public static class MigrationCli
                         break;
                     case CopyFlag when command == "shadow":
                         copy = true;
+                        break;
+                    case "--full-life" when command == "convert":
+                        fullLife = true;
+                        break;
+                    case "--include-drafts" when command == "convert":
+                        includeDrafts = true;
                         break;
                     case "--allow-unproven" when command == "parity":
                         allowUnproven = true;
@@ -636,7 +669,7 @@ public static class MigrationCli
                 return null;
             }
 
-            return new Options(connection, outPath, inPath, methodology, copy, document, allowUnproven, eligibleOut);
+            return new Options(connection, outPath, inPath, methodology, copy, document, allowUnproven, eligibleOut, includeDrafts, fullLife);
         }
     }
 }

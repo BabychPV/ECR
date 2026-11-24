@@ -33,7 +33,7 @@ public static class ReferenceParityCommand
     public static async Task<int> RunAsync(string[] args, TextWriter output, TextWriter error, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(args);
-        string? connection = null, input = null, outPath = null, eligibleOut = null, goldenOut = null;
+        string? connection = null, input = null, outPath = null, eligibleOut = null, goldenOut = null, texts = null;
         var goldenAll = false;
         for (var i = 1; i < args.Length; i++)
         {
@@ -45,6 +45,9 @@ public static class ReferenceParityCommand
                 case "--eligible-out" when i + 1 < args.Length: eligibleOut = args[++i]; break;
                 case "--golden-out" when i + 1 < args.Length: goldenOut = args[++i]; break;
                 case "--golden-all": goldenAll = true; break;
+                // ✎ P-1124-2: текст версії — з теки convert (<Код>/<Версія>.ecrs), якщо файл є, замість тіньового з бази. Так
+                // доводиться саме той текст, що піде в finalize (повний «--full-life» текст витісненої версії, чернетки без тіні).
+                case "--texts" when i + 1 < args.Length: texts = args[++i]; break;
                 default:
                     await error.WriteLineAsync($"Невідомий або неповний параметр: {args[i]}").ConfigureAwait(false);
                     return MigrationCli.UsageOrEnvironment;
@@ -89,6 +92,11 @@ public static class ReferenceParityCommand
                 .Where(v => v.Id == version.VersionId)
                 .Select(v => new { v.Engine, v.ScriptText })
                 .SingleOrDefaultAsync(ct).ConfigureAwait(false);
+            if (stored is not null && texts is not null
+                && ScriptFiles.PathOf(texts, version.MethodologyCode, version.Version) is var textPath && File.Exists(textPath))
+            {
+                stored = stored with { ScriptText = (await File.ReadAllTextAsync(textPath, new UTF8Encoding(false), ct).ConfigureAwait(false)).Replace("\r\n", "\n", StringComparison.Ordinal) };
+            }
             if (stored is null || stored.Engine != MethodologyEngine.Formulas)
             {
                 results.Add(new ReferenceVersionResult(version.MethodologyCode, version.VersionId, version.Version, 0, 0, 0, null,
