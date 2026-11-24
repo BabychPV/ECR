@@ -79,6 +79,9 @@ builder.Services.AddPiAfAdapters(
 // чим оголоситися.
 builder.Services.AddSqlAdapters();
 builder.Services.AddEcrApplication();
+// ✎ P-1124-1: формульний авторинг (нові формульні версії, клон, публікація, імпорт пакета) — у продукті вимкнено.
+builder.Services.AddSingleton(Ecr.Application.Calculations.FormulaEngineAuthoring.From(
+    builder.Configuration[Ecr.Application.Calculations.FormulaEngineAuthoring.EnabledKey]));
 
 builder.Services.AddEcrAuthentication(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
