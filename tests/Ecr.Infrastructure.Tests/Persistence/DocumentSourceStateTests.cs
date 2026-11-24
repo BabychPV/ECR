@@ -96,10 +96,221 @@ public sealed class DocumentSourceStateTests(SqlServerFixture sql)
             .Select(r => r.SourceStateJson)
             .SingleAsync();
         Assert.Equal(await StatesAsync(check, w), recorded);
-        Assert.Contains($"\"{w.World.Source.DocumentId}:{March}\"", recorded!, StringComparison.Ordinal);
+        Assert.Contains($"\"{w.World.BindingId}:{w.World.Source.DocumentId}:{March}\"", recorded!, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// ✎ Огляд b11 №5 (HIGH, MEDIUM b): невідомий стан ніколи не гасить позначки — прогін до міграції (<c>NULL</c>, рішення
+    /// людини P-1123-21: «змінено»), явне «невідомо» (збій знімка, без графа), документного прогону немає, а чинний прогін
+    /// усього проєкту (<c>DocumentId = NULL</c>) новіший за документний.
+    /// </summary>
+    /// <remarks>Мутації: <c>LegacyStateMeansChanged</c> → <c>false</c> — червоний «legacy-null»; «невідомо» як відомий — червоні решта.</remarks>
+    [Theory]
+    [InlineData("legacy-null")]
+    [InlineData("unknown")]
+    [InlineData("no-document-run")]
+    [InlineData("project-run-newer")]
+    public async Task Невідомий_стан_прогону_споживача_позначає(string kind)
+    {
+        var w = await ArrangeAsync();
+        Assert.Empty(await ListAsync(w));
+
+        await using (var db = sql.CreateContext())
+        {
+            var land = w.World.Land;
+            switch (kind)
+            {
+                case "legacy-null":
+                    await db.Database.ExecuteSqlAsync($"UPDATE calc.CalculationRun SET SourceStateJson = NULL WHERE DocumentId = {land.DocumentId} AND Status = N'Current'");
+                    break;
+                case "unknown":
+                    await db.Database.ExecuteSqlAsync($"UPDATE calc.CalculationRun SET SourceStateJson = {DocumentSourceIssues.UnknownState} WHERE DocumentId = {land.DocumentId} AND Status = N'Current'");
+                    break;
+                case "no-document-run":
+                case "project-run-newer":
+                    if (kind == "no-document-run")
+                    {
+                        await db.Database.ExecuteSqlAsync($"UPDATE calc.CalculationRun SET Status = N'Superseded' WHERE DocumentId = {land.DocumentId} AND Status = N'Current'");
+                    }
+
+                    var project = new Ecr.Domain.Entities.Calculations.CalculationRun(land.ProjectId, March, 5, Approved.AddHours(-1));
+                    db.CalculationRuns.Add(project);
+                    await db.SaveChangesAsync();
+                    project.Complete(Ecr.Domain.Entities.Calculations.CalculationRun.CurrentStatus, Approved.AddHours(-1), null, null);
+                    await db.SaveChangesAsync();
+                    break;
+            }
+        }
+
+        var issue = Assert.Single(await ListAsync(w));
+        Assert.Equal(ISourceIssueReader.SourceChangedAfterApproval, issue.Kind);
+    }
+
+    /// <summary>
+    /// ✎ Огляд b11 №5 (LOW 1): джерело, яке читав чинний прогін споживача (ключ у стані), видалено — обраного документа за рік
+    /// більше немає: позначка (числа змінилися), а не «джерела нема — проблем нема». Контроль — джерела не було й у стані.
+    /// </summary>
+    /// <remarks>Мутація: <c>VanishedSourceAsync</c> → <c>null</c> — червоний.</remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Видалене_джерело_яке_читав_прогін_позначає(bool hadSource)
+    {
+        var w = await ArrangeAsync();
+        await using (var db = sql.CreateContext())
+        {
+            if (!hadSource)
+            {
+                await db.Database.ExecuteSqlAsync($"UPDATE calc.CalculationRun SET SourceStateJson = N'{{}}' WHERE DocumentId = {w.World.Land.DocumentId} AND Status = N'Current'");
+            }
+
+            await db.Database.ExecuteSqlAsync($"DELETE FROM doc.TableRow WHERE TableInstanceId = {w.InstanceId} AND PeriodKey = {March}");
+            await db.Database.ExecuteSqlAsync($"DELETE FROM doc.TableInstance WHERE Id = {w.InstanceId} AND PeriodKey = {March}");
+        }
+
+        var issues = await ListAsync(w);
+        Assert.Equal(hadSource, issues.Count == 1);
+        if (hadSource)
+        {
+            Assert.Equal(w.World.Source.DocumentId, issues[0].SourceDocumentId);
+        }
+    }
+
+    /// <summary>
+    /// ✎ Огляд b11 №5 (MEDIUM a, c): звичайний перерахунок затвердженого періоду (оригінал затверджено, копія-чернетка
+    /// перераховується) не переписує затверджених чисел — лишає стан ПОПЕРЕДНЬОГО прогону, і видалення рядка джерела між
+    /// прогонами позначається. Прогін «з затвердженими» (IncludeApproved) перераховує й затверджене — пише ВЛАСНИЙ стан
+    /// (оркестратор викликано за період, без перенесення), і позначки немає.
+    /// </summary>
+    /// <remarks>Мутації: неповний період бере новий стан — червоний «regular»; IncludeApproved неповний — червоний «include-approved».</remarks>
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task Перерахунок_затвердженого_лишає_стан_попереднього_а_з_затвердженими_пише_свій(bool includeApproved, bool expected)
+    {
+        var w = await ArrangeAsync(recordRun: false);
+        var runner = new RecordingRunner();
+        await JobAsync(w, runner, includeApproved: false, Approved.AddDays(-1));
+        var first = await RecordedAsync(w);
+
+        await SourceIssueWorld.AddStateAsync(sql, w.World.Land.DocumentId, w.World.Land.SheetDefId, March, Approved.AddHours(-1), Approved);
+        await using (var db = sql.CreateContext())
+        {
+            // Копія аркуша Land — чернетка з власним екземпляром: звичайний прогін періоду не відмовляє (F13 p218).
+            if (!includeApproved)
+            {
+                await AddDraftCopyAsync(db, w);
+            }
+
+            var row = await db.TableRows.SingleAsync(r => r.Id == w.RowIds[0]);
+            row.SoftDelete(Approved.AddHours(1));
+            await db.SaveChangesAsync();
+        }
+
+        runner.Periods.Clear();
+        await JobAsync(w, runner, includeApproved, Approved.AddDays(1));
+
+        Assert.Contains(March, runner.Periods);
+        var second = await RecordedAsync(w);
+        if (includeApproved)
+        {
+            await using var check = sql.CreateContext();
+            Assert.Equal(await StatesAsync(check, w), second);
+            Assert.NotEqual(first, second);
+            Assert.Null(await check.CalculationRuns.AsNoTracking()
+                .Where(r => r.DocumentId == w.World.Land.DocumentId && r.PeriodKey == March && r.Status == Ecr.Domain.Entities.Calculations.CalculationRun.CurrentStatus)
+                .Select(r => r.InputsAsOfUtc).SingleAsync());
+        }
+        else
+        {
+            Assert.Equal(first, second);
+        }
+
+        Assert.Equal(expected, (await ListAsync(w)).Count == 1);
+    }
+
+    /// <summary>
+    /// ✎ Огляд b11 №5 (HIGH): знімок стану не вдався (тут — без графа залежностей) — прогін пише явне «невідомо», а не NULL,
+    /// і позначка стоїть.
+    /// </summary>
+    /// <remarks>Мутація: без графа — <c>"{}"</c> замість «невідомо» — червоний.</remarks>
+    [Fact]
+    public async Task Збій_знімка_стану_пише_невідомо_і_позначає()
+    {
+        var w = await ArrangeAsync(recordRun: false);
+        await SourceIssueWorld.AddStateAsync(sql, w.World.Land.DocumentId, w.World.Land.SheetDefId, March, Approved.AddHours(-1), Approved);
+        await using (var db = sql.CreateContext())
+        {
+            await AddDraftCopyAsync(db, w);
+            await NightlyJobParts.Job(db, new RecordingRunner(), Substitute.For<IBackgroundJobScheduler>(), Approved.AddDays(1), withGraph: false)
+                .ExecuteAsync(
+                    new RecalculationRequest(w.World.Land.ProjectId, w.World.Land.DocumentId, March, TriggeredByUserId: null, IncludeApproved: true),
+                    Substitute.For<IJobProgress>(),
+                    CancellationToken.None);
+        }
+
+        Assert.Equal(DocumentSourceIssues.UnknownState, await RecordedAsync(w));
+        Assert.Single(await ListAsync(w));
     }
 
     // ───────────────────────────── допоміжне ─────────────────────────────
+
+    private async Task JobAsync(StateWorld w, ICalculationRunner runner, bool includeApproved, DateTime at)
+    {
+        await using var db = sql.CreateContext();
+        await NightlyJobParts.Job(db, runner, Substitute.For<IBackgroundJobScheduler>(), at)
+            .ExecuteAsync(
+                new RecalculationRequest(
+                    w.World.Land.ProjectId, w.World.Land.DocumentId, March, TriggeredByUserId: null, IncludeApproved: includeApproved),
+                Substitute.For<IJobProgress>(),
+                CancellationToken.None);
+    }
+
+    private async Task<string?> RecordedAsync(StateWorld w)
+    {
+        await using var db = sql.CreateContext();
+        return await db.CalculationRuns.AsNoTracking()
+            .Where(r => r.DocumentId == w.World.Land.DocumentId && r.PeriodKey == March
+                        && r.Status == Ecr.Domain.Entities.Calculations.CalculationRun.CurrentStatus)
+            .Select(r => r.SourceStateJson)
+            .SingleAsync();
+    }
+
+    private async Task AddDraftCopyAsync(EcrDbContext db, StateWorld w)
+    {
+        var land = w.World.Land;
+        if (!await db.DocumentSheets.AnyAsync(s => s.DocumentId == land.DocumentId && s.CopyOfId == null))
+        {
+            db.DocumentSheets.Add(new DocumentSheet(land.DocumentId, land.SheetDefId));
+            await db.SaveChangesAsync();
+        }
+
+        var copy = (await new DocumentSheetCopyStore(db).AddCopyAsync(land.DocumentId, land.SheetDefId, default)).SheetCopyId;
+        var instanceId = await new BulkCellLoader(sql.ConnectionString, 1000).ReserveIdsAsync("doc.TableInstanceSeq", 1, CancellationToken.None);
+        if (!await db.TableInstances.AnyAsync(i => i.DocumentId == land.DocumentId && i.SheetCopyId == copy))
+        {
+            db.TableInstances.Add(new TableInstance(new PeriodKey(March), instanceId, land.DocumentId, land.TableDefId, Approved.AddDays(-2), copy));
+            await db.SaveChangesAsync();
+        }
+    }
+
+    /// <summary>Оркестратор-свідок: періоди, за якими справді рахувалися методології.</summary>
+    private sealed class RecordingRunner : ICalculationRunner
+    {
+        public List<int> Periods { get; } = [];
+
+        public Task<ModuleProfile> RunAsync(
+            long calculationRunId, long documentId, PeriodKey periodKey,
+            IReadOnlyList<CalculationBindingRef> bindings, IJobProgress progress, CancellationToken ct)
+        {
+            lock (Periods)
+            {
+                Periods.Add(periodKey.Value);
+            }
+
+            return Task.FromResult(new ModuleProfile());
+        }
+    }
 
     private sealed record StateWorld(SourceIssueWorld.World World, long InstanceId, long[] RowIds);
 

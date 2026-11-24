@@ -1046,12 +1046,12 @@ internal static class NightlyJobParts
 {
     public static RecalculationJob Job(
         EcrDbContext db, ICalculationRunner runner, IBackgroundJobScheduler jobs, DateTime at,
-        Func<RecalculationRequest, Task>? probe = null)
+        Func<RecalculationRequest, Task>? probe = null, bool withGraph = true)
     {
         var clock = new TestClock(at);
         return new RecalculationJob(
             db, runner, RunHandler(db, clock), FormulaService(), clock, jobs,
-            dependencyGraph: DependencyGraphTestKit.Provider(db))
+            dependencyGraph: withGraph ? DependencyGraphTestKit.Provider(db) : null)
         {
             NightlyDecisionProbe = probe,
         };

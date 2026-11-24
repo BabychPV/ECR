@@ -104,6 +104,8 @@ public sealed class DocumentSourceIssuesAnyTests(SqlServerFixture sql)
             var edit = (await db.Database
                 .SqlQuery<long>($"SELECT MAX(Id) AS Value FROM aud.CellChange WHERE DocumentId = {w.World.Source.DocumentId}")
                 .ToListAsync()).Single();
+            await db.Database.ExecuteSqlAsync(
+                $"UPDATE calc.CalculationRun SET Status = N'Superseded' WHERE DocumentId = {w.World.Land.DocumentId} AND Status = N'Current'");
             var run = new Ecr.Domain.Entities.Calculations.CalculationRun(
                 w.World.Land.ProjectId, March, 5, change.AddSeconds(runStartSeconds), w.World.Land.DocumentId);
             if (carried)
@@ -120,6 +122,10 @@ public sealed class DocumentSourceIssuesAnyTests(SqlServerFixture sql)
                 var watermark = edit + watermarkDelta;
                 await db.Database.ExecuteSqlAsync(
                     $"UPDATE calc.CalculationRun SET InputsCellChangeWatermark = {watermark} WHERE Id = {run.Id}");
+
+                // Прогін після міграції записує й стан джерел (P-1123-20); без межі — прогін до міграції (NULL: P-1123-21).
+                var states = await StatesAsync(db, w);
+                await db.Database.ExecuteSqlAsync($"UPDATE calc.CalculationRun SET SourceStateJson = {states} WHERE Id = {run.Id}");
             }
 
             await db.ApprovalStates.Where(s => s.DocumentId == w.World.Land.DocumentId && s.PeriodKey == March)
@@ -251,8 +257,27 @@ public sealed class DocumentSourceIssuesAnyTests(SqlServerFixture sql)
         return new AnyWorld(world, column.Id);
     }
 
-    private Task<long> ApproveLandAsync(AnyWorld w)
-        => SourceIssueWorld.AddStateAsync(sql, w.World.Land.DocumentId, w.World.Land.SheetDefId, March, Approved.AddHours(-1), Approved);
+    /// <summary>
+    /// Затверджує Land і ставить чинний прогін споживача, що бачив поточний стан джерела (P-1123-20): без нього стан
+    /// невідомий, і позначка стоїть завжди (огляд b11 №5, P-1123-21).
+    /// </summary>
+    private async Task<long> ApproveLandAsync(AnyWorld w)
+    {
+        var state = await SourceIssueWorld.AddStateAsync(sql, w.World.Land.DocumentId, w.World.Land.SheetDefId, March, Approved.AddHours(-1), Approved);
+        await using var db = sql.CreateContext();
+        var run = new Ecr.Domain.Entities.Calculations.CalculationRun(w.World.Land.ProjectId, March, 5, Approved.AddHours(-2), w.World.Land.DocumentId);
+        db.CalculationRuns.Add(run);
+        await db.SaveChangesAsync();
+        run.Complete(Ecr.Domain.Entities.Calculations.CalculationRun.CurrentStatus, Approved.AddHours(-2), null, null);
+        await db.SaveChangesAsync();
+        var states = await StatesAsync(db, w);
+        await db.Database.ExecuteSqlAsync($"UPDATE calc.CalculationRun SET SourceStateJson = {states} WHERE Id = {run.Id}");
+        return state;
+    }
+
+    private static Task<string> StatesAsync(EcrDbContext db, AnyWorld w)
+        => new DocumentSourceIssues(db, readOverride: null, DependencyGraphTestKit.Provider(db))
+            .SourceStatesJsonAsync(w.World.Land.DocumentId, [March / 100], CancellationToken.None);
 
     private async Task ChangeAsync(long documentId, int columnDefId, DateTime at, string origin = "UserEdit")
     {

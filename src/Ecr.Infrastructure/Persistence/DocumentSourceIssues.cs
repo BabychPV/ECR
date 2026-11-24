@@ -46,7 +46,7 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
     private readonly Dictionary<(int BindingId, int Year), SourceYear?> years = [];
     private readonly Dictionary<long, (string ProjectCode, string DocumentKey)> sources = [];
     private readonly Dictionary<(long DocumentId, int PeriodKey, DateTime Since, long ConsumerId, int ConsumerPeriod), DateTime?> changes = [];
-    private readonly Dictionary<(long DocumentId, int PeriodKey), Dictionary<string, string>?> seen = [];
+    private readonly Dictionary<(long DocumentId, int PeriodKey), RecordedState> seen = [];
     private readonly Dictionary<(long DocumentId, int PeriodKey), string> now = [];
     private (bool ApprovedOnly, bool Any)? kindsCache;
 
@@ -139,9 +139,24 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
                 }
 
                 // A5: документа-джерела за рік немає — рядки довідника, як доти; проблеми немає.
+                // ✎ Огляд b11 №5 (LOW 1): але якщо чинний прогін споживача ЧИТАВ джерело цієї зв'язки за рік (ключ у записаному
+                // стані), а тепер його немає (документ видалено) — числа змінилися: позначка за кожен місяць періоду.
                 var source = await SourceYearAsync(binding.Id, year, ct).ConfigureAwait(false);
                 if (source is null)
                 {
+                    if (binding.State == DocumentSourceState.Any
+                        && await VanishedSourceAsync(binding.Id, year, documentId, periodKey, ct).ConfigureAwait(false) is { } vanished)
+                    {
+                        var gone = await SourceFactsAsync(vanished, ct).ConfigureAwait(false);
+                        findings.AddRange(DocumentSourceGate.OwnedMonths(binding.PeriodKind, periodKey % 100).Select(month =>
+                            new SourceIssueFinding(
+                                new SourceIssueRow(
+                                    ISourceIssueReader.SourceChangedAfterApproval, periodKey, month, (year * 100) + month, vanished,
+                                    gone.ProjectCode, gone.DocumentKey, null, approvedAt, null),
+                                ReasonChanged,
+                                stateId)));
+                    }
+
                     continue;
                 }
 
@@ -163,9 +178,10 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
 
                         // ✎ P-1123-20: зміни джерела БЕЗ aud.CellChange (видалення рядка подією чи людиною, новий актуальний
                         // прогін джерела з іншими F_<X>) — стан джерела зараз ≠ стану, який бачив чинний прогін споживача.
-                        // Стану не записано (прогін до міграції, невідомо) — як доти: лише журнал комірок.
+                        // ✎ Огляд b11 №5 (HIGH): стан «невідомо» (збій знімка, без графа, чинний прогін усього проєкту) — змінено;
+                        // стан прогону до міграції (NULL) — за рішенням людини P-1123-21 (LegacyStateMeansChanged).
                         var changed = changedAt is not null
-                                      || await SourceStateChangedAsync(source, year, month, documentId, periodKey, ct).ConfigureAwait(false);
+                                      || await SourceStateChangedAsync(binding.Id, source, year, month, documentId, periodKey, ct).ConfigureAwait(false);
 
                         (kind, reason) = !changed
                             ? (null, null)
@@ -205,7 +221,7 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
     /// <param name="documentId">Документ-споживач.</param>
     /// <param name="years">Роки.</param>
     /// <param name="ct">Токен скасування.</param>
-    /// <returns>JSON <c>{"{документ}:{період}": "{відбиток}"}</c> (порожній об'єкт — джерел немає).</returns>
+    /// <returns>JSON <c>{"{зв'язка}:{документ}:{період}": "{відбиток}"}</c> (порожній об'єкт — джерел немає).</returns>
     /// <remarks>
     /// ⛔ Що читає споживач (<see cref="Hse400CompositionSnapshotLoader"/>): лише екземпляри ОРИГІНАЛУ таблиць зв'язки обраного
     /// документа (<c>SheetCopyId = NULL</c>) — комірки рядків і розрахункові <c>F_&lt;X&gt;</c> актуальних прогонів; ні
@@ -235,7 +251,7 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
                     var owners = Enumerable.Range(1, 12).Select(m => OwnerPeriod(source.PeriodKind, year, m)).Distinct().ToList();
                     foreach (var (owner, state) in await SourceStatesAsync(source, owners, ct).ConfigureAwait(false))
                     {
-                        states[StateKey(source.DocumentId, owner)] = state;
+                        states[StateKey(binding.Id, source.DocumentId, owner)] = state;
                     }
                 }
             }
@@ -244,43 +260,125 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
         return System.Text.Json.JsonSerializer.Serialize(states);
     }
 
-    /// <summary>Ключ стану джерела: документ і період-власник.</summary>
-    private static string StateKey(long documentId, int periodKey)
-        => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{documentId}:{periodKey}");
+    /// <summary>Ключ стану джерела: зв'язка, документ і період-власник.</summary>
+    private static string StateKey(int bindingId, long documentId, int periodKey)
+        => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{bindingId}:{documentId}:{periodKey}");
+
+    /// <summary>
+    /// ✎ Огляд b11 №5 (HIGH): стан «невідомо» — знімок не вдався (збій, без графа). Записується явно, а не <c>NULL</c>, і
+    /// означає «змінено» (позначка): невідомий стан ніколи не гасить позначки.
+    /// </summary>
+    internal const string UnknownState = "?";
+
+    /// <summary>
+    /// ✎ Рішення людини P-1123-21 (24.11, варіант A): прогін ДО міграції (<c>SourceStateJson</c> = <c>NULL</c>) для споживача
+    /// зв'язки <c>Any</c> з обраним джерелом — «змінено» (позначка), без заповнення стану заднім числом. ЄДИНЕ місце рішення.
+    /// </summary>
+    internal static bool LegacyStateMeansChanged => true;
+
+    /// <summary>Записаний стан чинного прогону споживача: відомий (словник), невідомий або прогін до міграції.</summary>
+    private sealed record RecordedState(Dictionary<string, string>? Known, bool Legacy);
+
+    /// <summary>
+    /// Стан, який бачив чинний прогін ДОКУМЕНТА-споживача за період. Немає такого прогону, або чинний прогін усього проєкту
+    /// (<c>DocumentId = NULL</c>) новіший за нього — «невідомо» (числа періоду дав прогін, що стану не записує).
+    /// </summary>
+    private async Task<RecordedState> RecordedAsync(long consumerId, int consumerPeriod, CancellationToken ct)
+    {
+        if (seen.TryGetValue((consumerId, consumerPeriod), out var cached))
+        {
+            return cached;
+        }
+
+        var runs = await (
+                from d in db.Documents.AsNoTracking()
+                where d.Id == consumerId
+                join r in db.CalculationRuns.AsNoTracking() on d.ProjectId equals r.ProjectId
+                where r.PeriodKey == consumerPeriod && r.Status == Ecr.Domain.Entities.Calculations.CalculationRun.CurrentStatus
+                      && (r.DocumentId == consumerId || r.DocumentId == null)
+                select new { r.Id, r.DocumentId, r.SourceStateJson })
+            .ToListAsync(ct).ConfigureAwait(false);
+        var own = runs.Where(r => r.DocumentId == consumerId).MaxBy(r => r.Id);
+        RecordedState result;
+        if (own is null || runs.Exists(r => r.DocumentId == null && r.Id > own.Id))
+        {
+            result = new RecordedState(null, Legacy: false);
+        }
+        else if (own.SourceStateJson is null)
+        {
+            result = new RecordedState(null, Legacy: true);
+        }
+        else if (string.Equals(own.SourceStateJson, UnknownState, StringComparison.Ordinal))
+        {
+            result = new RecordedState(null, Legacy: false);
+        }
+        else
+        {
+            result = new RecordedState(System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(own.SourceStateJson), Legacy: false);
+        }
+
+        seen[(consumerId, consumerPeriod)] = result;
+        return result;
+    }
+
+    /// <summary>
+    /// ✎ Огляд b11 №5 (LOW 1): документ-джерело зв'язки за рік, який ЧИТАВ чинний прогін споживача (ключ у відомому стані),
+    /// а тепер не обраний ніякий; <c>null</c> — не читав (чи стан невідомий: тоді й порівнювати нема з чим).
+    /// </summary>
+    private async Task<long?> VanishedSourceAsync(int bindingId, int year, long consumerId, int consumerPeriod, CancellationToken ct)
+    {
+        var recorded = await RecordedAsync(consumerId, consumerPeriod, ct).ConfigureAwait(false);
+        if (recorded.Known is null)
+        {
+            return null;
+        }
+
+        var prefix = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{bindingId}:");
+        foreach (var key in recorded.Known.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)))
+        {
+            var parts = key.Split(':');
+            if (parts.Length == 3
+                && long.TryParse(parts[1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var doc)
+                && int.TryParse(parts[2], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var period)
+                && period / 100 == year)
+            {
+                return doc;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// ✎ P-1123-20: чи стан місяця <paramref name="month"/> джерела зараз інший, ніж бачив чинний прогін споживача
-    /// (<c>SourceStateJson</c>). Стану не записано — <c>false</c> (лише журнал комірок, як доти); джерела в записі немає
-    /// (тоді його не було) — так.
+    /// (<c>SourceStateJson</c>). ✎ Огляд b11 №5: стан невідомий (<see cref="UnknownState"/>, немає документного прогону, новіший
+    /// прогін усього проєкту) — так; прогін до міграції (<c>NULL</c>) — <see cref="LegacyStateMeansChanged"/> (P-1123-21: так);
+    /// джерела в записі немає (тоді його не було) — так.
     /// </summary>
     private async Task<bool> SourceStateChangedAsync(
-        SourceYear source, int year, int month, long consumerId, int consumerPeriod, CancellationToken ct)
+        int bindingId, SourceYear source, int year, int month, long consumerId, int consumerPeriod, CancellationToken ct)
     {
-        if (!seen.TryGetValue((consumerId, consumerPeriod), out var recorded))
+        var recorded = await RecordedAsync(consumerId, consumerPeriod, ct).ConfigureAwait(false);
+        if (recorded.Known is null)
         {
-            var json = (await db.CalculationRuns.AsNoTracking()
-                    .Where(r => r.DocumentId == consumerId && r.PeriodKey == consumerPeriod
-                                && r.Status == Ecr.Domain.Entities.Calculations.CalculationRun.CurrentStatus)
-                    .Select(r => r.SourceStateJson)
-                    .ToListAsync(ct).ConfigureAwait(false))
-                .FirstOrDefault();
-            recorded = json is null ? null : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json);
-            seen[(consumerId, consumerPeriod)] = recorded;
+            return !recorded.Legacy || LegacyStateMeansChanged;
         }
 
-        if (recorded is null)
-        {
-            return false;
-        }
-
+        // ✎ Огляд b11 №5 (LOW 2): усі періоди-власники джерела за рік — одним запитом на документ-джерело.
         var owner = OwnerPeriod(source.PeriodKind, year, month);
         if (!now.TryGetValue((source.DocumentId, owner), out var current))
         {
-            current = (await SourceStatesAsync(source, [owner], ct).ConfigureAwait(false)).GetValueOrDefault(owner) ?? string.Empty;
-            now[(source.DocumentId, owner)] = current;
+            var owners = Enumerable.Range(1, 12).Select(m => OwnerPeriod(source.PeriodKind, year, m)).Distinct().ToList();
+            var states = await SourceStatesAsync(source, owners, ct).ConfigureAwait(false);
+            foreach (var each in owners)
+            {
+                now[(source.DocumentId, each)] = states.GetValueOrDefault(each) ?? string.Empty;
+            }
+
+            current = now[(source.DocumentId, owner)];
         }
 
-        return !recorded.TryGetValue(StateKey(source.DocumentId, owner), out var was)
+        return !recorded.Known.TryGetValue(StateKey(bindingId, source.DocumentId, owner), out var was)
                || !string.Equals(was, current, StringComparison.Ordinal);
     }
 
@@ -496,9 +594,10 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
                 where d.Id == documentId
                 join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
                 select new { ProjectCode = p.Code, d.BusinessKey })
-            .FirstAsync(ct).ConfigureAwait(false);
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
-        var result = (facts.ProjectCode, facts.BusinessKey);
+        // ✎ Огляд b11 №5 (LOW 1): джерело, яке читав прогін, могли видалити — рядок позначки без коду й ключа.
+        var result = facts is null ? (string.Empty, string.Empty) : (facts.ProjectCode, facts.BusinessKey);
         sources[documentId] = result;
         return result;
     }
