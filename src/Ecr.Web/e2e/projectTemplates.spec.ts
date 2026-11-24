@@ -174,11 +174,12 @@ test.describe('B74 project templates', () => {
     await expect(dialog.getByRole('checkbox', { name: new RegExp(primary.sheetName) })).toHaveCount(0);
     await dialog.getByRole('button', { name: /^Next$/ }).click();
 
-    // ✎ B74 P4: огляд — шаблон під підписом «Template», версія — окремим рядком «Version».
+    // ✎ B74 P4: огляд — шаблон під підписом «Template», версія — окремим рядком (підпис каталогу documents.version —
+    // en «Template version»).
     const summary = dialog.getByTestId('wizard-summary');
     await expect(summary.getByText('Template', { exact: true })).toBeVisible();
     await expect(summary.getByText(second.code, { exact: true })).toBeVisible();
-    await expect(summary.getByText('Version', { exact: true })).toBeVisible();
+    await expect(summary.getByText('Template version', { exact: true })).toBeVisible();
 
     const created = page.waitForRequest((request) => request.method() === 'POST' && /\/api\/v1\/documents$/.test(request.url()));
     await dialog.getByRole('button', { name: /^Create document$/ }).click();
