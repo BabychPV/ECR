@@ -218,6 +218,50 @@ describe('прокрутка й фокус через API revo-grid', () => {
     expect(grid.setCellsFocus).toHaveBeenLastCalledWith({ x: 1, y: 2 }, { x: 1, y: 2 }, 'colPinStart');
   });
 
+  // ✎ Огляд M4 (4): `scrollToCoordinate` RevoGrid — у ПІКСЕЛЯХ; колонку за межами вікна (M10 з 12) прокручує лише
+  // `scrollToColumnIndex` за індексом в'юпорту rgCol (e2e-stand 45310768143: фокус на M10, а видно M01–M08).
+  it('прокручувана колонка: scrollToColumnIndex з індексом в`юпорту; закріплена — без прокрутки колонки', async () => {
+    const container = document.createElement('div');
+    const grid = Object.assign(document.createElement('revo-grid'), {
+      componentOnReady: vi.fn(() => Promise.resolve()),
+      scrollToCoordinate: vi.fn(() => Promise.resolve()),
+      scrollToColumnIndex: vi.fn(() => Promise.resolve()),
+      setCellsFocus: vi.fn(() => Promise.resolve()),
+    });
+    container.append(grid);
+
+    await revealGridCell(container, { x: 10, y: 0 }, 1);
+    expect(grid.scrollToColumnIndex).toHaveBeenLastCalledWith(9);
+
+    grid.scrollToColumnIndex.mockClear();
+    await revealGridCell(container, { x: 0, y: 0 }, 1);
+    expect(grid.scrollToColumnIndex).not.toHaveBeenCalled();
+  });
+
+  it('прокрутку колонки скинуто після переходу (перемальовка колонок) — прокручується знову', async () => {
+    const container = document.createElement('div');
+    const viewport = document.createElement('revogr-viewport-scroll');
+    viewport.className = 'rgCol';
+    let calls = 0;
+    const grid = Object.assign(document.createElement('revo-grid'), {
+      componentOnReady: vi.fn(() => Promise.resolve()),
+      scrollToCoordinate: vi.fn(() => Promise.resolve()),
+      // Перший виклик «скинуто» (scrollLeft лишається 0), другий — прокрутка тримається.
+      scrollToColumnIndex: vi.fn(() => {
+        calls += 1;
+        if (calls >= 2) viewport.scrollLeft = 300;
+        return Promise.resolve();
+      }),
+      setCellsFocus: vi.fn(() => Promise.resolve()),
+    });
+    grid.append(viewport);
+    container.append(grid);
+
+    await revealGridCell(container, { x: 10, y: 0 }, 1);
+    expect(grid.scrollToColumnIndex.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(viewport.scrollLeft).toBe(300);
+  });
+
   it('без елемента сітки — false, без винятку', async () => {
     await expect(revealGridCell(document.createElement('div'), { x: 0, y: 0 })).resolves.toBe(false);
   });
