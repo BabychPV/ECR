@@ -1428,6 +1428,9 @@ public sealed partial class EndpointCoverageTests
         // MS 8.5: перенесення на проді викликає оператор у вікні (curl/скрипт), екрана немає й не планується.
         "POST /api/v1/methodologies/script-migration/apply",
         "POST /api/v1/methodologies/script-migration/switch",
+        // P-1124-2: остаточне перенесення формульних версій викликає фаза вікна (window/Invoke-MsMigrationPhase.ps1 -Stage
+        // Finalize); одноразове, після нього відмовляє (finalizeNothingLeft) — екрана немає й не буде.
+        "POST /api/v1/methodologies/script-migration/finalize",
         // MS 8.4: паритет «формули проти скрипта» на документі запускає оператор перед перемиканням рушія (curl/скрипт, поруч
         // із `script-migration/switch`); кнопки в редакторі немає й не планується — редактор працює з версіями на рушії Script.
         "POST /api/v1/methodologies/{p}/versions/{p}/script/parity",

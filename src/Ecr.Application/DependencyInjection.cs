@@ -485,6 +485,7 @@ public static class DependencyInjection
         services.AddScoped<Calculations.Scripting.GetScriptTablesHandler>();
         services.AddScoped<Calculations.Scripting.Migration.ApplyScriptPackageHandler>();
         services.AddScoped<Calculations.Scripting.Migration.SwitchScriptEngineHandler>();
+        services.AddScoped<Calculations.Scripting.Migration.FinalizeFormulasHandler>();
 
         // Авторство методології з нуля (директива №09, `W6`): сама методологія,
         // константи, правила відбору, виходи, золотий набір, режими і прив'язка

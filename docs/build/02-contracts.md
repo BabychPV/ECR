@@ -4266,6 +4266,12 @@ public interface IScriptPreviewRunner
   entries: [{ methodologyCode, version, versionId, status: applied|wouldApply|refused, reason, message, details[] }] }`.
   Відбиток джерела рахується з БАЗИ тим самим `Fingerprint`, що й в інструменті; текст мусить компілюватися без
   діагностик (бібліотеки з тіньовим скриптом із цього ж пакета годяться, порядок не важить). Рушій не змінюється.
+- ✎ P-1124-2: `POST /methodologies/script-migration/finalize` — тіло `{ reason, entries: [{ versionId, scriptHash, proof, provenValues, text? }] }`;
+  відповідь `{ finalized: [{ versionId, methodologyCode, version, proof }], formulasVersionsLeft }`. ОДНОРАЗОВЕ остаточне перенесення
+  НЕ чинних формульних версій (витіснених, виведених, чернеток) на Script тим самим Id: хеш тексту = доведеному, доказ із ≥ 1
+  значенням (`reference|synthetic|legacy|stored`) або перевірений `noRules`/`unusedLibrary`, компіляція, склад = наявному; вміст
+  формул — у `aud.PublicationEvent` (`scriptMigration.finalize`). Будь-яка проблема — `422 finalizeRefused`, нічого не змінено;
+  формульних версій немає — `409 finalizeNothingLeft`.
 - `POST /methodologies/script-migration/switch` — тіло `{ versionIds[], engine: Script|Formulas, reason }`; відповідь
   `{ engine, versions: [{ versionId, methodologyCode, version }] }`. Одна транзакція; на `Script` — текст без
   діагностик, склад зі скрипта (виходи/речовини/імпорти) збігається з наявним (`422 switchChecksFailed`, `problems[]`),
@@ -5156,6 +5162,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/methodologies/{id}/versions/{vid}/script/parity` | `Calculation.Publish` (+ доступ до документа) | 7 |
 | `POST` | `/api/v1/methodologies/script-migration/apply?dryRun=` | `Calculation.Publish` | 7 |
 | `POST` | `/api/v1/methodologies/script-migration/switch` | `Calculation.Publish` | 7 |
+| `POST` | `/api/v1/methodologies/script-migration/finalize` | `Calculation.Publish` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/bindings` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/bindings/{columnDefId}/{outputCode}` | `Calculation.EditRule` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/publications` | `Calculation.View` | 7 |
