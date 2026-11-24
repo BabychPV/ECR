@@ -9533,6 +9533,757 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/gas-composition/components": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Компоненти для редактора складу. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GasComponentDto"][];
+                        "text/json": components["schemas"]["GasComponentDto"][];
+                        "text/plain": components["schemas"]["GasComponentDto"][];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gas-composition/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Разовий імпорт із FLERT (лише в порожню базу): 202 з `jobId`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/plain": components["schemas"]["JobAcceptedResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gas-composition/streams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Перелік потоків зі зведенням версій, право змін і стан імпорту з FLERT. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GasStreamListDto"];
+                        "text/json": components["schemas"]["GasStreamListDto"];
+                        "text/plain": components["schemas"]["GasStreamListDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Новий потік (Id = найбільший + 1). */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["GasStreamRequest"];
+                    "application/json": components["schemas"]["GasStreamRequest"];
+                    "text/json": components["schemas"]["GasStreamRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GasChangeResultDto"];
+                        "text/json": components["schemas"]["GasChangeResultDto"];
+                        "text/plain": components["schemas"]["GasChangeResultDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gas-composition/streams/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Потік з кейсами й версіями. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Запис потоку. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GasStreamDetailDto"];
+                        "text/json": components["schemas"]["GasStreamDetailDto"];
+                        "text/plain": components["schemas"]["GasStreamDetailDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /** Зміна атрибутів потоку. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Запис потоку. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["GasStreamRequest"];
+                    "application/json": components["schemas"]["GasStreamRequest"];
+                    "text/json": components["schemas"]["GasStreamRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GasChangeResultDto"];
+                        "text/json": components["schemas"]["GasChangeResultDto"];
+                        "text/plain": components["schemas"]["GasChangeResultDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Логічне видалення потоку з усіма версіями. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Запис потоку. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GasChangeResultDto"];
+                        "text/json": components["schemas"]["GasChangeResultDto"];
+                        "text/plain": components["schemas"]["GasChangeResultDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gas-composition/streams/{id}/cases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Перейменування кейсу потоку (усіх його версій). */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Запис потоку. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["GasCaseRenameRequest"];
+                    "application/json": components["schemas"]["GasCaseRenameRequest"];
+                    "text/json": components["schemas"]["GasCaseRenameRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GasChangeResultDto"];
+                        "text/json": components["schemas"]["GasChangeResultDto"];
+                        "text/plain": components["schemas"]["GasChangeResultDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gas-composition/streams/{id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Нова версія кейсу (або перша версія нового кейсу). */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Запис потоку. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["GasVersionCreateRequest"];
+                    "application/json": components["schemas"]["GasVersionCreateRequest"];
+                    "text/json": components["schemas"]["GasVersionCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GasChangeResultDto"];
+                        "text/json": components["schemas"]["GasChangeResultDto"];
+                        "text/plain": components["schemas"]["GasChangeResultDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gas-composition/versions/{versionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Зміна версії (значення і/або місяць початку). */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія. */
+                    versionId: number;
+                };
+                cookie?: never;
+            };
+            /** @description Скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["GasVersionUpdateRequest"];
+                    "application/json": components["schemas"]["GasVersionUpdateRequest"];
+                    "text/json": components["schemas"]["GasVersionUpdateRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GasChangeResultDto"];
+                        "text/json": components["schemas"]["GasChangeResultDto"];
+                        "text/plain": components["schemas"]["GasChangeResultDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Видалення версії (попередня продовжується на її вікно). */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія. */
+                    versionId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GasChangeResultDto"];
+                        "text/json": components["schemas"]["GasChangeResultDto"];
+                        "text/plain": components["schemas"]["GasChangeResultDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health/facts": {
         parameters: {
             query?: never;
@@ -9617,108 +10368,6 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "text/plain": components["schemas"]["ProblemDetails"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/integration/flert-sync": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Ставить синк у чергу позачергово («Синхронізувати зараз»). Право `Integration.Manage`.
-         * @description ⚠ 202 з `jobId`: синк ходить до FLERT. Поки попередній у черзі — той самий `jobId` (злиття).
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Accepted */
-                202: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["JobAcceptedResponse"];
-                        "text/json": components["schemas"]["JobAcceptedResponse"];
-                        "text/plain": components["schemas"]["JobAcceptedResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ProblemDetails"];
-                        "text/json": components["schemas"]["ProblemDetails"];
-                        "text/plain": components["schemas"]["ProblemDetails"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/integration/flert-sync/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Стан синку: чи увімкнено, де показувати (коди довідників-дзеркала) і останній прогін.
-         *     Право `Integration.View` або `Integration.Manage`. */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description OK */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["FlertSyncStatusDto"];
-                        "text/json": components["schemas"]["FlertSyncStatusDto"];
-                        "text/plain": components["schemas"]["FlertSyncStatusDto"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ProblemDetails"];
-                        "text/json": components["schemas"]["ProblemDetails"];
                         "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
@@ -36131,14 +36780,6 @@ export interface components {
              */
             updated: number;
         };
-        /** @description Стан синку FLERT. */
-        FlertSyncStatusDto: {
-            /** @description Синк увімкнено (`Flert:Sync:Enabled`); вимкнений прогін лише пише «вимкнено». */
-            enabled: boolean;
-            lastRun: null | components["schemas"]["FlertSyncRunDto"];
-            /** @description Коди довідників-дзеркала (`STREAM`, `STREAM_CASE`, `GAS_COMPOSITION`) — де показувати стан. */
-            registryCodes: string[];
-        };
         /** @description Результат форматування літерала константи. */
         FormatConstDto: {
             /** @description Діагностики розбору (позиції — у вхідному тексті). */
@@ -36317,6 +36958,310 @@ export interface components {
          * @enum {unknown}
          */
         FormulaScope: "Column" | "Row" | "Cell";
+        /** @description Кейс потоку зі шкалою версій. */
+        GasCaseDto: {
+            /** @description Назва кейсу. */
+            name: string;
+            /** @description Версії за датою дії. */
+            versions: components["schemas"]["GasVersionDto"][];
+        };
+        /** @description Перейменування кейсу (усіх його версій). */
+        GasCaseRenameRequest: {
+            /** @description Поточна назва. */
+            from: string;
+            /** @description Нова назва. */
+            to: string;
+        };
+        /** @description Результат зміни: потік після неї і поставлений перерахунок. */
+        GasChangeResultDto: {
+            /** @description Роки, за які поставити не вдалося (перерахуйте вручну). */
+            failedYears: number[];
+            /** @description Роки, за які поставлено перерахунок залежних документів. */
+            queuedYears: number[];
+            stream: null | components["schemas"]["GasStreamDetailDto"];
+        };
+        /** @description Компонент для редактора. */
+        GasComponentDto: {
+            /** @description Код. */
+            code: string;
+            /** @description Формула. */
+            formula: null | string;
+            /** @description Група для показу: `inert`, `hydrocarbon`, `aromatic`, `sulphur`, `other`. */
+            group: string;
+            /**
+             * Format: decimal
+             * @description Молярна маса.
+             */
+            mw: null | string;
+            /** @description Назва. */
+            name: string;
+        };
+        /** @description Компонент складу у запиті: код і мол.%. */
+        GasComponentValue: {
+            /** @description Код компонента (`COMPONENT`). */
+            code: string;
+            /**
+             * Format: decimal
+             * @description Мол.%, 0…100.
+             */
+            molPct: string;
+        };
+        /** @description Стан разового імпорту з FLERT. */
+        GasImportStatusDto: {
+            /** @description Імпорт можливий: у ECR ще немає жодного потоку. */
+            available: boolean;
+            lastRun: null | components["schemas"]["FlertSyncRunDto"];
+        };
+        /** @description Замкнений період, що тримає версію. */
+        GasLockDto: {
+            /** @description Підпис періоду (`2026-03` або `2026`). */
+            period: string;
+            /** @description `closed` або `approved`. */
+            reason: string;
+        };
+        /** @description Потік з кейсами. */
+        GasStreamDetailDto: {
+            /** @description Право змін. */
+            canEdit: boolean;
+            /** @description Кейси. */
+            cases: components["schemas"]["GasCaseDto"][];
+            /**
+             * Format: int32
+             * @description Група.
+             */
+            group: null | number;
+            /** @description Прихований у списках. */
+            hidden: boolean;
+            /** @description Документ HMB. */
+            hmbDoc: null | string;
+            /**
+             * Format: int64
+             * @description Запис потоку.
+             */
+            id: number;
+            /** @description Потік HMB. */
+            isHmb: boolean;
+            /** @description Суша. */
+            isOnshore: boolean;
+            /** @description Кислий. */
+            isSour: boolean;
+            /** @description Назва. */
+            name: string;
+            /** @description Номер. */
+            number: null | string;
+            /**
+             * Format: int32
+             * @description Id потоку.
+             */
+            streamId: number;
+        };
+        /** @description Перелік потоків. */
+        GasStreamListDto: {
+            /** @description Чи має користувач право змінювати. */
+            canEdit: boolean;
+            /** @description Чи може користувач запустити імпорт (право змін + керування інтеграціями). */
+            canImport: boolean;
+            /** @description Стан імпорту з FLERT. */
+            import: components["schemas"]["GasImportStatusDto"];
+            /** @description Потоки. */
+            streams: components["schemas"]["GasStreamListItemDto"][];
+        };
+        /** @description Потік у переліку. */
+        GasStreamListItemDto: {
+            /**
+             * Format: int32
+             * @description Кейсів.
+             */
+            caseCount: number;
+            /**
+             * Format: int32
+             * @description Версій, у яких Σ поза 100 ± 0.5 (зокрема без складу).
+             */
+            deviatingVersions: number;
+            /** @description Прихований у списках. */
+            hidden: boolean;
+            /**
+             * Format: int64
+             * @description Запис потоку.
+             */
+            id: number;
+            /** @description Потік HMB. */
+            isHmb: boolean;
+            /** @description Суша. */
+            isOnshore: boolean;
+            /** @description Кислий. */
+            isSour: boolean;
+            /**
+             * Format: date
+             * @description Найпізніша дата дії серед версій; `null` — версій немає.
+             */
+            latestFrom: null | string;
+            /** @description Назва. */
+            name: string;
+            /** @description Номер. */
+            number: null | string;
+            /**
+             * Format: int32
+             * @description Id потоку (на нього посилаються події PI, FLERT `FlaringStream.ID`).
+             */
+            streamId: number;
+            /**
+             * Format: int32
+             * @description Версій усіх кейсів.
+             */
+            versionCount: number;
+        };
+        /** @description Атрибути потоку. */
+        GasStreamRequest: {
+            /**
+             * Format: int32
+             * @description Група.
+             */
+            group: null | number;
+            /** @description Прихований у списках. */
+            hidden: boolean;
+            /** @description Документ HMB. */
+            hmbDoc: null | string;
+            /** @description Потік HMB. */
+            isHmb: boolean;
+            /** @description Суша. */
+            isOnshore: boolean;
+            /** @description Кислий. */
+            isSour: boolean;
+            /** @description Назва (унікальна разом із «суша/море»). */
+            name: string;
+            /** @description Номер. */
+            number: null | string;
+        };
+        /** @description Нова версія кейсу (або перша версія нового кейсу). */
+        GasVersionCreateRequest: {
+            /** @description Підтвердження Σ поза 100 ± 0.5. */
+            acceptSumDeviation: boolean;
+            /** @description Кейс. */
+            caseName: string;
+            /** @description Компоненти. */
+            components: components["schemas"]["GasComponentValue"][];
+            /**
+             * Format: decimal
+             * @description Густина.
+             */
+            densityOp: null | string;
+            /**
+             * Format: decimal
+             * @description Молярна маса.
+             */
+            mwHysys: null | string;
+            /**
+             * Format: decimal
+             * @description Температура.
+             */
+            temperatureC: null | string;
+            /**
+             * Format: date
+             * @description З якого місяця діє (1-ше число).
+             */
+            validFrom: string;
+            /**
+             * Format: decimal
+             * @description Стисливість.
+             */
+            z: null | string;
+        };
+        /** @description Версія кейсу. */
+        GasVersionDto: {
+            /** @description Ненульові компоненти. */
+            components: components["schemas"]["GasComponentValue"][];
+            /**
+             * Format: decimal
+             * @description Робоча густина.
+             */
+            densityOp: null | string;
+            /** @description Значення довгих колонок-дублів FLERT, що розійшлися з коротким кодом (довідково). */
+            flertAliases: null | string;
+            /**
+             * Format: int64
+             * @description Запис версії.
+             */
+            id: number;
+            /**
+             * Format: int32
+             * @description Id складу FLERT.
+             */
+            legacyCompositionId: null | number;
+            /**
+             * Format: int32
+             * @description Id кейсу FLERT.
+             */
+            legacyTypeId: null | number;
+            /** @description Замкнені періоди всередині вікна: значення змінювати не можна. */
+            locks: components["schemas"]["GasLockDto"][];
+            /**
+             * Format: decimal
+             * @description Молярна маса HYSYS.
+             */
+            mwHysys: null | string;
+            /** @description Складу немає. */
+            noComposition: boolean;
+            /** @description Правило FLERT (довідково). */
+            ruleParse: null | string;
+            /**
+             * Format: decimal
+             * @description Σ мол.%.
+             */
+            sum: string;
+            /**
+             * Format: decimal
+             * @description Температура, °C.
+             */
+            temperatureC: null | string;
+            /**
+             * Format: date
+             * @description Початок дії.
+             */
+            validFrom: string;
+            /**
+             * Format: date
+             * @description Кінець (виключно); `null` — чинна.
+             */
+            validTo: null | string;
+            /**
+             * Format: decimal
+             * @description Стисливість.
+             */
+            z: null | string;
+        };
+        /** @description Зміна версії. */
+        GasVersionUpdateRequest: {
+            /** @description Підтвердження Σ поза 100 ± 0.5. */
+            acceptSumDeviation: boolean;
+            /** @description Компоненти (повний склад версії). */
+            components: components["schemas"]["GasComponentValue"][];
+            /**
+             * Format: decimal
+             * @description Густина.
+             */
+            densityOp: null | string;
+            /**
+             * Format: decimal
+             * @description Молярна маса.
+             */
+            mwHysys: null | string;
+            /**
+             * Format: decimal
+             * @description Температура.
+             */
+            temperatureC: null | string;
+            /**
+             * Format: date
+             * @description З якого місяця діє.
+             */
+            validFrom: string;
+            /**
+             * Format: decimal
+             * @description Стисливість.
+             */
+            z: null | string;
+        };
         /**
          * @description Рівень ресурсного гранта. Порядок значень значущий: більше = ширше.
          * @enum {unknown}

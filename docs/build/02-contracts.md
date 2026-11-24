@@ -1523,10 +1523,10 @@ public sealed record ExternalTable(
     bool Truncated);
 ```
 
-✎ 2026-11-12 (`D-476`, FLERT F3): «Синхронізувати зараз» і стан синку складу газу FLERT.
-`POST /api/v1/integration/flert-sync` (право `Integration.Manage`) → `202 JobAcceptedResponse` (злита постановка
-`IFlertCompositionSyncJob`); `GET /api/v1/integration/flert-sync/status` (`Integration.View` або `Integration.Manage`) →
-`200 FlertSyncStatusDto` (чи увімкнено, коди довідників-дзеркала, останній прогін із `itg.MaintenanceRun`).
+✎ 2026-11-12 (`D-476`, FLERT F3) → ✎ 2026-11-24 (D-NEW): склад газу — власник ECR. Щоденного синку й «Синхронізувати
+зараз» немає; `POST /api/v1/gas-composition/import` (`GasComposition.Edit` + `Integration.Manage`) → `202 JobAcceptedResponse`
+(злита постановка `IFlertCompositionSyncJob`, лише в порожню базу); стан останнього прогону — у відповіді
+`GET /api/v1/gas-composition/streams` (`import.lastRun`, той самий `FlertSyncRunDto`).
 
 ```csharp
 // src/Ecr.Application/Ports/IFlertSyncStatusReader.cs
@@ -5220,8 +5220,17 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/sources/{id}/registry/policy` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/sources/{id}/collect` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/sources/{id}/mapping/preview` | `Integration.Manage` | 5 |
-| `POST` | `/api/v1/integration/flert-sync` | `Integration.Manage` (D-476 F3: «Синхронізувати зараз» — злита постановка синку складу газу FLERT; `202 JobAcceptedResponse`) | 8 |
-| `GET` | `/api/v1/integration/flert-sync/status` | `Integration.View` (або `Integration.Manage`; D-476 F3: чи увімкнено, коди довідників-дзеркала, останній прогін `itg.MaintenanceRun` `flert-composition-sync` — < 1 КБ) | 8 |
+| `GET` | `/api/v1/gas-composition/streams` | `GasComposition.View` (D-NEW: потоки зі зведенням версій, `canEdit`/`canImport`, стан разового імпорту FLERT) | 8 |
+| `GET` | `/api/v1/gas-composition/components` | `GasComposition.View` (D-NEW: компоненти для редактора складу, з групою показу) | 8 |
+| `GET` | `/api/v1/gas-composition/streams/{id}` | `GasComposition.View` (D-NEW: потік, кейси, версії з компонентами й замкненими періодами) | 8 |
+| `POST` | `/api/v1/gas-composition/streams` | `GasComposition.Edit` (D-NEW: новий потік, Id = найбільший + 1) | 8 |
+| `PUT` | `/api/v1/gas-composition/streams/{id}` | `GasComposition.Edit` (D-NEW: атрибути потоку; поля, які читають розрахунки, — лише без замкнених версій) | 8 |
+| `DELETE` | `/api/v1/gas-composition/streams/{id}` | `GasComposition.Edit` (D-NEW: логічне видалення потоку з версіями; 409 — замкнено або є посилання) | 8 |
+| `POST` | `/api/v1/gas-composition/streams/{id}/versions` | `GasComposition.Edit` (D-NEW: нова версія кейсу з 1-го числа місяця; версія, що містить дату, обрізається) | 8 |
+| `PUT` | `/api/v1/gas-composition/streams/{id}/cases` | `GasComposition.Edit` (D-NEW: перейменування кейсу — усіх версій) | 8 |
+| `PUT` | `/api/v1/gas-composition/versions/{versionId}` | `GasComposition.Edit` (D-NEW: значення і/або місяць версії; сусід тягнеться) | 8 |
+| `DELETE` | `/api/v1/gas-composition/versions/{versionId}` | `GasComposition.Edit` (D-NEW: видалення версії; попередня продовжується) | 8 |
+| `POST` | `/api/v1/gas-composition/import` | `GasComposition.Edit` + `Integration.Manage` (D-NEW: разовий імпорт FLERT лише в порожню базу; `202 JobAcceptedResponse`, 409 — дані вже є) | 8 |
 | `GET` | `/api/v1/sources/{id}/raw-data/tags` | `Integration.View` (або `Integration.Manage`; D-463: теги сутності — поля мапінгів, без мапінгів — шлях сутності) | 5 |
 | `GET` | `/api/v1/sources/{id}/raw-data/points` | `Integration.View` (або `Integration.Manage`; D-463: `path` 1..400, вікно `fromUtc`/`toUtc` ≤ 400 діб, типово 7 діб; keyset за міткою часу, новіші першими; `limit` 1..500, типово 100) | 5 |
 | `GET` | `/api/v1/sources/{id}/raw-data/series` | `Integration.View` (або `Integration.Manage`; D-463: ≤ `buckets` (1..2000, типово 500) кошиків мін/макс/середнє на все вікно, згортка в SQL) | 5 |
