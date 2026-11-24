@@ -56,6 +56,7 @@ function count(path: string, param: string): string[] {
 
       if (url.pathname === path) seen.push(url.searchParams.get(param) ?? '');
       if (url.pathname === '/api/v1/me') return json(me);
+      if (url.pathname === '/api/v1/audit/structure/entity-types') return json(['cfg.Template']);
 
       return json({ items: [], nextCursor: null, totalCount: 0 });
     }),
@@ -137,13 +138,24 @@ describe('/admin/audit — журнал змін комірок', () => {
 });
 
 describe('/admin/audit?view=structure — журнал структурних змін', () => {
+  // ✎ P-1124-4: «Entity type» — вибір із типів вікна (`/structure/entity-types`), а не набір коду: один вибір —
+  // один запит із КОДОМ типу (сервер шукає точний збіг).
   it(
-    '«Entity type»: набір Template — один запит',
+    '«Entity type»: вибір Template — один запит із кодом',
     async () => {
       const seen = count('/api/v1/audit/structure', 'entityType');
       show(<AuditPage />, '/admin/audit?view=structure');
 
-      await typeAndCount('⟦audit.entityType⟧', 'Template', seen);
+      const user = userEvent.setup();
+      const input = await screen.findByRole('textbox', { name: '⟦audit.entityType⟧' }, { timeout: SlowEnvTimeout });
+      await waitFor(() => expect(seen).toEqual(['']));
+
+      await user.click(input);
+      await user.click(await screen.findByRole('option', { name: 'Template' }, { timeout: SlowEnvTimeout }));
+
+      await waitFor(() => expect(seen).toEqual(['', 'cfg.Template']));
+      await settle();
+      expect(seen).toEqual(['', 'cfg.Template']);
     },
     SlowEnvTimeout,
   );

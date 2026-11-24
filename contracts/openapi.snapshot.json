@@ -1807,6 +1807,28 @@
         ],
         "type": "object"
       },
+      "AuditAuthorView": {
+        "description": "✎ P-1124-4: автор для фільтра «By user» журналів аудиту — номер і ім'я. ⛔ Не логін і не SID (R-A2, D-86).",
+        "properties": {
+          "displayName": {
+            "description": "Ім'я; порожнє ім'я в записі — `null` (клієнт покаже «користувач #id»).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "userId": {
+            "description": "Номер користувача — значення фільтра.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "userId",
+          "displayName"
+        ],
+        "type": "object"
+      },
       "AuditSort": {
         "description": "Порядок сторінок журналів аудиту (вкладки Cell changes / Structure changes / Security events / Workflow events).",
         "enum": [
@@ -36104,6 +36126,65 @@
         ]
       }
     },
+    "/api/v1/audit/authors": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AuditAuthorView"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AuditAuthorView"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AuditAuthorView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Автори для фільтра «By user» журналів аудиту (✎ P-1124-4): номер і ім'я, без логіна й SID. Право\n`Security.ViewAudit` — те саме, що відкриває журнали; `GET /users` вимагає `Security.ManageUsers`.",
+        "tags": [
+          "Audit"
+        ]
+      }
+    },
     "/api/v1/audit/cells": {
       "get": {
         "description": "Таблиця партиційована за `ChangedAt`, а не за періодом: місяць\nзміни і звітний період — різні осі (зміна за січень може статися в\nберезні). Тому запит **обов'язково** обмежений вікном часу — інакше він\nпіде по всіх партиціях.\n\n⚠ Одна дія, ДВА рівні доступу (D15-16). `documentId + rowKey +\ncolumnDefId` разом — це історія ОДНІЄЇ комірки, і її бачить той, хто\nбачить документ (`Document.View` плюс грант на проєкт). Будь-який\nширший запит — загальний журнал, і для нього поріг лишається\n`Security.ViewAudit`. Розділяти це на два маршрути означало б\nдублювати вікно, курсор і всі п'ять фільтрів заради різниці, яка\nвиражається самим фільтром.\n\n⚠ `rowKey`/`columnDefId` без `documentId` —\n`422 ECR-REQ-0422`: ключ рядка унікальний у межах екземпляра\nтаблиці, а не системи, тож без документа він не адресує нічого.\nРодина `REQ`, а не `AUD`/`CELL`: суб'єкт відмови —\nпараметр запиту, і саме так тут уже відмовляють обидві перевірки вікна.",
@@ -36733,6 +36814,125 @@
         ]
       }
     },
+    "/api/v1/audit/security/event-types": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Початок вікна в UTC, включно.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кінець вікна в UTC, виключно.",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Типи подій безпеки, що є у вікні, — варіанти фільтра «Event type» (✎ P-1124-4). Право й вікно — як у\n`security`.",
+        "tags": [
+          "Audit"
+        ]
+      }
+    },
     "/api/v1/audit/security/export.csv": {
       "get": {
         "description": "Ті самі стеля, кодування й захист, що в `cells/export.csv`; подія безпеки `AuditSecurityExported`.",
@@ -36972,6 +37172,125 @@
           }
         },
         "summary": "Загальний журнал структурних змін (`BE-16`). Право `Security.ViewAudit`.",
+        "tags": [
+          "Audit"
+        ]
+      }
+    },
+    "/api/v1/audit/structure/entity-types": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Початок вікна в UTC, включно.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кінець вікна в UTC, виключно.",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Типи сутностей журналу структурних змін, що є у вікні, — варіанти фільтра «Entity type» (✎ P-1124-4). Право й\nвікно — як у `structure`.",
         "tags": [
           "Audit"
         ]

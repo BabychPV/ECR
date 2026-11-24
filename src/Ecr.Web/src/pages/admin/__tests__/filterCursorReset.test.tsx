@@ -66,6 +66,7 @@ function serve(path: string, row: unknown): URLSearchParams[] {
       const url = new URL(String(input), 'http://x');
 
       if (url.pathname === '/api/v1/me') return json({ permissions: [], denies: [], grants: {} });
+      if (url.pathname.endsWith('/entity-types')) return json(['cfg.Template']);
       if (url.pathname === path) {
         seen.push(url.searchParams);
         const cursor = url.searchParams.get('cursor');
@@ -120,9 +121,19 @@ describe('скидання курсора разом із відкладеним
       const seen = serve('/api/v1/audit/structure', structureRow);
       show(<AuditPage />, '/admin/audit?view=structure');
 
-      const after = await pageThenType(seen, '⟦audit.entityType⟧', 'cfg');
+      // ✎ P-1124-4: «Entity type» — вибір (код типу), не набір; скидання курсора — те саме.
+      const user = userEvent.setup();
+      const more = await screen.findByRole('button', { name: t('documents.more') }, { timeout: SlowEnvTimeout });
+      await user.click(more);
+      await waitFor(() => expect(seen).toHaveLength(2));
+      expect(seen[1]?.get('cursor')).toBe('page-2');
 
-      expect(after.map((query) => [query.get('entityType'), query.get('cursor')])).toEqual([['cfg', null]]);
+      await user.click(screen.getByRole('textbox', { name: '⟦audit.entityType⟧' }));
+      await user.click(await screen.findByRole('option', { name: 'Template' }, { timeout: SlowEnvTimeout }));
+      await waitFor(() => expect(seen.length).toBeGreaterThan(2));
+      await settle();
+
+      expect(seen.slice(2).map((query) => [query.get('entityType'), query.get('cursor')])).toEqual([['cfg.Template', null]]);
     },
     SlowEnvTimeout,
   );

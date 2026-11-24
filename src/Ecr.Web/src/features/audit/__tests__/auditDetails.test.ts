@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { auditDetailsText } from '@/features/audit/auditDetails';
+import { auditDetails, auditDetailsText } from '@/features/audit/auditDetails';
+import { jobKindLabel } from '@/features/workflow/jobLabel';
 
 /**
  * ✎ debt-1109 x10: «Details» журналу безпеки — читабельні пари замість сирого JSON.
@@ -27,6 +28,24 @@ describe('auditDetailsText', () => {
     );
     expect(text).not.toMatch(/[{}"]/);
     expect(auditDetailsText('{"a":[{"b":{"c":[1,2]},"d":[]}]}')).toBe('a: (b: (c: 1, 2), d: —)');
+  });
+
+  // ✎ P-1124-4: живий екран — «jobId: IConsistencyCheckJob-9e3d… · reason: oji». Ідентифікатор задачі — назвою виду
+  // задачі, GUID кореляції — геть із головного тексту; обидва лишаються в `technical`.
+  // Мутація: прибрати гілку `JobIdPattern` — червоне (у тексті знову ім'я класу з GUID).
+  it('jobId задачі — назва виду задачі, GUID — у technical, не в тексті', () => {
+    const view = auditDetails(
+      '{"jobId":"IConsistencyCheckJob-9e3d9be36c654521a03734c933b50263","reason":"oji","correlationId":"0f8fad5b-d9cb-469f-a165-70867728950e"}',
+    );
+    // Підпис виду задачі — з каталогу (`jobs.kind.consistencyCheck`, «Consistency check»); тест каталогу не вантажить.
+    expect(view.text).toBe(`job: ${jobKindLabel('IConsistencyCheckJob')} · reason: oji`);
+    expect(view.text).not.toMatch(/9e3d|IConsistency|0f8fad5b/u);
+    expect(view.technical).toStrictEqual([
+      'IConsistencyCheckJob-9e3d9be36c654521a03734c933b50263',
+      '0f8fad5b-d9cb-469f-a165-70867728950e',
+    ]);
+    // Звичайне число-ідентифікатор лишається в тексті: воно коротке й осмислене (роль №7).
+    expect(auditDetails('{"roleId":7}').text).toBe('roleId: 7');
   });
 
   it('не об’єкт або зіпсований JSON — як є; порожньо — тире', () => {

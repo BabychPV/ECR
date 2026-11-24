@@ -7,7 +7,7 @@ import { SortableTh } from '@/features/audit/SortableTh';
 import { decimalDelta } from '@/features/audit/changeDelta';
 import { NumericTypes, auditValueText } from '@/features/audit/auditValue';
 import { cellChangeReasonText } from '@/features/audit/cellChangeReason';
-import { Timestamp } from '@/shared/ui/Timestamp';
+import { AuditChangedAt } from '@/features/audit/AuditChangedAt';
 import { TwoLine } from '@/shared/ui/TwoLine';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
@@ -283,10 +283,11 @@ export const CellChangesTable = memo(function CellChangesTable({
       <Table.Tbody>
         {items.map((change, index) => (
           <Table.Tr key={`${change.documentId}:${change.rowKey}:${change.columnDefId}:${index}`}>
-            <Table.Td>
-              {/* ⛔ Саме `Timestamp`, а не сирий рядок: точне значення лишається в `dateTime`/`title`. */}
+            <Table.Td data-audit-time-cell="">
+              {/* ⛔ Не сирий рядок: точне значення лишається в `dateTime`/`title`.
+                  ✎ P-1124-4: місцевий час читача, 24 год, одним рядком (`AuditChangedAt`). */}
               <Text span ff="monospace" fz="sm">
-                <Timestamp value={change.changedAt} />
+                <AuditChangedAt value={change.changedAt} />
               </Text>
               {/* НФ-8.9.6 / D-247: рядок із архіву аудиту — позначка джерела, значення й межі читання ті самі. */}
               {change.fromArchive && (

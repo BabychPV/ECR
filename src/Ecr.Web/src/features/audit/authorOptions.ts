@@ -3,7 +3,12 @@ import { useQuery } from '@tanstack/react-query';
 import { allUsersQuery } from '@/features/security/allUsers';
 import { t } from '@/shared/i18n';
 import { isHumanCellChange } from '@/features/audit/api';
+import { apiFetch } from '@/api/client';
+import type { components } from '@/api/schema';
 import { can, useSession } from '@/shared/session/useSession';
+
+/** Автор для фільтра «By user» (`GET /api/v1/audit/authors`, ✎ P-1124-4): номер і ім'я, без логіна й SID. */
+type AuditAuthor = components['schemas']['AuditAuthorView'];
 
 /** Рядок журналу з автором — спільна форма журналу комірок і структури. */
 interface AuthoredRow {
@@ -68,6 +73,17 @@ export function useAuthorOptions(
     enabled: can(session.data, 'Security.ManageUsers'),
     staleTime: 5 * 60 * 1000,
   });
+  /*
+   * ✎ P-1124-4: автори за правом САМОГО журналу (`Security.ViewAudit`). `GET /users` вимагає `Security.ManageUsers`,
+   * якого вбудовані ролі не мають, — і в аудитора «By user» стояв порожнім «Anyone» без жодного варіанта (живий екран
+   * 24.11): у журналі безпеки більшість рядків — «Система» чи анонімна спроба входу, імені в рядку немає.
+   */
+  const authors = useQuery({
+    queryKey: ['audit-authors'],
+    queryFn: () => apiFetch<AuditAuthor[]>('/api/v1/audit/authors'),
+    enabled: can(session.data, 'Security.ViewAudit'),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const [seen, setSeen] = useState<ReadonlyMap<number, string>>(new Map());
 
@@ -78,7 +94,11 @@ export function useAuthorOptions(
       let next: Map<number, string> | null = null;
 
       for (const item of items) {
-        const name = item.changedByDisplayName;
+        // ✎ P-1124-4: «Система» (0) і анонімна спроба входу (-1) — теж варіанти фільтра: імені в рядку в них немає.
+        const name =
+          item.changedByUserId === SystemUserId || item.changedByUserId === AnonymousUserId
+            ? authorName(item)
+            : item.changedByDisplayName;
         if (name !== null && name !== undefined && previous.get(item.changedByUserId) !== name) {
           next ??= new Map(previous);
           next.set(item.changedByUserId, name);
@@ -91,6 +111,10 @@ export function useAuthorOptions(
 
   return useMemo(() => {
     const names = new Map<number, string>(seen);
+
+    for (const author of Array.isArray(authors.data) ? authors.data : []) {
+      names.set(author.userId, authorName({ changedByUserId: author.userId, changedByDisplayName: author.displayName }));
+    }
 
     for (const user of users.data?.items ?? []) {
       names.set(user.id, user.displayName.length > 0 ? user.displayName : user.userName);
@@ -111,5 +135,5 @@ export function useAuthorOptions(
         ? []
         : [{ value: '__list-truncated__', label: t('common.shownSoFar', { shown: users.data.items.length }), disabled: true }]),
     ];
-  }, [seen, users.data, selected]);
+  }, [seen, authors.data, users.data, selected]);
 }

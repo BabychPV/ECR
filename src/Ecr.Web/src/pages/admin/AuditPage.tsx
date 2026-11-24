@@ -312,6 +312,7 @@ export function AuditPage(): JSX.Element {
           description={t('audit.authorHint')}
           styles={readerOnlyDescription}
           placeholder={t('audit.authorAny')}
+          nothingFoundMessage={t('audit.filterNothing')}
           data={authorOptions}
           value={author === null ? null : String(author)}
           onChange={(value) => {

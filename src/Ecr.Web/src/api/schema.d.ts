@@ -555,6 +555,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/audit/authors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Автори для фільтра «By user» журналів аудиту (✎ P-1124-4): номер і ім'я, без логіна й SID. Право
+         *     `Security.ViewAudit` — те саме, що відкриває журнали; `GET /users` вимагає `Security.ManageUsers`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AuditAuthorView"][];
+                        "text/json": components["schemas"]["AuditAuthorView"][];
+                        "text/plain": components["schemas"]["AuditAuthorView"][];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit/cells": {
         parameters: {
             query?: never;
@@ -934,6 +984,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/audit/security/event-types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Типи подій безпеки, що є у вікні, — варіанти фільтра «Event type» (✎ P-1124-4). Право й вікно — як у
+         *     `security`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Початок вікна в UTC, включно. */
+                    from?: string;
+                    /** @description Кінець вікна в UTC, виключно. */
+                    to?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": string[];
+                        "text/json": string[];
+                        "text/plain": string[];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit/security/export.csv": {
         parameters: {
             query?: never;
@@ -1052,6 +1179,83 @@ export interface paths {
                         "application/json": components["schemas"]["PagedResultOfStructureChangeView"];
                         "text/json": components["schemas"]["PagedResultOfStructureChangeView"];
                         "text/plain": components["schemas"]["PagedResultOfStructureChangeView"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit/structure/entity-types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Типи сутностей журналу структурних змін, що є у вікні, — варіанти фільтра «Entity type» (✎ P-1124-4). Право й
+         *     вікно — як у `structure`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Початок вікна в UTC, включно. */
+                    from?: string;
+                    /** @description Кінець вікна в UTC, виключно. */
+                    to?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": string[];
+                        "text/json": string[];
+                        "text/plain": string[];
                     };
                 };
                 /** @description Bad Request */
@@ -32089,6 +32293,16 @@ export interface components {
              * @description Версія шаблону — з нею шаблон стає в проєкт (за нею заводяться нові документи).
              */
             templateVersionId: number;
+        };
+        /** @description ✎ P-1124-4: автор для фільтра «By user» журналів аудиту — номер і ім'я. ⛔ Не логін і не SID (R-A2, D-86). */
+        AuditAuthorView: {
+            /** @description Ім'я; порожнє ім'я в записі — `null` (клієнт покаже «користувач #id»). */
+            displayName: null | string;
+            /**
+             * Format: int32
+             * @description Номер користувача — значення фільтра.
+             */
+            userId: number;
         };
         /**
          * @description Порядок сторінок журналів аудиту (вкладки Cell changes / Structure changes / Security events / Workflow events).

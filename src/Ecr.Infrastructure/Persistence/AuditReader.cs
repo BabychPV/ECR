@@ -1134,6 +1134,72 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
             TotalCount: null);
     }
 
+    /// <inheritdoc />
+    public Task<IReadOnlyList<string>> ReadSecurityEventTypesAsync(DateTime from, DateTime to, CancellationToken ct)
+        => DistinctInWindowAsync("EventType", "aud.SecurityEvent", from, to, ct);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<string>> ReadStructureEntityTypesAsync(DateTime from, DateTime to, CancellationToken ct)
+        => DistinctInWindowAsync("EntityType", "aud.StructureChange", from, to, ct);
+
+    /// <summary>
+    /// Різні значення колонки журналу у вікні <c>ChangedAt</c> (✎ P-1124-4). <paramref name="column"/> і
+    /// <paramref name="table"/> — лише константи з цього класу, не з запиту.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> DistinctInWindowAsync(
+        string column, string table, DateTime from, DateTime to, CancellationToken ct)
+    {
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+
+        // ⚠ Вікно ПЕРШИМ — читаються лише партиції вікна, як у переліку.
+        command.CommandText = $"""
+            SELECT DISTINCT {column}
+              FROM {table}
+             WHERE ChangedAt >= @from AND ChangedAt < @to
+             ORDER BY {column};
+            """;
+        foreach (var (name, value) in new[] { ("@from", from), ("@to", to) })
+        {
+            var moment = command.Parameters.Add(name, SqlDbType.DateTime2);
+            moment.Scale = 3;
+            moment.Value = value;
+        }
+
+        var types = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            types.Add(reader.GetString(0));
+        }
+
+        return types;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<AuditAuthorView>> ReadAuditAuthorsAsync(CancellationToken ct)
+    {
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+
+        // ⛔ Лише номер і ім'я: логін і SID людині не показуються (R-A2, D-86).
+        command.CommandText = "SELECT Id, DisplayName FROM sec.[User] ORDER BY DisplayName, Id;";
+
+        var authors = new List<AuditAuthorView>();
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var name = StringOrNull(reader, 1);
+            authors.Add(new AuditAuthorView(reader.GetInt32(0), string.IsNullOrWhiteSpace(name) ? null : name));
+        }
+
+        return authors;
+    }
+
     /// <summary>
     /// Пояс майданчика для подій безпеки (✎ debt-1110): подія не належить проєкту, тож це пояс, спільний для всіх
     /// проєктів установки. Різні пояси або жодного проєкту — <c>null</c> (клієнт лишає пояс читача).

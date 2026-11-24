@@ -25,6 +25,13 @@ public sealed record SecurityEventView(
     string? CorrelationId = null,
     string? SiteTimeZoneId = null);
 
+/// <summary>
+/// ✎ P-1124-4: автор для фільтра «By user» журналів аудиту — номер і ім'я. ⛔ Не логін і не SID (R-A2, D-86).
+/// </summary>
+/// <param name="UserId">Номер користувача — значення фільтра.</param>
+/// <param name="DisplayName">Ім'я; порожнє ім'я в записі — <c>null</c> (клієнт покаже «користувач #id»).</param>
+public sealed record AuditAuthorView(int UserId, string? DisplayName);
+
 /// <summary>Фільтр журналу подій безпеки.</summary>
 /// <remarks>
 /// ⛔ Вікно часу — обов'язкове, як і в інших журналах: <c>aud.SecurityEvent</c>

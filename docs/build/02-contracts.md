@@ -5199,6 +5199,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/audit/security/export.csv` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/audit/workflow` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/audit/workflow/export.csv` | `Security.ViewAudit` | 7 |
+| `GET` | `/api/v1/audit/security/event-types` | `Security.ViewAudit` | 7 |
+| `GET` | `/api/v1/audit/structure/entity-types` | `Security.ViewAudit` | 7 |
+| `GET` | `/api/v1/audit/authors` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/consistency/issues` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/consistency/summary` | `System.ViewHealth` | 5 |
 | `POST` | `/api/v1/consistency/run` | `System.RunJob` | 5 |

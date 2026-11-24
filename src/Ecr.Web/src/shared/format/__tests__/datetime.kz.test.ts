@@ -31,6 +31,18 @@ afterEach(() => {
   localStorage.clear();
 });
 
+describe('formatDateTime24 (✎ P-1124-4, час журналів аудиту)', () => {
+  it('en — 24 год без AM/PM; kz без ICU kk — числовий запис, і з поясом майданчика теж', async () => {
+    const { formatDateTime24 } = await import('@/shared/format/datetime');
+    expect(formatDateTime24(At, undefined, 'en')).toBe('Oct 18, 2026, 18:40');
+
+    await load(false);
+    const kz = await import('@/shared/format/datetime');
+    expect(kz.formatDateTime24(At)).toBe('18.10.2026, 18:40');
+    // 2026-10-18T13:40Z у Атирау (+05) — 18:40; без числового запису було б «Oct 18, 2026, 18:40» англійською.
+    expect(kz.formatDateTime24('2026-10-18T13:40:00Z', 'Asia/Atyrau')).toBe('18.10.2026, 18:40');
+  });
+});
 describe('formatDate/formatDateTime/formatTime у kz без ICU kk', () => {
   it('дата й час — числовий запис kk-KZ, а не «Oct 18, 2026, 6:40 PM»', async () => {
     const { formatDate, formatDateTime, formatTime } = await load(false);
