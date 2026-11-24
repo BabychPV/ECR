@@ -4,6 +4,7 @@ import { RevoGrid } from '@revolist/react-datagrid';
 import type { ColumnRegular } from '@revolist/revogrid';
 import { installEnterKeyCompat } from '@/features/grid/keyboardCompat';
 import { installKeyCommitGate } from '@/features/grid/keyCommitGate';
+import { RevoGridDefaults } from '@/features/grid/revoGridDefaults';
 
 /**
  * Стенд черги клавіш (T3-01 → T4-01) для `e2e/keyCommitGateLive.spec.ts`.
@@ -52,6 +53,7 @@ export function KeyCommitGateStandPage(): JSX.Element {
   return (
     <div ref={containerRef} data-stand="key-commit-gate">
       <RevoGrid
+        {...RevoGridDefaults}
         theme="compact"
         range
         applyOnClose

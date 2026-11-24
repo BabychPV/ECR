@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { ActionIcon, Alert, Badge, Button, Group, List, Modal, Stack, Text } from '@mantine/core';
 import { RevoGrid } from '@revolist/react-datagrid';
+import { RevoGridDefaults } from './revoGridDefaults';
 import type { ColumnRegular } from '@revolist/revogrid';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseQueryResult } from '@tanstack/react-query';
@@ -3310,6 +3311,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       <div ref={gridContainerRef} className={sheetLockClass(sheetState)} style={{ display: 'contents' }}>
         <RevoGrid
+          {...RevoGridDefaults}
           theme="compact"
           rowSize={rowSize}
           range

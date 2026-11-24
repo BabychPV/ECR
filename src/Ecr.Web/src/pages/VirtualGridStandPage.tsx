@@ -2,6 +2,7 @@ import type { JSX } from 'react';
 import { useMemo } from 'react';
 import { RevoGrid } from '@revolist/react-datagrid';
 import type { ColumnRegular } from '@revolist/revogrid';
+import { RevoGridDefaults } from '@/features/grid/revoGridDefaults';
 import { useRowHeight } from '@/shared/theme/preferences';
 
 /**
@@ -47,6 +48,7 @@ export function VirtualGridStandPage(): JSX.Element {
   return (
     <div data-measure="virtual-grid" data-rows={StandRows} data-columns={StandColumns}>
       <RevoGrid
+        {...RevoGridDefaults}
         theme="compact"
         rowSize={rowSize}
         range
