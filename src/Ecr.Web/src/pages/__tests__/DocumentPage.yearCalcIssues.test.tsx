@@ -2,7 +2,7 @@ import type { JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DocumentPage } from '@/pages/DocumentPage';
 import { formatPeriodKey } from '@/shared/format/periodKey';
@@ -81,9 +81,30 @@ interface Faults {
   readonly calendarFails?: boolean;
   /** ✎ Огляд M4 (1): запит року (`year=true`) відмовив. */
   readonly yearFails?: boolean;
+  /** ✎ Огляд b11 (G): `submission-target` відмовив — `focusMonth` прибирається з адреси. */
+  readonly targetFails?: boolean;
+  /**
+   * ✎ Огляд b11 (G): записи «Помилок формул» року обрізано на вересні (стеля), а жовтень має власні помилки — їх
+   * показує лише запит місяця.
+   */
+  readonly truncated?: boolean;
+  /**
+   * ✎ Репетиція W15z: річний проєкт HSE400 (PeriodKind.Yearly) — `monthColumns` ПОРОЖНІЙ (статуси лише для місячного
+   * календаря), місяць колонки — у `monthColumnCodes`.
+   */
+  readonly yearlyProject?: boolean;
 }
 
-function mockFetch(layout: string, { calendarFails = false, yearFails = false }: Faults = {}): void {
+const formulaError = (monthNumber: number) => ({
+  tableCode: 'T0', sheetCopyId: null, rowKey: 'R1', rowOrdinal: 1, rowLabelL10n: null, columnCode: 'M01',
+  columnHeaderL10n: null, kind: 'Error', errorCode: '#VALUE', formula: '[A] / [B]', inputs: [], source: null,
+  since: '2099-11-03T08:00:00Z', dependentCount: 0, monthNumber,
+});
+
+function mockFetch(
+  layout: string,
+  { calendarFails = false, yearFails = false, targetFails = false, truncated = false, yearlyProject = false }: Faults = {},
+): void {
   requested.length = 0;
   vi.stubGlobal(
     'fetch',
@@ -113,7 +134,15 @@ function mockFetch(layout: string, { calendarFails = false, yearFails = false }:
       if (url.includes('/calculation-issues')) {
         if (url.includes('year=true')) {
           if (yearFails) return jsonResponse({ title: 'boom', status: 500 }, 500);
+          if (truncated) return jsonResponse({ items: [], formulaErrors: [formulaError(9)], formulaErrorTotal: 600 });
           return jsonResponse({ items: [stepError(10), stepError(12)], sourceIssues: [sourceChanged(10)] });
+        }
+        if (truncated) {
+          return url.includes(`periodKey=${String(October)}`)
+            ? jsonResponse({ items: [], formulaErrors: [formulaError(10)], formulaErrorTotal: 1 })
+            : url.includes('periodKey=209909')
+              ? jsonResponse({ items: [], formulaErrors: [formulaError(9)], formulaErrorTotal: 599 })
+              : jsonResponse({ items: [] });
         }
         // Відмова року: якір теж має проблему (запасна панель одного періоду має що показати).
         return url.includes(`periodKey=${String(October)}`) || yearFails
@@ -122,6 +151,10 @@ function mockFetch(layout: string, { calendarFails = false, yearFails = false }:
       }
       if (url.includes('/validation')) return jsonResponse({ documentId: 1, periodKey: Anchor, messages: [], validated: true });
       if (url.includes('/tables/status')) return jsonResponse([]);
+      // Зріз таблиці (перехід до колонки місяця доходить до сітки): порожній, але справжньої форми.
+      if (/\/tables\/\d+/.test(url)) {
+        return jsonResponse({ tableInstanceId: 1, periodKey: Anchor, columns: [], rows: [], cellPermissions: {}, cellConfirmations: {} });
+      }
       if (url.includes('/tables')) {
         return jsonResponse([
           {
@@ -134,6 +167,15 @@ function mockFetch(layout: string, { calendarFails = false, yearFails = false }:
       if (url.includes('/recall')) return jsonResponse({ canRecall: false });
       if (url.includes('/approver-edit')) return jsonResponse({ canApproverEdit: false });
       if (url.includes('/submission-target')) {
+        if (targetFails) return jsonResponse({ title: 'boom', status: 500 }, 500);
+        if (yearlyProject) {
+          return jsonResponse({
+            targetPeriodKey: Anchor, nextPeriodKey: null,
+            periods: [{ periodKey: Anchor, state: 'Open', sheetStatus: 'Draft', submittable: true }],
+            monthColumns: [],
+            monthColumnCodes: [1, 10].map((month) => ({ tableDefId: 1, columnCode: `M${String(month).padStart(2, '0')}`, monthNumber: month })),
+          });
+        }
         return jsonResponse({
           targetPeriodKey: Anchor, nextPeriodKey: null,
           periods: [{ periodKey: Anchor, state: 'Open', sheetStatus: 'Draft', submittable: true }],
@@ -155,6 +197,12 @@ function mockFetch(layout: string, { calendarFails = false, yearFails = false }:
   );
 }
 
+function LocationProbe(): JSX.Element {
+  return <div data-testid="search">{useLocation().search}</div>;
+}
+
+const search = (): string => screen.getByTestId('search').textContent ?? '';
+
 function show(initial: string, layout: string, faults: Faults = {}): void {
   mockFetch(layout, faults);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -163,6 +211,7 @@ function show(initial: string, layout: string, faults: Faults = {}): void {
     <MantineProvider theme={testTheme}>
       <MemoryRouter initialEntries={[initial]}>
         <QueryClientProvider client={client}>
+          <LocationProbe />
           <Routes>
             <Route path="/documents/:id" element={<DocumentPage />} />
           </Routes>
@@ -242,20 +291,64 @@ describe('DocumentPage: проблеми розрахунку документа
   );
 
   it(
-    'рік без місяця в адресі (якір): переходу сітки до колонки немає',
+    'рік: посилання на САМ якір (?periodKey=січень) — теж перехід до колонки січня (огляд b11, G), одноразово',
     async () => {
       navigation.requests.length = 0;
       show(`/documents/1?periodKey=${String(Anchor)}`, 'YearWithMonthColumns');
 
       await waitFor(
+        () => expect(navigation.requests).toContainEqual(expect.objectContaining({ tableDefId: 1, columnCode: 'M01' })),
+        { timeout: 60_000 },
+      );
+      await waitFor(() => expect(search()).toBe(`?periodKey=${String(Anchor)}`), { timeout: 60_000 });
+      // Прибрання focusMonth з адреси не запускає перехід удруге.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(navigation.requests.filter((r) => (r as { columnCode?: string }).columnCode === 'M01')).toHaveLength(1);
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'рік, річний проєкт як HSE400 (monthColumns порожній): перехід до колонки жовтня з monthColumnCodes',
+    async () => {
+      navigation.requests.length = 0;
+      show(`/documents/1?periodKey=${String(October)}`, 'YearWithMonthColumns', { yearlyProject: true });
+
+      await waitFor(
+        () => expect(navigation.requests).toContainEqual(expect.objectContaining({ tableDefId: 1, columnCode: 'M10' })),
+        { timeout: 60_000 },
+      );
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'рік: submission-target відмовив — focusMonth прибрано з адреси (не спрацює пізніше на іншому аркуші)',
+    async () => {
+      show(`/documents/1?periodKey=${String(October)}`, 'YearWithMonthColumns', { targetFails: true });
+
+      await waitFor(() => expect(requested.some((url) => url.includes('/submission-target'))).toBe(true), { timeout: 60_000 });
+      await waitFor(() => expect(search()).toBe(`?periodKey=${String(Anchor)}`), { timeout: 60_000 });
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'рік: записи помилок формул року обрізано на вересні — жовтень (повністю відкинутий) усе одно має панель (G tail)',
+    async () => {
+      show(`/documents/1?periodKey=${String(Anchor)}`, 'YearWithMonthColumns', { truncated: true });
+
+      await waitFor(
         () => {
           if (document.querySelector(`[data-testid="document-calc-issues"][data-period="${String(October)}"]`) === null) {
-            throw new Error('сторінка ще не готова');
+            throw new Error('панелі жовтня немає');
           }
         },
         { timeout: 60_000 },
       );
-      expect(navigation.requests).toEqual([]);
+      const september = document.querySelector<HTMLElement>('[data-testid="document-calc-issues"][data-period="209909"]');
+      expect(september).not.toBeNull();
+      expect(within(september!).getByTestId('document-calc-issue-count').getAttribute('data-at-least')).toBe('true');
     },
     SlowEnvTimeout,
   );

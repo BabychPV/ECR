@@ -258,8 +258,73 @@ describe('прокрутка й фокус через API revo-grid', () => {
     container.append(grid);
 
     await revealGridCell(container, { x: 10, y: 0 }, 1);
-    expect(grid.scrollToColumnIndex.mock.calls.length).toBeGreaterThanOrEqual(2);
+    await vi.waitFor(() => expect(grid.scrollToColumnIndex.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 2000 });
     expect(viewport.scrollLeft).toBe(300);
+  });
+
+  // ✎ Огляд b11 (F): перехід торкається КОЖНОГО стрибка (Issues, чат, D-461) — не смикати видиме, не затримувати фокус,
+  // не повертати до старої колонки.
+  function revoWithViewport(options: { columnVisible?: boolean; rowVisible?: boolean } = {}) {
+    const container = document.createElement('div');
+    const viewport = document.createElement('revogr-viewport-scroll');
+    viewport.className = 'rgCol';
+    const rect = (left: number, top: number, width: number, height: number) => () =>
+      ({ left, top, right: left + width, bottom: top + height, width, height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+    viewport.getBoundingClientRect = rect(0, 0, 800, 400);
+    const cell = document.createElement('div');
+    cell.setAttribute('data-rgcol', '9');
+    cell.setAttribute('data-rgrow', '30');
+    cell.getBoundingClientRect = rect(options.columnVisible === true ? 100 : 900, options.rowVisible === true ? 100 : 900, 80, 30);
+    const data = document.createElement('revogr-data');
+    data.setAttribute('type', 'rgRow');
+    data.append(cell);
+    viewport.append(data);
+    const grid = Object.assign(document.createElement('revo-grid'), {
+      componentOnReady: vi.fn(() => Promise.resolve()),
+      scrollToCoordinate: vi.fn(() => Promise.resolve()),
+      scrollToColumnIndex: vi.fn(() => Promise.resolve()),
+      scrollToRow: vi.fn(() => Promise.resolve()),
+      setCellsFocus: vi.fn(() => Promise.resolve()),
+    });
+    grid.append(viewport);
+    container.append(grid);
+    return { container, grid, viewport };
+  }
+
+  it('(a) колонка й рядок уже у вікні — без прокрутки колонки й рядка; поза вікном — прокрутка за індексом', async () => {
+    const visible = revoWithViewport({ columnVisible: true, rowVisible: true });
+    visible.viewport.scrollLeft = 50;
+    await revealGridCell(visible.container, { x: 10, y: 30 }, 1);
+    expect(visible.grid.scrollToColumnIndex).not.toHaveBeenCalled();
+    expect(visible.grid.scrollToRow).not.toHaveBeenCalled();
+    expect(visible.grid.setCellsFocus).toHaveBeenCalledWith({ x: 9, y: 30 }, { x: 9, y: 30 });
+
+    const hidden = revoWithViewport();
+    await revealGridCell(hidden.container, { x: 10, y: 30 }, 1);
+    expect(hidden.grid.scrollToColumnIndex).toHaveBeenCalledWith(9);
+    // Вертикаль: `scrollToCoordinate({ y })` — теж ПІКСЕЛІ; рядок за індексом — `scrollToRow`.
+    expect(hidden.grid.scrollToRow).toHaveBeenCalledWith(30);
+    expect(hidden.grid.scrollToCoordinate).not.toHaveBeenCalled();
+  });
+
+  it('(b) фокус не чекає на сторожа горизонтальної прокрутки (повертається одразу)', async () => {
+    const { container, grid } = revoWithViewport();
+    const started = Date.now();
+    await revealGridCell(container, { x: 10, y: 0 }, 1);
+    expect(Date.now() - started).toBeLessThan(100);
+    expect(grid.setCellsFocus).toHaveBeenCalled();
+    // Сторож працює далі у фоні: прокрутку скинуто (scrollLeft 0) — повтор.
+    await vi.waitFor(() => expect(grid.scrollToColumnIndex.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 2000 });
+  });
+
+  it('(c) новий стрибок скасовує сторожа попереднього — прокрутка не повертається до старої колонки', async () => {
+    const { container, grid } = revoWithViewport();
+    await revealGridCell(container, { x: 10, y: 0 }, 1);
+    await revealGridCell(container, { x: 4, y: 0 }, 1);
+    grid.scrollToColumnIndex.mockClear();
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    expect(grid.scrollToColumnIndex.mock.calls.length).toBeGreaterThan(0);
+    expect((grid.scrollToColumnIndex.mock.calls as unknown as number[][]).every((call) => call[0] === 3)).toBe(true);
   });
 
   it('без елемента сітки — false, без винятку', async () => {

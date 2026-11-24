@@ -45,12 +45,20 @@ public sealed record MonthColumnStatusDto(
 /// <param name="Periods">Відкриті періоди проєкту за зростанням (вибір іншого періоду — серед <c>Submittable</c>).</param>
 /// <param name="MonthColumns">Місячні колонки таблиць <c>MonthsInColumns</c> аркуша зі станом свого періоду.</param>
 /// <param name="AnchorUnapprovedSourcePeriodKey">✎ D-6: аркуш за період запиту поданий (у будь-якому стані періоду, зокрема закритому) — місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить його затвердження; null — перешкоди немає.</param>
+/// <param name="MonthColumnCodes">✎ W15z M4: місяць кожної місячної колонки аркуша (<c>IsMonthColumn</c>/<c>MonthNumber</c>) — факт шаблону, незалежно від календаря й розкладки таблиці (річний проєкт HSE400 статусів <c>MonthColumns</c> не має): куди вести посилання на місяць річного документа. Схованих таблиць немає; <c>null</c> — аркуша немає у версії.</param>
 public sealed record SubmissionTargetDto(
     int? TargetPeriodKey,
     int? NextPeriodKey,
     IReadOnlyList<SubmissionPeriodDto> Periods,
     IReadOnlyList<MonthColumnStatusDto> MonthColumns,
-    int? AnchorUnapprovedSourcePeriodKey = null);
+    int? AnchorUnapprovedSourcePeriodKey = null,
+    IReadOnlyList<MonthColumnRefDto>? MonthColumnCodes = null);
+
+/// <summary>✎ W15z M4: місячна колонка таблиці аркуша — код і місяць (без стану).</summary>
+/// <param name="TableDefId">Таблиця.</param>
+/// <param name="ColumnCode">Код колонки.</param>
+/// <param name="MonthNumber">Місяць колонки 1..12.</param>
+public sealed record MonthColumnRefDto(int TableDefId, string ColumnCode, byte MonthNumber);
 
 /// <summary>
 /// Що подасть кнопка «Подати» на аркуші (D-441). Право <c>Document.View</c>.
@@ -113,6 +121,7 @@ public sealed class GetSubmissionTargetHandler(
         var sheet = snapshot.Sheets.FirstOrDefault(s => s.Id == sheetDefId);
 
         IReadOnlyList<MonthColumnStatusDto> months = [];
+        IReadOnlyList<MonthColumnRefDto>? codes = null;
         if (sheet is not null)
         {
             // S6: межі читання — лише для читача з обмеженнями нижче проєкту (решта не платить запитом).
@@ -124,6 +133,7 @@ public sealed class GetSubmissionTargetHandler(
             }
 
             months = SubmissionPeriodSelector.MonthColumns(calendar, sheet, key.Year, canReadTable);
+            codes = SubmissionPeriodSelector.MonthColumnCodes(sheet, canReadTable);
 
             // ✎ D-6: що САМЕ ЦЯ людина може зробити з кожним місяцем (затвердити/відхилити, відкликати, повернути) —
             // право в річному аркуші своє на кожен місяць (крок маршруту, автор подання), тож клієнт не вгадує його.
@@ -142,7 +152,7 @@ public sealed class GetSubmissionTargetHandler(
             .ConfigureAwait(false);
 
         return new SubmissionTargetDto(
-            choice.TargetPeriodKey, choice.NextPeriodKey, gated.Periods, gated.Months, gated.AnchorUnapprovedSourcePeriodKey);
+            choice.TargetPeriodKey, choice.NextPeriodKey, gated.Periods, gated.Months, gated.AnchorUnapprovedSourcePeriodKey, codes);
     }
 }
 

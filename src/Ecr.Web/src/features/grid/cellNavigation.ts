@@ -151,6 +151,8 @@ interface RevoGridNavigable {
   scrollToCoordinate?: (cell: { x?: number; y?: number }) => Promise<void>;
   /** Прокрутка до колонки за ІНДЕКСОМ в'юпорту `rgCol` (`scrollToCoordinate` — у пікселях). */
   scrollToColumnIndex?: (coordinate?: number) => Promise<void>;
+  /** Прокрутка до рядка за ІНДЕКСОМ в'юпорту `rgRow`. */
+  scrollToRow?: (coordinate?: number) => Promise<void>;
   setCellsFocus?: (start?: GridCellCoordinate, end?: GridCellCoordinate, colType?: string) => Promise<void>;
 }
 
@@ -178,18 +180,32 @@ export async function revealGridCell(
   const target = viewportOfColumn(coordinate.x, pinnedStart);
   const local: GridCellCoordinate = { x: target.x, y: coordinate.y };
 
+  // ✎ Огляд b11 (F, c): новий стрибок скасовує фонового сторожа попереднього (D-461 крок за кроком).
+  revealSeq += 1;
+  const seq = revealSeq;
+
   await grid.componentOnReady?.();
+  // ✎ Огляд M4 (4) / b11 (F): `scrollToCoordinate` RevoGrid приймає ПІКСЕЛІ (`viewport.scrollToCell` → `proxyScroll`), не
+  // індекси: колонка за межами вікна (M10 із 12) не прокручувалась (e2e-stand 45310768143), а `{ y: rowIndex }` крутив
+  // на rowIndex пікселів. За індексом прокручують `scrollToColumnIndex`/`scrollToRow` — і лише коли цілі у вікні немає
+  // (a: видиму не смикаємо до краю). Сітка без цих методів (старі макети тестів) — як доти.
+  const byIndex = grid.scrollToColumnIndex !== undefined || grid.scrollToRow !== undefined;
+  // ⚠ Лише рядки ДАНИХ (`type="rgRow"`): рядок підсумків (`rowPinEnd`) має ті самі індекси з 0.
+  const rowHidden = !cellVisible(grid, `revogr-data[type="rgRow"] [data-rgrow="${String(coordinate.y)}"]`, 'y');
   if (target.colType === 'colPinStart') {
-    await grid.scrollToCoordinate?.({ y: coordinate.y });
+    if (!byIndex) await grid.scrollToCoordinate?.({ y: coordinate.y });
+    else if (rowHidden) await scrollRow(grid, coordinate.y);
     await grid.setCellsFocus?.(local, local, 'colPinStart');
-  } else {
+  } else if (!byIndex) {
     await grid.scrollToCoordinate?.(local);
-    // ✎ Огляд M4 (4): `scrollToCoordinate` RevoGrid приймає ПІКСЕЛІ (`viewport.scrollToCell` → `proxyScroll`), не
-    // індекс колонки, тож колонка за межами вікна (M10 із 12 місячних) не прокручувалась — фокус ставав, комірки не було
-    // видно (e2e-stand 45310768143). Колонку за індексом прокручує `scrollToColumnIndex` (індекс → позиція в'юпорту).
-    await grid.scrollToColumnIndex?.(local.x);
     await grid.setCellsFocus?.(local, local);
-    if (grid.scrollToColumnIndex !== undefined && local.x > 0) await keepColumnScrolled(grid, local.x);
+  } else {
+    if (rowHidden) await scrollRow(grid, coordinate.y);
+    const columnHidden = local.x > 0 && !cellVisible(grid, `[data-rgcol="${String(local.x)}"]`, 'x');
+    if (columnHidden) await grid.scrollToColumnIndex?.(local.x);
+    await grid.setCellsFocus?.(local, local);
+    // (b) сторож — у фоні: фокус, вертикаль і завершення переходу не чекають на нього.
+    if (columnHidden && grid.scrollToColumnIndex !== undefined) void keepColumnScrolled(grid, local.x, seq);
   }
 
   // ✎ fg6 F13: рядок, до якого перейшли, — у верхній третині вікна, а не на нижньому краї (людина: банер і сітка
@@ -204,14 +220,41 @@ export async function revealGridCell(
 const ColumnScrollChecks = 8;
 const ColumnScrollCheckMs = 120;
 
+/** Номер останнього стрибка — сторож старішого виходить (огляд b11, F c). */
+let revealSeq = 0;
+
+/** Рядок за індексом (`scrollToRow`); без методу — пікселі, як доти. */
+async function scrollRow(grid: Element & RevoGridNavigable, row: number): Promise<void> {
+  if (grid.scrollToRow !== undefined) await grid.scrollToRow(row);
+  else await grid.scrollToCoordinate?.({ y: row });
+}
+
+/**
+ * Чи відрендерена комірка/заголовок з цим індексом ЦІЛКОМ у видимому в'юпорті `rgCol` по осі (RevoGrid віртуалізує:
+ * поза вікном її в DOM немає або вона в буфері за краєм). Невідомо (немає в'юпорту чи елемента) — «не видно».
+ */
+function cellVisible(grid: Element, selector: string, axis: 'x' | 'y'): boolean {
+  const viewport = grid.querySelector('revogr-viewport-scroll.rgCol');
+  const element = viewport?.querySelector(selector) ?? null;
+  if (viewport === null || element === null) return false;
+  const box = viewport.getBoundingClientRect();
+  const own = element.getBoundingClientRect();
+  if (own.width === 0 && own.height === 0) return false;
+
+  return axis === 'x'
+    ? own.left >= box.left - 1 && own.right <= box.right + 1
+    : own.top >= box.top - 1 && own.bottom <= box.bottom + 1;
+}
+
 /**
  * ✎ Огляд M4 (4): RevoGrid скидає горизонтальну прокрутку в'юпорту `rgCol` на 0, коли сітка одразу після переходу
  * перемальовує колонки (підсвітка цілі — `cellProperties` колонок; e2e-stand: `scrollLeft` 0 через 300 мс після
  * переходу, хоча ручний `scrollToColumnIndex(9)` прокручує). Кілька коротких перевірок: скинуто — прокрутити знову.
  */
-async function keepColumnScrolled(grid: Element & RevoGridNavigable, column: number): Promise<void> {
+async function keepColumnScrolled(grid: Element & RevoGridNavigable, column: number, seq: number): Promise<void> {
   for (let attempt = 0; attempt < ColumnScrollChecks; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, ColumnScrollCheckMs));
+    if (seq !== revealSeq) return;
     const viewport = grid.querySelector('revogr-viewport-scroll.rgCol');
     if (viewport === null) return;
     if (viewport.scrollLeft === 0) await grid.scrollToColumnIndex?.(column);

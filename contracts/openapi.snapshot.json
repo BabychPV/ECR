@@ -14743,6 +14743,31 @@
         ],
         "type": "object"
       },
+      "MonthColumnRefDto": {
+        "description": "✎ W15z M4: місячна колонка таблиці аркуша — код і місяць (без стану).",
+        "properties": {
+          "columnCode": {
+            "description": "Код колонки.",
+            "type": "string"
+          },
+          "monthNumber": {
+            "description": "Місяць колонки 1..12.",
+            "format": "uint8",
+            "type": "integer"
+          },
+          "tableDefId": {
+            "description": "Таблиця.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tableDefId",
+          "columnCode",
+          "monthNumber"
+        ],
+        "type": "object"
+      },
       "MonthColumnStatusDto": {
         "description": "Статус місячної колонки (D-441): стан аркуша за період місяця колонки.",
         "properties": {
@@ -31140,6 +31165,16 @@
             "type": [
               "null",
               "integer"
+            ]
+          },
+          "monthColumnCodes": {
+            "description": "✎ W15z M4: місяць кожної місячної колонки аркуша (`IsMonthColumn`/`MonthNumber`) — факт шаблону, незалежно від календаря й розкладки таблиці (річний проєкт HSE400 статусів `MonthColumns` не має): куди вести посилання на місяць річного документа. Схованих таблиць немає; `null` — аркуша немає у версії.",
+            "items": {
+              "$ref": "#/components/schemas/MonthColumnRefDto"
+            },
+            "type": [
+              "null",
+              "array"
             ]
           },
           "monthColumns": {
