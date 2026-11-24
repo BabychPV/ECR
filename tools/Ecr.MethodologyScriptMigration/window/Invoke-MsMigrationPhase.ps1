@@ -413,7 +413,9 @@ WHERE v.Status = 1 AND m.Kind <> 2 AND v.ScriptText IS NOT NULL
         }
     }
     'WaterV2' {
-        if (-not $WaterText -or -not $WaterGolden) { Stop-Phase 'WaterV2 needs -WaterText and -WaterGolden' $null }
+        if (-not $WaterText) { $WaterText = Join-Path $PSScriptRoot 'finalize-cases\ECW_C09_02_01-V2.ecrs' }
+        if (-not $WaterGolden) { $WaterGolden = Join-Path $PSScriptRoot 'finalize-cases\ECW_C09_02_01-golden.json' }
+        if (-not (Test-Path -LiteralPath $WaterText) -or -not (Test-Path -LiteralPath $WaterGolden)) { Stop-Phase 'WaterV2: water text / golden set not found' $null }
         $cur = @(Invoke-Sql "SELECT TOP 1 v.Id, v.Engine, v.Version FROM calc.MethodologyVersion v JOIN calc.Methodology m ON m.Id = v.MethodologyId WHERE m.Code = 'ECW_C09_02_01' AND v.Status = 1 ORDER BY v.EffectiveFrom DESC, v.Id DESC")
         if ($cur.Count -eq 0) { Stop-Phase 'water methodology has no published version' $null }
         $c = $cur[0] -split '\|'
@@ -483,7 +485,13 @@ FROM calc.MethodologyVersion v JOIN calc.Methodology m ON m.Id = v.MethodologyId
         }
         # 3. Випадки: ref/syn-cases фази на КОЖНУ формульну версію за кодом методології + додаткові файли.
         $proofs = @{}
-        $sources = @(@{ f = (Join-Path $Work 'ref-cases.json'); s = 'reference' }, @{ f = (Join-Path $Work 'syn-cases.json'); s = 'synthetic' }) + @($ExtraCases | ForEach-Object { @{ f = $_; s = $(if ($_ -match 'synthetic') { 'synthetic' } else { 'legacy' }) } })
+        # Випадки — у теці фази поруч зі скриптом (finalize-cases: ref/syn W15z, синтетика B-1, вода), щоб вікно не копіювало файли руками;
+        # ref/syn-cases.json із -Work (якщо Reference цього вікна їх перебудував) мають перевагу.
+        $bundle = Join-Path $PSScriptRoot 'finalize-cases'
+        $refF = if (Test-Path -LiteralPath (Join-Path $Work 'ref-cases.json')) { Join-Path $Work 'ref-cases.json' } else { Join-Path $bundle 'ref-cases.json' }
+        $synF = if (Test-Path -LiteralPath (Join-Path $Work 'syn-cases.json')) { Join-Path $Work 'syn-cases.json' } else { Join-Path $bundle 'syn-cases.json' }
+        if ($ExtraCases.Count -eq 0) { $ExtraCases = @(Get-ChildItem -LiteralPath $bundle -Filter '*-*.json' | Where-Object { $_.Name -match '-(synthetic|legacy)\.json$' } | ForEach-Object { $_.FullName }) }
+        $sources = @(@{ f = $refF; s = 'reference' }, @{ f = $synF; s = 'synthetic' }) + @($ExtraCases | ForEach-Object { @{ f = $_; s = $(if ($_ -match 'synthetic') { 'synthetic' } else { 'legacy' }) } })
         foreach ($src in $sources) {
             if (-not (Test-Path -LiteralPath $src.f)) { Write-Phase "no case file $($src.f) - skipped" $null; continue }
             $doc = Get-Content -LiteralPath $src.f -Raw -Encoding UTF8 | ConvertFrom-Json
