@@ -1440,7 +1440,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'methodologies.reasonHint',        N'en', N'Recorded in the change log: it explains why past numbers were recalculated.', 1),
     (N'methodologies.effectiveFrom',     N'en', N'Effective from', 1),
     (N'methodologies.effectiveFromHint', N'en', N'Periods from this date on are calculated by this version; earlier ones keep the previous.', 1),
-    (N'methodologies.versionsTitle',     N'en', N'Versions and formulas', 1),
+    (N'methodologies.versionsTitle',     N'en', N'Versions', 1),
     (N'methodologies.version',           N'en', N'Version', 1),
     (N'methodologies.status',            N'en', N'Status', 1),
     (N'methodologies.modes',             N'en', N'Modes', 1),

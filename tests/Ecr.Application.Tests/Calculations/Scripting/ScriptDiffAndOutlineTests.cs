@@ -47,11 +47,14 @@ public sealed class ScriptDiffAndOutlineTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "MS-T3.2")]
-    public void Заготовка_нової_версії_компілюється_з_єдиною_діагностикою_missingRows()
+    public void Заготовка_нової_версії_компілюється_без_жодної_діагностики()
     {
+        // ✎ P-1124-1 (людина 24.11: «свіжа чернетка — 0 проблем»): текст лише з коментарів не має missingRows;
+        // порожню версію однаково не опублікувати (noBoundOutput). Мутація: прибрати умову program.Items.Count > 0
+        // у ScriptBinder — тест червоний.
         var compilation = ScriptTestKit.Compile(ScriptStarter.Text);
 
-        Assert.Equal([ScriptDiagnosticCodes.MissingRows], compilation.Diagnostics.Select(d => d.Code));
+        Assert.Empty(compilation.Diagnostics);
     }
 
     [Fact]

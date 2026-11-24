@@ -163,6 +163,17 @@ public sealed class DiagnosticTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void missingRows_немає_для_тексту_лише_з_коментарів()
+    {
+        // ✎ P-1124-1 (людина 24.11: «свіжа чернетка — 0 проблем»): заготовка з коментарів — без проблем; щойно
+        // з'являється бодай одна конструкція без rows — missingRows, як і раніше (`output` чи `const`).
+        Assert.Empty(T.Compile("// rows from T1;\n// output X : t = 1;\n").Diagnostics);
+        Assert.Empty(T.Compile("").Diagnostics);
+        Has(T.Compile("// header\noutput X : t = 1;"), ScriptDiagnosticCodes.MissingRows);
+        Has(T.Compile("const k = 1;"), ScriptDiagnosticCodes.MissingRows);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void duplicateTable()
     {
         Has(T.Compile("rows from T1, T2; rows from T2;"), ScriptDiagnosticCodes.DuplicateTable);
