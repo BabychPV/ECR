@@ -22,9 +22,9 @@ vi.mock('@/features/common/usePendingLoading', () => ({ usePendingLoading: () =>
  * діалогу лишилась би в DOM і слала б другий POST).
  */
 
-const Registry = { id: 1, code: 'STREAM_CASE', nameL10n: { values: { en: 'Streams' } }, isTemporal: false, fields: [] } as unknown as RegistryDefDto;
+const Registry = { id: 1, code: 'FLARE_CASE', nameL10n: { values: { en: 'Streams' } }, isTemporal: false, fields: [] } as unknown as RegistryDefDto;
 const Row = storedRows[0]!;
-const Save = 'POST /api/v1/registries/STREAM_CASE/entries';
+const Save = 'POST /api/v1/registries/FLARE_CASE/entries';
 
 /** Наступний тік: `isPending` мутації вже дійшов до рендера (так приходить другий клік подвійного кліку). */
 async function nextTick(): Promise<void> {

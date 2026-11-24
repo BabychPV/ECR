@@ -129,6 +129,17 @@ function UnitsIcon(): JSX.Element {
   );
 }
 
+/** Gas composition — колба з рівнем рідини й бульбашкою (склад газу, D-NEW). */
+function GasCompositionIcon(): JSX.Element {
+  return (
+    <Icon>
+      <path d="M9.5 3h5M10.5 3v5.5L5.2 18.2A1.9 1.9 0 0 0 6.9 21h10.2a1.9 1.9 0 0 0 1.7-2.8L13.5 8.5V3" />
+      <path d="M7.6 14h8.8" />
+      <circle cx="11" cy="17.5" r="0.9" />
+    </Icon>
+  );
+}
+
 /** Security — щит із позначкою. */
 function SecurityIcon(): JSX.Element {
   return (
@@ -310,6 +321,7 @@ const navIcons: Record<string, () => JSX.Element> = {
   methodologies: MethodologiesIcon,
   expressions: ExpressionsIcon,
   units: UnitsIcon,
+  gasComposition: GasCompositionIcon,
   security: SecurityIcon,
   periods: PeriodsIcon,
   sources: SourcesIcon,

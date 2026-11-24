@@ -512,6 +512,19 @@ export const routes = {
     handle: { labelKey: 'nav.units', permission: 'Calculation.View', icon: 'units', descriptionKey: 'nav.units.description' },
     showInNav: true,
   },
+  /** Склад газу (D-NEW, людина 24.11: «Додай в бічній панелі пункт»): потоки, кейси, версії складу — власник ECR. */
+  adminGasComposition: {
+    id: 'admin-gas-composition',
+    path: '/admin/gas-composition',
+    handle: {
+      labelKey: 'nav.gasComposition',
+      permission: 'GasComposition.View',
+      icon: 'gasComposition',
+      descriptionKey: 'nav.gasComposition.description',
+      skeletonShape: 'table',
+    },
+    showInNav: true,
+  },
   adminSecurity: {
     id: 'admin-security',
     path: '/admin/security',
@@ -815,6 +828,7 @@ export const navGroups: readonly NavGroup[] = [
       routes.adminMethodologies,
       routes.adminExpressions,
       routes.adminUnits,
+      routes.adminGasComposition,
       routes.adminSources,
       routes.adminDependencyGraph,
       routes.adminMapping,

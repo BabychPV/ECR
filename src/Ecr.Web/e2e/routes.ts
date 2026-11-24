@@ -32,6 +32,7 @@ export const Routes = [
   { path: '/admin/methodologies', name: 'methodologies' },
   { path: '/admin/expressions', name: 'expressions' },
   { path: '/admin/units', name: 'units' },
+  { path: '/admin/gas-composition', name: 'gas-composition' },
   { path: '/admin/security', name: 'security' },
   // ✎ Projects (08.11): «Periods» і «Project settings» — один перелік /projects.
   { path: '/projects', name: 'projects' },

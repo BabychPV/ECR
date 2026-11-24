@@ -21,7 +21,7 @@ import { problemText } from '@/shared/ui/problemText';
 import { t } from '@/shared/i18n';
 import { RegistryExternalKeysPanel } from './RegistryExternalKeysPanel';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
-import { isExternalRegistry } from './externalRegistry';
+import { isExternalRegistry, isGasCompositionRegistryCode } from './externalRegistry';
 
 // ✎ D-132: `isExternalRegistry` — у `./externalRegistry`, щоб сторінка даних довідника не тягнула редактор запису
 // в чанк маршруту заради однієї перевірки. Реекспорт — для наявних імпортів.
@@ -210,7 +210,9 @@ function EntryForm({
   const queryClient = useQueryClient();
 
   // D-211: External — лише перегляд; поля й збереження неактивні, підказка каже, де правити.
-  const readOnly = isExternalRegistry(registry);
+  // D-NEW: склад газу (`STREAM`, `STREAM_CASE`, `GAS_COMPOSITION`) пише лише сторінка «Склад газу» — тут теж перегляд.
+  const gasComposition = isGasCompositionRegistryCode(registry.code);
+  const readOnly = isExternalRegistry(registry) || gasComposition;
 
   const [code, setCode] = useState(initial.code);
   const [display, setDisplay] = useState<LocalizedValue>(initial.display);
@@ -246,7 +248,7 @@ function EntryForm({
     <>
       {readOnly && (
         <Alert color="statusWarning" mb="sm" data-registry-external="read-only">
-          {t('registries.externalReadOnly')}
+          {gasComposition ? t('gasComposition.registryManaged') : t('registries.externalReadOnly')}
         </Alert>
       )}
 
