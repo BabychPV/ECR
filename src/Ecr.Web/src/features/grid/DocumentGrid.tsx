@@ -2846,8 +2846,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     }
 
     const column = data.columns[dataColumnIndexOf(coordinate.x, data)];
+    // ✎ Огляд M4 (4): `FirstRowKey` — ключ підсвітки за справжнім рядком, на який перейшли.
+    const rowKey = data.rows[coordinate.y]?.rowKey ?? navigateTo.rowKey;
     if (column !== undefined) {
-      setNavigated({ key: cellKey(navigateTo.rowKey, column.code), seq: request.seq });
+      setNavigated({ key: cellKey(rowKey, column.code), seq: request.seq });
     }
 
     void revealGridCell(node, coordinate, pinnedStartRef.current)

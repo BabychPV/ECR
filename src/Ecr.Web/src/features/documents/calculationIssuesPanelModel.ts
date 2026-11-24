@@ -3,7 +3,7 @@ import type { SourceIssue } from '@/features/calculationIssues/api';
 import { copyFieldsOf } from '@/features/documents/sheetCopies/sheetCopyTypes';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { localized } from '@/shared/i18n/localized';
-import type { UnmatchedRows } from './useUnmatchedRows';
+import { representedFormulaCells, type UnmatchedRows } from './useUnmatchedRows';
 import { groupRowCount, groupUnmatchedRows } from './unmatchedRowsModel';
 
 /**
@@ -334,12 +334,10 @@ function latestChange(group: readonly SourceIssue[]): string | null {
  * і лічильники причин — нижня межа («N+»).
  */
 export function formulaErrorsTruncated(rows: UnmatchedRows): boolean {
-  const represented = rows.formulaErrors.reduce(
-    (sum, error) => sum + (error.kind === 'Error' ? 1 + error.dependentCount : Math.max(1, error.dependentCount)),
-    0,
-  );
+  // ✎ Огляд M4 (2): документ «рік» — обрізання визначено за відповіддю року (`splitIssuesByMonth`), не за місяцем.
+  if (rows.truncatedFormulaErrors === true) return true;
 
-  return (rows.formulaErrorTotal ?? 0) > represented;
+  return (rows.formulaErrorTotal ?? 0) > representedFormulaCells(rows.formulaErrors);
 }
 
 /** Перші `limit` назв через кому і «…», якщо є ще. */

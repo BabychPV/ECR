@@ -37,7 +37,7 @@ import { DocumentProgress } from '@/features/documents/DocumentProgress';
 import { permitRowWarningsOf, publishRowFindings } from '@/features/grid/rowAttentionStore';
 import type { HeldEdit } from '@/features/grid/pendingStore';
 import { editsDeferToServer, isEditable } from '@/features/workflow/sheetEditability';
-import { useApproverEditAvailability } from '@/features/workflow/api';
+import { fetchSubmissionTarget, submissionTargetKey, useApproverEditAvailability } from '@/features/workflow/api';
 import {
   hasCalculationIssues,
   useUnmatchedRows,
@@ -70,7 +70,7 @@ import {
   stateOfGroup,
 } from '@/features/documents/sheetCopies/sheetGroups';
 import { parseChatKey } from '@/features/tableChat/chatKey';
-import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
+import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { registerHeldEditRevealer, useSettledAction } from '@/features/grid/settleEdits';
 
@@ -321,6 +321,10 @@ export function DocumentPage(): JSX.Element {
   const [viewParam] = useUrlState('view');
   // ✎ D-6: місяць із посилання черги погодження — `?periodKey` річної сторінки нормалізується до якоря, тож місяць окремо.
   const [decideParam, setDecideParam] = useUrlNumber('decide');
+  // ✎ Огляд M4 (4): місяць із посилання на річний документ (`?periodKey=202610`) — адреса нормалізується до якоря, а
+  // місяць зберігається тут, щоб сітка перейшла до його колонки (одноразово, потім прибирається з адреси).
+  const [focusMonth, setFocusMonth] = useUrlNumber('focusMonth');
+  const setUrlParams = useUrlParamsSetter();
   const periodKey = urlPeriod ?? currentPeriodKey();
   const setPeriodKey = setUrlPeriod;
 
@@ -701,9 +705,15 @@ export function DocumentPage(): JSX.Element {
    * Копія на місяць — без змін.
    */
   const yearAnchor = yearLayout ? yearAnchorOf(projectPeriods, periodKey) : null;
+  // ✎ Огляд M4 (4): явний місяць в адресі (не умовчання) — у `focusMonth`, тим самим переходом адреси.
   useEffect(() => {
-    if (yearAnchor !== null && yearAnchor !== periodKey) setPeriodKey(yearAnchor);
-  }, [yearAnchor, periodKey, setPeriodKey]);
+    if (yearAnchor === null || yearAnchor === periodKey) return;
+    if (urlPeriod === null) {
+      setPeriodKey(yearAnchor);
+      return;
+    }
+    setUrlParams({ periodKey: String(yearAnchor), focusMonth: String(urlPeriod % 100) });
+  }, [yearAnchor, periodKey, setPeriodKey, urlPeriod, setUrlParams]);
 
   // Адреса з періодом поза проєктом (сервер його відхилив) сама веде на найближчий допустимий; кнопка в стані
   // помилки нижче - запасний шлях, якщо календар не завантажився.
@@ -866,18 +876,55 @@ export function DocumentPage(): JSX.Element {
   );
   // ✎ W15z M4 (P-1122-4): документ «рік» — проблеми ВСІХ місяців року (F5-R, StepError, помилки формул), панель на
   // кожен місяць із проблемами; запит лише на якорі (до переходу на якір — нічого). Копія на місяць — одна панель, як було.
-  const yearIssueMonths = useYearUnmatchedRows(
+  // ✎ Огляд M4 (1): якоря не знати (календар не прийшов чи відмовив) або запит року відмовив — панель поточного
+  // періоду, як до M4 (проблеми не ховаються). Право — `Document.View`, як у сервера для calculation-issues; час прогону
+  // (`Calculation.View`) рік не запитує.
+  const scheduledMonths = useMemo(
+    () => new Set((calendar.data?.periods ?? []).filter((period) => period.state === 'Scheduled').map((period) => period.periodKey)),
+    [calendar.data],
+  );
+  const yearIssues = useYearUnmatchedRows(
     documentId,
     periodKey,
     active?.sheetCopyId ?? null,
     yearLayout && yearAnchor === periodKey,
     unmatchedRows.finishedAt,
   );
-  const issuePanels: readonly MonthUnmatchedRows[] = yearLayout
-    ? yearIssueMonths
-    : hasCalculationIssues(unmatchedRows)
-      ? [{ periodKey, rows: unmatchedRows }]
-      : [];
+  const issuePanels: readonly MonthUnmatchedRows[] =
+    yearLayout && yearAnchor !== null && !yearIssues.failed
+      ? // ✎ Огляд M4 (5): місяць Scheduled (ще не відкрито, D-575) — порожні комірки й жодних помилок.
+        yearIssues.months.filter((month) => !scheduledMonths.has(month.periodKey))
+      : hasCalculationIssues(unmatchedRows)
+        ? [{ periodKey, rows: unmatchedRows }]
+        : [];
+
+  // ✎ Огляд M4 (4): посилання на місяць річного документа — сітка переходить до колонки цього місяця в першій таблиці
+  // аркуша, що її має (місяці колонок — з `submission-target` аркуша, той самий запит, що в рядку дій), на перший рядок.
+  const focusPending = yearLayout && focusMonth !== null && yearAnchor === periodKey && active !== undefined;
+  const focusTarget = useQuery({
+    queryKey: submissionTargetKey(documentId, active?.sheetDefId ?? 0, periodKey, active?.sheetCopyId ?? null),
+    queryFn: () => fetchSubmissionTarget(documentId, active?.sheetDefId ?? 0, periodKey, active?.sheetCopyId ?? null),
+    enabled: focusPending,
+  });
+  useEffect(() => {
+    if (!focusPending || active === undefined) return;
+    const months = focusTarget.data?.monthColumns;
+    if (!Array.isArray(months)) return;
+    setFocusMonth(null);
+    const table = active.tables.find((candidate) =>
+      months.some((month) => month.tableDefId === candidate.tableDefId && month.monthNumber === focusMonth),
+    );
+    const column = months.find((month) => month.tableDefId === table?.tableDefId && month.monthNumber === focusMonth);
+    if (table === undefined || column === undefined) return;
+    void import('@/features/grid/cellNavigation').then((module) =>
+      module.requestCellNavigation({
+        tableDefId: table.tableDefId,
+        tableInstanceId: table.tableInstanceId,
+        rowKey: module.FirstRowKey,
+        columnCode: column.columnCode,
+      }),
+    );
+  }, [focusPending, focusTarget.data, active, focusMonth, setFocusMonth]);
 
   const refetchBoth = (): void => {
     void summary.refetch();

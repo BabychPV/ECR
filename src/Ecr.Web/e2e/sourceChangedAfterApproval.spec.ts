@@ -118,6 +118,13 @@ test.describe('Джерело змінено після затвердження
     await expect(cause.getByTestId('document-calc-issue-detail')).toHaveText('HSE · HSE400-E2E');
     await expect(cause.getByTestId('document-calc-issue-source-hint')).not.toContainText('document.calcIssues');
     await expect(cause.getByTestId('document-calc-issue-open-source')).toBeVisible();
+
+    // ✎ Огляд M4 (4): «Open HSE400» веде на МІСЯЦЬ річного документа (`?periodKey=жовтень`) — сторінка лишається на якорі
+    // для даних, але сітка переходить до колонки жовтня (підсвічена комірка, заголовок «Month M10» у вікні).
+    await cause.getByTestId('document-calc-issue-open-source').click();
+    await expect(page).toHaveURL(new RegExp(`periodKey=${String(arranged.anchor)}`), { timeout: 90_000 });
+    await expect(page.locator('.ecr-cell-nav-target'), 'сітка не перейшла до колонки місяця').toHaveCount(1, { timeout: 60_000 });
+    await expect(page.getByText('Month M10', { exact: true }).first()).toBeInViewport();
   });
 });
 
@@ -192,6 +199,22 @@ async function arrangeYearDocument(request: APIRequestContext): Promise<YearDocu
       data: { projectId: project.projectId, sheetDefIds: structure.sheets.map((s) => s.id), templateVersionId: version.versionId },
     }),
     'документ',
+  );
+
+  // Екземпляри всіх місяців (власники місячних колонок) і рядок R1 — щоб було куди перейти в колонці жовтня.
+  let anchorTables: { tableInstanceId: number; tableCode: string }[] = [];
+  for (let m = 1; m <= 12; m += 1) {
+    const rows = await ok<{ tableInstanceId: number; tableCode: string }[]>(
+      await request.get(`/api/v1/documents/${String(document.documentId)}/tables?periodKey=${String(year * 100 + m)}`),
+      `таблиці ${String(m)}`,
+    );
+    if (m === 1) anchorTables = rows;
+  }
+  const t1 = anchorTables.find((t) => t.tableCode === 'T1');
+  if (t1 === undefined) throw new Error('у якоря немає таблиці T1');
+  await ok(
+    await request.post(`/api/v1/documents/${String(document.documentId)}/rows`, { data: { tableInstanceId: t1.tableInstanceId, rowKey: 'R1' } }),
+    'рядок R1',
   );
 
   return { documentId: document.documentId, anchor: year * 100 + 1, october: year * 100 + 10 };

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CalculationIssues } from '@/features/calculationIssues/api';
+import { formulaErrorsTruncated } from '@/features/documents/calculationIssuesPanelModel';
 import { splitIssuesByMonth } from '@/features/documents/useUnmatchedRows';
 
 /**
@@ -42,6 +43,20 @@ describe('splitIssuesByMonth', () => {
     expect(months[1]!.rows.finishedAt).toBeNull();
     expect(months[2]!.rows.issues).toHaveLength(2);
     expect(months[2]!.rows.sourceIssues).toHaveLength(1);
+  });
+
+  // ✎ Огляд M4 (2): сервер віддає ≤ 500 записів року ПО ПОРЯДКУ місяців, а `formulaErrorTotal` — усі комірки року. Обрізано —
+  // місяць зрізу (останній із записами) і пізніші несуть «N+»; раніші — повні, без позначки.
+  it('стеля записів року: місяць зрізу позначено «обрізано» (N+), ранніший — ні; без обрізання — ніхто', () => {
+    const errors = [formulaError(1), formulaError(3)];
+    const truncated = splitIssuesByMonth(Anchor, { items: [issue(5)], formulaErrors: errors, formulaErrorTotal: 7 } as unknown as CalculationIssues, undefined, null, null);
+    const byMonth = new Map(truncated.map((m) => [m.periodKey, m.rows]));
+    expect(formulaErrorsTruncated(byMonth.get(209901)!)).toBe(false);
+    expect(formulaErrorsTruncated(byMonth.get(209903)!)).toBe(true);
+    expect(formulaErrorsTruncated(byMonth.get(209905)!)).toBe(true);
+
+    const whole = splitIssuesByMonth(Anchor, { items: [], formulaErrors: errors, formulaErrorTotal: 2 } as unknown as CalculationIssues, undefined, null, null);
+    expect(whole.map((m) => formulaErrorsTruncated(m.rows))).toEqual([false, false]);
   });
 
   it('копія: лише рядки відкритої копії; рядок без monthNumber — до якоря; без відповіді — порожньо', () => {

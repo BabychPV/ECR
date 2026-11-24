@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   cellCoordinateOf,
   completeCellNavigation,
+  FirstRowKey,
   currentCellNavigation,
   requestCellNavigation,
   keepInUpperThird,
@@ -219,5 +220,14 @@ describe('прокрутка й фокус через API revo-grid', () => {
 
   it('без елемента сітки — false, без винятку', async () => {
     await expect(revealGridCell(document.createElement('div'), { x: 0, y: 0 })).resolves.toBe(false);
+  });
+});
+
+describe('cellCoordinateOf: FirstRowKey (огляд M4 (4) — перехід до колонки місяця річного документа)', () => {
+  const slice = { rows: [{ rowKey: 'r1' }, { rowKey: 'r2' }], columns: [{ code: 'M01' }, { code: 'M10' }] };
+
+  it('перший рядок зрізу в колонці; порожня таблиця — null (лишаємось на таблиці)', () => {
+    expect(cellCoordinateOf(slice, true, FirstRowKey, 'M10')).toEqual({ x: 2, y: 0 });
+    expect(cellCoordinateOf({ rows: [], columns: slice.columns }, true, FirstRowKey, 'M10')).toBeNull();
   });
 });
