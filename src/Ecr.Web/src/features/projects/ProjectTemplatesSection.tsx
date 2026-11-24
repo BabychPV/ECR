@@ -3,6 +3,7 @@ import { Badge, Button, Group, Modal, Select, Stack, Table, Text, VisuallyHidden
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { templatesListQuery, templateVersionsQuery } from '@/features/templates/templateQueries';
+import { versionsOfTemplatesQuery } from '@/features/templates/versionsOfTemplates';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -92,9 +93,17 @@ export function ProjectTemplatesSection({
   });
 
   const attachedIds = new Set((templates.data ?? []).map((row) => row.templateId));
-  const templateOptions = (catalog.data?.items ?? [])
-    // ⚠ Архівний шаблон сервер не приєднає (`ECR-TMPL-0409`), а вже приєднаний — `templateAlreadyAttached`.
-    .filter((template) => !template.isArchived && !attachedIds.has(template.id))
+  // ⚠ Архівний шаблон сервер не приєднає (`ECR-TMPL-0409`), а вже приєднаний — `templateAlreadyAttached`.
+  const candidates = (catalog.data?.items ?? []).filter((template) => !template.isArchived && !attachedIds.has(template.id));
+  // ✎ B74 UX: як у «Новому проєкті» (`CreateProjectModal`) і майстрі документа — пропонуються лише шаблони з ОПУБЛІКОВАНОЮ
+  // версією: шаблон лише з чернеткою лишав обов'язкове поле «Version» порожнім без пояснення. Версії — той самий пул
+  // (`versionsOfTemplatesQuery`, ключ `versionsOf(id)`), що й у діалозі створення проєкту.
+  const publishedOf = useQuery({
+    ...versionsOfTemplatesQuery(queryClient, candidates.map((template) => template.id)),
+    enabled: attaching && candidates.length > 0,
+  });
+  const templateOptions = candidates
+    .filter((_, index) => (publishedOf.data?.[index]?.items ?? []).some((version) => version.status === 'Published'))
     .map((template) => {
       const name = localized(template.nameL10n);
 
@@ -253,11 +262,12 @@ export function ProjectTemplatesSection({
 
       <Modal opened={attaching} onClose={() => setAttaching(false)} title={t('projects.templates.attach')}>
         <Stack gap="xs">
-          {(catalog.error ?? versions.error) !== null && (
+          {(catalog.error ?? publishedOf.error ?? versions.error) !== null && (
             <ErrorAlert
-              error={catalog.error ?? versions.error}
+              error={catalog.error ?? publishedOf.error ?? versions.error}
               onRetry={() => {
                 void catalog.refetch();
+                void publishedOf.refetch();
                 if (templateId !== null) void versions.refetch();
               }}
             />
