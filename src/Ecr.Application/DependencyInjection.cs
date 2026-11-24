@@ -571,8 +571,7 @@ public static class DependencyInjection
         services.AddScoped<Reporting.PublishReportVersionHandler>();
         services.AddScoped<Integration.ListSourceEntitiesHandler>();
         services.AddScoped<Integration.CollectFromSourceHandler>();
-        services.AddScoped<Integration.SyncFlertNowHandler>(); // D-476 F3: «Синхронізувати зараз»
-        services.AddScoped<Integration.GetFlertSyncStatusHandler>();
+        services.AddScoped<GasComposition.GasCompositionService>(); // D-NEW: сторінка «Склад газу» (власник — ECR)
         services.AddScoped<Integration.GetJobStatusHandler>();
         services.AddScoped<Integration.ListJobsHandler>();
         services.AddScoped<Integration.GetJobsSummaryHandler>();

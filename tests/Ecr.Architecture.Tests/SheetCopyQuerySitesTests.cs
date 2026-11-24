@@ -86,6 +86,8 @@ public sealed partial class SheetCopyQuerySitesTests
             "B80 N5: наслідки зміни джерела (sourceImpact) — затверджені стани споживачів лише оригіналу аркуша (ApprovalState.SheetCopyId == null), як у DocumentSourceIssues",
         ["src/Ecr.Infrastructure/Persistence/RegistryImpactStore.cs"] =
             "B179 L2: «документ-споживач × період є» — екземпляри оригіналу (SheetCopyId == null); перерахунок методологій — лише оригінал",
+        ["src/Ecr.Infrastructure/Persistence/GasCompositionStore.cs"] =
+            "D-NEW: замкнений період складу газу — затверджений аркуш ОРИГІНАЛУ (ApprovalState.SheetCopyId == null), як і результати методологій",
         ["src/Ecr.Infrastructure/Jobs/SourceDocumentChangeHook.cs"] =
             "B179 L2: «чи документ — джерело зв'язки» — за екземплярами оригіналу (SheetCopyId == null), як у завантажувачі складу",
         ["src/Ecr.Infrastructure/Jobs/SourceApprovalChangeTrigger.cs"] =

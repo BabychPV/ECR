@@ -57,7 +57,9 @@ public sealed class ExternalRegistryManualEditGuardTests
         ["Ecr.Infrastructure.Jobs.RegistrySyncJob"] =
             "Синк із зовнішнього джерела — і є шлях master-даних AF у External/Hybrid-довідник (D-49, S7).",
         ["Ecr.Infrastructure.Jobs.FlertCompositionSyncJob"] =
-            "Синк складу газу FLERT — шлях master-даних FLERT у External-дзеркало STREAM/STREAM_CASE/GAS_COMPOSITION (D-476).",
+            "Разовий імпорт складу газу з FLERT у STREAM/STREAM_CASE/GAS_COMPOSITION (D-476; D-NEW: лише в порожню базу).",
+        ["Ecr.Application.GasComposition.GasCompositionService"] =
+            "D-NEW: сторінка «Склад газу» — єдиний шлях запису складу газу (шкала версій, замкнені періоди, Σ); гард відмовляє саме ЗАГАЛЬНИМ редакторам цих довідників.",
     };
 
     /// <summary>Типи, що містять самі стоки (writer), — не писачі, а точка запису.</summary>

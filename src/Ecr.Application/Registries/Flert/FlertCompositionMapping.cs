@@ -75,6 +75,12 @@ public sealed record FlertCaseEntry(
     bool NoComposition,
     decimal MolPctSum)
 {
+    /// <summary>
+    /// Значення довгих колонок-дублів, що розійшлися з коротким кодом (<c>Carbon_Monoxide=0.016982; …</c>); <c>null</c> —
+    /// розбіжностей немає. Імпорт без втрат (D-NEW): у склад іде коротка назва, розбіжне значення FLERT зберігається тут.
+    /// </summary>
+    public string? FlertAliases { get; init; }
+
     /// <summary>Чи діє версія на дату <paramref name="on"/> (вікно <c>[ValidFrom, ValidTo)</c>).</summary>
     /// <param name="on">Дата.</param>
     public bool IsValidOn(DateOnly on) => (ValidFrom is not { } from || from <= on) && (ValidTo is not { } to || on < to);
@@ -253,7 +259,12 @@ public static class FlertCompositionMapping
             }
 
             var code = CaseCode(tid, from);
+            var aliasCount = issues.Count;
             var rows = Components(reader, code, issues);
+            var aliases = string.Join("; ", issues
+                .Skip(aliasCount)
+                .Where(i => i.Kind == AliasConflict)
+                .Select(i => AliasText(reader, i.Subject)));
             var sum = rows.Sum(x => x.MolPct);
 
             var entry = new FlertCaseEntry(
@@ -270,7 +281,10 @@ public static class FlertCompositionMapping
                 tid,
                 reader.Int("GasComposition_ID"),
                 NoComposition: rows.Count == 0,
-                MolPctSum: sum);
+                MolPctSum: sum)
+            {
+                FlertAliases = aliases.Length == 0 ? null : aliases,
+            };
 
             if (cases.TryGetValue(code, out var existing))
             {
@@ -375,6 +389,18 @@ public static class FlertCompositionMapping
         return rows;
     }
 
+    /// <summary>
+    /// Текст розбіжного дубля для <see cref="FlertCaseEntry.FlertAliases"/>: <c>Carbon_Monoxide=0.0169820000000000</c> — значення
+    /// довгої колонки FLERT як є (повна точність <c>decimal(20,16)</c>).
+    /// </summary>
+    private static string AliasText(RowReader reader, string subject)
+    {
+        var component = subject[(subject.LastIndexOf('.') + 1)..];
+        var column = FlertCompositionSchema.ComponentColumns
+            .First(c => c.Component == component && !string.Equals(c.Column, component, StringComparison.Ordinal)).Column;
+        return column + "=" + reader.Decimal(column)?.ToString(CultureInfo.InvariantCulture);
+    }
+
     private static decimal? Filled(decimal? value) => value is { } v && v != 0m ? v : null;
 
     private static decimal? NullIfZero(decimal? value) => value is { } v && v != 0m ? v : null;
@@ -439,6 +465,12 @@ public static class FlertCompositionMapping
             null => null,
             bool value => value,
             int value when value is 0 or 1 => value == 1,
+
+            // ⛔ D-NEW (імпорт на копії live 24.11): прапорці FLERT — `smallint` (isOnshore, isSour, isHMB, excludeInListBox),
+            // тобто Int16 з SqlDataReader. Без цієї гілки КОЖЕН рядок справжнього FLERT давав unreadableValue і знімок не
+            // застосовувався зовсім (тести дзеркала будували знімок із bool/int і цього не бачили).
+            short value when value is 0 or 1 => value == 1,
+            long value when value is 0 or 1 => value == 1,
             byte value when value is 0 or 1 => value == 1,
             string text when bool.TryParse(text, out var parsed) => parsed,
             var other => Unreadable<bool?>(column, other),
