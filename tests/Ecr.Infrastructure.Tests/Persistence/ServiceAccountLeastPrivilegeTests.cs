@@ -243,6 +243,12 @@ public sealed class ServiceAccountLeastPrivilegeTests(ServiceAccountLeastPrivile
         {
             superseded = await PurgeKit.AddRunAsync(admin, stand, "Superseded", Now);
             await PurgeKit.InsertRowsAsync(admin, stand, superseded, 3, 2, 2, "S");
+
+            // ✎ P-1124: проблема розрахунку прибраного прогону зникає разом із ним (нічна задача, FK_CIssue_Run).
+            admin.CalculationIssues.Add(new Ecr.Domain.Entities.Calculations.CalculationIssue(
+                stand.Document.DocumentId, stand.Period, stand.Document.TableDefId, null, "R-1", 1, stand.MethodologyId,
+                superseded, Now));
+            await admin.SaveChangesAsync();
         }
 
         var recovery = await database.AdminScalarAsync<string>(
@@ -270,6 +276,8 @@ public sealed class ServiceAccountLeastPrivilegeTests(ServiceAccountLeastPrivile
         Assert.Equal(string.Equals(recovery, "SIMPLE", StringComparison.OrdinalIgnoreCase), outcome.CheckpointSkipped);
         Assert.Equal(0, await database.AdminScalarAsync<int>(
             $"SELECT COUNT(*) FROM calc.CalculationRun WHERE Id = {superseded}"));
+        Assert.Equal(0, await database.AdminScalarAsync<int>(
+            $"SELECT COUNT(*) FROM calc.CalculationIssue WHERE CalculationRunId = {superseded}"));
     }
 
     /// <summary>

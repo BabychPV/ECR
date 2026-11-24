@@ -279,6 +279,7 @@ internal sealed partial class SupersededResultsPurger(
     /// <summary>
     /// Рядок <c>calc.CalculationRun</c> — лише якщо прогін досі підлягає прибиранню. FK (кроки, входи, результати)
     /// перевіряється по індексах прогону; лишився рядок — <c>547</c>, прогін лишається до наступного проходу.
+    /// ✎ P-1124: проблеми розрахунку прогону (<c>FK_CIssue_Run</c>) — тим самим пакетом перед ним і за тією самою умовою.
     /// </summary>
     private async Task<bool> DeleteRunRowAsync(long runId, CancellationToken ct)
     {
@@ -288,6 +289,7 @@ internal sealed partial class SupersededResultsPurger(
                     $"""
                     SET DEADLOCK_PRIORITY LOW;
                     SET LOCK_TIMEOUT 5000;
+                    {CalculationIssueRunCleanup.DeleteForRunSql(EligibleSql("ru"))}
                     DELETE ru FROM calc.CalculationRun AS ru WHERE ru.Id = @run AND {EligibleSql("ru")};
                     SELECT @@ROWCOUNT;
                     """,

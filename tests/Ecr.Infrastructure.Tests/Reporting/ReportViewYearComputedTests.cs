@@ -539,6 +539,7 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
             var docs = string.Join(",", _documents);
             await ExecuteAsync($"""
                 DELETE FROM calc.CalculationResult WHERE DocumentId IN ({docs}) AND PeriodKey BETWEEN 209901 AND 209912;
+                DELETE FROM calc.CalculationIssue WHERE CalculationRunId IN (SELECT Id FROM calc.CalculationRun WHERE DocumentId IN ({docs}));
                 DELETE FROM calc.CalculationRun WHERE DocumentId IN ({docs});
                 DELETE cv FROM doc.CellValue AS cv
                   JOIN doc.TableRow AS r ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId

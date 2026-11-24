@@ -130,6 +130,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CalculationRunId")
+                        .HasDatabaseName("IX_CalculationIssue_Run");
+
                     b.HasIndex("DocumentId", "PeriodKey", "TableDefId", "SheetCopyId")
                         .HasDatabaseName("IX_CalculationIssue_Address");
 
@@ -7392,6 +7395,16 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_CIn_Run");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Calculations.CalculationIssue", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Calculations.CalculationRun", null)
+                        .WithMany()
+                        .HasForeignKey("CalculationRunId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_CIssue_Run");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.CalculationResult", b =>

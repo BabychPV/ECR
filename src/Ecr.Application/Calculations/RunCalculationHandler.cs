@@ -452,6 +452,15 @@ public sealed class RunCalculationHandler(
                     ],
                     ct)
                 .ConfigureAwait(false);
+
+            // ✎ P-1124: проблеми неперерахованих таблиць (перенесені аркуші, пропущені подані/затверджені) — на новий прогін,
+            // у тій самій транзакції: знятий прогін прибирається після коміту разом зі своїми проблемами (FK_CIssue_Run).
+            if (superseded.Count > 0)
+            {
+                _ = await issues
+                    .CarryOverAsync(calculationRunId, [.. superseded.Select(s => s.RunId)], ct)
+                    .ConfigureAwait(false);
+            }
         }
 
         var invalidated = await results

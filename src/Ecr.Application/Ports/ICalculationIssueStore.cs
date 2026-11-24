@@ -72,6 +72,25 @@ public interface ICalculationIssueStore
     public Task<int> DeleteForUnboundTablesAsync(
         long? documentId, int? periodKey, IReadOnlyCollection<int>? tableDefIds, CancellationToken ct);
 
+    /// <summary>
+    /// ✎ P-1124: проблеми, які прогін <paramref name="calculationRunId"/> НЕ перерахував (перенесені аркуші області, пропущені
+    /// подані/затверджені), переходять на нього з прогонів, які перемикання щойно зняло з актуальності.
+    /// </summary>
+    /// <param name="calculationRunId">Новий актуальний прогін.</param>
+    /// <param name="supersededRunIds">Прогони, які перемикання зняло з актуальності.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Скільки проблем перенесено.</returns>
+    /// <remarks>
+    /// ⛔ Проблема живе не довше за свій прогін (<c>FK_CIssue_Run</c>; прибирання прогону видаляє і його проблеми), а знятий
+    /// з актуальності прогін прибирається одразу після коміту (D-560). Без переносу поточна проблема неперерахованої таблиці
+    /// зникла б разом зі старим прогоном.
+    /// Переноситься лише проблема таблиці, екземпляр якої в документі є (документ × таблиця × період × копія): таблиця, якої
+    /// вже немає (зміна версії шаблону, перебудова Land), лишається на старому прогоні й зникає з ним. Виконується одразу,
+    /// у транзакції перемикання, ПІСЛЯ <see cref="ReplaceAsync"/>.
+    /// </remarks>
+    public Task<int> CarryOverAsync(
+        long calculationRunId, IReadOnlyCollection<long> supersededRunIds, CancellationToken ct);
+
     /// <summary>Читає поточні проблеми документа за період і копію аркуша — ОДНИМ запитом.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>
