@@ -221,23 +221,6 @@ public sealed class RawDataPointConfiguration : IEntityTypeConfiguration<RawData
     }
 }
 
-/// <summary>Конфігурація <see cref="ConsistencyRule"/>.</summary>
-public sealed class ConsistencyRuleConfiguration : IEntityTypeConfiguration<ConsistencyRule>
-{
-    /// <inheritdoc />
-    public void Configure(EntityTypeBuilder<ConsistencyRule> builder)
-    {
-        ArgumentNullException.ThrowIfNull(builder);
-
-        builder.ToTable("ConsistencyRule", "ext");
-        builder.HasKey(x => x.Id);
-        builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
-        builder.Property(x => x.Expression).HasMaxLength(2000).IsRequired();
-        builder.Property(x => x.IsActive).HasDefaultValue(true);
-        builder.HasIndex(x => x.Code).IsUnique().HasDatabaseName("UQ_ConsistencyRule");
-    }
-}
-
 /// <summary>Конфігурація legacy-мапінгу аркушів.</summary>
 public sealed class LegacySheetMappingConfiguration : IEntityTypeConfiguration<LegacySheetMapping>
 {

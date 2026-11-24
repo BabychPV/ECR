@@ -37,8 +37,6 @@ public sealed class ExpressionColumnLengthGuardTests
                 "довжину відхиляє ExpressionRejection/ExpressionLengthGuard.MaxFor на збереженні (діалекти Template/Report — 2000)"),
             [("ValidationRule", "Expression")] = ("MaxExpressionLength",
                 "довжину відхиляє ExpressionRejection на збереженні (ValidationRuleHandlers, межа ValidationRule.MaxExpressionLength)"),
-            [("ConsistencyRule", "Expression")] = (null,
-                "сутність без записувачів у src (є лише DbSet): вираз не потрапляє з методологій; обмеження довжини в домені немає"),
         };
 
     [Fact]

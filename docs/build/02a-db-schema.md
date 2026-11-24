@@ -2492,18 +2492,8 @@ CREATE TABLE ext.SourceEventAttributeValue
 );
 GO
 
-CREATE TABLE ext.ConsistencyRule
-(
-    Id             int            IDENTITY(1,1) NOT NULL,
-    Code           nvarchar(64)   NOT NULL,
-    SourceEntityId int            NULL,
-    Expression     nvarchar(2000) NOT NULL,
-    Severity       tinyint        NOT NULL,
-    IsActive       bit            NOT NULL CONSTRAINT DF_CR_Act DEFAULT(1),
-    CONSTRAINT PK_ConsistencyRule PRIMARY KEY (Id),
-    CONSTRAINT UQ_ConsistencyRule UNIQUE (Code)
-);
-GO
+-- ✎ 2026-11-24: ext.ConsistencyRule прибрано міграцією P1124DropConsistencyRule — правила нічної перевірки
+-- узгодженості є кодом (ConsistencyCheckJob.KnownRules); таблиця не мала жодного читача чи записувача, на live 0 рядків.
 
 -- Legacy-мапінг: усе, що знає про Excel і AF
 CREATE TABLE ext.LegacySheetMapping
