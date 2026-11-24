@@ -42,7 +42,6 @@ public sealed record CampaignSummaryResponse(
 /// ⛔ Те саме для <c>Done</c>/<c>Overdue</c>/<c>AtRisk</c>/<c>InProgress</c> і <c>Progress</c> рядка: клас
 /// «усе затверджено» залежить від станів УСІХ аркушів, тож розбиття проєктів на класи розкрило б стан прихованих (R-1).
 /// </remarks>
-/// <param name="Snapshots">Сума поточних зрізів.</param>
 /// <param name="Done">Проєктів у стані <see cref="CampaignProgress.Done"/>.</param>
 /// <param name="Overdue">Проєктів у стані <see cref="CampaignProgress.Overdue"/>.</param>
 /// <param name="AtRisk">Проєктів у стані <see cref="CampaignProgress.AtRisk"/>.</param>
@@ -62,7 +61,6 @@ public sealed record CampaignTotals(
     int? Submitted,
     int? Approved,
     int? Rejected,
-    int Snapshots,
     int? Done,
     int? Overdue,
     int? AtRisk,
@@ -85,7 +83,7 @@ public enum CampaignProgress
     /// <summary>Не готово, а строк подання вже минув.</summary>
     Overdue = 2,
 
-    /// <summary>Усі документи затверджено і є хоча б один поточний зріз.</summary>
+    /// <summary>Усі документи затверджено (✎ P-1124-3: умову «є поточний зріз звітності» прибрано разом зі зрізами).</summary>
     Done = 3,
 }
 
@@ -101,11 +99,6 @@ public enum CampaignProgress
 /// <param name="Submitted">Усі аркуші подано або затверджено, і хоч один ще не затверджено.</param>
 /// <param name="Approved">Усі аркуші затверджено.</param>
 /// <param name="Rejected">Хоч один аркуш відхилено.</param>
-/// <param name="Snapshots">
-/// Скільки ПОТОЧНИХ зрізів звітності побудовано за цей період
-/// (<c>rpt.ReportSnapshot.IsCurrent</c>). Останній етап кампанії: документи
-/// затверджено, але доки зрізу немає — регулятор не отримав нічого.
-/// </param>
 /// <remarks>
 /// ⚠ Перші чотири лічильники в сумі дають <paramref name="Documents"/>: стан
 /// документа — найгірший зі станів його аркушів
@@ -131,7 +124,6 @@ public sealed record CampaignProjectSummary(
     int? Submitted,
     int? Approved,
     int? Rejected,
-    int Snapshots,
     CampaignProgress? Progress,
     DateTimeOffset? SubmissionDeadline,
     int? SheetsTotal = null,

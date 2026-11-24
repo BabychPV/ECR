@@ -366,13 +366,6 @@ public sealed class RegistryLookupFunctionTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Діалект_звітів_функцій_довідників_не_має()
-    {
-        Assert.False(Expr.Parse("REGFIND('COMPONENT', 'H2S')", ExpressionDialect.Report).IsSuccess);
-    }
-
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Дерево_з_кешу_розбору_не_тримає_стану_знімка()
     {
         // ⛔ CAL-05: дерево в кеші спільне для всіх прогонів. Обчислення з

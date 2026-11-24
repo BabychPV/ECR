@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Ecr.Application.Ports;
-using Ecr.Domain.Enums;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,7 +7,7 @@ namespace Ecr.Infrastructure.Persistence;
 
 /// <summary>Реалізація <see cref="ICampaignSummaryStore"/> (<c>BE-22</c>).</summary>
 /// <remarks>
-/// ⚠ Перелік проєктів і лічильник зрізів LINQ дає точно, а от «стан документа
+/// ⚠ Перелік проєктів LINQ дає точно, а от «стан документа
 /// — найгірший зі станів його аркушів» лишається агрегатом по агрегату, якого
 /// SQL Server не бере без похідної таблиці (той самий привід до сирого SQL, що
 /// й у <see cref="DocumentListSummaryStore"/>). Рядки йдуть по щонайбільше
@@ -30,8 +29,8 @@ public sealed class CampaignSummaryStore(EcrDbContext db) : ICampaignSummaryStor
     /// <c>wf.ApprovalState</c> (урок <c>WR-05</c>).
     ///
     /// ✎ B144 (B75): аркуш документа, чия версія шаблону за період — без подання й затвердження
-    /// (<c>cfg.TemplateVersion.WorkflowMode = 1</c>, None), ФІНАЛЬНИЙ, як у зрізі звіту
-    /// (<c>ReportSnapshotBuilder.StatusOfDataAsync</c>, B138): рахується затвердженим, а не чернеткою, і в
+    /// (<c>cfg.TemplateVersion.WorkflowMode = 1</c>, None), ФІНАЛЬНИЙ
+    /// (B138): рахується затвердженим, а не чернеткою, і в
     /// <c>NotSubmittedSheets</c> не входить; старий стан (перенос версії) не враховується. Версія — за правилом
     /// <c>SheetEditGate</c>: без шаблону — <c>doc.fn_VersionOf</c>, із шаблоном — <c>doc.fn_TemplateVersionOf</c>.
     /// Приєднання <c>nv</c> — у тому самому запиті (щонайбільше один рядок на документ: <c>Id</c> — ключ).
@@ -72,11 +71,8 @@ public sealed class CampaignSummaryStore(EcrDbContext db) : ICampaignSummaryStor
     /// Підсумки по ВСІХ проєктах періоду, згруповані за строком, поясом і готовністю.
     /// </summary>
     /// <remarks>
-    /// ⛔ X7-05 (аудит R11): «зріз» огляду — лише ГОТОВИЙ (<c>Approved</c>/<c>Submitted</c>,
-    /// <c>SnapshotStatus</c> 1/2), а не будь-який поточний. Поточний зріз статусу <c>Draft</c> —
-    /// побудований від незатверджених даних (або від даних, що відтоді змінилися): регулятор з нього
-    /// не отримав нічого, а проєкт лічився «Готово» щойно всі документи затверджено. Статус — той
-    /// самий критерій, що в регуляторній вʼюсі (D-65: лише <c>Approved</c> і <c>Submitted</c>).
+    /// ✎ P-1124-3 (D-NEW): лічильник зрізів звітності і умову «є зріз» прибрано разом зі зрізами —
+    /// «готово» = усі документи затверджено.
     ///
     /// ⚠ Групи, а не одне число на кожен клас: «прострочено/під ризиком»
     /// залежить від поясу проєкту й поточного моменту, і рахує їх
@@ -84,31 +80,24 @@ public sealed class CampaignSummaryStore(EcrDbContext db) : ICampaignSummaryStor
     /// строків і поясів, — одиниці, а не тисячі рядків.
     /// </remarks>
     private const string BucketsSql = """
-        SELECT b.DeadlineUtc, b.TimeZoneId, b.AllApproved, b.HasSnapshot,
+        SELECT b.DeadlineUtc, b.TimeZoneId, b.AllApproved,
                COUNT(*) AS Projects,
                SUM(b.Documents) AS Documents, SUM(b.Draft) AS Draft, SUM(b.Submitted) AS Submitted,
-               SUM(b.Approved) AS Approved, SUM(b.Rejected) AS Rejected, SUM(b.Snapshots) AS Snapshots,
+               SUM(b.Approved) AS Approved, SUM(b.Rejected) AS Rejected,
                SUM(b.Sheets) AS Sheets, SUM(b.NotSubmittedSheets) AS NotSubmittedSheets
         FROM (
             SELECT pe.ComputedGraceAt AS DeadlineUtc, pr.TimeZoneId,
                    COALESCE(st.Documents, 0) AS Documents, COALESCE(st.Draft, 0) AS Draft,
                    COALESCE(st.Submitted, 0) AS Submitted, COALESCE(st.Approved, 0) AS Approved,
-                   COALESCE(st.Rejected, 0) AS Rejected, COALESCE(sn.Snapshots, 0) AS Snapshots,
+                   COALESCE(st.Rejected, 0) AS Rejected,
                    COALESCE(st.Sheets, 0) AS Sheets, COALESCE(st.NotSubmittedSheets, 0) AS NotSubmittedSheets,
-                   CAST(CASE WHEN st.Documents > 0 AND st.Approved = st.Documents THEN 1 ELSE 0 END AS bit) AS AllApproved,
-                   CAST(CASE WHEN sn.Snapshots > 0 THEN 1 ELSE 0 END AS bit) AS HasSnapshot
+                   CAST(CASE WHEN st.Documents > 0 AND st.Approved = st.Documents THEN 1 ELSE 0 END AS bit) AS AllApproved
             FROM doc.Period pe
             JOIN doc.Project pr ON pr.Id = pe.ProjectId
             LEFT JOIN (/*stages*/) st ON st.ProjectId = pe.ProjectId
-            LEFT JOIN (
-                SELECT r.ProjectId, COUNT(*) AS Snapshots
-                FROM rpt.ReportSnapshot r
-                WHERE r.PeriodKey = @periodKey AND r.IsCurrent = 1 AND r.Status IN (1, 2)
-                GROUP BY r.ProjectId
-            ) sn ON sn.ProjectId = pe.ProjectId
             WHERE pe.PeriodKey = @periodKey
         ) b
-        GROUP BY b.DeadlineUtc, b.TimeZoneId, b.AllApproved, b.HasSnapshot
+        GROUP BY b.DeadlineUtc, b.TimeZoneId, b.AllApproved
         """;
 
     /// <summary>Етапи проєктів переліку (ідентифікатори — JSON-параметром).</summary>
@@ -163,19 +152,6 @@ public sealed class CampaignSummaryStore(EcrDbContext db) : ICampaignSummaryStor
         var ids = projects.ConvertAll(p => p.Id);
         var stages = await StagesAsync(periodKey, ids, ct).ConfigureAwait(false);
 
-        // ⚠ Лише ПОТОЧНІ зрізи: повторна побудова створює новий рядок, а не
-        // переписує старий, і без `IsCurrent` проєкт, зріз якого перебудували
-        // тричі, виглядав би втричі готовішим за сусіда.
-        // ⛔ X7-05: і лише ГОТОВІ (`Approved`/`Submitted`) — `Draft`-зріз не є результатом для регулятора.
-        var snapshots = await db.ReportSnapshots
-            .AsNoTracking()
-            .Where(s => ids.Contains(s.ProjectId) && s.PeriodKey == periodKey && s.IsCurrent
-                        && (s.Status == SnapshotStatus.Approved || s.Status == SnapshotStatus.Submitted))
-            .GroupBy(s => s.ProjectId)
-            .Select(g => new { ProjectId = g.Key, Count = g.Count() })
-            .ToDictionaryAsync(x => x.ProjectId, x => x.Count, ct)
-            .ConfigureAwait(false);
-
         var rows = projects.ConvertAll(p =>
         {
             // Проєкт без жодного документа не має рядка в агрегаті — і це не
@@ -191,7 +167,6 @@ public sealed class CampaignSummaryStore(EcrDbContext db) : ICampaignSummaryStor
                 stage?.Submitted ?? 0,
                 stage?.Approved ?? 0,
                 stage?.Rejected ?? 0,
-                snapshots.GetValueOrDefault(p.Id),
                 Deadline(p.Deadline),
                 p.TimeZoneId,
                 stage?.Sheets ?? 0,
@@ -274,8 +249,8 @@ public sealed class CampaignSummaryStore(EcrDbContext db) : ICampaignSummaryStor
             .ConfigureAwait(false);
 
         return rows.ConvertAll(r => new CampaignBucket(
-            Deadline(r.DeadlineUtc), r.TimeZoneId, r.AllApproved, r.HasSnapshot, r.Projects,
-            r.Documents, r.Draft, r.Submitted, r.Approved, r.Rejected, r.Snapshots, r.Sheets, r.NotSubmittedSheets));
+            Deadline(r.DeadlineUtc), r.TimeZoneId, r.AllApproved, r.Projects,
+            r.Documents, r.Draft, r.Submitted, r.Approved, r.Rejected, r.Sheets, r.NotSubmittedSheets));
     }
 
     /// <summary>Рядок агрегату етапів; імена колонок — імена властивостей.</summary>
@@ -284,6 +259,6 @@ public sealed class CampaignSummaryStore(EcrDbContext db) : ICampaignSummaryStor
 
     /// <summary>Рядок підсумкового агрегату; імена колонок — імена властивостей.</summary>
     public sealed record BucketRow(
-        DateTime DeadlineUtc, string TimeZoneId, bool AllApproved, bool HasSnapshot, int Projects,
-        int Documents, int Draft, int Submitted, int Approved, int Rejected, int Snapshots, int Sheets, int NotSubmittedSheets);
+        DateTime DeadlineUtc, string TimeZoneId, bool AllApproved, int Projects,
+        int Documents, int Draft, int Submitted, int Approved, int Rejected, int Sheets, int NotSubmittedSheets);
 }

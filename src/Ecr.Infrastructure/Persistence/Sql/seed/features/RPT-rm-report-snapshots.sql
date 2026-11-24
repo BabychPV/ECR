@@ -357,7 +357,39 @@ SELECT v.[Key], v.Lang, v.OldVal
     (N'status.snapshot.Draft', N'kz', N'Нобай'),
     (N'status.snapshot.Submitted', N'en', N'Submitted'),
     (N'status.snapshot.Submitted', N'ru', N'Подан'),
-    (N'status.snapshot.Submitted', N'kz', N'Тапсырылған')
+    (N'status.snapshot.Submitted', N'kz', N'Тапсырылған'),
+    -- P-1124-3 (огляд координатора): колонка «зрізи» огляду кампанії прибрана разом із полем контракту Snapshots
+    (N'campaign.snapshots', N'en', N'Snapshots'),
+    (N'campaign.snapshots', N'ru', N'Срезы'),
+    (N'campaign.snapshots', N'kz', N'Кесінділер'),
+    -- P-1124-3 (огляд координатора): діалект виразів Report (правила звіту) прибрано разом із конструктором
+    (N'expr.referenceForbiddenInReport', N'en', N'The reference "{construct}" is not allowed in the report dialect: a report rule sees only the columns of its own row ("[Code]") and the report parameters ("@Name").'),
+    (N'expr.referenceForbiddenInReport', N'ru', N'Ссылка «{construct}» недопустима в диалекте отчётов: правило отчёта видит только столбцы своей строки («[Code]») и параметры отчёта («@Name»).'),
+    (N'expr.referenceForbiddenInReport', N'kz', N'«{construct}» сілтемесіне есептер диалектінде рұқсат етілмейді: есеп ережесі тек өз жолының бағандарын («[Code]») және есеп параметрлерін («@Name») көреді.'),
+    (N'expr.report.columnMissing', N'en', N'The report row has no column "{column}".'),
+    (N'expr.report.columnMissing', N'ru', N'В строке отчёта нет столбца «{column}».'),
+    (N'expr.report.columnMissing', N'kz', N'Есеп жолында «{column}» бағаны жоқ.'),
+    (N'expr.report.ownRowColumnsOnly', N'en', N'A report rule sees only the columns of its own row: [Code].'),
+    (N'expr.report.ownRowColumnsOnly', N'ru', N'Правило отчёта видит только столбцы своей строки: [Code].'),
+    (N'expr.report.ownRowColumnsOnly', N'kz', N'Есеп ережесі тек өз жолының бағандарын көреді: [Code].'),
+    (N'expr.report.parameterMissing', N'en', N'The report has no parameter "@{name}".'),
+    (N'expr.report.parameterMissing', N'ru', N'В отчёте нет параметра «@{name}».'),
+    (N'expr.report.parameterMissing', N'kz', N'Есепте «@{name}» параметрі жоқ.'),
+    (N'expr.report.resultType', N'en', N'A result of type {expected} was expected, but the expression gives {actual}.'),
+    (N'expr.report.resultType', N'ru', N'Ожидался результат типа {expected}, но выражение даёт {actual}.'),
+    (N'expr.report.resultType', N'kz', N'{expected} типті нәтиже күтілді, бірақ өрнек {actual} береді.'),
+    (N'expr.report.scope', N'en', N'A report rule sees only the columns of its own row and the report parameters.'),
+    (N'expr.report.scope', N'ru', N'Правило отчёта видит только столбцы своей строки и параметры отчёта.'),
+    (N'expr.report.scope', N'kz', N'Есеп ережесі тек өз жолының бағандарын және есеп параметрлерін көреді.'),
+    (N'expr.report.unknownColumnType', N'en', N'Unknown type "{type}" of column "{name}".'),
+    (N'expr.report.unknownColumnType', N'ru', N'Неизвестный тип «{type}» столбца «{name}».'),
+    (N'expr.report.unknownColumnType', N'kz', N'«{name}» бағанының «{type}» типі белгісіз.'),
+    (N'expr.report.unknownParameterType', N'en', N'Unknown type "{type}" of parameter "{name}".'),
+    (N'expr.report.unknownParameterType', N'ru', N'Неизвестный тип «{type}» параметра «{name}».'),
+    (N'expr.report.unknownParameterType', N'kz', N'«{name}» параметрінің «{type}» типі белгісіз.'),
+    (N'expr.report.unknownResultType', N'en', N'Unknown expected result type "{type}".'),
+    (N'expr.report.unknownResultType', N'ru', N'Неизвестный ожидаемый тип результата «{type}».'),
+    (N'expr.report.unknownResultType', N'kz', N'Нәтиженің күтілетін «{type}» типі белгісіз.')
        ) AS v ([Key], Lang, OldVal)
 OPTION (RECOMPILE);
 GO
@@ -371,6 +403,33 @@ SELECT v.[Key], v.Lang, v.OldVal, v.NewVal
     (N'jobs.kind.reportRetention', N'ru', N'Хранение срезов отчётов', N'Хранение результатов проверки документов'),
     (N'jobs.kind.reportRetention', N'kz', N'Есеп кесінділерін сақтау', N'Құжатты тексеру нәтижелерін сақтау')
        ) AS v ([Key], Lang, OldVal, NewVal)
+OPTION (RECOMPILE);
+GO
+-- RPT:rm-report-snapshots ── кінець секції ──
+
+-- RPT:rm-report-snapshots ── ru/kz: стартова сторінка ролі переглядача звітів «звіти — у SSRS»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'home.reportsInSsrs.title', N'ru', N'Отчёты'),
+    (N'home.reportsInSsrs.title', N'kz', N'Есептер'),
+    (N'home.reportsInSsrs.heading', N'ru', N'Отчёты формируются в SQL Server Reporting Services'),
+    (N'home.reportsInSsrs.heading', N'kz', N'Есептер SQL Server Reporting Services жүйесінде жасалады'),
+    (N'home.reportsInSsrs.hint', N'ru', N'Регламентированные отчёты строятся в SSRS по данным ECR. Адрес сервера отчётов уточните у администратора. Документы в приложении вам недоступны: для этого нужна роль с правом просмотра документов.'),
+    (N'home.reportsInSsrs.hint', N'kz', N'Реттелетін есептер ECR деректері бойынша SSRS жүйесінде құрылады. Есеп серверінің мекенжайын әкімшіден сұраңыз. Қосымшадағы құжаттар сізге қолжетімсіз: ол үшін құжаттарды қарау құқығы бар рөл қажет.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- RPT:rm-report-snapshots ── кінець секції ──
+
+-- RPT:rm-report-snapshots ── стартова сторінка ролі переглядача звітів (без Document.View): «звіти — у SSRS», без посилань ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'home.reportsInSsrs.title', N'en', N'Reports', 1),
+    (N'home.reportsInSsrs.heading', N'en', N'Reports are produced in SQL Server Reporting Services', 1),
+    (N'home.reportsInSsrs.hint', N'en', N'Regulatory reports are built in SSRS from ECR data. Ask your administrator for the report server address. Documents in the application are not available to you: that needs a role with the right to view documents.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO
 -- RPT:rm-report-snapshots ── кінець секції ──

@@ -61,8 +61,8 @@ const LastDay = '2026-06-15';
 function project(id: number, code: string, progress: CampaignProgress, deadline: string | null = DeadlineAt): CampaignProject {
   const counts =
     progress === 'Done'
-      ? { documents: 4, draft: 0, submitted: 0, approved: 4, rejected: 0, snapshots: 1 }
-      : { documents: 6, draft: 2, submitted: 1, approved: 1, rejected: 2, snapshots: 0 };
+      ? { documents: 4, draft: 0, submitted: 0, approved: 4, rejected: 0 }
+      : { documents: 6, draft: 2, submitted: 1, approved: 1, rejected: 2 };
 
   return {
     projectId: id,
@@ -86,7 +86,6 @@ function totalsOf(all: readonly CampaignProject[]): CampaignTotals {
     submitted: sum((p) => p.submitted),
     approved: sum((p) => p.approved),
     rejected: sum((p) => p.rejected),
-    snapshots: sum((p) => p.snapshots),
     done: count('Done'),
     overdue: count('Overdue'),
     atRisk: count('AtRisk'),
