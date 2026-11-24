@@ -1,6 +1,5 @@
 // tests/Ecr.Application.Tests/Workflow/WorkflowTransactionTests.SheetCopies.cs
 using Ecr.Application.Ports;
-using Ecr.Application.Reporting;
 using Ecr.Application.Workflow;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Documents;
@@ -81,17 +80,12 @@ public sealed partial class WorkflowTransactionTests
 
         await using (var db = CreateContext())
         {
-            var snapshots = Substitute.For<IReportSnapshotBuilder>();
-            snapshots.ListAsync(
-                         Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<IReadOnlyCollection<int>?>(),
-                         Arg.Any<CancellationToken>())
-                     .Returns<IReadOnlyList<ReportSnapshotSummary>>([]);
             var documents = CopyDocuments(world, copyId);
 
             // Копія — на останньому кроці маршруту: затвердження остаточне.
             await new ApproveSheetHandler(
                     new Ecr.Infrastructure.Persistence.WorkflowStore(db), CopyAccess(copyId, nextStepId: null),
-                    new ReportSnapshotSync(snapshots, documents), new Ecr.Infrastructure.Persistence.UnitOfWork(db),
+                    new Ecr.Infrastructure.Persistence.UnitOfWork(db),
                     Approver(), new TestClock(Now), new Ecr.Infrastructure.Persistence.AuditWriter(db), documents)
                 .HandleAsync(
                     world.DocumentId, world.SheetDefId, PeriodKeyValue, approved: true, reason: null, copyId,

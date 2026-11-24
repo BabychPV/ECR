@@ -141,8 +141,7 @@ public sealed class RecalculationJobForeignOwnerReadersTests(SqlServerFixture sq
             new UnitOfWork(db),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
-            clock,
-            Substitute.For<IAuditWriter>());
+            clock);
 
     private static Ecr.Application.Recalculation.RecalculationService FormulaService()
     {

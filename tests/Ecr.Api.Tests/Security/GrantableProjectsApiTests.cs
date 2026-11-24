@@ -70,7 +70,6 @@ public sealed class GrantableProjectsApiTests(SqlServerFixture sql)
                      $"/api/v1/projects/{b.ProjectId}/periods",
                      $"/api/v1/documents?projectId={b.ProjectId}",
                      $"/api/v1/documents/{b.DocumentId}",
-                     $"/api/v1/reports/snapshots?projectId={b.ProjectId}",
                  })
         {
             using var denied = await admin.GetAsync(Uri(path)).ConfigureAwait(true);

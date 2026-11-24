@@ -39,6 +39,12 @@ public sealed partial class UncheckedPermissionTests
     /// </remarks>
     private static readonly Dictionary<string, string> NotYetChecked = new(StringComparer.Ordinal)
     {
+        // ✎ P-1124-3 (D-NEW, людина 24.11): конструктор звітів і зрізи прибрано; права лишаються в каталозі разом
+        // з таблицями rpt.Report* (D-53) і прибираються тим самим окремим словом людини (видалення прав і гранти ролей).
+        ["Report.BuildSnapshot"] = "зрізи звітності прибрано (D-NEW, P-1124-3); видалення права — разом із таблицями зрізів",
+        ["Report.EditDefinition"] = "конструктор описів звітів прибрано (D-NEW, P-1124-3); видалення — разом із таблицями зрізів",
+        ["Report.Export"] = "книгу XLSX зрізу прибрано (D-NEW, P-1124-3); видалення права — разом із таблицями зрізів",
+        ["Report.ViewSnapshot"] = "рядки зрізу прибрано (D-NEW, P-1124-3); видалення права — разом із таблицями зрізів",
     };
 
     [Fact]

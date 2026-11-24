@@ -24,7 +24,6 @@ public sealed class ReopenDocumentHandler(
     ICurrentUser currentUser,
     IClock clock,
     IDocumentStore documents,
-    Reporting.ReportSnapshotSync reports,
 
     // ✎ D-451: лист «Аркуш повернуто» — ПІСЛЯ коміту, без права валити дію; `null` — тестові фабрики без пошти.
     SheetWorkflowNotifier? notifier = null,
@@ -215,13 +214,6 @@ public sealed class ReopenDocumentHandler(
                 ApprovalEvent.For(state, fromStatus, ApprovalAction.Reopen, userId, now, reason),
                 innerCt).ConfigureAwait(false);
 
-            // ⛔ R5-W1 / W1-03: статус НЕЗАМОРОЖЕНОГО зрізу перераховується, як після
-            // Approve/Reject/Recall (D-65, H-23b). Без цього зріз `Approved` лишався
-            // `Approved` у `rpt.v_*`, хоча аркуш щойно повернули в роботу. Заморожений
-            // (поданий) зріз не чіпається — його відсіює `ReportSnapshotSync` (ФВ-9.17).
-            // Перехід скидається в БД ДО перерахунку (W1-01): запит статусу його не бачить.
-            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
-            await reports.RefreshAsync(documentId, key, innerCt).ConfigureAwait(false);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
 
             // RS (Q5): збір пише лише в оригінал — для копії наздоганяти нічого.

@@ -1,6 +1,5 @@
 // tests/Ecr.Application.Tests/Workflow/WorkflowTransactionTests.SourceImpact.cs
 using Ecr.Application.Ports;
-using Ecr.Application.Reporting;
 using Ecr.Application.Security;
 using Ecr.Application.Workflow;
 using Ecr.Domain.Entities.Configuration;
@@ -56,8 +55,7 @@ public sealed partial class WorkflowTransactionTests
 
         await using var db = CreateContext();
         await new ApproveSheetHandler(
-                new WorkflowStore(db), AccessAt(Step(ordinal: 2, next: null)), new ReportSnapshotSync(NoSnapshots(), Documents(world)),
-                new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db), Documents(world),
+                new WorkflowStore(db), AccessAt(Step(ordinal: 2, next: null)), new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db), Documents(world),
                 sourceImpact: assessor)
             .HandleAsync(world.DocumentId, world.SheetDefId, PeriodKeyValue, approved: false, "B80 N5: відхилення", CancellationToken.None)
             .ConfigureAwait(true);
@@ -99,7 +97,6 @@ public sealed partial class WorkflowTransactionTests
         await using var db = CreateContext();
         await new ReopenDocumentHandler(
                 new WorkflowStore(db), AccessAt(step: null), new UnitOfWork(db), User(), new TestClock(Now), Documents(world),
-                new ReportSnapshotSync(NoSnapshots(), Documents(world)),
                 sourceImpact: assessor)
             .HandleAsync(world.DocumentId, world.SheetDefId, PeriodKeyValue, "B80 N5: повернення", CancellationToken.None)
             .ConfigureAwait(false);
@@ -119,8 +116,7 @@ public sealed partial class WorkflowTransactionTests
     {
         await using var db = CreateContext();
         await new ApproveSheetHandler(
-                new WorkflowStore(db), AccessAt(step), new ReportSnapshotSync(NoSnapshots(), Documents(world)),
-                new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db), Documents(world),
+                new WorkflowStore(db), AccessAt(step), new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db), Documents(world),
                 sourceImpact: assessor)
             .HandleAsync(world.DocumentId, world.SheetDefId, PeriodKeyValue, approved: true, reason: null, CancellationToken.None)
             .ConfigureAwait(false);

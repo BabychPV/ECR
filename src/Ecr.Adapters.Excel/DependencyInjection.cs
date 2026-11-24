@@ -41,10 +41,6 @@ public static class DependencyInjection
         // «Import file…» of a permit table: one .xlsx sheet as text, same safety gate. Stateless.
         services.AddSingleton<IPermitImportWorkbook, RegistryImport.PermitImportWorkbook>();
 
-        // Книга зрізу звітності (R7). Без стану і без портів — тому Singleton:
-        // усе, що їй треба, приходить аргументом.
-        services.AddSingleton<ISnapshotWorkbookWriter, SnapshotWorkbookWriter>();
-
         // Книга експорту довідника (RT-16): так само без стану й без портів.
         services.AddSingleton<IRegistryWorkbookWriter, RegistryWorkbookWriter>();
 

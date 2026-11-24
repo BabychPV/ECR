@@ -2,7 +2,6 @@ using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
-using Ecr.Application.Reporting;
 using Ecr.Application.Security;
 using Ecr.Application.Workflow;
 using Ecr.Domain.Abstractions;
@@ -461,10 +460,6 @@ public sealed class ServiceAccountLeastPrivilegeTests(ServiceAccountLeastPrivile
         access.CurrentApprovalStepAsync(doc.DocumentId, doc.SheetDefId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
               .Returns((ApprovalStepView?)null);
 
-        var snapshots = Substitute.For<IReportSnapshotBuilder>();
-        snapshots.ListAsync(Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
-                 .Returns<IReadOnlyList<ReportSnapshotSummary>>([]);
-
         var methodologies = Substitute.For<IMethodologyStore>();
         methodologies.GetCalculationFreshnessAsync(
                          Arg.Any<long>(), Arg.Any<int>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
@@ -474,8 +469,7 @@ public sealed class ServiceAccountLeastPrivilegeTests(ServiceAccountLeastPrivile
             new NormalizedCellStore(db), new RowStore(db, bulk, clock), new WorkflowStore(db), documents,
             Metadata(doc), access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-            Headers(), new ReportSnapshotSync(snapshots, documents),
-            new UnitOfWork(db), User(), clock, new SheetEditGate(db),
+            Headers(), new UnitOfWork(db), User(), clock, new SheetEditGate(db),
             Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
             methodologies, new TemplateVersionStore(db), new RegistryStore(db), new AuditWriter(db));
     }

@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Configuration;
@@ -99,9 +99,13 @@ public sealed class ContractIntegrityTests
     /// ⚠ <c>ECR-SCHM-0409</c> зі списку ПІШОВ: ФВ-7.4 доведена до відмови
     /// операції в <c>PatchPresentationHandler</c>. Саме так цей список і має
     /// коротшати — не правкою «щоб зелене», а виконаною вимогою.
+    ///
+    /// ⚠ ✎ P-1124-3 (D-NEW): <c>ECR-RPT-0404</c> і <c>ECR-RPT-0422</c> кидали лише обробники конструктора звітів і
+    /// побудови зрізів, прибрані повністю; коди лишаються в каталозі до окремого слова людини про таблиці зрізів
+    /// (тоді — разом із рядками §7 <c>02-contracts.md</c>).
     /// </remarks>
     private static readonly string[] ReservedCodes =
-        ["ECR-CELL-4222"];
+        ["ECR-CELL-4222", "ECR-RPT-0404", "ECR-RPT-0422"];
 
     /// <summary>Шлях каталогу констант відносно кореня репозиторію.</summary>
     private const string CatalogFile = "src/Ecr.Domain/Errors/ErrorCodes.cs";

@@ -91,6 +91,10 @@ DROP TABLE #I18N;
 GO
 
 -- ── Опис звіту: одна державна форма з каталогу ФВ-10.7 ───────────────────
+-- ✎ P-1124-3 (D-NEW, рішення людини 24.11): конструктор описів і побудову зрізів прибрано повністю — класи,
+-- згадані нижче (IReportDefinitionStore, ReportSnapshotBuilder, ReportColumnSpec, ReportSourceColumns,
+-- ReportColumnNames, POST /api/v1/reports), більше не існують; коментарі лишено як історію рішення. Рядки описів
+-- лишаються ДАНИМИ контракту rpt.* (D-53) до окремого слова людини про таблиці зрізів (D-NEW, «прибрати пізніше»).
 -- ⛔ Тут `IEC`; ще три (ECR230_A1/B1/B4) — у секції COLL:an14-ecr230. `rpt.ReportDef` і
 -- `rpt.ReportVersion` не створювало НІЩО — ні код, ні seed, ні тести, — тому
 -- `POST /reports/{code}/build` відмовляв `ECR-RPT-0404` на будь-який код:

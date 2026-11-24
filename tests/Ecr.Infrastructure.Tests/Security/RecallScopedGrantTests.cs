@@ -2,7 +2,6 @@
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
-using Ecr.Application.Reporting;
 using Ecr.Application.Security;
 using Ecr.Application.Workflow;
 using Ecr.Domain.Entities.Security;
@@ -215,17 +214,11 @@ public sealed class RecallScopedGrantTests(SqlServerFixture sql) : IDisposable
         documents.FindProjectIdAsync(doc.DocumentId, Arg.Any<CancellationToken>()).Returns(doc.ProjectId);
         documents.GetTemplateVersionIdAsync(doc.DocumentId, Arg.Any<CancellationToken>()).Returns(doc.TemplateVersionId);
 
-        var snapshots = Substitute.For<IReportSnapshotBuilder>();
-        snapshots.ListAsync(
-                     Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
-                 .Returns<IReadOnlyList<ReportSnapshotSummary>>([]);
-
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(userId);
 
         return new RecallSheetHandler(
-            new WorkflowStore(db), documents, access, new ReportSnapshotSync(snapshots, documents),
-            new UnitOfWork(db), user, new TestClock(Now));
+            new WorkflowStore(db), documents, access, new UnitOfWork(db), user, new TestClock(Now));
     }
 
     private static async Task<DocumentStatus> StatusAsync(TestDocumentBuilder builder, TestDocument doc)

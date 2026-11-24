@@ -130,8 +130,6 @@ public sealed partial class SheetCopyQuerySitesTests
         ["src/Ecr.Infrastructure/Persistence/CellSourceStore.cs"] = "останній запис журналу — екземпляра своєї копії (@copy)",
 
         // ── звітність і зведення (RS7): копія — окремий аркуш складу зі СВОЇМ станом ──
-        ["src/Ecr.Infrastructure/Reporting/ReportSnapshotBuilder.cs"] =
-            "статус зрізу: стан рядка складу (копія — своя); Approved лише коли затверджені оригінал і всі копії",
         ["src/Ecr.Infrastructure/Persistence/CampaignSummaryStore.cs"] =
             "підсумки кампанії: стан СВОГО рядка складу (a.SheetCopyId = s.Id або обидва NULL)",
         ["src/Ecr.Infrastructure/Persistence/DocumentListSummaryStore.cs"] =

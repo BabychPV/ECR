@@ -63,8 +63,6 @@ public sealed class ScopedOperatorPermissionTests(SqlServerFixture sql)
     [InlineData("recalculate", false)]
     [InlineData("reopen", true)]
     [InlineData("reopen", false)]
-    [InlineData("report", true)]
-    [InlineData("report", false)]
     [InlineData("compare", true)]
     [InlineData("compare", false)]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
@@ -108,11 +106,7 @@ public sealed class ScopedOperatorPermissionTests(SqlServerFixture sql)
             // Хибна версія `to`: 422 означає, що перевірку права в проєкті
             // пройдено (S6 додав тут межі читання; глобальна перевірка права
             // давала б 403 оператору з роллю з областю). Чужий — невидимий.
-            "compare" => (422, 404),
-
-            // Невідомий код звіту: 404 означає, що перевірку права й гранта
-            // пройдено і обробник дійшов до пошуку версії.
-            _ => (404, 403),
+            _ => (422, 404),
         };
 
         Assert.True(
@@ -125,11 +119,6 @@ public sealed class ScopedOperatorPermissionTests(SqlServerFixture sql)
                 .Select(d => d.GetProperty("id").GetInt64())
                 .ToList();
             Assert.Equal(own, ids.Contains(b.DocumentId));
-        }
-
-        if (action == "report" && own)
-        {
-            Assert.Equal("ECR-RPT-0404", JsonDocument.Parse(body).RootElement.GetProperty("errorCode").GetString());
         }
     }
 
@@ -182,11 +171,8 @@ public sealed class ScopedOperatorPermissionTests(SqlServerFixture sql)
             "reopen" => client.PostAsJsonAsync(
                 new Uri($"/api/v1/documents/{b.DocumentId}/reopen", UriKind.Relative),
                 new { sheetDefId = b.SheetDefId, periodKey = b.PeriodKey.Value, reason = "ФВ-6.14" }),
-            "compare" => client.GetAsync(
+            _ => client.GetAsync(
                 new Uri($"/api/v1/documents/{b.DocumentId}/compare?from=1&to=not-a-version", UriKind.Relative)),
-            _ => client.PostAsJsonAsync(
-                new Uri("/api/v1/reports/NO_SUCH_REPORT_FV614/build", UriKind.Relative),
-                new { projectId = b.ProjectId, periodKey = b.PeriodKey.Value }),
         };
 
     /// <summary>Два проєкти одного шаблону; документ — у B.</summary>

@@ -373,18 +373,10 @@ public sealed partial class RecurringScheduleService(
             .ScheduleAsync<Infrastructure.Jobs.OrphanScanJob>(NightlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);
 
-        // ⛔ Q-2xx (аудит фази 3, звітність). Без цього рядка задача існувала
-        // б у коді й ніколи не виконувалася б: rpt.ReportSnapshot/ReportRow
-        // росли б вічно — на кожен звіт, кожен проєкт, кожен період, кожну
-        // повторну побудову (B16 §4, D-71).
+        // P1-08: нічна ретенція прогонів перевірки документа (wf.ValidationResult). ✎ P-1124-3: прибирання зрізів
+        // звітності з неї прибрано разом зі зрізами; код задачі той самий (історія itg.MaintenanceRun).
         await scheduler
             .ScheduleAsync<Infrastructure.Jobs.ReportRetentionJob>(NightlyCron, null, CancellationToken.None)
-            .ConfigureAwait(false);
-
-        // Класифікація формату суми старих зрізів (рішення 2026-09-21): у запиті
-        // переліку її не робить ніхто, тож без цього рядка старі лишалися б `unknown`.
-        await scheduler
-            .ScheduleAsync<Infrastructure.Jobs.ReportSnapshotFormatJob>(NightlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);
 
         // AN-134: прибирання старих зрізів подання. Нічне вікно; за замовчуванням лише рахує (dry-run) —

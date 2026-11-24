@@ -2,7 +2,6 @@
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
-using Ecr.Application.Reporting;
 using Ecr.Application.Security;
 using Ecr.Application.Workflow;
 using Ecr.Domain.Abstractions;
@@ -167,7 +166,7 @@ public sealed partial class WorkflowTransactionTests
 
     private static RecallSheetHandler Recall(
         World world, EcrDbContext db, int userId, GrantLevel level, bool submitRight = false,
-        IReportSnapshotBuilder? reportSnapshots = null, DateTime? at = null)
+        DateTime? at = null)
     {
         var documents = Documents(world);
         documents.HasSheetAsync(world.DocumentId, world.SheetDefId, Arg.Any<CancellationToken>()).Returns(true);
@@ -205,7 +204,6 @@ public sealed partial class WorkflowTransactionTests
         user.UserId.Returns(userId);
 
         return new RecallSheetHandler(
-            new WorkflowStore(db), documents, access, new ReportSnapshotSync(reportSnapshots ?? NoSnapshots(), documents),
-            new UnitOfWork(db), user, new TestClock(at ?? Now));
+            new WorkflowStore(db), documents, access, new UnitOfWork(db), user, new TestClock(at ?? Now));
     }
 }

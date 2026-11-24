@@ -649,12 +649,6 @@ export const routes = {
     handle: { labelKey: 'nav.jobs', permission: 'System.ViewHealth', icon: 'jobs', descriptionKey: 'nav.jobs.description' },
     showInNav: true,
   },
-  adminSnapshots: {
-    id: 'admin-snapshots',
-    path: '/admin/snapshots',
-    handle: { labelKey: 'nav.snapshots', permission: 'Report.ViewRegulatory', icon: 'snapshots', descriptionKey: 'nav.snapshots.description' },
-    showInNav: true,
-  },
   /**
    * Огляд звітної кампанії періоду (`BE-22`): хто її затримує.
    *
@@ -828,7 +822,6 @@ export const navGroups: readonly NavGroup[] = [
     labelKey: 'nav.group.operate',
     routes: [
       routes.adminJobs,
-      routes.adminSnapshots,
       routes.adminAudit,
       routes.adminConsistency,
       routes.adminUiStrings,

@@ -342,10 +342,8 @@ public sealed class SeedTests(SqlServerFixture sql)
     // `RequirementCensusTests`.
     public async Task Seed_заводить_один_опис_звіту_з_опублікованою_версією()
     {
-        // ⛔ Без цього рядка звітність існує і не працює: побудова зрізу
-        // резолвить версію ЗА КОДОМ, а `rpt.ReportDef` не створювало ніщо —
-        // ні код, ні seed, ні тести. Чиста база відмовляла `ECR-RPT-0404` на
-        // будь-який код, який можна було ввести (директива №09 `W7`).
+        // ✎ P-1124-3: побудову зрізів прибрано; рядок опису лишається даними контракту rpt.* (D-53),
+        // і сід далі має його заводити — до окремого слова людини про таблиці зрізів.
         Assert.Equal(1, await ScalarAsync(
             "SELECT COUNT(*) FROM rpt.ReportDef WHERE Code = N'IEC' AND IsActive = 1 AND IsRegulatory = 1"));
 
@@ -404,21 +402,19 @@ public sealed class SeedTests(SqlServerFixture sql)
         }
 
         Assert.Equal(["ECR230_A1", "ECR230_B1", "ECR230_B4"], versions.Select(v => v.Code));
+        // ✎ P-1124-3: звірку колонок із полями джерела побудови зрізу (ReportSourceColumns) прибрано разом із побудовою;
+        // рядки опису лишаються даними контракту rpt.* (D-53) — перевіряються форма й ідемпотентність сіду.
         foreach (var (code, columns, rules) in versions)
         {
-            var parsed = Ecr.Application.Reporting.ReportRules.Parse(rules);
-            Assert.Equal(Ecr.Application.Reporting.ReportDefinitionSpec.CalculationResults, parsed.RowSource);
+            Assert.Contains("CalculationResults", rules, StringComparison.Ordinal);
 
             using var json = System.Text.Json.JsonDocument.Parse(columns);
             foreach (var column in json.RootElement.EnumerateArray())
             {
                 var columnCode = column.GetProperty("code").GetString()!;
-                Assert.True(
-                    Ecr.Application.Reporting.ReportSourceColumns.KindOf(parsed.RowSource, columnCode)
-                        == column.GetProperty("kind").GetString(),
-                    $"{code}: колонка {columnCode} не з джерела або не того типу");
+                Assert.False(string.IsNullOrWhiteSpace(column.GetProperty("kind").GetString()), $"{code}: {columnCode} без типу");
 
-                // Підпис — щонайменше en: kz падає на en (ReportColumnNames.Of); без en колонка безіменна.
+                // Підпис — щонайменше en; без en колонка безіменна.
                 if (column.TryGetProperty("nameL10n", out var names))
                 {
                     Assert.False(string.IsNullOrWhiteSpace(names.GetProperty("en").GetString()), $"{code}: {columnCode} без en");

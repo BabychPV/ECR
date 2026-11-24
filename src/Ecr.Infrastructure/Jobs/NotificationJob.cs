@@ -491,7 +491,6 @@ public sealed class NotificationJob(
             [typeof(IFormulaRecalculationJob).FullName!] = "formula-recalculation",
             [typeof(IExcelImportJob).FullName!] = "excel-import",
             [typeof(IExcelExportJob).FullName!] = "excel-export",
-            [typeof(IReportSnapshotJob).FullName!] = "report-snapshot",
         };
 
     /// <summary>

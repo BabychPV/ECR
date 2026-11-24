@@ -178,8 +178,7 @@ public sealed class RecalculationJobPartialTableDiagnosticsTests(SqlServerFixtur
             Substitute.For<IUnitOfWork>(),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
-            new TestClock(DateTime.UtcNow),
-            Substitute.For<IAuditWriter>());
+            new TestClock(DateTime.UtcNow));
 
     private sealed record Arranged(TestDocumentBuilder Builder, TestDocument Document, long SecondInstanceId);
 

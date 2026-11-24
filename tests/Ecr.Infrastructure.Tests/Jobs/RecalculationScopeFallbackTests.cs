@@ -106,6 +106,5 @@ public sealed class RecalculationScopeFallbackTests(SqlServerFixture sql)
             Substitute.For<IUnitOfWork>(),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
-            new TestClock(DateTime.UtcNow),
-            Substitute.For<IAuditWriter>());
+            new TestClock(DateTime.UtcNow));
 }

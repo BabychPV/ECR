@@ -50,7 +50,8 @@ internal sealed record NightlyInputProbe(
 ///   (<c>TemplateVersionId = 0</c>) — лише типи <see cref="GlobalStructureEntityTypes"/> (огляд M2(a): прив'язки, пакети,
 ///   довідники; маршрути погодження, звіти, дозволи, інтеграція — ні). Записи періодів (під версією проєкту) не потрібні — їх
 ///   перехід ловить гілка станів періодів нижче (і B74 не дає читати <c>Project.TemplateVersionId</c>). Крім власних записів перерахунку —
-///   <c>SheetRecalc</c> (журнал пропущених/перерахованих аркушів) і <c>ReportSnapshot</c> (зріз застарів), — і блокувань рядків
+///   <c>SheetRecalc</c> (журнал пропущених/перерахованих аркушів; запис «зріз застарів» прибрано разом зі зрізами звітності,
+///   P-1124-3), — і блокувань рядків
 ///   (<c>RowLock</c>: не вхід розрахунку): інакше нічний прогін сам собі давав би «зміну» щоночі;</item>
 ///   <item>перехід стану періоду проєкту (<c>doc.Period.StateChangedAt</c>, зокрема Reopen) і виняток «місяць відкрито для
 ///   документа» (відкрито чи закрито);</item>
@@ -78,7 +79,6 @@ internal static class NightlyInputChangeQuery
     internal static readonly string[] IgnoredStructureEntityTypes =
     [
         RecalculationSkips.AuditEntityType,
-        RunCalculationHandler.SnapshotAuditEntityType,
         Ecr.Application.Documents.RowLocks.RowLockRules.AuditEntityType,
     ];
 

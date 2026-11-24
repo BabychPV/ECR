@@ -397,7 +397,7 @@ public sealed class SourceCascadePerfTests(SqlServerFixture sql, ITestOutputHelp
         => new(
             Substitute.For<IPeriodStore>(), Substitute.For<IWorkflowStore>(), new CalculationResultStore(db, clock),
             Substitute.For<IBackgroundJobScheduler>(), new UnitOfWork(db), Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
-            Substitute.For<ICurrentUser>(), clock, Substitute.For<IAuditWriter>());
+            Substitute.For<ICurrentUser>(), clock);
 
     private static RecalculationService FormulaService()
     {
