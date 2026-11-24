@@ -96,6 +96,23 @@ public interface IRegistryImpactStore
     /// <returns>Рядки «документ × період»; <c>MethodologyCode</c> — порожній (результату може не бути).</returns>
     public Task<IReadOnlyList<RegistryImpactRow>> ListTemplateConsumersAsync(
         IReadOnlyCollection<int> templateIds, int firstPeriod, int lastPeriod, int? month, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>, live Quartz): те саме, що <c>ListTemplateConsumersAsync</c>,
+    /// плюс <paramref name="routedMonth"/> — ребро «літеральний місяць у комірці періоду-власника»
+    /// (<c>TemplateDependency.MonthOwned</c>): у МІСЯЧНОМУ проєкті лишається лише період <c>(рік, m)</c>, якщо він є в
+    /// календарі проєкту (власник колонки <c>M{m}</c>); без такого рядка календаря чи в проєкті іншої періодичності — усі
+    /// періоди, як доти (маршрутизація там не віддає комірку одному періоду).
+    /// </summary>
+    /// <param name="templateIds">Шаблони-споживачі.</param>
+    /// <param name="firstPeriod">Найменший ключ періоду (включно).</param>
+    /// <param name="lastPeriod">Найбільший ключ періоду (включно).</param>
+    /// <param name="month">Обсяг «місяць» (див. перевантаження).</param>
+    /// <param name="routedMonth">Місяць правки для ребра <c>MonthOwned</c>; <c>null</c> — без звуження.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<RegistryImpactRow>> ListTemplateConsumersRoutedAsync(
+        IReadOnlyCollection<int> templateIds, int firstPeriod, int lastPeriod, int? month, int? routedMonth, CancellationToken ct)
+        => ListTemplateConsumersAsync(templateIds, firstPeriod, lastPeriod, month, ct);
 }
 
 /// <summary>Один зачеплений документ у періоді, через одну методологію.</summary>

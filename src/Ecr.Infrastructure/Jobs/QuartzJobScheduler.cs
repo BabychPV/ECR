@@ -100,6 +100,10 @@ public sealed partial class QuartzJobScheduler(
     /// <remarks>⚠ Черга в пам'яті: постановка — лише ПІСЛЯ коміту викликача (MI-02 (в)).</remarks>
     public bool EnlistsInCallerTransaction => false;
 
+    /// <inheritdoc />
+    /// <remarks>✎ PERF-06b (<c>D-572</c>, live): злиття перерахунку документа об'єднує місяці (<see cref="QuartzSourceMonths"/>).</remarks>
+    public bool MergesSourceMonths => true;
+
     /// <summary>Чи поставлена задача через <see cref="ScheduleAsync{TJob}"/> (крон).</summary>
     /// <param name="detail">Деталь задачі; <c>null</c> — задачі немає.</param>
     /// <remarks>
@@ -469,6 +473,15 @@ public sealed partial class QuartzJobScheduler(
         CancellationToken ct)
         where TJob : IBackgroundJob
     {
+        // ✎ PERF-06b (D-572, live Quartz): перерахунок документа зливає місяці правки джерела (sourceMonths) об'єднанням —
+        // спершу в задачу цілі, що чекає й зареєстрована (QuartzPayloadMerges, межа — взяття адаптером), як черга в базі.
+        var months = typeof(TJob) == typeof(IRecalculationJob);
+        var json = months ? JsonSerializer.Serialize(payload, PayloadOptions) : null;
+        if (months && QuartzPayloadMerges.MergeOpen(instance.SchedulerName, prefix, json!, QuartzSourceMonths.Merge) is { } open)
+        {
+            return open;
+        }
+
         var listener = CoalescedRequeueListener.Of(instance, logger);
 
         var executing = new HashSet<string>(StringComparer.Ordinal);
@@ -503,21 +516,60 @@ public sealed partial class QuartzJobScheduler(
 
         if (running is null)
         {
-            return await EnqueueCoreAsync<TJob>(
-                    instance, prefix + Guid.NewGuid().ToString("N"), payload, ct, createdByUserId)
-                .ConfigureAwait(false);
+            var created = prefix + Guid.NewGuid().ToString("N");
+
+            // ✎ PERF-06b: тіло з місяцями — відкрите для злиття наступних постановок, поки адаптер його не взяв.
+            if (months && QuartzSourceMonths.Has(json))
+            {
+                QuartzPayloadMerges.Open(instance.SchedulerName, prefix, json!, created);
+            }
+
+            try
+            {
+                return await EnqueueCoreAsync<TJob>(instance, created, payload, ct, createdByUserId).ConfigureAwait(false);
+            }
+            catch
+            {
+                QuartzPayloadMerges.Forget(created);
+                throw;
+            }
         }
 
-        Task<string> Requeue(string finished, CancellationToken token)
-            => CoalesceAsync<TJob>(instance, prefix, payload, createdByUserId, finished, token);
+        // ✎ PERF-06b: злиття з ВИКОНУВАНОЮ — місяці накопичуються для перепостановки (не payload останнього злиття).
+        var dirtyKey = $"{instance.SchedulerName}|{running}";
+        var accumulated = months ? QuartzSourceMonths.AccumulateDirty(dirtyKey, json!) : null;
+
+        (object? Payload, string? Used) Effective()
+            => months && QuartzSourceMonths.PeekDirty(dirtyKey) is { } acc
+                ? (JsonDocument.Parse(acc).RootElement.Clone(), acc)
+                : (payload, null);
+
+        async Task<string> Requeue(string finished, CancellationToken token)
+        {
+            var (body, used) = Effective();
+            var id = await CoalesceAsync<TJob>(instance, prefix, body, createdByUserId, finished, token).ConfigureAwait(false);
+            if (used is not null)
+            {
+                QuartzSourceMonths.ForgetDirty(dirtyKey, used);
+            }
+
+            return id;
+        }
 
         // ⛔ N-5: замикання, що тримає 	his, пережило б scope запиту (див. <paramref name="scopes"/>).
         async Task<string> RequeueInOwnScope(string finished, CancellationToken token)
         {
+            var (body, used) = Effective();
             using var scope = scopes!.CreateScope();
-            return await scope.ServiceProvider.GetRequiredService<QuartzJobScheduler>()
-                .CoalesceAsync<TJob>(instance, prefix, payload, createdByUserId, finished, token)
+            var id = await scope.ServiceProvider.GetRequiredService<QuartzJobScheduler>()
+                .CoalesceAsync<TJob>(instance, prefix, body, createdByUserId, finished, token)
                 .ConfigureAwait(false);
+            if (used is not null)
+            {
+                QuartzSourceMonths.ForgetDirty(dirtyKey, used);
+            }
+
+            return id;
         }
 
         Func<string, CancellationToken, Task<string>> requeue = scopes is null ? Requeue : RequeueInOwnScope;
@@ -534,9 +586,18 @@ public sealed partial class QuartzJobScheduler(
         var stillExecuting = (await instance.GetCurrentlyExecutingJobs(ct).ConfigureAwait(false))
             .Any(c => string.Equals(c.JobDetail.Key.Name, running, StringComparison.Ordinal));
 
-        return stillExecuting && listener.MarkDirty(running, requeue, adoptRunning: true)
-            ? running
-            : await CoalesceAsync<TJob>(instance, prefix, payload, createdByUserId, running, ct).ConfigureAwait(false);
+        if (stillExecuting && listener.MarkDirty(running, requeue, adoptRunning: true))
+        {
+            return running;
+        }
+
+        // Виконувана вже завершилась — накопичене для неї не знадобиться; постановка йде новою.
+        if (accumulated is not null)
+        {
+            QuartzSourceMonths.ForgetDirty(dirtyKey, accumulated);
+        }
+
+        return await CoalesceAsync<TJob>(instance, prefix, payload, createdByUserId, running, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1200,6 +1261,49 @@ internal static class QuartzPayloadMerges
             ByJob[newJobId] = new Entry(target) { Payload = json };
             OpenByTarget[target] = newJobId;
             return (newJobId, true);
+        }
+    }
+
+    /// <summary>
+    /// ✎ PERF-06b: зливає тіло <paramref name="json"/> у задачу цілі, що ЧЕКАЄ (зареєстровану й ще не взяту адаптером),
+    /// функцією <paramref name="merge"/>; <c>null</c> — такої задачі немає.
+    /// </summary>
+    /// <param name="scope">Ім'я планувальника.</param>
+    /// <param name="prefix">Префікс цілі.</param>
+    /// <param name="json">Тіло постановки.</param>
+    /// <param name="merge">Злиття (тіло задачі, тіло постановки) → нове тіло.</param>
+    public static string? MergeOpen(string scope, string prefix, string json, Func<string, string, string> merge)
+    {
+        ArgumentNullException.ThrowIfNull(merge);
+        var target = $"{scope}|{prefix}";
+
+        lock (Gate)
+        {
+            if (OpenByTarget.TryGetValue(target, out var openId)
+                && ByJob.TryGetValue(openId, out var open)
+                && !open.Taken)
+            {
+                open.Payload = merge(open.Payload, json);
+                return openId;
+            }
+
+            return null;
+        }
+    }
+
+    /// <summary>✎ PERF-06b: реєструє тіло нової задачі цілі як відкрите для злиття (<see cref="MergeOpen"/>).</summary>
+    /// <param name="scope">Ім'я планувальника.</param>
+    /// <param name="prefix">Префікс цілі.</param>
+    /// <param name="json">Тіло.</param>
+    /// <param name="jobId">Нова задача.</param>
+    public static void Open(string scope, string prefix, string json, string jobId)
+    {
+        var target = $"{scope}|{prefix}";
+
+        lock (Gate)
+        {
+            ByJob[jobId] = new Entry(target) { Payload = json };
+            OpenByTarget[target] = jobId;
         }
     }
 

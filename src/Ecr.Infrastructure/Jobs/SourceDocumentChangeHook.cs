@@ -183,8 +183,9 @@ public sealed partial class SourceDocumentChangeHook(
             if (cellsEdited && sourceRecalculation is not null)
             {
                 // ✎ PERF-06b (D-572): річне/квартальне джерело — місяці правки (усі змінені колонки місячні) їдуть крізь `-auto`.
-                // Черга без об'єднання (Quartz) місяців однаково не несе — колонок не читаємо (жодного звернення понад доти).
-                var editedMonths = sourceRecalculation.CoalescesCascadePeriods
+                // Черга, що не зливає місяці, їх однаково не несе — колонок не читаємо (жодного звернення понад доти).
+                // ✎ PERF-06b live: Quartz теж зливає місяці (QuartzSourceMonths) — CarriesSourceMonths, а не злиття періодів.
+                var editedMonths = sourceRecalculation.CarriesSourceMonths
                     ? await EditedMonthsAsync(
                             matched.Where(f => f.PeriodKind != PeriodKind.Monthly).Select(f => (f.DocumentId, f.PeriodKeyValue, f.PeriodKind)),
                             (periodsByDocument as ChangedPeriodsDictionary)?.ChangedColumns, ct)

@@ -121,6 +121,12 @@ public interface ICalculationTrigger
     public bool CoalescesCascadePeriods => false;
 
     /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>): чи власний перерахунок річного/квартального джерела несе місяці правки (злиття — об'єднанням).
+    /// </summary>
+    /// <remarks>Типово <c>false</c> (фейки тестів); справжній тригер — за чергою (<see cref="IBackgroundJobScheduler.MergesSourceMonths"/>).</remarks>
+    public bool CarriesSourceMonths => false;
+
+    /// <summary>
     /// ✎ PERF-06 (<c>D-566</c>, рішення людини 22.11): каскад від правки документа-джерела B179 — ОДНА задача на документ-споживач
     /// і рік, що рахує лише <paramref name="periodKeys"/> (періоди, які читають змінені місяці джерела) і пізніші місяці, що
     /// читають їхні обчислені числа. Постановки за вікно каскаду (<c>CalculationTrigger.CascadeDebounce</c>) зливаються з
