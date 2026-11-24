@@ -23,6 +23,7 @@ import type {
   SimulationResultDto,
 } from '@/api/types';
 import { createMethodology } from '@/features/methodologies/api';
+import { currentScriptVersion, scriptVersions, todayIso } from '@/features/methodologies/newVersionEngine';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -33,9 +34,14 @@ import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 
+/** Версія-скрипт, яку відкриває головна кнопка рядка: чинна сьогодні (перелік містить лише опубліковані). */
+function listedEditorTarget(methodology: MethodologyDto): MethodologyDto['versions'][number] | undefined {
+  return currentScriptVersion(methodology.versions, todayIso());
+}
+
 /**
- * Перелік методологій: заведення, імпорт пакета, прогін без запису й вхід у
- * конфігуратор версій.
+ * Перелік методологій: заведення, прогін без запису, вхід у редактор поточної версії-скрипта й у перелік версій
+ * (✎ P-1124-1: імпорт пакета формул прибрано — формульний авторинг виведено).
  *
  * ⛔ L9-43: публікації тут БІЛЬШЕ НЕМАЄ — і це не втрата. Перелік за побудовою
  * містить лише ОПУБЛІКОВАНІ версії (`ListMethodologiesHandler.Map` відкидає
@@ -166,6 +172,18 @@ export function MethodologiesPage(): JSX.Element {
                         опубліковані версії — те, чим рахують, — і кнопка
                         «Опублікувати» поруч стояла для версій, яких він не
                         містить (`ФВ-9.15`). */}
+                    {/* ✎ P-1124-1 (24.11, «має бути тільки наш новий редакор»): головний вхід — редактор поточної
+                        версії-скрипта; формульних версій у переліку немає (лише в базі). */}
+                    {listedEditorTarget(methodology) !== undefined && (
+                      <Button
+                        size="xs"
+                        component={Link}
+                        to={`/admin/methodologies/${String(methodology.id)}/versions/${String(listedEditorTarget(methodology)?.id)}/script`}
+                      >
+                        {t('methodologyScript.versions.openEditor')}
+                      </Button>
+                    )}
+
                     <Button
                       size="xs"
                       variant="light"
@@ -175,7 +193,7 @@ export function MethodologiesPage(): JSX.Element {
                       {t('methodologies.versionsTitle')}
                     </Button>
 
-                    {methodology.versions.map((version) => (
+                    {scriptVersions(methodology.versions).map((version) => (
                       <Group key={version.id} gap="xs">
                         <Badge variant={version.status === 'Published' ? 'filled' : 'light'}>
                           {version.versionNumber} · {version.level}
