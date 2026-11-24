@@ -291,10 +291,31 @@ describe('DocumentPage: проблеми розрахунку документа
   );
 
   it(
-    'рік: посилання на САМ якір (?periodKey=січень) — теж перехід до колонки січня (огляд b11, G), одноразово',
+    'рік: звичайне відкриття якоря (?periodKey=січень, без focusMonth) — сітка НЕ стрибає (огляд b11 #3, п. 5)',
     async () => {
       navigation.requests.length = 0;
       show(`/documents/1?periodKey=${String(Anchor)}`, 'YearWithMonthColumns');
+
+      await waitFor(
+        () => {
+          if (document.querySelector(`[data-testid="document-calc-issues"][data-period="${String(October)}"]`) === null) {
+            throw new Error('сторінка ще не готова');
+          }
+        },
+        { timeout: 60_000 },
+      );
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(navigation.requests).toEqual([]);
+      expect(search()).toBe(`?periodKey=${String(Anchor)}`);
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'рік: явний focusMonth=1 на якорі (посилання з панелі F5-R / «Open HSE400») — перехід до колонки січня (огляд b11, G), одноразово',
+    async () => {
+      navigation.requests.length = 0;
+      show(`/documents/1?periodKey=${String(Anchor)}&focusMonth=1`, 'YearWithMonthColumns');
 
       await waitFor(
         () => expect(navigation.requests).toContainEqual(expect.objectContaining({ tableDefId: 1, columnCode: 'M01' })),
