@@ -144,6 +144,9 @@ public static class ScriptDiagnosticCodes
     // Перевірки оточення (потребують БД; створюються поза цим проєктом).
     public const string UnknownUnit = "unknownUnit";
     public const string UnknownSubstance = "unknownSubstance";
+
+    /// <summary>✎ c11-10: код речовини є в кількох довідниках, і методологія жодного з них ще не вживає.</summary>
+    public const string AmbiguousSubstance = "ambiguousSubstance";
     public const string UnknownTable = "unknownTable";
     public const string AmbiguousTable = "ambiguousTable";
     public const string UnknownColumn = "unknownColumn";

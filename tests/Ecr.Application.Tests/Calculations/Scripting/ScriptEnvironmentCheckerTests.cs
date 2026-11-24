@@ -164,8 +164,8 @@ public sealed class ScriptEnvironmentCheckerTests
     {
         var table = ScriptTestKit.Table("T1", [ScriptTestKit.Column(1, "Hours"), ScriptTestKit.Column(2, "Fuel")]);
         var store = ScriptTestKit.Store(table);
-        store.FindSubstanceEntryIdsAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyDictionary<string, long>>(new Dictionary<string, long> { ["301"] = 5 }));
+        store.FindSubstanceCandidatesAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<SubstanceCandidate>>([new SubstanceCandidate("301", 5, "E301", "SUBST", false)]));
 
         var registries = Substitute.For<IRegistryStore>();
         var definition = ScriptTestKit.WithId(
@@ -193,6 +193,37 @@ public sealed class ScriptEnvironmentCheckerTests
         var substance = Assert.Single(environment.Diagnostics, d => d.Code == ScriptDiagnosticCodes.UnknownSubstance);
         Assert.Equal("999", substance.Params["code"]);
         Assert.Equal(2, substance.Line);
+    }
+
+    /// <summary>
+    /// c11-10: код речовини в кількох довідниках («333» — C333 HSE400 і E333 повітря) — діагностика з кодами записів, коли методологія
+    /// жодного з них не вживає; довідник, який методологія вже вживає, знімає неоднозначність без діагностики.
+    /// </summary>
+    /// <remarks>Мутація: у <c>ScriptSubstanceResolver</c> брати перший кандидат (менший Id) — червоніє перша частина.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "MS-T3.1")]
+    public async Task Код_речовини_у_кількох_довідниках_дає_ambiguousSubstance_якщо_методологія_не_вживає_жодного()
+    {
+        var table = ScriptTestKit.Table("T1", [ScriptTestKit.Column(1, "Hours")]);
+        const string Text = "rows from T1;\nforeach substance S in (\"333\") {\n    output O per S : t = 1;\n}";
+
+        var fresh = ScriptTestKit.Store(table);
+        fresh.FindSubstanceCandidatesAsync(Arg.Any<IReadOnlyCollection<string>>(), 1, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<SubstanceCandidate>>(
+                [new SubstanceCandidate("333", 642, "C333", "LAND_HSE400_SUBSTANCE", false), new SubstanceCandidate("333", 6044, "E333", "LAND_AIR_SUBSTANCE", false)]));
+        var ambiguous = await CheckAsync(Text, ScriptTestKit.Checker(fresh));
+
+        var diagnostic = Assert.Single(ambiguous.Diagnostics);
+        Assert.Equal(ScriptDiagnosticCodes.AmbiguousSubstance, diagnostic.Code);
+        Assert.Equal("333", diagnostic.Params["code"]);
+        Assert.Equal("C333 (LAND_HSE400_SUBSTANCE), E333 (LAND_AIR_SUBSTANCE)", diagnostic.Params["entries"]);
+
+        var known = ScriptTestKit.Store(table);
+        known.FindSubstanceCandidatesAsync(Arg.Any<IReadOnlyCollection<string>>(), 1, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<SubstanceCandidate>>(
+                [new SubstanceCandidate("333", 642, "C333", "LAND_HSE400_SUBSTANCE", false), new SubstanceCandidate("333", 6044, "E333", "LAND_AIR_SUBSTANCE", true)]));
+        Assert.Empty((await CheckAsync(Text, ScriptTestKit.Checker(known))).Diagnostics);
     }
 
     [Fact]

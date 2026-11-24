@@ -47,7 +47,7 @@ public sealed class ScriptEnvironmentChecker(
 
         CheckUnits(script, catalog, diagnostics);
         CheckOutputCodes(script, text, diagnostics);
-        await CheckSubstancesAsync(script, text, diagnostics, ct).ConfigureAwait(false);
+        await CheckSubstancesAsync(script, text, methodologyId, diagnostics, ct).ConfigureAwait(false);
 
         var resolved = await ResolveTablesAsync(script, diagnostics, ct).ConfigureAwait(false);
         var rowTables = script.Rows
@@ -101,20 +101,35 @@ public sealed class ScriptEnvironmentChecker(
     }
 
     private async Task CheckSubstancesAsync(
-        CompiledScript script, string text, List<ScriptDiagnostic> diagnostics, CancellationToken ct)
+        CompiledScript script, string text, int methodologyId, List<ScriptDiagnostic> diagnostics, CancellationToken ct)
     {
         if (script.Substances.Count == 0)
         {
             return;
         }
 
-        var found = await methodologies.FindSubstanceEntryIdsAsync(script.Substances, ct).ConfigureAwait(false);
-        foreach (var code in script.Substances.Where(c => !found.ContainsKey(c)))
+        // ✎ c11-10: код у кількох довідниках речовин розв'язується довідником, який уже вживає методологія; інакше —
+        // діагностика з кодами записів (ними автор пише речовину однозначно), а не мовчазний «менший Id».
+        var candidates = await methodologies.FindSubstanceCandidatesAsync(script.Substances, methodologyId, ct).ConfigureAwait(false);
+        var resolution = ScriptSubstanceResolver.Resolve(script.Substances, new Dictionary<long, string>(), candidates);
+        foreach (var code in script.Substances)
         {
-            diagnostics.Add(ScriptDiagnostic.At(
-                ScriptDiagnosticCodes.UnknownSubstance, ScriptTextLocator.FindLiteral(text, code),
-                $"Substance '{code}' was not found in the substance registry.",
-                ("code", code)));
+            if (resolution.Ambiguous.TryGetValue(code, out var options))
+            {
+                var entries = string.Join(", ", options.Select(o => $"{o.EntryCode} ({o.RegistryCode})"));
+                diagnostics.Add(ScriptDiagnostic.At(
+                    ScriptDiagnosticCodes.AmbiguousSubstance, ScriptTextLocator.FindLiteral(text, code),
+                    $"Substance '{code}' exists in several substance registries ({entries}): write the entry code instead.",
+                    ("code", code),
+                    ("entries", entries)));
+            }
+            else if (!resolution.Found.ContainsKey(code))
+            {
+                diagnostics.Add(ScriptDiagnostic.At(
+                    ScriptDiagnosticCodes.UnknownSubstance, ScriptTextLocator.FindLiteral(text, code),
+                    $"Substance '{code}' was not found in the substance registry.",
+                    ("code", code)));
+            }
         }
     }
 

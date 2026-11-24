@@ -183,43 +183,67 @@ public sealed class MethodologyScriptAuthoringStoreTests(SqlServerFixture sql)
         var tag = Guid.NewGuid().ToString("N")[..8];
         long withValue;
         long withoutValue;
+        long duplicate;
+        int methodologyId;
 
         await using (var seed = builder.CreateContext())
         {
             var withField = new RegistryDef(EcrCode.Create($"MSF_{tag}"), Name("with field"), isTemporal: false);
+            var second = new RegistryDef(EcrCode.Create($"MSG_{tag}"), Name("second with field"), isTemporal: false);
             var plain = new RegistryDef(EcrCode.Create($"MSN_{tag}"), Name("plain"), isTemporal: false);
-            seed.RegistryDefs.AddRange(withField, plain);
+            seed.RegistryDefs.AddRange(withField, second, plain);
             await seed.SaveChangesAsync();
 
             var field = new RegistryFieldDef(
                 withField.Id, EcrCode.Create("SUBSTANCE_CODE"), Name("code"), CellDataType.String, 1);
-            seed.RegistryFieldDefs.Add(field);
+            var secondField = new RegistryFieldDef(
+                second.Id, EcrCode.Create("SUBSTANCE_CODE"), Name("code"), CellDataType.String, 1);
+            seed.RegistryFieldDefs.AddRange(field, secondField);
             await seed.SaveChangesAsync();
 
             var e1 = new RegistryEntry(withField.Id, EcrCode.Create($"SA{tag}"), Name("a"));
             var e2 = new RegistryEntry(withField.Id, EcrCode.Create($"SB{tag}"), Name("b"));
             var e3 = new RegistryEntry(plain.Id, EcrCode.Create($"SP{tag}"), Name("p"));
-            seed.RegistryEntries.AddRange(e1, e2, e3);
+            var e4 = new RegistryEntry(second.Id, EcrCode.Create($"SD{tag}"), Name("d"));
+            seed.RegistryEntries.AddRange(e1, e2, e3, e4);
             await seed.SaveChangesAsync();
 
+            // ✎ c11-10: той самий код речовини X у ДВОХ довідниках (як «333» у C333/E333).
             var value = new RegistryValue(e1.Id, field.Id);
             value.Set(CellDataType.String, $"X{tag}", unitId: null);
-            seed.RegistryValues.Add(value);
+            var dup = new RegistryValue(e4.Id, secondField.Id);
+            dup.Set(CellDataType.String, $"X{tag}", unitId: null);
+            seed.RegistryValues.AddRange(value, dup);
+
+            // Методологія вже вживає другий довідник (речовина її версії).
+            var method = new Methodology(EcrCode.Create($"MSU_{tag}"), Name("uses second"));
+            seed.Methodologies.Add(method);
+            await seed.SaveChangesAsync();
+            var version = new MethodologyVersion(method.Id, "1.0", CalculationLevel.Configuration, 1, Now, MethodologyEngine.Script);
+            seed.MethodologyVersions.Add(version);
+            await seed.SaveChangesAsync();
+            await new MethodologyStore(seed).ReplaceScriptSubstancesAsync(version.Id, [e4.Id], default);
             await seed.SaveChangesAsync();
 
             withValue = e1.Id;
             withoutValue = e2.Id;
+            duplicate = e4.Id;
+            methodologyId = method.Id;
         }
 
         await using var read = builder.CreateContext();
-        var found = await new MethodologyStore(read).FindSubstanceEntryIdsAsync(
-            [$"X{tag}", $"SB{tag}", $"SP{tag}", $"NOPE{tag}", "  "], default);
+        var found = await new MethodologyStore(read).FindSubstanceCandidatesAsync(
+            [$"X{tag}", $"SB{tag}", $"SP{tag}", $"NOPE{tag}", "  "], methodologyId, default);
 
-        Assert.Equal(withValue, found[$"X{tag}"]);
-        Assert.Equal(withoutValue, found[$"SB{tag}"]);
-        Assert.False(found.ContainsKey($"SP{tag}"));
-        Assert.False(found.ContainsKey($"NOPE{tag}"));
-        Assert.Empty(await new MethodologyStore(read).FindSubstanceEntryIdsAsync([], default));
+        // Обидва записи з кодом X — кандидати (вибір — не «менший Id» сховища), бажаний — довідник методології.
+        var x = found.Where(c => c.Code == $"X{tag}").ToList();
+        Assert.Equal([withValue, duplicate], x.Select(c => c.EntryId));
+        Assert.Equal([$"SA{tag}", $"SD{tag}"], x.Select(c => c.EntryCode));
+        Assert.Equal([$"MSF_{tag}", $"MSG_{tag}"], x.Select(c => c.RegistryCode));
+        Assert.Equal([false, true], x.Select(c => c.UsedByMethodology));
+        Assert.Equal(withoutValue, Assert.Single(found, c => c.Code == $"SB{tag}").EntryId);
+        Assert.DoesNotContain(found, c => c.Code == $"SP{tag}" || c.Code == $"NOPE{tag}");
+        Assert.Empty(await new MethodologyStore(read).FindSubstanceCandidatesAsync([], methodologyId, default));
     }
 
     [Fact]
