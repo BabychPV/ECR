@@ -2,7 +2,6 @@
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Entities.Integration;
 using Ecr.Domain.Entities.Notifications;
-using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Documents;
@@ -237,12 +236,6 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
 
     /// <summary>✎ C-1: поточний стан помилок формул.</summary>
     public DbSet<FormulaError> FormulaErrors => Set<FormulaError>();
-
-    // rpt
-    public DbSet<ReportDef> ReportDefs => Set<ReportDef>();
-    public DbSet<ReportVersion> ReportVersions => Set<ReportVersion>();
-    public DbSet<ReportSnapshot> ReportSnapshots => Set<ReportSnapshot>();
-    public DbSet<ReportRow> ReportRows => Set<ReportRow>();
 
     // ext
     public DbSet<DataSource> DataSources => Set<DataSource>();

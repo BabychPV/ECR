@@ -4,7 +4,6 @@ using Ecr.Application.Reporting;
 using Ecr.Application.Reporting.Dto;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Documents;
-using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -199,33 +198,24 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
     }
 
     /// <summary>
-    /// ✎ P-1124-3 (D-NEW): «Готово» = усі документи затверджено. Зрізів звітності застосунок більше не будує, тож
-    /// умову «і є поточний зріз» прибрано; рядки <c>rpt.ReportSnapshot</c>, що лишилися з минулого (будь-якого статусу),
-    /// на класифікацію не впливають.
+    /// ✎ P-1124-3 (D-NEW): «Готово» = усі документи затверджено. Зрізів звітності застосунок більше не будує (таблиці
+    /// <c>rpt.ReportSnapshot</c> тощо прибрано міграцією P1124RemoveReportSnapshots), тож умову «і є поточний зріз» прибрано.
     /// </summary>
     /// <remarks>
-    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути в <c>CampaignProgressRule.Classify</c> умову зрізу — випадок без зрізу і з
-    /// <c>Draft</c>-зрізом червоніють (проєкт «прострочено», хоча все затверджено).
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути в <c>CampaignProgressRule.Classify</c> умову зрізу — тест червоніє (проєкт
+    /// «прострочено», хоча все затверджено).
     /// </remarks>
-    [Theory]
+    [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "BE-22")]
-    [InlineData(null)]
-    [InlineData(SnapshotStatus.Draft)]
-    [InlineData(SnapshotStatus.Approved)]
-    public async Task Готово_коли_все_затверджено_незалежно_від_зрізів(SnapshotStatus? legacySnapshot)
+    public async Task Готово_коли_все_затверджено_без_жодного_зрізу()
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var key = await FreshPeriodKeyAsync(builder);
         var chain = await builder.BuildAsync(periodKey: key, ct: CancellationToken.None);
         await using var db = builder.CreateContext();
         await ArrangeAsync(db, chain, chain.DocumentId, DocumentStatus.Approved);
-
-        if (legacySnapshot is { } status)
-        {
-            await AddCurrentSnapshotAsync(db, chain.ProjectId, key, status);
-        }
 
         var today = new DateOnly(2026, 6, 15);
         var period = await db.Periods.SingleAsync(p => p.ProjectId == chain.ProjectId && p.PeriodKeyValue == key);
@@ -604,31 +594,6 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
 
         await db.SaveChangesAsync(CancellationToken.None);
         return project.Id;
-    }
-
-    /// <summary>Поточний зріз звіту за проєкт і період — рядок, що лишився з часів до P-1124-3 (таблиця жива, D-53).</summary>
-    private static async Task AddCurrentSnapshotAsync(
-        EcrDbContext db, int projectId, int periodKey, SnapshotStatus status = SnapshotStatus.Approved)
-    {
-        var tag = $"{Guid.NewGuid():N}"[..8];
-        var definition = new ReportDef(
-            EcrCode.Create($"RPT{tag}"),
-            new LocalizedText(new Dictionary<string, string> { ["en"] = "BE-22" }),
-            isRegulatory: true);
-
-        db.ReportDefs.Add(definition);
-        await db.SaveChangesAsync(CancellationToken.None);
-
-        var version = new ReportVersion(definition.Id, "1.0", "[]", "{}", Now);
-        db.ReportVersions.Add(version);
-        await db.SaveChangesAsync(CancellationToken.None);
-
-        var snapshot = new ReportSnapshot(
-            version.Id, projectId, periodKey, status, Now, builtByUserId: 1);
-        snapshot.MakeCurrent();
-
-        db.ReportSnapshots.Add(snapshot);
-        await db.SaveChangesAsync(CancellationToken.None);
     }
 
     /// <summary>Аркуш у складі документа і, за потреби, його стан у періоді.</summary>

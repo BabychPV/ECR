@@ -44,17 +44,17 @@ public sealed class PermissionCatalogTests
     public async Task Каталог_показує_право_яке_не_має_жодного_носія()
     {
         // ⛔ Каталог наповнений навмисно ширше за те, що видано будь-якій ролі:
-        // жодна роль (`_users.Roles` порожній) не має `Report.EditDefinition`,
+        // жодна роль (`_users.Roles` порожній) не має `Report.ViewCampaign`,
         // а каталог усе одно зобов'язаний його показати.
         _users.Permissions.Add("Template.View");
-        _users.Permissions.Add("Report.EditDefinition");
-        _users.Dangerous.Add("Report.EditDefinition");
+        _users.Permissions.Add("Report.ViewCampaign");
+        _users.Dangerous.Add("Report.ViewCampaign");
 
         Assert.Empty(_users.Roles);
 
         var result = await Handler().HandleAsync(CancellationToken.None);
 
-        Assert.Contains(result, p => p.Code == "Report.EditDefinition");
+        Assert.Contains(result, p => p.Code == "Report.ViewCampaign");
     }
 
     [Fact]

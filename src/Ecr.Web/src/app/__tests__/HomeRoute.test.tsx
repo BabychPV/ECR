@@ -68,7 +68,7 @@ describe('HomeRoute — стартова сторінка ролі без пер
   });
 
   it('роль переглядача звітів без Document.View — пояснення «звіти у SSRS», без посилань і без переліку', () => {
-    renderHome(meWith(['Report.ViewRegulatory', 'Report.ViewSnapshot', 'Report.Export']));
+    renderHome(meWith(['Report.ViewRegulatory']));
 
     const notice = screen.getByTestId('reports-in-ssrs');
     expect(notice).toBeTruthy();

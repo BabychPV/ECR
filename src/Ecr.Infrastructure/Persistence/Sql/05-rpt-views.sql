@@ -10,27 +10,8 @@ SET QUOTED_IDENTIFIER ON;
 GO
 
 -- src/Ecr.Infrastructure/Persistence/Sql/05-rpt-views.sql
--- Генерується під кожен звіт. ФІЛЬТР ЗА СТАТУСОМ — У ВʼЮСІ, не в RDL (D-65):
--- інакше його одного дня забудуть поставити.
-CREATE OR ALTER VIEW rpt.v_WaterReport_v1
-AS
-SELECT s.ProjectId, s.PeriodKey, r.RowNo, r.ColumnCode,
-       r.ValueString, r.ValueNumeric, r.ValueDate,
-       s.BuiltAt, s.Status
-FROM rpt.ReportSnapshot s
-JOIN rpt.ReportRow      r ON r.SnapshotId = s.Id
-JOIN rpt.ReportVersion  v ON v.Id = s.ReportVersionId
-JOIN rpt.ReportDef      d ON d.Id = v.ReportDefId
-WHERE d.Code = N'WaterReport'
-  AND s.IsCurrent = 1
-  AND s.Status IN (1, 2);   -- Approved, Submitted
--- ⛔ Нумерація ЗРІЗУ (`rpt.ReportSnapshot.Status` = SnapshotStatus, D-65):
--- 0 Draft, 1 Approved, 2 Submitted. Вона НЕ збігається з нумерацією подання
--- аркуша нижче (`wf.ApprovalState.Status` = DocumentStatus: 0 Draft,
--- 1 Submitted, 2 Approved, 3 Rejected): одиниця тут — Approved, там — Submitted.
--- Обидві фіксує `tests/Ecr.Architecture.Tests/StatusNumberingTests.cs`.
-GO
-
+-- ✎ P-1124-3 (D-NEW, людина 24.11): вʼюху зрізу `rpt.v_WaterReport_v1` і таблиці зрізів (`rpt.ReportDef`, `ReportVersion`,
+-- `ReportSnapshot`, `ReportRow`) прибрано міграцією P1124RemoveReportSnapshots: звіти SSRS будуються лише із сирого шару нижче.
 
 -- ══ B138 / B146 (D-536): позначка «перераховано після подання» для вʼюх сирих даних ════════
 -- Рішення людини 16.11 («додай позначку у в'юхи»). ЄДИНЕ визначення правила в SQL: стани аркушів (wf.ApprovalState:
@@ -84,8 +65,7 @@ GO
 -- ⚠ Статус подання аркуша (`Status`: 0 Draft, 1 Submitted, 2 Approved,
 -- 3 Rejected; немає стану — 0) — КОЛОНКА, а не фільтр: сирі дані віддаються
 -- всі, а звіт регулятору обирає `Status = 2` сам. Це свідоме відхилення від
--- «фільтр у вʼюсі» (ФВ-10.11), яке стосувалося зрізів rpt.ReportSnapshot, —
--- їхня вʼюха вище фільтр тримає.
+-- «фільтр у вʼюсі» (ФВ-10.11), яке стосувалося зрізів звітності (прибрані P-1124-3, D-NEW).
 --
 -- ✎ R-1 (рішення PO 11.11, D-498): гаряча гілка (`doc.*`, IsArchived = 0) UNION ALL архівна (`arc.*`, IsArchived = 1) —
 -- лише екземпляри, яких немає в `doc.*` (проміжні стани архівації/повернення: гаряча копія має перевагу, як F-13).
@@ -3003,6 +2983,105 @@ SELECT t.Code AS TemplateCode, tv.[Version] AS TemplateVersion, sd.Code AS Sheet
   JOIN cfg.TemplateVersion AS tv ON tv.Id = sd.TemplateVersionId AND tv.Status IN (1, 2)
   JOIN cfg.Template        AS t  ON t.Id = tv.TemplateId
  WHERE cd.IsDeleted = 0;
+GO
+
+-- ══ P-1124-3 (D-NEW, людина 24.11): результати розрахунків і методології для SSRS ══════════════════════════════
+-- «зауваж що дані розрахунків методологія тощо мають бути доступні для ssrs». Зрізи звітності прибрано; що раніше SSRS міг
+-- отримати лише через зріз (результати методологій), тепер — сирими вʼюхами, як і комірки документів (рішення 30.09: сирі
+-- дані, групує й фільтрує SSRS). Розшифровки Id — тут-таки (коди проєкту, документа, методології, одиниці), щоб звіт не
+-- потребував доступу поза `rpt` (роль `rpt_reader` нижче бачить лише цю схему).
+-- ⚠ Контракт D-53: колонки лише ДОДАЮТЬСЯ в кінець; склад і типи стереже RptContractTests (Infrastructure.Tests).
+-- ⚠ Статуси — КОЛОНКА з числом і назвою, не фільтр: Status/State/Kind як у доменних енумах (TemplateVersionStatus
+-- 0 Draft/1 Published/2 Deprecated; MethodologyEngine 0 Formulas/1 Script; PeriodState 0 Scheduled/1 Open/2 Grace/3 Closed;
+-- ProjectStatus 0 Draft/1 Active/4 Archived; CalculationResultKind 0 Output/1 Intermediate).
+-- ⚠ Результати й проблеми розрахунку — лише АКТУАЛЬНИХ прогонів (`calc.CalculationRun.Status = N'Current'`): заміщені прогони
+-- — історія, і звіт, що підсумовує всі, порахував би кожне число стільки разів, скільки його перераховували. Архівні
+-- (`arc.*`) результатів не мають — архівація переносить комірки, а не результати методологій.
+CREATE OR ALTER VIEW rpt.v_Project
+AS
+SELECT p.Id AS ProjectId, p.Code AS ProjectCode,
+       JSON_VALUE(p.NameL10n, N'$.en') AS Name_en, JSON_VALUE(p.NameL10n, N'$.ru') AS Name_ru,
+       JSON_VALUE(p.NameL10n, N'$.kz') AS Name_kz,
+       p.[Year], p.PeriodStart, p.PeriodEnd, p.TimeZoneId,
+       p.Status,
+       CASE p.Status WHEN 0 THEN N'Draft' WHEN 1 THEN N'Active' WHEN 4 THEN N'Archived' END AS StatusName
+  FROM doc.Project AS p;
+GO
+CREATE OR ALTER VIEW rpt.v_Period
+AS
+SELECT pr.Id AS ProjectId, pr.Code AS ProjectCode, pe.PeriodKey, pe.Sequence, pe.PeriodStart, pe.PeriodEnd,
+       pe.State,
+       CASE pe.State WHEN 0 THEN N'Scheduled' WHEN 1 THEN N'Open' WHEN 2 THEN N'Grace' WHEN 3 THEN N'Closed' END AS StateName
+  FROM doc.Period  AS pe
+  JOIN doc.Project AS pr ON pr.Id = pe.ProjectId;
+GO
+CREATE OR ALTER VIEW rpt.v_Document
+AS
+SELECT d.Id AS DocumentId, d.BusinessKey AS DocumentKey,
+       JSON_VALUE(d.NameL10n, N'$.en') AS Name_en, JSON_VALUE(d.NameL10n, N'$.ru') AS Name_ru,
+       JSON_VALUE(d.NameL10n, N'$.kz') AS Name_kz,
+       pr.Id AS ProjectId, pr.Code AS ProjectCode, t.Code AS TemplateCode, d.CreatedAt, d.ModifiedAt
+  FROM doc.Document     AS d
+  JOIN doc.Project      AS pr ON pr.Id = d.ProjectId
+  LEFT JOIN cfg.Template AS t ON t.Id = d.TemplateId;
+GO
+CREATE OR ALTER VIEW rpt.v_MethodologyVersion
+AS
+SELECT m.Id AS MethodologyId, m.Code AS MethodologyCode,
+       JSON_VALUE(m.NameL10n, N'$.en') AS Name_en, JSON_VALUE(m.NameL10n, N'$.ru') AS Name_ru,
+       JSON_VALUE(m.NameL10n, N'$.kz') AS Name_kz,
+       m.[Group] AS MethodologyGroup, m.IsActive,
+       mv.Id AS MethodologyVersionId, mv.[Version], mv.EffectiveFrom, mv.PublishedAt,
+       mv.Status,
+       CASE mv.Status WHEN 0 THEN N'Draft' WHEN 1 THEN N'Published' WHEN 2 THEN N'Deprecated' END AS StatusName,
+       mv.Engine,
+       CASE mv.Engine WHEN 0 THEN N'Formulas' WHEN 1 THEN N'Script' END AS EngineName,
+       -- Остання опублікована версія методології (найпізніша дата дії, далі найбільший Id). Яка версія діяла в КОНКРЕТНОМУ
+       -- періоді, видно з результатів: rpt.v_CalculationResult.MethodologyVersionId.
+       CAST(CASE WHEN mv.Status = 1 AND mv.Id = (SELECT TOP (1) l.Id
+                                                   FROM calc.MethodologyVersion AS l
+                                                  WHERE l.MethodologyId = mv.MethodologyId AND l.Status = 1
+                                                  ORDER BY l.EffectiveFrom DESC, l.Id DESC)
+                 THEN 1 ELSE 0 END AS bit) AS IsLatestPublished
+  FROM calc.MethodologyVersion AS mv
+  JOIN calc.Methodology        AS m ON m.Id = mv.MethodologyId;
+GO
+CREATE OR ALTER VIEW rpt.v_MethodologyOutput
+AS
+SELECT mv.MethodologyId, m.Code AS MethodologyCode, mo.MethodologyVersionId, mv.[Version] AS MethodologyVersion,
+       mo.Code AS OutputCode, mo.Ordinal, mo.IsPerSubstance, mo.UnitId, u.Code AS UnitCode
+  FROM calc.MethodologyOutput  AS mo
+  JOIN calc.MethodologyVersion AS mv ON mv.Id = mo.MethodologyVersionId
+  JOIN calc.Methodology        AS m  ON m.Id = mv.MethodologyId
+  JOIN uom.Unit                AS u  ON u.Id = mo.UnitId;
+GO
+CREATE OR ALTER VIEW rpt.v_CalculationResult
+AS
+SELECT cr.Id AS ResultId, run.ProjectId, pr.Code AS ProjectCode, cr.DocumentId, d.BusinessKey AS DocumentKey,
+       cr.PeriodKey, mv.MethodologyId, m.Code AS MethodologyCode, cr.MethodologyVersionId, mv.[Version] AS MethodologyVersion,
+       cr.OutputCode, cr.SourceRowKey, cr.SubstanceEntryId, cr.Value, cr.UnitId, u.Code AS UnitCode,
+       cr.Kind,
+       CASE cr.Kind WHEN 0 THEN N'Output' WHEN 1 THEN N'Intermediate' END AS KindName,
+       cr.CalculationRunId, run.FinishedAt AS RunFinishedAt
+  FROM calc.CalculationResult  AS cr
+  JOIN calc.CalculationRun     AS run ON run.Id = cr.CalculationRunId AND run.Status = N'Current'
+  JOIN doc.Project             AS pr  ON pr.Id = run.ProjectId
+  JOIN doc.Document            AS d   ON d.Id = cr.DocumentId
+  JOIN calc.MethodologyVersion AS mv  ON mv.Id = cr.MethodologyVersionId
+  JOIN calc.Methodology        AS m   ON m.Id = mv.MethodologyId
+  JOIN uom.Unit                AS u   ON u.Id = cr.UnitId;
+GO
+CREATE OR ALTER VIEW rpt.v_CalculationIssue
+AS
+SELECT i.Id AS IssueId, d.ProjectId, pr.Code AS ProjectCode, i.DocumentId, d.BusinessKey AS DocumentKey, i.PeriodKey,
+       td.Code AS TableCode, i.SheetCopyId, i.RowKey, i.RowNumber, i.Kind, i.MethodologyId, m.Code AS MethodologyCode,
+       i.ErrorCode, i.StepCode, i.AffectedCount, i.DetectedAt, i.CalculationRunId
+  FROM calc.CalculationIssue AS i
+  JOIN calc.CalculationRun   AS run ON run.Id = i.CalculationRunId AND run.Status = N'Current'
+  JOIN doc.Document          AS d   ON d.Id = i.DocumentId
+  JOIN doc.Project           AS pr  ON pr.Id = d.ProjectId
+  JOIN cfg.TableDef          AS td  ON td.Id = i.TableDefId
+  LEFT JOIN calc.Methodology AS m   ON m.Id = i.MethodologyId;
 GO
 
 -- ⛔ Право читання для ОБЛІКОВОГО ЗАПИСУ SSRS — роль бази `rpt_reader`:

@@ -41,8 +41,7 @@ public sealed class ScopedOperatorPermissionTests(SqlServerFixture sql)
     private static readonly string[] OperatorPermissions =
     [
         "Document.View", "Document.Create", "Document.Import", "Document.Export", "Document.Reopen",
-        "Calculation.View", "Calculation.Recalculate", "Report.BuildSnapshot", "Report.ViewRegulatory",
-        "Report.Export",
+        "Calculation.View", "Calculation.Recalculate", "Report.ViewRegulatory",
     ];
 
     /// <summary>Група дій × власний/чужий проєкт.</summary>

@@ -255,8 +255,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     -- а не мовчазне обрізання: книга з «майже всіма» рядками виглядає повною.
     -- Борг локалізації (contracts/localization-debt.md, ReportDefHandlers.cs):
     -- заведення й публікація опису звіту та його версій.
-    (N'err.ECR-RPT-4091.code',               N'en', N'A report with code "{code}" is already described.', 1),
-    (N'err.ECR-RPT-4091.version',            N'en', N'Version "{version}" already exists in this report definition: the version number must be unique.', 1),
     -- Борг локалізації (B-14, Reporting): побудова зрізу за КОДОМ звіту —
     -- окремий факт від `.def`/`.version` вище (id-based): тут одне повідомлення
     -- покриває і «коду немає», і «код є, чинної версії немає», бо
@@ -887,9 +885,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'err.ECR-REG-0422.naeImportRejected',   N'en', N'NAE load rejected at {code}: {reason}.', 1),
     (N'registryAudit.naeAfImport',            N'en', N'NAE nodes created: {count}.', 1),
     (N'err.ECR-INT-0422.materializationRequiresAggregation', N'en', N'Mapping of field "{sourceField}" names row "{targetRowKey}", but does not say how to fold period points: the system does not know whether the value is instantaneous or cumulative.', 1),
-    (N'err.ECR-RPT-0409.versionNotDraft',           N'en', N'Report version {version} is {status}: there is nothing to publish.', 1),
-    (N'err.ECR-RPT-0409.snapshotSubmittedContent',  N'en', N'Snapshot {snapshotId} was submitted: its content is not rebuilt, a new snapshot is needed.', 1),
-    (N'err.ECR-RPT-0409.snapshotSubmittedStatus',   N'en', N'Snapshot {snapshotId} was submitted: its status does not change, a new snapshot is needed.', 1),
     (N'err.ECR-USR-0422.receivesAlertsRequiresEmail', N'en', N'User "{userName}" has no email: there is nowhere to turn alerts on.', 1),
     (N'err.ECR-PRD-4224.countOutOfRange',    N'en', N'The period count {count} is outside 1..{max}.', 1),
     (N'err.ECR-PRD-4224.countNotDivisor',    N'en', N'The period count {count} does not divide the year evenly: 12 must be divisible by it, or part of the year would have no period.', 1),
@@ -1027,10 +1022,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'err.ECR-JOB-0409',   N'en', N'Conflicting state', 1),
 
     -- Звіти.
-    (N'err.ECR-RPT-0404',   N'en', N'Report not found', 1),
-    (N'err.ECR-RPT-0409',   N'en', N'Already published: a new version is needed', 1),
-    (N'err.ECR-RPT-4091',   N'en', N'The report code is taken', 1),
-    (N'err.ECR-RPT-0422',   N'en', N'Invalid report definition', 1),
 
     -- ⚠ Системні. Подробиця для 500 стала й беззмістовна НАВМИСНО (ФВ-6.11),
     -- тому й заголовок тут загальний — але саме тут сирий код найгірший:
@@ -3670,9 +3661,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'permission.Calculation.ManageRequiredInputs', N'en', N'Manage required input columns', 1),
 
     (N'permission.Report.ViewRegulatory',    N'en', N'View regulatory reports', 1),
-    (N'permission.Report.BuildSnapshot',     N'en', N'Build a report snapshot', 1),
-    (N'permission.Report.Export',            N'en', N'Export reports', 1),
-    (N'permission.Report.EditDefinition',    N'en', N'Author regulatory report definitions', 1),
     (N'permission.Report.ViewCampaign',      N'en', N'View the campaign overview of all projects', 1),
 
     (N'permission.Integration.View',         N'en', N'View collection sources', 1),
@@ -3989,7 +3977,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     -- заблоковане. Зверніться до відповідального за проєкт.»
     (N'err.ECR-SUB-4221.hiddenIssues',         N'en', N'There are issues outside your visibility — submission is blocked. Contact the project owner.', 1),
     -- Рішення людини 2026-09-29: вміст регуляторного зрізу — окреме право (секція `SEC:RPT` вище).
-    (N'permission.Report.ViewSnapshot',        N'en', N'View the contents of regulatory report snapshots', 1),
     -- D-207 п.2: вибір проєкту в гранті — усі проєкти (код і назва), `GET /security/projects`.
     (N'grants.projectsCatalogHint',            N'en', N'All projects are listed by code and name. A grant opens the project to the role; it does not show you its data. Sheets, tables and columns are picked in the template version they belong to.', 1),
     -- Гранти ролі: збереження відмовлене 409 (If-Match застарів) — чернетку лишено, набір перечитано.

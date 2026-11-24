@@ -46,105 +46,34 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 [Collection("SqlServer")]
 public sealed class RptContractTests(SqlServerFixture sql)
 {
-    /// <summary>Контракт <c>rpt.v_WaterReport_v1</c>: порядок, ім'я, тип, довжина, nullability.</summary>
-    private static readonly (int Ordinal, string Name, string Type, int MaxLength, bool IsNullable)[] WaterReportV1 =
-    [
-        (1, "ProjectId", "int", 4, false),
-        (2, "PeriodKey", "int", 4, true),
-        (3, "RowNo", "int", 4, false),
-        (4, "ColumnCode", "nvarchar", 128, false),
-        (5, "ValueString", "nvarchar", 2000, true),
-        (6, "ValueNumeric", "decimal", 17, true),
-        (7, "ValueDate", "datetime2", 7, true),
-        (8, "BuiltAt", "datetime2", 7, false),
-        (9, "Status", "tinyint", 1, false),
-    ];
-
-    /*
-     * ⚠ Числа вище зняті з РОЗГОРНУТОЇ бази, не виведені з голови: перша
-     * спроба вгадати їх дала розбіжність уже на другій колонці. `max_length`
-     * для `nvarchar` — у БАЙТАХ (2000 = 1000 символів), для `decimal` це
-     * внутрішній розмір (13), а не точність.
-     *
-     * ⚠ Дві речі, які тест ФІКСУЄ як є, і жодна з них не виправляється тут,
-     * бо виправлення = зміна публічного контракту:
-     *   — `PeriodKey` виходить NULLABLE, хоча в джерелі ключ: тип колонки
-     *     вʼюхи виводить сервер, і крізь з'єднання він не доводить
-     *     обов'язковість;
-     *   — `ValueDate` має тип `datetime2`, а не `date`, попри ім'я — тобто
-     *     несе ще й час. Споживач (SSRS) уже бачить саме це.
-     * Обидві — кандидати на `v2`, якщо замовник погодиться; мовчки міняти їх
-     * не можна, і саме це й стереже цей тест.
-     *
-     * ✎ 2026-09-21: `ValueNumeric` — 17 замість 13, і це СВІДОМЕ відхилення
-     * від букви припису в повідомленні асерту («потрібна зміна — заведи v2»).
-     * Називаю його прямо, а не ховаю за оновленим числом.
-     *
-     * ЩО сталося. `rpt.ReportRow.ValueNumeric` перейшов `decimal(28,16)` →
-     * `(34,16)` (пряме рішення людини: 12 цілих розрядів замало, множник
-     * `MWh → 3 600 000 000` виводить 278 МВт·год за межу). Вʼюха віддає
-     * `r.ValueNumeric` НАПРЯМУ, тож її тип поїхав слідом, а `max_length`
-     * decimal стрибає 13 → 17 на межі precision 28/29.
-     *
-     * ЧОМУ не `v2`. Щоб `v1` лишилася з `decimal(28,16)`, у ній має з'явитися
-     * `CAST(r.ValueNumeric AS decimal(28,16))`. Тоді рядок звіту зі значенням
-     * ≥ 10¹² — рівно той, заради якого тип і розширювали, — валив би `v1`
-     * помилкою «Arithmetic overflow» У МОМЕНТ ПОБУДОВИ ЗВІТУ в замовника.
-     * Тобто «зворотна сумісність» звелася б до гарантії, що нові дані
-     * ламають старий звіт голосно. Це гірше за розширення типу.
-     *
-     * ЧОМУ це не той злам, який стереже `D-53`. Сторож ловить звуження,
-     * перейменування й перестановку — випадки, коли те, що вміщалося,
-     * перестає вміщатися. Тут ЗВОРОТНЕ: множина значень лише зростає, усі
-     * наявні числа читаються тим самим `decimal` і друкуються так само.
-     * Сторож не вміє відрізнити розширення від звуження — він порівнює
-     * `max_length` літералом, — тож рішення лягає сюди, в коментар.
-     *
-     * ⚠ ЧОГО Я НЕ ЗНАЮ і що лишається питанням до замовника: чи всі його
-     * RDL-звіти справді приймають ширший `decimal`. Для ADO.NET/SSRS це той
-     * самий тип `decimal`, але жорстко типізований датасет із заданою
-     * precision може вимагати перегенерації. Це факт про світ замовника, а не
-     * судження виконавця, — винесено в звіт як відкрите питання.
-     */
-
+    /// <summary>
+    /// ✎ P-1124-3 (D-NEW, людина 24.11 «можеш прибрати, якщо не потрібні»): вʼюху зрізу <c>rpt.v_WaterReport_v1</c> і
+    /// таблиці зрізів прибрано міграцією <c>P1124RemoveReportSnapshots</c> — свідома зміна публічного контракту D-53 (запис
+    /// у <c>docs/tz/10-decisions.md</c>). Доказ, що нею ніхто не користувався: RDL у репозиторії немає, 166 RDL замовника
+    /// у <c>docs/</c> не згадують <c>rpt.*</c>, на live 0 зрізів і 0 рядків, і жодна інша вʼюха чи процедура на неї не
+    /// посилається (<c>sys.sql_expression_dependencies</c>, 24.11).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути блок <c>CREATE OR ALTER VIEW rpt.v_WaterReport_v1</c> у <c>05-rpt-views.sql</c> — скрипт
+    /// падає (таблиць зрізів немає); прибрати з міграції <c>DropTable</c> — тест червоніє на таблицях.
+    /// </remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-10.12")]
-    public async Task Контракт_вʼюхи_звіту_не_змінився()
+    public async Task Вʼюху_і_таблиці_зрізів_прибрано()
     {
-        var actual = await ColumnsAsync("rpt", "v_WaterReport_v1");
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*) FROM sys.objects
+             WHERE schema_id = SCHEMA_ID(N'rpt')
+               AND name IN (N'v_WaterReport_v1', N'ReportDef', N'ReportVersion', N'ReportSnapshot', N'ReportRow');
+            """;
+        var left = (int)(await command.ExecuteScalarAsync())!;
 
-        // ⛔ Без цього перейменована чи видалена вʼюха дала б ПОРОЖНІЙ список
-        // і зелений тест — тобто найгірший різновид сторожа.
-        Assert.True(
-            actual.Count > 0,
-            "Вʼюхи rpt.v_WaterReport_v1 у базі немає взагалі. Якщо її свідомо "
-            + "прибрали — це зміна публічного контракту (ФВ-10.12, D-53), і "
-            + "вона мусить бути описана тут разом із версією, що прийшла на заміну.");
-
-        Assert.Equal(WaterReportV1.Length, actual.Count);
-
-        foreach (var (ordinal, name, type, maxLength, isNullable) in WaterReportV1)
-        {
-            var column = actual[ordinal - 1];
-
-            Assert.True(
-                column.Name == name
-                && column.Type == type
-                && column.MaxLength == maxLength
-                && column.IsNullable == isNullable,
-                $"Колонка {ordinal} вʼюхи rpt.v_WaterReport_v1 розійшлася з контрактом."
-                + Environment.NewLine
-                + $"  очікували: {name} {type}({maxLength}) null={isNullable}"
-                + Environment.NewLine
-                + $"  у базі:    {column.Name} {column.Type}({column.MaxLength}) null={column.IsNullable}"
-                + Environment.NewLine
-                + "ФВ-10.12 і D-53: rpt.* — постійний публічний контракт, споживач "
-                + "SSRS. Зміна імені чи типу ламає звіти замовника мовчки. Потрібна "
-                + "зміна — заведи НОВУ версію вʼюхи (v2) поряд зі старою і онови "
-                + "перелік у цьому тесті; правка на місці зворотної сумісності не дає.");
-        }
+        Assert.Equal(0, left);
     }
 
     /// <summary>
