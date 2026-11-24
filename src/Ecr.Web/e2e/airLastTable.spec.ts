@@ -38,7 +38,7 @@ const Second: readonly Shape401Source[] = [
   { nae: '7104', workshop: 'WS-4', name: 'Source four', substances: [{ code: '0337', tons: 8 }] },
 ];
 
-const state = { permitId: 0, permitNumber: `E2E-LT-${Stamp}`, regionNodeId: 0, typeColumn: '' };
+const state = { permitId: 0, permitNumber: `E2E-LT-${Stamp}`, regionNodeId: 0, typeColumn: '', adminDisplayName: '' };
 let scope: PreparedScope | null = null;
 
 async function ok<T>(response: APIResponse, what: string): Promise<T> {
@@ -135,7 +135,12 @@ test.describe('Air last table', () => {
     test.setTimeout(180_000);
     const baseURL = info.project.use.baseURL;
     admin = await playwright.request.newContext(baseURL === undefined ? {} : { baseURL });
-    await ok(await admin.post('/api/v1/login/local', { data: { userName: Admin.user, password: Admin.password } }), 'admin login');
+    // The card names who applied the table by display name (AirCurrentTableDto.ImportedBy), not by login.
+    state.adminDisplayName = (await ok<{ displayName?: string }>(
+      await admin.post('/api/v1/login/local', { data: { userName: Admin.user, password: Admin.password } }),
+      'admin login',
+    )).displayName ?? '';
+    expect(state.adminDisplayName, 'login response has no displayName').not.toBe('');
 
     const treeId = await ensureNaeTree(admin);
     await ensureSubstances(admin);
@@ -213,7 +218,7 @@ test.describe('Air last table', () => {
     await expect(page.getByTestId('air-counts')).toHaveText('3 sources · 4 substance rows', { timeout: 30_000 });
     for (const value of ['WS-1', 'WS-2', 'WS-3']) await expect(page.getByText(value, { exact: true })).toBeVisible();
     await expect(page.getByTestId('air-current-table')).toContainText('params-401-first.xlsx');
-    await expect(page.getByTestId('air-current-table')).toContainText(Admin.user);
+    await expect(page.getByTestId('air-current-table')).toContainText(state.adminDisplayName);
     await shot(page, 'e2e-02-card-first');
   });
 

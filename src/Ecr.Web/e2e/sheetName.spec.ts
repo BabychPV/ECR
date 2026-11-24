@@ -135,6 +135,31 @@ async function arrange(page: Page): Promise<Arranged> {
   return { documentId: document.documentId, periodKey, sheetDefId };
 }
 
+/** Живі (Queued/Running) фонові задачі проєкту — `GET /api/v1/jobs?projectId=…&state=…` (та сама черга, що читають ворота F5). */
+async function liveJobs(page: Page, projectId: number): Promise<{ jobCode: string; state: string }[]> {
+  const live: { jobCode: string; state: string }[] = [];
+  for (const state of ['Queued', 'Running']) {
+    live.push(
+      ...(await ok<{ jobCode: string; state: string }[]>(
+        await page.request.get(`/api/v1/jobs?projectId=${String(projectId)}&state=${state}&limit=50`),
+        `задачі проєкту (${state})`,
+      )),
+    );
+  }
+
+  return live;
+}
+
+/** Чекає, доки в проєкті не лишиться живих задач (без фіксованих пауз). */
+async function settled(page: Page, projectId: number): Promise<void> {
+  await expect
+    .poll(async () => (await liveJobs(page, projectId)).map((job) => `${job.jobCode}:${job.state}`), {
+      timeout: 180_000,
+      intervals: [500, 1_000, 2_000, 5_000],
+    })
+    .toEqual([]);
+}
+
 async function tables(page: Page, doc: Arranged): Promise<TableRef[]> {
   return ok<TableRef[]>(
     await page.request.get(`/api/v1/documents/${String(doc.documentId)}/tables?periodKey=${String(doc.periodKey)}`),
@@ -331,19 +356,24 @@ test('SHEETNAME: debt-1109b — перерахунок проєкту назив
     'копія аркуша',
   );
   await tables(page, doc);
+  const card = await ok<{ projectId: number }>(await page.request.get(`/api/v1/documents/${id}?periodKey=${period}`), 'картка');
+
+  // ✎ F5 (D-567, огляд b11-2 (A)): поки жива задача перерахунку чи формул документа (тут — SHEETNAME() копії), подання
+  // відмовляє 422 `sourceCascadePending`. Чекаємо, доки в черзі проєкту (лише цей документ) не лишиться Queued/Running.
+  await settled(page, card.projectId);
   await ok(
     await page.request.post(`/api/v1/documents/${id}/submit`, {
       data: { sheetDefId: doc.sheetDefId, periodKey: doc.periodKey, acknowledgeWarnings: true, sheetCopyId: copy.sheetCopyId },
     }),
     'подання копії',
   );
+  await settled(page, card.projectId);
   await ok(
     await page.request.post(`/api/v1/documents/${id}/approve`, {
       data: { sheetDefId: doc.sheetDefId, periodKey: doc.periodKey, approved: true, reason: null, sheetCopyId: copy.sheetCopyId },
     }),
     'затвердження копії',
   );
-  const card = await ok<{ projectId: number }>(await page.request.get(`/api/v1/documents/${id}?periodKey=${period}`), 'картка');
 
   await page.goto(`/?projectId=${String(card.projectId)}`);
   await page.getByRole('button', { name: /^(Recalculate|Пересчитать|Қайта есептеу)$/ }).first().click();
