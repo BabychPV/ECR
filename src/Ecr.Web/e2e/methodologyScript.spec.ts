@@ -537,7 +537,11 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
     await expect(compare).toBeHidden({ timeout: 10_000 });
 
     // «Edit constant as table» без константи під курсором — пояснення, а не тиша.
-    await ui.getByRole('button', { name: 'Edit constant as table' }).click();
+    // ⚠ Кнопка навмисно `aria-disabled` (а не `disabled`): лишається клікабельною й пояснює — Playwright вважає
+    // її вимкненою, тож клік примусовий.
+    const constButton = ui.getByRole('button', { name: 'Edit constant as table' });
+    await expect(constButton).toHaveAttribute('aria-disabled', 'true');
+    await constButton.click({ force: true });
     await expect(ui.getByText('Place the cursor inside a constant map { … } to edit it as a table.').first()).toBeVisible({ timeout: 10_000 });
 
     // 10. Темна тема: той самий редактор і код на весь екран.

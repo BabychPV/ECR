@@ -297,7 +297,14 @@ test.describe('Methodology page UI: script versions only, new version is a scrip
         doc: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         body: document.body.scrollWidth - document.body.clientWidth,
       }));
-      expect(overflow.doc, `горизонтальна прокрутка сторінки @500 ${scheme}`).toBeLessThanOrEqual(1);
+      // Хто вилазить за край — у повідомлення падіння (діагностика, а не здогад).
+      const offenders = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('body *'))
+          .filter((node) => node.getBoundingClientRect().right > document.documentElement.clientWidth + 1)
+          .slice(0, 5)
+          .map((node) => `${node.tagName.toLowerCase()}.${String(node.className).slice(0, 40)}[${node.getAttribute('data-testid') ?? ''}]`),
+      );
+      expect(overflow.doc, `горизонтальна прокрутка сторінки @500 ${scheme}: ${offenders.join(' | ')}`).toBeLessThanOrEqual(1);
       expect(overflow.body).toBeLessThanOrEqual(1);
       expect(await axeViolations(page, 'color-contrast'), `color-contrast page @500 ${scheme}`).toEqual([]);
       await shot(page, testInfo, `methodology-page-${scheme}-500`);

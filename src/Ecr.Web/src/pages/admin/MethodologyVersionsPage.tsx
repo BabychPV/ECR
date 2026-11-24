@@ -191,6 +191,8 @@ export function MethodologyVersionsPage(): JSX.Element {
       {versions.isPending && known && <Skeleton height={120} data-testid="versions-loading" />}
 
       {scripts.length > 0 && (
+        // ⚠ Вузький екран (500 px): таблиця прокручується сама, сторінка — ні (e2e methodologyUi.spec.ts).
+        <Table.ScrollContainer minWidth={640} type="native">
         <Table striped className="ecr-sticky-head" data-testid="script-versions">
           <Table.Thead>
             <Table.Tr>
@@ -249,6 +251,7 @@ export function MethodologyVersionsPage(): JSX.Element {
             ))}
           </Table.Tbody>
         </Table>
+        </Table.ScrollContainer>
       )}
 
       {/* ⚠ Режими — поточної версії-скрипта: скрипт їх читає. Правити — лише чернетку (сервер тримає те саме). */}
