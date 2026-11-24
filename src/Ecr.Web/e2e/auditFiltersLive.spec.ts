@@ -84,7 +84,8 @@ test.describe('Журнал безпеки: фільтри й місцевий �
 
 /** Вибір у Mantine `Select` за підписом поля. */
 async function pick(page: Page, label: string, option: RegExp): Promise<void> {
-  await page.getByLabel(label, { exact: true }).click();
+  // ⚠ Лише поле: відкритий перелік варіантів (`role="listbox"`) теж підписаний тим самим `aria-labelledby`.
+  await page.getByLabel(label, { exact: true }).and(page.locator('input')).click();
   await page.getByRole('option', { name: option }).first().click();
 }
 
