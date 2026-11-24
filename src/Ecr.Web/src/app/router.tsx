@@ -16,6 +16,7 @@ import {
   DocumentPage,
   DocumentsPage,
   ExpressionsPage,
+  GasCompositionPage,
   HealthPage,
   JobsPage,
   MappingPreviewPage,
@@ -600,6 +601,11 @@ export const router = createBrowserRouter([
             path: relativePath(routes.adminUnits, 'admin'),
             element: guarded(routes.adminUnits.handle, <UnitsPage />),
             handle: routes.adminUnits.handle,
+          },
+          {
+            path: relativePath(routes.adminGasComposition, 'admin'),
+            element: guarded(routes.adminGasComposition.handle, <GasCompositionPage />),
+            handle: routes.adminGasComposition.handle,
           },
           {
             path: relativePath(routes.adminConsistency, 'admin'),

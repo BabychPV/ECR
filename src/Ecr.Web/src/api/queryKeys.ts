@@ -123,8 +123,6 @@ const registries = {
   /** `GET /api/v1/registries/{code}/hierarchy` - рівні ієрархічного довідника (NAE plan N1). */
   hierarchy: (code: string) => ['registries', 'hierarchy', code] as const,
 
-  /** `GET /api/v1/integration/flert-sync/status` — стан синку складу газу FLERT (D-476) для сторінок дзеркала. */
-  flertSync: () => ['registries', 'flertSync'] as const,
 
   /**
    * `GET /api/v1/registries/{code}/tree` - плаский список вузлів. Без параметрів - префікс для інвалідації всіх
@@ -328,6 +326,20 @@ const units = {
 };
 
 /**
+ * Домен `gasComposition`: сторінка «Склад газу» (D-NEW). `['gasComposition']` — префікс; перелік, шторка потоку й
+ * компоненти — під ним, тож одна інвалідація префікса оновлює все після імпорту з FLERT.
+ */
+const gasComposition = {
+  all: () => ['gasComposition'] as const,
+  /** `GET /api/v1/gas-composition/streams` — перелік потоків і стан імпорту. */
+  streams: () => ['gasComposition', 'streams'] as const,
+  /** `GET /api/v1/gas-composition/streams/{id}` — потік з кейсами й версіями. */
+  stream: (id: number | undefined) => ['gasComposition', 'stream', id ?? null] as const,
+  /** `GET /api/v1/gas-composition/components` — компоненти для редактора. */
+  components: () => ['gasComposition', 'components'] as const,
+};
+
+/**
  * Єдина точка правди для ключів TanStack Query.
  *
  * Охоплює домени, потрібні для першого зрізу навігаційної архітектури —
@@ -347,4 +359,5 @@ export const queryKeys = {
   projects,
   tableChat,
   units,
+  gasComposition,
 };
