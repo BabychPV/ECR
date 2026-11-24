@@ -244,7 +244,9 @@ export function useYearUnmatchedRows(
       queryFn: () => getCalculationIssues(documentId, periodKey, null),
       retry: false,
     })),
-    combine: (results) => results.map((result) => result.data ?? null),
+    // ✎ Огляд b11 #3 (п. 6): стабільне посилання — `combine` не перезапускається на кожен рендер; результат структурно
+    // спільний, тож `tail`/`months` тримають ідентичність (тест `useYearUnmatchedRows`).
+    combine: dataOfResults,
   });
   const tail = useMemo(() => {
     const map = new Map<number, CalculationIssues>();
@@ -264,6 +266,11 @@ export function useYearUnmatchedRows(
   // Збій фонового перезапиту (дані вже є) — не відмова: лишаємо панелі місяців.
   const failedQuery = (query: typeof originals): boolean => query.isError && query.data === undefined;
   return { months, failed: enabled && (failedQuery(originals) || (activeCopyId !== null && failedQuery(copy))) };
+}
+
+/** Дані запитів місяців за стелею року (`useQueries.combine`): модульна функція — стабільне посилання. */
+function dataOfResults(results: readonly { readonly data?: CalculationIssues | undefined }[]): (CalculationIssues | null)[] {
+  return results.map((result) => result.data ?? null);
 }
 
 /** ✎ W15z M4: місяці з проблемами документа «рік»; `failed` — запит року відмовив (без даних). */

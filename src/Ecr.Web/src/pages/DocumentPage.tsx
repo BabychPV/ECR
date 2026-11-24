@@ -712,24 +712,16 @@ export function DocumentPage(): JSX.Element {
    */
   const yearAnchor = yearLayout ? yearAnchorOf(projectPeriods, periodKey) : null;
   // ✎ Огляд M4 (4): явний місяць в адресі (не умовчання) — у `focusMonth`, тим самим переходом адреси.
-  // ✎ Огляд b11 (G): посилання на САМ якір (`?periodKey=січень`) — теж місяць: перехід до його колонки, одноразово на
-  // документ (прибирання `focusMonth` з адреси і власні переходи сторінки не запускають його вдруге).
-  const arrivalHandled = useRef<number | null>(null);
+  // ✎ Огляд b11 #3 (п. 5): звичайне відкриття якоря (`?periodKey=січень` — реєстр, дашборд, вибір періоду) НЕ стрибає;
+  // до колонки січня веде лише явний `focusMonth` (посилання з панелі F5-R, «Open HSE400»).
   useEffect(() => {
-    if (yearAnchor === null) return;
-    if (yearAnchor !== periodKey) {
-      if (urlPeriod === null) {
-        setPeriodKey(yearAnchor);
-        return;
-      }
-      arrivalHandled.current = documentId;
-      setUrlParams({ periodKey: String(yearAnchor), focusMonth: String(urlPeriod % 100) });
+    if (yearAnchor === null || yearAnchor === periodKey) return;
+    if (urlPeriod === null) {
+      setPeriodKey(yearAnchor);
       return;
     }
-    if (arrivalHandled.current === documentId) return;
-    arrivalHandled.current = documentId;
-    if (urlPeriod !== null && focusMonth === null) setFocusMonth(yearAnchor % 100);
-  }, [yearAnchor, periodKey, setPeriodKey, urlPeriod, setUrlParams, documentId, focusMonth, setFocusMonth]);
+    setUrlParams({ periodKey: String(yearAnchor), focusMonth: String(urlPeriod % 100) });
+  }, [yearAnchor, periodKey, setPeriodKey, urlPeriod, setUrlParams]);
 
   // Адреса з періодом поза проєктом (сервер його відхилив) сама веде на найближчий допустимий; кнопка в стані
   // помилки нижче - запасний шлях, якщо календар не завантажився.
