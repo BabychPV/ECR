@@ -38,7 +38,8 @@ public sealed class PublishMethodologyHandler(
     RuleCoverageHandler? ruleCoverage = null,
     IEnumerable<ICalculationModule>? modules = null,
     Scripting.ScriptPublishChecks? scriptChecks = null,
-    IDependencyGraphProvider? dependencyGraph = null) : IFormulaLinkRebuilder, IGoldenSetGate
+    IDependencyGraphProvider? dependencyGraph = null,
+    FormulaEngineAuthoring? formulaAuthoring = null) : IFormulaLinkRebuilder, IGoldenSetGate
 {
     /// <summary>Ключ попередження: комбінації значень реальних рядків, яких не зачіпає жодне правило (ФВ-13.9).</summary>
     public const string CoverageGapsWarningKey = "publish.warning.ruleCoverageGaps";
@@ -112,6 +113,13 @@ public sealed class PublishMethodologyHandler(
         if (version.Engine == MethodologyEngine.Script)
         {
             return await PublishScriptAsync(methodology, version, changeReason, from, userId, ct).ConfigureAwait(false);
+        }
+
+        // ✎ P-1124-1 (24.11, «має бути тільки наш новий редакор»): формульна версія з вимкненим авторингом не
+        // публікується — нова чинна версія буває лише скриптом. Наявні опубліковані формульні версії рахують далі.
+        if (!FormulaEngineAuthoring.Allows(formulaAuthoring))
+        {
+            throw FormulaEngineAuthoring.Retired("publish", version.Version);
         }
 
         // ⛔ V-18: правила відбору рядків — ДО золотого набору. Версія, чиї

@@ -1644,6 +1644,12 @@ function Stage-Methodologies {
     $ms = Items (Api GET '/api/v1/methodologies').Json
     if (-not ($ms | Where-Object { $_.code -eq 'ECW_C05_01' })) {
         $pkg = Get-Content -LiteralPath $afFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        # P-1124-1: імпорт пакета AF заводить формульні чернетки, а формульний авторинг у продукті вимкнено -
+        # стенд збирання має бути піднятий з ECR_Calculations__FormulaEngineAuthoring__Enabled=true.
+        $probe = Invoke-Ecr -Method POST -Path '/api/v1/methodologies/import?dryRun=true&timeZone=Asia%2FAtyrau' -Body $pkg
+        if ([string]$probe.Text -match 'formulaEngineRetired') {
+            throw 'Стенд відхиляє формульний авторинг (err.ECR-CALC-0422.formulaEngineRetired): підніміть API з ECR_Calculations__FormulaEngineAuthoring__Enabled=true для збирання Land з AF.'
+        }
         $dry = Api POST '/api/v1/methodologies/import?dryRun=true&timeZone=Asia%2FAtyrau' $pkg
         Log ("  dry-run імпорту: outcome={0}" -f $dry.Json.outcome)
         $imp = Api POST '/api/v1/methodologies/import?dryRun=false&timeZone=Asia%2FAtyrau' $pkg

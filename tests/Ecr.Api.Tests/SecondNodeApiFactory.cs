@@ -90,6 +90,8 @@ public sealed class SecondNodeApiFactory : WebApplicationFactory<Program>
         // (RecurringTriggerVeto): другий вузол так само ставить cron-розклади проти спільної бази.
         // Наздоганяння нічних задач вимкнено з тієї ж причини, що й cron (`NightlyCatchUp`, як у EcrApiFactory).
         builder.UseSetting(Ecr.Api.Startup.NightlyCatchUp.EnabledKey, "false");
+        // ✎ P-1124-1: як у EcrApiFactory — формульні заготовки сценаріїв.
+        builder.UseSetting(Ecr.Application.Calculations.FormulaEngineAuthoring.EnabledKey, "true");
         builder.ConfigureTestServices(RecurringTriggerVeto.Register);
         builder.ConfigureTestServices(RetryingStartupSeed.Register);
     }
