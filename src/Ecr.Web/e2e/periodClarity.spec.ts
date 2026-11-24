@@ -200,7 +200,12 @@ test.describe('Pass2 (людський прохід 07.11)', () => {
     return dialog;
   }
 
-  test('Pass2: new document wizard warns that the project already has a document and opens it instead', async ({ page }) => {
+  /*
+   * ✎ B74 (людина 24.11, live: «чому я бачу це і для чого?»): проєкт тримає документи кількох шаблонів, тож на кроці
+   * Project попередження немає; воно — на кроці Template, коли документ є в ОБРАНОГО шаблону, і не запрошує «Next —
+   * створити ще один» (шаблон «один документ на проєкт» сервер відхилить `409 ECR-DOC-4092`).
+   */
+  test('Pass2: new document wizard warns that the chosen template already has a document and opens it instead', async ({ page }) => {
     await signIn(page);
     const { id, project, card } = await partlySubmittedDocument(page);
     let posts = 0;
@@ -210,12 +215,17 @@ test.describe('Pass2 (людський прохід 07.11)', () => {
 
     const dialog = await wizardOnProject(page, project);
     const banner = dialog.getByTestId('create-existing-documents');
-    await expect(banner).toBeVisible({ timeout: 60_000 });
-    await expect(banner).toContainText('This project already has a document');
-    await expect(banner).toContainText(card.businessKey);
+    // Крок Project: документи проєкту ще ні до чого — шаблон не обрано.
+    await expect(dialog.getByRole('button', { name: /^Next$/ })).toBeEnabled({ timeout: 60_000 });
+    await expect(banner).toHaveCount(0);
 
-    // «Створити ще один» лишається: Next доступний.
-    await expect(dialog.getByRole('button', { name: /^Next$/ })).toBeEnabled();
+    // Крок Template: у проєкту один шаблон (обраний сам), і документ цього шаблону вже є.
+    await dialog.getByRole('button', { name: /^Next$/ }).click();
+    await expect(dialog.getByRole('textbox', { name: /^Template/ })).not.toHaveValue('', { timeout: 60_000 });
+    await expect(banner).toBeVisible({ timeout: 60_000 });
+    await expect(banner).toContainText('This template already has a document in this project');
+    await expect(banner).toContainText(card.businessKey);
+    await expect(banner).not.toContainText(/press Next|create another/);
 
     await banner.getByRole('button', { name: `Open ${card.businessKey}` }).click();
     await expect(page).toHaveURL(new RegExp(`/documents/${String(id)}(\\?|$)`), { timeout: 60_000 });
