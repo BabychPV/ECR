@@ -81,7 +81,9 @@ test.describe('Projects 08.11', () => {
       ['/admin/periods', /\/projects$/],
       ['/admin/projects', /\/projects$/],
       [`/admin/periods?projectId=${String(card.projectId)}`, new RegExp(`/projects/${String(card.projectId)}/periods$`)],
-      [`/admin/projects?projectId=${String(card.projectId)}`, new RegExp(`/projects/${String(card.projectId)}/settings$`)],
+      // ✎ 24.11: колишня вкладка Settings — Templates (стара адреса `/projects/:id/settings` теж веде туди).
+      [`/admin/projects?projectId=${String(card.projectId)}`, new RegExp(`/projects/${String(card.projectId)}/templates$`)],
+      [`/projects/${String(card.projectId)}/settings`, new RegExp(`/projects/${String(card.projectId)}/templates$`)],
     ] as const) {
       await page.goto(from);
       await expect(page).toHaveURL(to, { timeout: 60_000 });
@@ -151,15 +153,22 @@ test.describe('Projects 08.11', () => {
     });
   });
 
-  test('f5: Settings tab has current period, close policy, approval route and time zone', async ({ page }) => {
+  // ✎ 24.11 (рішення людини «Одна таблиця шаблонів»): колишня Settings — вкладки Templates і General.
+  test('f5: General tab has current period, close policy and time zone; Templates tab has the approval route', async ({ page }) => {
     await signIn(page);
     const { card } = await ownProject(page);
 
-    await page.goto(`/projects/${String(card.projectId)}/settings`);
-    for (const section of ['current-period', 'policy', 'route', 'time-zone']) {
+    await page.goto(`/projects/${String(card.projectId)}/general`);
+    for (const section of ['current-period', 'policy', 'time-zone']) {
       await expect(page.locator(`[data-project-section="${section}"]`)).toBeVisible({ timeout: 60_000 });
     }
     await expect(page.getByRole('button', { name: /^Pin current period…$/ })).toBeVisible();
+    await expect(page.locator('[data-project-section="templates"]')).toHaveCount(0);
+
+    await page.locator('[data-project-tab="templates"]').click();
+    await expect(page.locator('[data-project-route]').getByRole('button', { name: /^Edit approval route…$/ })).toBeVisible({
+      timeout: 60_000,
+    });
   });
 
   test('f6 + c1–c4: Lifecycle — Activate, Clone, Archive, Delete draft with visible reasons; Clone creates a draft, Delete removes it', async ({ page }) => {
@@ -185,11 +194,12 @@ test.describe('Projects 08.11', () => {
     const dialog = page.getByRole('dialog');
     await dialog.getByRole('textbox').fill(`E2EPD${String(Date.now())}`);
     await dialog.getByRole('button', { name: /^Clone/ }).click();
-    await expect(page).toHaveURL(/\/projects\/\d+\/settings$/, { timeout: 60_000 });
+    // ✎ 24.11: після клону — вкладка Templates клону.
+    await expect(page).toHaveURL(/\/projects\/\d+\/templates$/, { timeout: 60_000 });
     // ⚠ Перехід іде переходом React (startTransition): адреса вже нова, а поки чанк вкладки вантажиться, на екрані
     // ще стара сторінка з посиланнями на ДЖЕРЕЛО клону. Клік тоді вів назад на нього — чекаємо нову вкладку.
-    const cloneId = /\/projects\/(\d+)\/settings/.exec(page.url())?.[1] ?? '';
-    await expect(page.locator('[data-project-section="current-period"]')).toBeVisible({ timeout: 60_000 });
+    const cloneId = /\/projects\/(\d+)\/templates/.exec(page.url())?.[1] ?? '';
+    await expect(page.locator('[data-project-section="templates"]')).toBeVisible({ timeout: 60_000 });
     await expect(page.locator('[data-project-tab="lifecycle"]')).toHaveAttribute('href', `/projects/${cloneId}/lifecycle`);
     await page.locator('[data-project-tab="lifecycle"]').click();
     await expect(page).toHaveURL(new RegExp(`/projects/${cloneId}/lifecycle$`));
@@ -348,8 +358,9 @@ test.describe('Projects 08.11', () => {
         for (const url of [
           '/projects',
           `/projects/${String(card.projectId)}/periods`,
-          `/projects/${String(card.projectId)}/settings`,
+          `/projects/${String(card.projectId)}/templates`,
           `/projects/${String(card.projectId)}/lifecycle`,
+          `/projects/${String(card.projectId)}/general`,
           '/',
         ]) {
           await page.goto(url);

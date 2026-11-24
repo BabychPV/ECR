@@ -38,8 +38,10 @@ const Pages: [string, () => JSX.Element][] = [
   // ✎ Projects (макет 08.11): перелік і три вкладки проєкту замість «Periods» і «Project settings».
   ['/projects', ProjectsPage],
   ['/projects/1/periods', () => <PeriodsPage projectId={1} />],
-  ['/projects/1/settings', () => <ProjectSettingsPage projectId={1} />],
+  // ✎ 24.11: колишня Settings — вкладки Templates (одна таблиця шаблонів з погодженням) і General.
+  ['/projects/1/templates', () => <ProjectSettingsPage projectId={1} view="templates" />],
   ['/projects/1/lifecycle', () => <ProjectLifecycleTab projectId={1} />],
+  ['/projects/1/general', () => <ProjectSettingsPage projectId={1} view="general" />],
   ['/admin/sources', SourcesPage],
   ['/admin/mapping', MappingPreviewPage],
 

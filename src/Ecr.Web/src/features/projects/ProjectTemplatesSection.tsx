@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { Fragment, useState, type JSX, type ReactNode } from 'react';
 import { Badge, Button, Group, Modal, Select, Stack, Table, Text, VisuallyHidden } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
@@ -53,6 +53,22 @@ function latestPublished(versions: ReadonlyArray<{ id: number; status: string; p
 }
 
 /**
+ * ✎ 24.11 (рішення людини «Одна таблиця шаблонів»): що вкладка Templates додає до рядка шаблону — колонку
+ * погодження, дію «виняток» поруч із «Detach» і розгорнутий під рядком редактор. Дані — власний запит розширення
+ * (`GET /projects/{id}/template-routes`), зіставлення з рядком — за `templateId`.
+ */
+export interface ProjectTemplateExtension {
+  /** Заголовок додаткової колонки. */
+  readonly header: string;
+  /** Вміст колонки для шаблону. */
+  readonly cell: (row: ProjectTemplateDto) => ReactNode;
+  /** Дія рядка (перед «Detach»). */
+  readonly action: (row: ProjectTemplateDto) => ReactNode;
+  /** Рядок під шаблоном на всю ширину таблиці; `null` — немає. */
+  readonly expansion: (row: ProjectTemplateDto) => ReactNode;
+}
+
+/**
  * ✎ B74 P4 (D-576, рішення людини 13.11): налаштування проєкту → «Templates». Проєкт «рік · об'єкт» тримає
  * документи КІЛЬКОХ шаблонів: таблиця (код і назва, версія, документів, позначка «Primary»), «Add template» (шаблон
  * і його опублікована версія) і «Detach» з підтвердженням.
@@ -66,9 +82,15 @@ function latestPublished(versions: ReadonlyArray<{ id: number; status: string; p
 export function ProjectTemplatesSection({
   projectId,
   readOnly,
+  toolbar,
+  extension,
 }: {
   readonly projectId: number;
   readonly readOnly: boolean;
+  /** ✎ 24.11 «Одна таблиця шаблонів»: рядок над таблицею (маршрут погодження проєкту для всіх шаблонів). */
+  readonly toolbar?: ReactNode;
+  /** ✎ 24.11: колонка погодження, дія «виняток» і рядок-редактор під шаблоном — у ЦІЙ таблиці, а не в другій. */
+  readonly extension?: ProjectTemplateExtension | undefined;
 }): JSX.Element {
   const queryClient = useQueryClient();
 
@@ -152,11 +174,17 @@ export function ProjectTemplatesSection({
     },
   });
 
+  // ✎ 24.11: колонка дій — «Detach» (керує проєктом) і/або дія розширення («виняток» маршруту).
+  const hasActions = !readOnly || extension !== undefined;
+  const columnCount = 3 + (extension === undefined ? 0 : 1) + (hasActions ? 1 : 0);
+
   return (
     <Stack gap="xs" data-project-templates="">
       <Text size="sm" c="dimmed">
         {t('projects.templates.hint')}
       </Text>
+
+      {toolbar}
 
       {detachError !== null && <ErrorAlert error={detachError} />}
 
@@ -177,9 +205,12 @@ export function ProjectTemplatesSection({
                   <Table.Th scope="col">{t('projects.templates.template')}</Table.Th>
                   <Table.Th scope="col">{t('projects.templates.version')}</Table.Th>
                   <Table.Th scope="col">{t('projects.templates.documents')}</Table.Th>
-                  {!readOnly && (
+                  {extension !== undefined && <Table.Th scope="col">{extension.header}</Table.Th>}
+                  {hasActions && (
                     <Table.Th scope="col">
-                      <VisuallyHidden>{t('projects.templates.detach')}</VisuallyHidden>
+                      <VisuallyHidden>
+                        {extension === undefined ? t('projects.templates.detach') : t('approvalRoutes.colActions')}
+                      </VisuallyHidden>
                     </Table.Th>
                   )}
                 </Table.Tr>
@@ -188,55 +219,69 @@ export function ProjectTemplatesSection({
                 {all.map((row) => {
                   const name = localized(row.templateNameL10n);
                   const blocked = detachBlockedReason(row);
+                  const expansion = extension?.expansion(row) ?? null;
 
                   return (
-                    <Table.Tr key={row.templateId} data-project-template={row.templateCode} data-primary={row.isPrimary}>
-                      <Table.Td>
-                        {/* ⚠ `wrap`, not `nowrap`: Mantine `Code` has `overflow: auto`, so in a nowrap flex row at 375 px it
-                            shrinks below its text and becomes a scroll region without focus (axe
-                            scrollable-region-focusable). Wrapping moves «Primary» under the code instead. */}
-                        <Group gap="xs" wrap="wrap">
-                          <CodeText>{row.templateCode}</CodeText>
-                          {row.isPrimary && (
-                            <Badge variant="light" data-testid="project-template-primary">
-                              {t('projects.templates.primary')}
-                            </Badge>
-                          )}
-                        </Group>
-                        {name.length > 0 && (
-                          <Text size="xs" c="dimmed">
-                            {name}
-                          </Text>
-                        )}
-                      </Table.Td>
-                      <Table.Td>{row.version}</Table.Td>
-                      <Table.Td data-project-template-documents={row.documentCount}>{row.documentCount}</Table.Td>
-                      {!readOnly && (
+                    <Fragment key={row.templateId}>
+                      <Table.Tr data-project-template={row.templateCode} data-primary={row.isPrimary}>
                         <Table.Td>
-                          {/* ⚠ `aria-disabled`, а не `disabled`: вимкнена кнопка не отримує ні фокуса, ні наведення, тож
-                              підказка «чому ні» була б недосяжна. */}
-                          <Hint label={blocked ?? ''} disabled={blocked === null}>
-                            <Button
-                              size="xs"
-                              variant="default"
-                              aria-disabled={blocked !== null}
-                              data-disabled={blocked !== null}
-                              aria-label={`${t('projects.templates.detach')} ${row.templateCode}`}
-                              onClick={(event) => {
-                                if (blocked !== null) {
-                                  event.preventDefault();
-                                  return;
-                                }
-                                setDetachError(null);
-                                setDetaching(row);
-                              }}
-                            >
-                              {t('projects.templates.detach')}
-                            </Button>
-                          </Hint>
+                          {/* ⚠ `wrap`, not `nowrap`: Mantine `Code` has `overflow: auto`, so in a nowrap flex row at 375 px it
+                              shrinks below its text and becomes a scroll region without focus (axe
+                              scrollable-region-focusable). Wrapping moves «Primary» under the code instead. */}
+                          <Group gap="xs" wrap="wrap">
+                            <CodeText>{row.templateCode}</CodeText>
+                            {row.isPrimary && (
+                              <Badge variant="light" data-testid="project-template-primary">
+                                {t('projects.templates.primary')}
+                              </Badge>
+                            )}
+                          </Group>
+                          {name.length > 0 && (
+                            <Text size="xs" c="dimmed">
+                              {name}
+                            </Text>
+                          )}
                         </Table.Td>
+                        <Table.Td>{row.version}</Table.Td>
+                        <Table.Td data-project-template-documents={row.documentCount}>{row.documentCount}</Table.Td>
+                        {extension !== undefined && <Table.Td>{extension.cell(row)}</Table.Td>}
+                        {hasActions && (
+                          <Table.Td>
+                            <Group gap="xs" wrap="wrap">
+                              {extension?.action(row)}
+                              {!readOnly && (
+                                /* ⚠ `aria-disabled`, а не `disabled`: вимкнена кнопка не отримує ні фокуса, ні наведення,
+                                   тож підказка «чому ні» була б недосяжна. */
+                                <Hint label={blocked ?? ''} disabled={blocked === null}>
+                                  <Button
+                                    size="xs"
+                                    variant="default"
+                                    aria-disabled={blocked !== null}
+                                    data-disabled={blocked !== null}
+                                    aria-label={`${t('projects.templates.detach')} ${row.templateCode}`}
+                                    onClick={(event) => {
+                                      if (blocked !== null) {
+                                        event.preventDefault();
+                                        return;
+                                      }
+                                      setDetachError(null);
+                                      setDetaching(row);
+                                    }}
+                                  >
+                                    {t('projects.templates.detach')}
+                                  </Button>
+                                </Hint>
+                              )}
+                            </Group>
+                          </Table.Td>
+                        )}
+                      </Table.Tr>
+                      {expansion !== null && (
+                        <Table.Tr data-project-template-expansion={row.templateCode}>
+                          <Table.Td colSpan={columnCount}>{expansion}</Table.Td>
+                        </Table.Tr>
                       )}
-                    </Table.Tr>
+                    </Fragment>
                   );
                 })}
               </Table.Tbody>

@@ -151,7 +151,7 @@ export function ProjectLifecycleTab({ projectId }: { readonly projectId: number 
     onError: showApiError,
   });
 
-  // ⚠ Клон копіює довідники, налаштування і склад аркушів; ДАНІ — ні (`ФВ-1.3`). Новий — чернетка, далі Settings.
+  // ⚠ Клон копіює довідники, налаштування і склад аркушів; ДАНІ — ні (`ФВ-1.3`). Новий — чернетка, далі Templates (✎ 24.11).
   const clone = useMutation({
     mutationFn: () =>
       apiFetch<ProjectIdResponse>(`/api/v1/projects/${String(projectId)}/clone`, {
@@ -163,7 +163,7 @@ export function ProjectLifecycleTab({ projectId }: { readonly projectId: number 
       setCloning(false);
       setCloneCode('');
       showDone(t('periods.cloned'));
-      void navigate(projectTabPath(result.projectId, 'settings'));
+      void navigate(projectTabPath(result.projectId, 'templates'));
     },
     onError: showApiError,
   });

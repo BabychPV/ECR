@@ -5,8 +5,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'nav.projects', N'ru', N'Проекты'),
     (N'nav.projects.description', N'ru', N'Проект — это один отчётный год: его месяцы, настройки и документы. Откройте проект, чтобы управлять всем этим в одном месте.'),
     (N'projects.tab.periods', N'ru', N'Периоды'),
-    (N'projects.tab.settings', N'ru', N'Настройки'),
+    (N'projects.tab.templates', N'ru', N'Шаблоны'),
     (N'projects.tab.lifecycle', N'ru', N'Жизненный цикл'),
+    (N'projects.tab.general', N'ru', N'Общие'),
+    (N'projects.templates.approval', N'ru', N'Согласование'),
+    (N'projects.templates.routeForAll', N'ru', N'Маршрут согласования для всех шаблонов:'),
     (N'projects.sections', N'ru', N'Разделы проекта'),
     (N'projects.create', N'ru', N'Новый проект'),
     (N'projects.column.project', N'ru', N'Проект'),
@@ -31,7 +34,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'projects.periods.legend', N'ru', N'Открыт — данные можно вводить · С опозданием — правки принимаются, но отмечаются · Заблокирован — только чтение, «Переоткрыть» просит причину · Запланирован — откроется в указанную дату.'),
     (N'projects.settings.archivedReadOnly', N'ru', N'Проект в архиве, его настройки только для чтения. Клонируйте его на вкладке «Жизненный цикл», чтобы начать новый проект с теми же настройками.'),
     (N'projects.settings.policy', N'ru', N'Политика закрытия месяцев'),
-    (N'projects.settings.route', N'ru', N'Маршрут согласования'),
     (N'projects.settings.timeZoneDesc', N'ru', N'Даты блокировки и сроки считаются в этом поясе. Изменить его можно, только пока проект — черновик.'),
     (N'projects.settings.timeZoneFixed', N'ru', N'Даты блокировки и сроки считаются в этом поясе. После активации проекта он не меняется.'),
     (N'projects.lifecycle.activate', N'ru', N'Активировать проект…'),
@@ -68,8 +70,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'nav.projects', N'kz', N'Жобалар'),
     (N'nav.projects.description', N'kz', N'Жоба — бір есепті жыл: оның айлары, баптаулары және құжаттары. Мұның бәрін бір жерден басқару үшін жобаны ашыңыз.'),
     (N'projects.tab.periods', N'kz', N'Кезеңдер'),
-    (N'projects.tab.settings', N'kz', N'Баптаулар'),
+    (N'projects.tab.templates', N'kz', N'Үлгілер'),
     (N'projects.tab.lifecycle', N'kz', N'Өмірлік цикл'),
+    (N'projects.tab.general', N'kz', N'Жалпы'),
+    (N'projects.templates.approval', N'kz', N'Келісу'),
+    (N'projects.templates.routeForAll', N'kz', N'Барлық үлгілерге арналған келісу маршруты:'),
     (N'projects.sections', N'kz', N'Жоба бөлімдері'),
     (N'projects.create', N'kz', N'Жаңа жоба'),
     (N'projects.column.project', N'kz', N'Жоба'),
@@ -94,7 +99,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'projects.periods.legend', N'kz', N'Ашық — деректерді енгізуге болады · Кешіккен — түзетулер қабылданады, бірақ белгіленеді · Бұғатталған — тек оқу, «Қайта ашу» себеп сұрайды · Жоспарланған — көрсетілген күні ашылады.'),
     (N'projects.settings.archivedReadOnly', N'kz', N'Жоба мұрағатта, оның баптаулары тек оқуға арналған. Сол баптаулармен жаңа жоба бастау үшін оны «Өмірлік цикл» қойындысында көшіріңіз.'),
     (N'projects.settings.policy', N'kz', N'Айларды жабу саясаты'),
-    (N'projects.settings.route', N'kz', N'Келісу маршруты'),
     (N'projects.settings.timeZoneDesc', N'kz', N'Бұғаттау күндері мен мерзімдер осы белдеуде есептеледі. Оны жоба нобай күйінде тұрғанда ғана өзгертуге болады.'),
     (N'projects.settings.timeZoneFixed', N'kz', N'Бұғаттау күндері мен мерзімдер осы белдеуде есептеледі. Жоба белсендірілгеннен кейін ол өзгермейді.'),
     (N'projects.lifecycle.activate', N'kz', N'Жобаны белсендіру…'),
@@ -190,8 +194,11 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'nav.projects', N'en', N'Projects', 1),
     (N'nav.projects.description', N'en', N'A project is one reporting year: its months, its settings and its documents. Open a project to manage everything about it in one place.', 1),
     (N'projects.tab.periods', N'en', N'Periods', 1),
-    (N'projects.tab.settings', N'en', N'Settings', 1),
+    (N'projects.tab.templates', N'en', N'Templates', 1),
     (N'projects.tab.lifecycle', N'en', N'Lifecycle', 1),
+    (N'projects.tab.general', N'en', N'General', 1),
+    (N'projects.templates.approval', N'en', N'Approval', 1),
+    (N'projects.templates.routeForAll', N'en', N'Approval route for all templates:', 1),
     (N'projects.sections', N'en', N'Project sections', 1),
     (N'projects.create', N'en', N'New project', 1),
     (N'projects.column.project', N'en', N'Project', 1),
@@ -216,7 +223,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'projects.periods.legend', N'en', N'Open — data can be entered and changed · Late (flagged) — still accepted, marked as late · Locked — read-only; Reopen asks for a reason · Scheduled — opens on the date shown.', 1),
     (N'projects.settings.archivedReadOnly', N'en', N'This project is archived, so its settings are read-only. Clone it on the Lifecycle tab to start a new project with the same settings.', 1),
     (N'projects.settings.policy', N'en', N'Close policy', 1),
-    (N'projects.settings.route', N'en', N'Approval route', 1),
     (N'projects.settings.timeZoneDesc', N'en', N'Lock dates and deadlines are counted in this time zone. It can be changed only while the project is a draft.', 1),
     (N'projects.settings.timeZoneFixed', N'en', N'Lock dates and deadlines are counted in this time zone. It is fixed once the project is active.', 1),
     (N'projects.lifecycle.activate', N'en', N'Activate project…', 1),
@@ -408,6 +414,38 @@ SELECT v.[Key], v.Lang, v.OldVal, v.NewVal
     (N'jobs.mineOnlyHint', N'ru', N'Свои задачи видны без права System.ViewHealth, а вся очередь — нет.', N'Свои задачи видны без права «{permission}», а вся очередь — нет.'),
     (N'jobs.mineOnlyHint', N'kz', N'Өз тапсырмаларыңыз System.ViewHealth құқығынсыз көрінеді, ал толық кезек — жоқ.', N'Өз тапсырмаларыңыз «{permission}» құқығынсыз көрінеді, ал толық кезек — жоқ.')
        ) AS v ([Key], Lang, OldVal, NewVal)
+OPTION (RECOMPILE);
+GO
+-- PROJECTS:ui ── кінець секції ──
+-- PROJECTS:ui ── прибрані ключі 24.11 (рішення людини «Одна таблиця шаблонів»): вкладка Settings стала Templates і General; окремий розділ «Templates: approval» і заголовок «Approval route» злиті з таблицею шаблонів ──
+INSERT INTO #UiRemoved ([Key], Lang, OldVal)
+SELECT v.[Key], v.Lang, v.OldVal
+  FROM (VALUES
+    (N'projects.tab.settings', N'en', N'Settings'),
+    (N'projects.tab.settings', N'ru', N'Настройки'),
+    (N'projects.tab.settings', N'kz', N'Баптаулар'),
+    (N'projects.settings.route', N'en', N'Approval route'),
+    (N'projects.settings.route', N'ru', N'Маршрут согласования'),
+    (N'projects.settings.route', N'kz', N'Келісу маршруты'),
+    (N'approvalRoutes.projectTemplatesTitle', N'en', N'Templates: approval'),
+    (N'approvalRoutes.projectTemplatesTitle', N'ru', N'Шаблоны: согласование'),
+    (N'approvalRoutes.projectTemplatesTitle', N'kz', N'Үлгілер: келісу'),
+    (N'approvalRoutes.projectTemplatesHint', N'en', N'The route in effect for each template of this project. An exception set here applies to this project only.'),
+    (N'approvalRoutes.projectTemplatesHint', N'ru', N'Маршрут, который действует для каждого шаблона этого проекта. Исключение, заданное здесь, действует только в этом проекте.'),
+    (N'approvalRoutes.projectTemplatesHint', N'kz', N'Осы жобаның әр үлгісі үшін қолданылатын маршрут. Мұнда белгіленген ерекшелік тек осы жобада қолданылады.'),
+    (N'approvalRoutes.noTemplates', N'en', N'This project has no templates.'),
+    (N'approvalRoutes.noTemplates', N'ru', N'В этом проекте нет шаблонов.'),
+    (N'approvalRoutes.noTemplates', N'kz', N'Бұл жобада үлгілер жоқ.'),
+    (N'approvalRoutes.colTemplate', N'en', N'Template'),
+    (N'approvalRoutes.colTemplate', N'ru', N'Шаблон'),
+    (N'approvalRoutes.colTemplate', N'kz', N'Үлгі'),
+    (N'approvalRoutes.colSource', N'en', N'Route source'),
+    (N'approvalRoutes.colSource', N'ru', N'Источник маршрута'),
+    (N'approvalRoutes.colSource', N'kz', N'Маршрут көзі'),
+    (N'approvalRoutes.colSteps', N'en', N'Steps'),
+    (N'approvalRoutes.colSteps', N'ru', N'Шаги'),
+    (N'approvalRoutes.colSteps', N'kz', N'Қадамдар')
+       ) AS v ([Key], Lang, OldVal)
 OPTION (RECOMPILE);
 GO
 -- PROJECTS:ui ── кінець секції ──

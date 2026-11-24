@@ -58,7 +58,7 @@ describe('ProjectLayout: зміна проєкту в адресі', () => {
           element: <ProjectLayout />,
           children: [
             { path: 'lifecycle', element: <Lifecycle /> },
-            { path: 'settings', element: <NeverSettings /> },
+            { path: 'templates', element: <NeverSettings /> },
           ],
         },
       ],
@@ -76,7 +76,7 @@ describe('ProjectLayout: зміна проєкту в адресі', () => {
     expect(await screen.findByTestId('old-content')).toBeTruthy();
 
     await act(async () => {
-      await router.navigate('/projects/7/settings');
+      await router.navigate('/projects/7/templates');
     });
 
     await waitFor(() =>

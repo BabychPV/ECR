@@ -91,14 +91,15 @@ test.describe('Period clarity', () => {
     }
     await expect(page.locator('[data-note="periods-lock-only"]')).toBeVisible();
     // Налаштування — сусідня вкладка проєкту, а не окрема сторінка.
-    await expect(page.locator('[data-project-tab="settings"]')).toHaveAttribute('href', `/projects/${String(card.projectId)}/settings`);
+    // ✎ 24.11: колишня Settings — вкладки Templates і General.
+    await expect(page.locator('[data-project-tab="general"]')).toHaveAttribute('href', `/projects/${String(card.projectId)}/general`);
   });
 
   test('project settings pins the current month and goes back to automatic', async ({ page }) => {
     await signIn(page);
     const { card } = await partlySubmittedDocument(page);
 
-    await page.goto(`/projects/${String(card.projectId)}/settings`);
+    await page.goto(`/projects/${String(card.projectId)}/general`);
     const section = page.locator('[data-project-section="current-period"]');
     await expect(section.locator('[data-current-period-mode="Auto"]')).toBeVisible({ timeout: 60_000 });
     await expect(section.locator('[data-current-period-badge]')).toHaveText(/Automatic by date/);

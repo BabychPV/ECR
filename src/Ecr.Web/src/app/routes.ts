@@ -566,15 +566,22 @@ export const routes = {
     path: '/projects/:id/periods',
     handle: { labelKey: 'projects.tab.periods', permission: 'Period.Configure', numericParams: ['id'] },
   },
-  projectSettings: {
-    id: 'project-settings',
-    path: '/projects/:id/settings',
-    handle: { labelKey: 'projects.tab.settings', permission: 'Period.Configure', numericParams: ['id'] },
+  // ✎ 24.11 (рішення людини «Одна таблиця шаблонів»): колишня Settings — дві вкладки; `/projects/:id/settings`
+  // лишається перенаправленням на Templates (`router.tsx`, `LegacyProjectTabRedirect`).
+  projectTemplates: {
+    id: 'project-templates',
+    path: '/projects/:id/templates',
+    handle: { labelKey: 'projects.tab.templates', permission: 'Period.Configure', numericParams: ['id'] },
   },
   projectLifecycle: {
     id: 'project-lifecycle',
     path: '/projects/:id/lifecycle',
     handle: { labelKey: 'projects.tab.lifecycle', permission: 'Period.Configure', numericParams: ['id'] },
+  },
+  projectGeneral: {
+    id: 'project-general',
+    path: '/projects/:id/general',
+    handle: { labelKey: 'projects.tab.general', permission: 'Period.Configure', numericParams: ['id'] },
   },
   adminSources: {
     id: 'admin-sources',

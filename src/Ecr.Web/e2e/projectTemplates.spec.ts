@@ -102,7 +102,9 @@ test.describe('B74 project templates', () => {
     const second = await publishedTemplate(page, `E2EB74L${stamp}`, 'Land plots sheet');
     const projectId = await projectWith(page, `E2EB74Prj${stamp}`, primary);
 
+    // ✎ 24.11: стара адреса вкладки Settings веде на Templates.
     await page.goto(`/projects/${String(projectId)}/settings`);
+    await expect(page).toHaveURL(new RegExp(`/projects/${String(projectId)}/templates$`), { timeout: 60_000 });
     const section = page.locator('[data-project-section="templates"]');
     await expect(section.getByTestId('project-templates')).toBeVisible({ timeout: 60_000 });
 
@@ -135,6 +137,46 @@ test.describe('B74 project templates', () => {
     await expect(secondRow.getByTestId('project-template-primary')).toHaveCount(0);
     // Приєднаний без документів — від'єднати можна.
     await expect(secondRow.getByRole('button', { name: `Detach ${second.code}` })).toHaveAttribute('aria-disabled', 'false');
+  });
+
+  // ✎ 24.11 (рішення людини «Одна таблиця шаблонів»): погодження — у тій самій таблиці шаблонів; другої таблиці
+  // «Templates: approval» немає; поточний період і часовий пояс — на вкладці General.
+  test('B74: Templates tab is one table with approval and exception; General tab has current period and time zone', async ({ page }) => {
+    await signIn(page);
+    const stamp = String(Date.now());
+    const primary = await publishedTemplate(page, `E2EB74G${stamp}`, 'General sheet');
+    const second = await publishedTemplate(page, `E2EB74L${stamp}`, 'Land plots sheet');
+    const projectId = await projectWith(page, `E2EB74Prj${stamp}`, primary);
+    await ok(
+      await page.request.post(`/api/v1/projects/${String(projectId)}/templates`, { data: { templateVersionId: second.versionId } }),
+      'приєднання другого шаблону',
+    );
+
+    await page.goto(`/projects/${String(projectId)}/templates`);
+    const section = page.locator('[data-project-section="templates"]');
+    await expect(section.getByTestId('project-templates')).toBeVisible({ timeout: 60_000 });
+    await expect(section.locator('table')).toHaveCount(1);
+    await expect(page.getByTestId('project-template-routes')).toHaveCount(0);
+    await expect(section.getByRole('columnheader', { name: 'Approval' })).toBeVisible();
+    await expect(section.locator('[data-project-route]')).toContainText('Approval route for all templates:');
+
+    // Рядок другого шаблону: джерело маршруту, «Edit exception» і «Detach» — в одному рядку.
+    const secondRow = section.locator(`[data-project-template="${second.code}"]`);
+    await expect(secondRow.locator('[data-template-route-source]')).toBeVisible({ timeout: 60_000 });
+    await expect(secondRow.getByRole('button', { name: `Detach ${second.code}` })).toHaveAttribute('aria-disabled', 'false');
+    const exception = secondRow.getByRole('button', { name: `Edit exception for template ${second.code}` });
+    await exception.click();
+    await expect(exception).toHaveAttribute('aria-expanded', 'true');
+    await expect(
+      section.locator(`[data-project-template-expansion="${second.code}"]`).getByTestId('scoped-approval-route'),
+    ).toBeVisible({ timeout: 60_000 });
+
+    // General: поточний період і часовий пояс; таблиці шаблонів там немає.
+    await page.locator('[data-project-tab="general"]').click();
+    await expect(page).toHaveURL(new RegExp(`/projects/${String(projectId)}/general$`));
+    await expect(page.locator('[data-project-section="current-period"]')).toBeVisible({ timeout: 60_000 });
+    await expect(page.locator('[data-project-time-zone]')).toHaveText('UTC');
+    await expect(page.getByTestId('project-templates')).toHaveCount(0);
   });
 
   test('B74: new document wizard creates a document by the second template and the list shows the template', async ({ page }) => {
