@@ -10328,39 +10328,6 @@
         ],
         "type": "object"
       },
-      "FlertSyncStatusDto": {
-        "description": "Стан синку FLERT.",
-        "properties": {
-          "enabled": {
-            "description": "Синк увімкнено (`Flert:Sync:Enabled`); вимкнений прогін лише пише «вимкнено».",
-            "type": "boolean"
-          },
-          "lastRun": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/FlertSyncRunDto",
-                "description": "Останній прогін; `null` — не було жодного."
-              }
-            ]
-          },
-          "registryCodes": {
-            "description": "Коди довідників-дзеркала (`STREAM`, `STREAM_CASE`, `GAS_COMPOSITION`) — де показувати стан.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "enabled",
-          "registryCodes",
-          "lastRun"
-        ],
-        "type": "object"
-      },
       "FormatConstDto": {
         "description": "Результат форматування літерала константи.",
         "properties": {
@@ -10749,6 +10716,694 @@
           "Row",
           "Cell"
         ]
+      },
+      "GasCaseDto": {
+        "description": "Кейс потоку зі шкалою версій.",
+        "properties": {
+          "name": {
+            "description": "Назва кейсу.",
+            "type": "string"
+          },
+          "versions": {
+            "description": "Версії за датою дії.",
+            "items": {
+              "$ref": "#/components/schemas/GasVersionDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "versions"
+        ],
+        "type": "object"
+      },
+      "GasCaseRenameRequest": {
+        "description": "Перейменування кейсу (усіх його версій).",
+        "properties": {
+          "from": {
+            "description": "Поточна назва.",
+            "type": "string"
+          },
+          "to": {
+            "description": "Нова назва.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "GasChangeResultDto": {
+        "description": "Результат зміни: потік після неї і поставлений перерахунок.",
+        "properties": {
+          "failedYears": {
+            "description": "Роки, за які поставити не вдалося (перерахуйте вручну).",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "queuedYears": {
+            "description": "Роки, за які поставлено перерахунок залежних документів.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "stream": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GasStreamDetailDto",
+                "description": "Потік після зміни; `null` — потік видалено."
+              }
+            ]
+          }
+        },
+        "required": [
+          "stream",
+          "queuedYears",
+          "failedYears"
+        ],
+        "type": "object"
+      },
+      "GasComponentDto": {
+        "description": "Компонент для редактора.",
+        "properties": {
+          "code": {
+            "description": "Код.",
+            "type": "string"
+          },
+          "formula": {
+            "description": "Формула.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "group": {
+            "description": "Група для показу: `inert`, `hydrocarbon`, `aromatic`, `sulphur`, `other`.",
+            "type": "string"
+          },
+          "mw": {
+            "description": "Молярна маса.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "name": {
+            "description": "Назва.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "formula",
+          "mw",
+          "group"
+        ],
+        "type": "object"
+      },
+      "GasComponentValue": {
+        "description": "Компонент складу у запиті: код і мол.%.",
+        "properties": {
+          "code": {
+            "description": "Код компонента (`COMPONENT`).",
+            "type": "string"
+          },
+          "molPct": {
+            "description": "Мол.%, 0…100.",
+            "format": "decimal",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "molPct"
+        ],
+        "type": "object"
+      },
+      "GasImportStatusDto": {
+        "description": "Стан разового імпорту з FLERT.",
+        "properties": {
+          "available": {
+            "description": "Імпорт можливий: у ECR ще немає жодного потоку.",
+            "type": "boolean"
+          },
+          "lastRun": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FlertSyncRunDto",
+                "description": "Останній прогін імпорту; `null` — не було."
+              }
+            ]
+          }
+        },
+        "required": [
+          "available",
+          "lastRun"
+        ],
+        "type": "object"
+      },
+      "GasLockDto": {
+        "description": "Замкнений період, що тримає версію.",
+        "properties": {
+          "period": {
+            "description": "Підпис періоду (`2026-03` або `2026`).",
+            "type": "string"
+          },
+          "reason": {
+            "description": "`closed` або `approved`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "period",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "GasStreamDetailDto": {
+        "description": "Потік з кейсами.",
+        "properties": {
+          "canEdit": {
+            "description": "Право змін.",
+            "type": "boolean"
+          },
+          "cases": {
+            "description": "Кейси.",
+            "items": {
+              "$ref": "#/components/schemas/GasCaseDto"
+            },
+            "type": "array"
+          },
+          "group": {
+            "description": "Група.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "hidden": {
+            "description": "Прихований у списках.",
+            "type": "boolean"
+          },
+          "hmbDoc": {
+            "description": "Документ HMB.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "description": "Запис потоку.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "isHmb": {
+            "description": "Потік HMB.",
+            "type": "boolean"
+          },
+          "isOnshore": {
+            "description": "Суша.",
+            "type": "boolean"
+          },
+          "isSour": {
+            "description": "Кислий.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Назва.",
+            "type": "string"
+          },
+          "number": {
+            "description": "Номер.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "streamId": {
+            "description": "Id потоку.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "streamId",
+          "number",
+          "name",
+          "isOnshore",
+          "isSour",
+          "isHmb",
+          "hmbDoc",
+          "group",
+          "hidden",
+          "cases",
+          "canEdit"
+        ],
+        "type": "object"
+      },
+      "GasStreamListDto": {
+        "description": "Перелік потоків.",
+        "properties": {
+          "canEdit": {
+            "description": "Чи має користувач право змінювати.",
+            "type": "boolean"
+          },
+          "canImport": {
+            "description": "Чи може користувач запустити імпорт (право змін + керування інтеграціями).",
+            "type": "boolean"
+          },
+          "import": {
+            "$ref": "#/components/schemas/GasImportStatusDto",
+            "description": "Стан імпорту з FLERT."
+          },
+          "streams": {
+            "description": "Потоки.",
+            "items": {
+              "$ref": "#/components/schemas/GasStreamListItemDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "streams",
+          "canEdit",
+          "canImport",
+          "import"
+        ],
+        "type": "object"
+      },
+      "GasStreamListItemDto": {
+        "description": "Потік у переліку.",
+        "properties": {
+          "caseCount": {
+            "description": "Кейсів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "deviatingVersions": {
+            "description": "Версій, у яких Σ поза 100 ± 0.5 (зокрема без складу).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "hidden": {
+            "description": "Прихований у списках.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Запис потоку.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "isHmb": {
+            "description": "Потік HMB.",
+            "type": "boolean"
+          },
+          "isOnshore": {
+            "description": "Суша.",
+            "type": "boolean"
+          },
+          "isSour": {
+            "description": "Кислий.",
+            "type": "boolean"
+          },
+          "latestFrom": {
+            "description": "Найпізніша дата дії серед версій; `null` — версій немає.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "name": {
+            "description": "Назва.",
+            "type": "string"
+          },
+          "number": {
+            "description": "Номер.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "streamId": {
+            "description": "Id потоку (на нього посилаються події PI, FLERT `FlaringStream.ID`).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "versionCount": {
+            "description": "Версій усіх кейсів.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "streamId",
+          "number",
+          "name",
+          "isOnshore",
+          "isSour",
+          "isHmb",
+          "hidden",
+          "caseCount",
+          "versionCount",
+          "latestFrom",
+          "deviatingVersions"
+        ],
+        "type": "object"
+      },
+      "GasStreamRequest": {
+        "description": "Атрибути потоку.",
+        "properties": {
+          "group": {
+            "description": "Група.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "hidden": {
+            "description": "Прихований у списках.",
+            "type": "boolean"
+          },
+          "hmbDoc": {
+            "description": "Документ HMB.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isHmb": {
+            "description": "Потік HMB.",
+            "type": "boolean"
+          },
+          "isOnshore": {
+            "description": "Суша.",
+            "type": "boolean"
+          },
+          "isSour": {
+            "description": "Кислий.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Назва (унікальна разом із «суша/море»).",
+            "type": "string"
+          },
+          "number": {
+            "description": "Номер.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "number",
+          "isOnshore",
+          "isSour",
+          "isHmb",
+          "hmbDoc",
+          "group",
+          "hidden"
+        ],
+        "type": "object"
+      },
+      "GasVersionCreateRequest": {
+        "description": "Нова версія кейсу (або перша версія нового кейсу).",
+        "properties": {
+          "acceptSumDeviation": {
+            "description": "Підтвердження Σ поза 100 ± 0.5.",
+            "type": "boolean"
+          },
+          "caseName": {
+            "description": "Кейс.",
+            "type": "string"
+          },
+          "components": {
+            "description": "Компоненти.",
+            "items": {
+              "$ref": "#/components/schemas/GasComponentValue"
+            },
+            "type": "array"
+          },
+          "densityOp": {
+            "description": "Густина.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "mwHysys": {
+            "description": "Молярна маса.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "temperatureC": {
+            "description": "Температура.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validFrom": {
+            "description": "З якого місяця діє (1-ше число).",
+            "format": "date",
+            "type": "string"
+          },
+          "z": {
+            "description": "Стисливість.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "caseName",
+          "validFrom",
+          "temperatureC",
+          "densityOp",
+          "mwHysys",
+          "z",
+          "components",
+          "acceptSumDeviation"
+        ],
+        "type": "object"
+      },
+      "GasVersionDto": {
+        "description": "Версія кейсу.",
+        "properties": {
+          "components": {
+            "description": "Ненульові компоненти.",
+            "items": {
+              "$ref": "#/components/schemas/GasComponentValue"
+            },
+            "type": "array"
+          },
+          "densityOp": {
+            "description": "Робоча густина.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "flertAliases": {
+            "description": "Значення довгих колонок-дублів FLERT, що розійшлися з коротким кодом (довідково).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "description": "Запис версії.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "legacyCompositionId": {
+            "description": "Id складу FLERT.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "legacyTypeId": {
+            "description": "Id кейсу FLERT.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "locks": {
+            "description": "Замкнені періоди всередині вікна: значення змінювати не можна.",
+            "items": {
+              "$ref": "#/components/schemas/GasLockDto"
+            },
+            "type": "array"
+          },
+          "mwHysys": {
+            "description": "Молярна маса HYSYS.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "noComposition": {
+            "description": "Складу немає.",
+            "type": "boolean"
+          },
+          "ruleParse": {
+            "description": "Правило FLERT (довідково).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sum": {
+            "description": "Σ мол.%.",
+            "format": "decimal",
+            "type": "string"
+          },
+          "temperatureC": {
+            "description": "Температура, °C.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validFrom": {
+            "description": "Початок дії.",
+            "format": "date",
+            "type": "string"
+          },
+          "validTo": {
+            "description": "Кінець (виключно); `null` — чинна.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "z": {
+            "description": "Стисливість.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "validFrom",
+          "validTo",
+          "temperatureC",
+          "densityOp",
+          "mwHysys",
+          "z",
+          "ruleParse",
+          "legacyTypeId",
+          "legacyCompositionId",
+          "flertAliases",
+          "sum",
+          "noComposition",
+          "components",
+          "locks"
+        ],
+        "type": "object"
+      },
+      "GasVersionUpdateRequest": {
+        "description": "Зміна версії.",
+        "properties": {
+          "acceptSumDeviation": {
+            "description": "Підтвердження Σ поза 100 ± 0.5.",
+            "type": "boolean"
+          },
+          "components": {
+            "description": "Компоненти (повний склад версії).",
+            "items": {
+              "$ref": "#/components/schemas/GasComponentValue"
+            },
+            "type": "array"
+          },
+          "densityOp": {
+            "description": "Густина.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "mwHysys": {
+            "description": "Молярна маса.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "temperatureC": {
+            "description": "Температура.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validFrom": {
+            "description": "З якого місяця діє.",
+            "format": "date",
+            "type": "string"
+          },
+          "z": {
+            "description": "Стисливість.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "validFrom",
+          "temperatureC",
+          "densityOp",
+          "mwHysys",
+          "z",
+          "components",
+          "acceptSumDeviation"
+        ],
+        "type": "object"
       },
       "GrantLevel": {
         "description": "Рівень ресурсного гранта. Порядок значень значущий: більше = ширше.",
@@ -48796,6 +49451,1153 @@
         ]
       }
     },
+    "/api/v1/gas-composition/components": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GasComponentDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GasComponentDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GasComponentDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Компоненти для редактора складу.",
+        "tags": [
+          "GasComposition"
+        ]
+      }
+    },
+    "/api/v1/gas-composition/import": {
+      "post": {
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Разовий імпорт із FLERT (лише в порожню базу): 202 з `jobId`.",
+        "tags": [
+          "GasComposition"
+        ]
+      }
+    },
+    "/api/v1/gas-composition/streams": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasStreamListDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasStreamListDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasStreamListDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Перелік потоків зі зведенням версій, право змін і стан імпорту з FLERT.",
+        "tags": [
+          "GasComposition"
+        ]
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasStreamRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasStreamRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasStreamRequest"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Новий потік (Id = найбільший + 1).",
+        "tags": [
+          "GasComposition"
+        ]
+      }
+    },
+    "/api/v1/gas-composition/streams/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Запис потоку.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Логічне видалення потоку з усіма версіями.",
+        "tags": [
+          "GasComposition"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "Запис потоку.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasStreamDetailDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasStreamDetailDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasStreamDetailDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Потік з кейсами й версіями.",
+        "tags": [
+          "GasComposition"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Запис потоку.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasStreamRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasStreamRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasStreamRequest"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Зміна атрибутів потоку.",
+        "tags": [
+          "GasComposition"
+        ]
+      }
+    },
+    "/api/v1/gas-composition/streams/{id}/cases": {
+      "put": {
+        "parameters": [
+          {
+            "description": "Запис потоку.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasCaseRenameRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasCaseRenameRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasCaseRenameRequest"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Перейменування кейсу потоку (усіх його версій).",
+        "tags": [
+          "GasComposition"
+        ]
+      }
+    },
+    "/api/v1/gas-composition/streams/{id}/versions": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Запис потоку.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasVersionCreateRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasVersionCreateRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasVersionCreateRequest"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Нова версія кейсу (або перша версія нового кейсу).",
+        "tags": [
+          "GasComposition"
+        ]
+      }
+    },
+    "/api/v1/gas-composition/versions/{versionId}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "versionId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Видалення версії (попередня продовжується на її вікно).",
+        "tags": [
+          "GasComposition"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "versionId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasVersionUpdateRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasVersionUpdateRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasVersionUpdateRequest"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Зміна версії (значення і/або місяць початку).",
+        "tags": [
+          "GasComposition"
+        ]
+      }
+    },
     "/api/v1/health/facts": {
       "get": {
         "responses": {
@@ -48874,107 +50676,6 @@
         "summary": "Готова команда для DBA на створення наступних партицій. Право `System.ViewHealth`.",
         "tags": [
           "SystemHealth"
-        ]
-      }
-    },
-    "/api/v1/integration/flert-sync": {
-      "post": {
-        "description": "⚠ 202 з `jobId`: синк ходить до FLERT. Поки попередній у черзі — той самий `jobId` (злиття).",
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobAcceptedResponse"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobAcceptedResponse"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobAcceptedResponse"
-                }
-              }
-            },
-            "description": "Accepted"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Forbidden"
-          }
-        },
-        "summary": "Ставить синк у чергу позачергово («Синхронізувати зараз»). Право `Integration.Manage`.",
-        "tags": [
-          "FlertSync"
-        ]
-      }
-    },
-    "/api/v1/integration/flert-sync/status": {
-      "get": {
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FlertSyncStatusDto"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FlertSyncStatusDto"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/FlertSyncStatusDto"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Forbidden"
-          }
-        },
-        "summary": "Стан синку: чи увімкнено, де показувати (коди довідників-дзеркала) і останній прогін.\nПраво `Integration.View` або `Integration.Manage`.",
-        "tags": [
-          "FlertSync"
         ]
       }
     },
@@ -78443,10 +80144,10 @@
       "name": "Expressions"
     },
     {
-      "name": "FlertSync"
+      "name": "FormulaManualOverride"
     },
     {
-      "name": "FormulaManualOverride"
+      "name": "GasComposition"
     },
     {
       "name": "GroupAssignments"

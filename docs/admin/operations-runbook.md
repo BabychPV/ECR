@@ -424,9 +424,7 @@ IF @@ROWCOUNT = 0
 | `Documents:StaleMapWarm:RingIntervalSeconds` | ні | `600` | Ціле число, не менше 60. |
 | `Documents:VersionMigration:FromMonthEnabled` | ні | `false` | `true` або `false`. |
 | `Flert:Sync:DataSourceCode` | ні | `FLERT` | Значення на старті не перевіряється. |
-| `Flert:Sync:Enabled` | ні | `false` | `true` або `false`. |
 | `Flert:Sync:MaxDeactivatePercent` | ні | `10` | Ціле число, не менше 0. |
-| `Flert:Sync:RecalculateDependents` | ні | `false` | `true` або `false`. |
 | `Health:RawDataPointWarnRows` | ні | `20000000` | Ціле число, не менше 0. |
 | `Health:WarmupOnStart` | ні | `true` | `true` або `false`. |
 | `Integration:AfTimeZoneId` | ні | — | Формат перевіряється на старті (див. текст відмови служби). |
@@ -667,7 +665,6 @@ Server Agent ідуть за локальним часом сервера SQL. �
 | кожні 10 хв, хх:02/12/… | `PeriodStateJob` (також один раз на старті) |
 | щогодини, хх:05 | `NotificationJob`, `RowWindowRefetchJob` (повторне підтягування вікон рядків за пізніми даними PI) |
 | щоночі 00:30 | ✎ PSS-15 (`D-562`): нічний перерахунок (типово увімкнений; вимикає `Jobs:NightlyRecalculation:Enabled=false`) — поточний рік і попередній у пільговому строку, лише змінені документи; до вікна прибирання 01:00–05:00 і до перевірок 02:15 (нижче) |
-| щоночі 02:00 | `FlertCompositionSyncJob` — синк складу газу FLERT у дзеркало ECR (`D-476`, п. 4.3); типово вимкнено `Flert:Sync:Enabled=false` — прогін лише пише «вимкнено» |
 | за cron розкладу сутності | збір даних (`ext.CollectionSchedule`, по одному розкладу на сутність джерела; формат і залежності — `admin-guide.md` §5.1–5.2) |
 | щохвилини / щогодини | прибирання покинутих задач і прогонів збору (`AbandonedWorkSweeper`) / видалення завершених записів `itg.JobProgress` (ретенція: 30 діб; успішні перерахунки формул — через добу, PERF-15, щоб «Мої задачі» не перебирала рутину) — цикл `RecurringScheduleService`, не Quartz |
 
@@ -941,22 +938,26 @@ calc.CalculationStep WHERE …` — кроки до `D-565` лежать у `Tra
 `tools/land-test-doc` і `tools/land/postcheck` для таких методологій пишуть «not evaluable», а не 0. Користувач бачить те
 саме в панелі «Calculation problems» документа (пояснення або кнопка «show step»).
 
-### 4.3. Синк складу газу FLERT (`FlertCompositionSyncJob`, `D-476`)
+### 4.3. Склад газу: власник ECR, разовий імпорт із FLERT (`FlertCompositionSyncJob`, `D-476`, D-NEW 24.11)
 
-Склад газу (потоки, кейси, мол.% компонентів) веде **FLERT**; ECR тримає копію лише для читання — довідники
-`STREAM` → `STREAM_CASE` → `GAS_COMPOSITION` (джерело `External`: ручна правка відхиляється) і `COMPONENT` (master — ECR:
-M, nC, nS вносить адміністратор). Задача щодня о 02:00 часу сервера (розклад у коді, як у решти нічних задач) читає
-FLERT одним запитом і застосовує різницю. Перший увімкнений прогін сам заводить ці чотири довідники (і правило
-`SUM_100` — «Σ мол.% = 100 ± 0.5», попередження), якщо їх немає; наявні не редагує.
+Склад газу (потоки, кейси, версії мол.% компонентів) з 24.11 веде **ECR** — сторінка **Configure → Gas composition**
+(`/admin/gas-composition`, права `GasComposition.View` / `GasComposition.Edit`). Дані лежать у довідниках
+`STREAM` → `STREAM_CASE` (версії з датою дії, з 1-го числа місяця, без перетинів) → `GAS_COMPOSITION` і `COMPONENT`
+(M, nC, nS вносить адміністратор). Загальні редактори довідників ці три довідники не змінюють
+(`err.ECR-REG-0409.managedByGasComposition`): шкала версій, замкнені періоди (результат закритого періоду чи затвердженого
+аркуша, що читав склад) і перевірка Σ = 100 ± 0.5 живуть лише на сторінці. Щоденного синку FLERT **немає**; кожна зміна —
+подія `GasCompositionChanged` у журналі безпеки і перерахунок залежних документів відкритих періодів (затверджені аркуші
+пропускаються).
 
-**Увімкнення** (після того, як DBA FLERT видав права — нижче):
+**Разовий імпорт із FLERT** — кнопка «Import from FLERT» на сторінці (права `GasComposition.Edit` і `Integration.Manage`),
+видима, лише поки в ECR немає жодного потоку: у непорожню базу імпорт відмовляє (`reason=alreadyImported`, FLERT навіть
+не читається), тож правки ECR він не перетирає. Перед кнопкою (після того, як DBA FLERT видав права — нижче):
 1. Інтеграція → Джерела: джерело з кодом `FLERT` (або іншим — тоді `Flert:Sync:DataSourceCode`), транспорт `Sql`,
    адреса — рядок з'єднання з базою FLERT під логіном лише для читання (`Server=<сервер FLERT>;Database=FLERT;User ID=ecr_flert_reader;Encrypt=True`),
    секрет — ім'я секрету з паролем (`ECR_Secrets__<ім'я>`). Linked server і синоніми НЕ потрібні (`D-268`).
 2. Текст запиту — змінна служби `ECR_Secrets__Sql__FLERT__CompositionQuery` = `EXEC dbo.usp_GetAllStreamDataFlattened;`
    (форма результату — 70+ колонок `usp_GetAllStreamDataFlattened`: поточні й історичні версії, усі компоненти).
    Типового тексту немає: без нього прогін падає з `err.ECR-INT-0503.queryNotConfigured`.
-3. `ECR_Flert__Sync__Enabled=true`, перезапуск `EcrApi`.
 
 **Права в базі FLERT** (DBA замовника; ECR у FLERT не пише нічого — запит виконується в транзакції, яку адаптер завжди
 відкочує):
@@ -968,26 +969,26 @@ GRANT EXECUTE ON OBJECT::[dbo].[usp_GetAllStreamDataFlattened] TO [ecr_flert_rea
 ```
 
 Цього досить: процедура і її шість таблиць (`FlaringStream`, `FlaringStreamType`, `FlaringStreamGasComposition` і три
-`…_History`) належать `dbo`, тож ланцюжок власності дає читання без `SELECT` на таблиці. Лише якщо замість процедури
-налаштовано власний `SELECT` по таблицях — тоді `GRANT SELECT` на ці шість таблиць (і більше нічого).
+`…_History`) належать `dbo`, тож ланцюжок власності дає читання без `SELECT` на таблиці. Після імпорту логін можна
+вимкнути — FLERT більше не читається.
 
-**Результат** — `itg.MaintenanceRun` з кодом `flert-composition-sync`, `DetailsJson`: `added`/`updated`/`unchanged`/
-`deactivated`/`reactivated` по довідниках, `issues` (перші 50):
+**Результат** — `itg.MaintenanceRun` з кодом `flert-composition-sync` (останній прогін видно на сторінці), `DetailsJson`:
+`added`/`updated`/`unchanged` по довідниках, `issues` (перші 50):
 
-| Статус | Коли | Копія |
+| Статус | Коли | ECR |
 |---|---|---|
-| `Succeeded` | знімок застосовано; повтор того самого знімка — нуль змін і без нової ревізії довідників | оновлена |
-| `Succeeded`, `reason=disabled` | `Flert:Sync:Enabled=false` | без змін |
-| `Degraded`, `reason=emptyResult` | запит повернув 0 рядків — ознака збою, а не «FLERT порожній» | **без змін, нічого не видалено** |
-| `Degraded`, `reason=deactivationLimit` | знімок вимкнув би більше чинних кейсів, ніж `Flert:Sync:MaxDeactivatePercent` (типово 10 %) від чинних, і більше 5 (до 5 вимикається завжди) — ознака часткового результату FLERT; у `issues` — скільки вимкнулося б і скільки дозволено. Якщо FLERT справді прибрав стільки кейсів — тимчасово підніміть ключ (до 100) і перезапустіть `EcrApi` | **без змін: ні вимкнень, ні змін, ні нових записів** |
-| `Degraded` | частину рядків відхилено (зауваження `writerRejected`), відсутній компонент у `COMPONENT` (`componentMissing`), довідник дзеркала не `External` (`registrySource`) | решта оновлена |
+| `Succeeded` | знімок імпортовано (усі Id FLERT, вікна, значення повної точності) | заповнено |
+| `Degraded`, `reason=alreadyImported` | у ECR уже є потоки | **без змін, FLERT не читався** |
+| `Degraded`, `reason=emptyResult` | запит повернув 0 рядків — ознака збою, а не «FLERT порожній» | **без змін** |
+| `Degraded` | частину рядків відхилено (`writerRejected`) або компонента немає в `COMPONENT` (`componentMissing`) | решта імпортована |
 | `Failed` | FLERT недоступний / облікові дані (`ECR-INT-0503` / `0502`, як у збору), змінилася схема (`mappingErrors`: зникла колонка; нова колонка — лише попередження), знімок понад 100 000 рядків (`truncated`), наявний довідник із такою назвою несумісний (`registryIncompatible`) | **без змін** |
 
-Записи, яких більше немає у FLERT, **вимикаються** (не видаляються); повернення у FLERT вмикає їх знову. Кейс зі
-складом Σ = 0 («No composition») записується з позначкою `NO_COMPOSITION` і зауваженням `noComposition` — розрахунок
-на ньому дасть проблему, а не нульові викиди. Пари дублів `CO`/`Carbon_Monoxide`, `H2`/`Hydrogen`, `O2`/`Oxygen` — береться
-коротка назва; обидві заповнені різними значеннями — зауваження `aliasConflict`. Мітки FLERT — UTC; вікно дії версії
-кейсу — вікно складу (`GasComposition_ValidFrom/To`).
+Кейс зі складом Σ = 0 («No composition») записується з позначкою `NO_COMPOSITION` і зауваженням `noComposition` —
+розрахунок на ньому дасть проблему, а не нульові викиди. Пари дублів `CO`/`Carbon_Monoxide`, `H2`/`Hydrogen`, `O2`/`Oxygen` —
+у склад іде коротка назва; якщо довга заповнена ІНШИМ значенням, воно зберігається на версії в полі `FLERT_ALIASES`
+(імпорт без втрат). Мітки FLERT — UTC; вікно дії версії кейсу — вікно складу (`GasComposition_ValidFrom/To`). Колишнє
+дзеркало `External` (стенди до 24.11) перший імпорт або перший потік переводять у власність ECR (`Local`, рядок
+`aud.StructureChange` `AdoptGasComposition`).
 ### 4.4. Черга перерахунку: стеля важких перерахунків, черга людей, місця воркера Api (✎ 2026-11-21, `D-564`)
 
 **Що змінилось для оператора.**

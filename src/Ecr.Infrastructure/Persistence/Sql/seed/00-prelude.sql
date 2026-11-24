@@ -144,8 +144,15 @@ USING (VALUES
   -- (затвердження/повернення джерела з галочкою в діалозі впливу; адміністративний перерахунок). Не небезпечне (0), як
   -- `Calculation.ManageSourceBinding`: з вбудованих ролей його бере лише `SystemAdministrator` шаблоном `%`; решті ролей
   -- адміністратор видає свідомо. Кожне застосування — з обов'язковою причиною й записом у журнал аркушів.
-  (N'Calculation.RecalculateApprovedDependents', N'Calculation', 0)
+  (N'Calculation.RecalculateApprovedDependents', N'Calculation', 0),
   -- B80:source-binding ── кінець секції ──
+  -- GAS:composition ── права сторінки «Склад газу» (D-NEW, людина 24.11: власник складу газу — ECR) ──
+  -- Глобальні (`PermissionScopes.Global`), не небезпечні (0): перегляд — довідкові дані розрахунків; зміна — версії з
+  -- датою дії, замкнені періоди незмінні, усе в журналі. `SystemAdministrator` бере обидва шаблоном `%`; перегляд решті
+  -- вбудованих ролей із `Registry.View` — секція `GAS:composition` нижче; зміну іншим ролям адміністратор видає свідомо.
+  (N'GasComposition.View',      N'GasComposition', 0),
+  (N'GasComposition.Edit',      N'GasComposition', 0)
+  -- GAS:composition ── кінець секції ──
 ) AS s (Code, [Group], IsDangerous)
 ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code, [Group], NameL10n, IsDangerous)
@@ -644,6 +651,25 @@ ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
 GO
 -- PERMITS: permissions ── роздача ── кінець секції ──
+
+-- GAS:composition ── роздача перегляду складу газу (D-NEW) ──
+-- Кожна вбудована роль, що бачить довідники (`Registry.View`), бачить і склад газу: це ті самі дані, що читають
+-- розрахунки. Зміна (`GasComposition.Edit`) — лише `SystemAdministrator` (шаблон `%`), як `Calculation.EditConstant`.
+MERGE sec.RolePermission AS t
+USING (
+    SELECT r.Id AS RoleId, p.Code AS PermissionCode
+    FROM (VALUES
+        (N'TemplateAdministrator', N'GasComposition.View'), (N'DataEntry', N'GasComposition.View'),
+        (N'Approver',              N'GasComposition.View'), (N'Viewer',    N'GasComposition.View'),
+        (N'Auditor',               N'GasComposition.View')
+    ) AS m (RoleCode, PermissionCode)
+    JOIN sec.Role       AS r ON r.Code = m.RoleCode AND r.IsBuiltIn = 1 -- U1-04
+    JOIN sec.Permission AS p ON p.Code = m.PermissionCode
+) AS s
+ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
+WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
+GO
+-- GAS:composition ── роздача ── кінець секції ──
 
 -- ── Роль первинного налаштування ─────────────────────────────────────────
 -- ⚠ Роль лишається, а от НЕБЕЗПЕЧНІ ПРАВА їй більше не видаються (`D-121`).
