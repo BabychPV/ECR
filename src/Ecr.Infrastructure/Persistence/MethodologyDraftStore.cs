@@ -311,6 +311,9 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
     public void Remove(MethodologyFormula formula) => db.MethodologyFormulas.Remove(formula);
 
     /// <inheritdoc />
+    public void Remove(MethodologyRequiredInput requiredInput) => db.MethodologyRequiredInputs.Remove(requiredInput);
+
+    /// <inheritdoc />
     public void Add(MethodologyImport import) => db.MethodologyImports.Add(import);
 
     /// <inheritdoc />

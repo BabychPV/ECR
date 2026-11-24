@@ -4,6 +4,7 @@ import {
   Button,
   Checkbox,
   Group,
+  Modal,
   Select,
   Stack,
   Table,
@@ -26,6 +27,7 @@ import { Hint } from '@/shared/ui/Hint';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import {
   calculationBindings,
+  deleteMethodologyRequiredInput,
   methodologyRequiredInputs,
   saveCalculationBinding,
   saveMethodologyModes,
@@ -81,6 +83,8 @@ export function MethodologyRequiredInputsPanel({
 }: PanelProps): JSX.Element {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<RequiredInputDraft | null>(null);
+  // ✎ P-1124-1: прибрати вимогу — лише після підтвердження (як видалення чернетки версії).
+  const [removing, setRemoving] = useState<MethodologyRequiredInputDto | null>(null);
 
   const requiredInputs = useQuery({
     queryKey: queryKeys.methodologies.requiredInputs(versionId),
@@ -105,6 +109,20 @@ export function MethodologyRequiredInputsPanel({
 
   // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
   const saveLoading = usePendingLoading(save.isPending);
+
+  const remove = useMutation({
+    mutationFn: (target: MethodologyRequiredInputDto) =>
+      deleteMethodologyRequiredInput(methodologyId, versionId, target.columnDefId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.methodologies.requiredInputs(versionId),
+      });
+      setRemoving(null);
+      showDone(t('methodologies.requiredInputRemoved'));
+    },
+    onError: showApiError,
+  });
+  const removeLoading = usePendingLoading(remove.isPending);
 
   return (
     <MethodologySection
@@ -194,6 +212,16 @@ export function MethodologyRequiredInputsPanel({
                         {t('methodologies.editFormula')}
                       </Button>
                     )}
+                    {editable && (
+                      <Button
+                        size="xs"
+                        variant="subtle"
+                        color="statusError"
+                        onClick={() => setRemoving(requiredInput)}
+                      >
+                        {t('methodologies.requiredInputRemove')}
+                      </Button>
+                    )}
                   </Table.Td>
                 </Table.Tr>
               ))}
@@ -201,6 +229,35 @@ export function MethodologyRequiredInputsPanel({
           </Table>
         )}
       </AsyncBoundary>
+
+      {/* ⛔ Закриття без кнопки (хрестик, Esc) — скасування: запиту немає. */}
+      <Modal
+        opened={removing !== null}
+        onClose={() => setRemoving(null)}
+        title={t('methodologies.requiredInputRemoveTitle')}
+      >
+        <Text size="sm" mb="md">
+          {t('methodologies.requiredInputRemoveText', {
+            column: removing === null ? '' : String(removing.columnCode ?? removing.columnDefId),
+          })}
+        </Text>
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={() => setRemoving(null)}>
+            {t('common.cancel')}
+          </Button>
+          <Button
+            color="statusError"
+            loading={removeLoading}
+            onClick={() => {
+              // ⛔ B149: кнопка закритого діалогу (~200 мс у DOM) не має слати запит.
+              if (removing === null || remove.isPending) return;
+              remove.mutate(removing);
+            }}
+          >
+            {t('methodologies.requiredInputRemove')}
+          </Button>
+        </Group>
+      </Modal>
 
       <ResizableModal
         sizeKey="methodology.requiredInput"

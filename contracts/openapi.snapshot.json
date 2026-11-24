@@ -25607,153 +25607,6 @@
           "Count"
         ]
       },
-      "RuleCoverageCombinationDto": {
-        "description": "Одна комбінація значень (коди, не числа звітності) і що з нею роблять правила.",
-        "properties": {
-          "documents": {
-            "description": "Кількість документів.",
-            "format": "int32",
-            "type": "integer"
-          },
-          "matchedRuleCodes": {
-            "description": "Усі збіжні правила; після переможця — нічия або затінені.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "rows": {
-            "description": "Кількість рядків.",
-            "format": "int64",
-            "type": "integer"
-          },
-          "state": {
-            "$ref": "#/components/schemas/RuleCoverageState",
-            "description": "Стан."
-          },
-          "values": {
-            "description": "Значення в порядку `ColumnDefIds`; `null` — порожньо.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "winnerRuleCode": {
-            "description": "Правило-переможець; `null` для розриву.",
-            "type": [
-              "null",
-              "string"
-            ]
-          }
-        },
-        "required": [
-          "values",
-          "state",
-          "winnerRuleCode",
-          "matchedRuleCodes",
-          "rows",
-          "documents"
-        ],
-        "type": "object"
-      },
-      "RuleCoverageDto": {
-        "description": "Матриця покриття «рядки реальних даних × правила» версії методології.",
-        "properties": {
-          "columnDefIds": {
-            "description": "Колонки осі — ті, що згадують правила; порядок значень у комбінації.",
-            "items": {
-              "format": "int32",
-              "type": "integer"
-            },
-            "type": "array"
-          },
-          "combinations": {
-            "description": "Комбінації: розриви → конфлікти → покриті, далі за кількістю рядків.",
-            "items": {
-              "$ref": "#/components/schemas/RuleCoverageCombinationDto"
-            },
-            "type": "array"
-          },
-          "excludedRows": {
-            "default": 0,
-            "description": "D-425: рядків відсіяно фільтром активності методології (статус не активний або порожній) — вони не рахуються\nпрогоном і не є «непокритими»; `0` — фільтра немає.",
-            "format": "int64",
-            "type": "integer"
-          },
-          "methodologyVersionId": {
-            "description": "Версія.",
-            "format": "int32",
-            "type": "integer"
-          },
-          "periodFrom": {
-            "description": "Нижня межа вікна періодів (включно), фактично застосована.",
-            "format": "int32",
-            "type": "integer"
-          },
-          "periodTo": {
-            "description": "Верхня межа (включно).",
-            "format": "int32",
-            "type": "integer"
-          },
-          "rules": {
-            "description": "Активні правила в порядку пріоритету.",
-            "items": {
-              "$ref": "#/components/schemas/RuleCoverageRuleDto"
-            },
-            "type": "array"
-          },
-          "tableDefIds": {
-            "description": "Таблиці, рядки яких бралися.",
-            "items": {
-              "format": "int32",
-              "type": "integer"
-            },
-            "type": "array"
-          },
-          "truncated": {
-            "description": "Комбінацій більше за стелю; показано найчисленніші.",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "methodologyVersionId",
-          "periodFrom",
-          "periodTo",
-          "tableDefIds",
-          "columnDefIds",
-          "rules",
-          "combinations",
-          "truncated"
-        ],
-        "type": "object"
-      },
-      "RuleCoverageRuleDto": {
-        "description": "Правило осі матриці.",
-        "properties": {
-          "code": {
-            "description": "Код правила.",
-            "type": "string"
-          },
-          "priority": {
-            "description": "Пріоритет; менше — вищий.",
-            "format": "int32",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "code",
-          "priority"
-        ],
-        "type": "object"
-      },
-      "RuleCoverageState": {
-        "description": "Стан комбінації значень у матриці покриття (ФВ-13.9).",
-        "enum": [
-          "Gap",
-          "Conflict",
-          "Covered"
-        ]
-      },
       "RunConsistencyCheckRequest": {
         "description": "Запит на прогін перевірки узгодженості.",
         "properties": {
@@ -52928,89 +52781,6 @@
         ]
       }
     },
-    "/api/v1/methodologies/{id}/versions/{vid}/constants/{code}/usage": {
-      "get": {
-        "parameters": [
-          {
-            "description": "Методологія.",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "format": "int32",
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Версія.",
-            "in": "path",
-            "name": "vid",
-            "required": true,
-            "schema": {
-              "format": "int32",
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Код константи.",
-            "in": "path",
-            "name": "code",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UsageResponse"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UsageResponse"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/UsageResponse"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Not Found"
-          }
-        },
-        "summary": "Формули версії, що посилаються на константу (ФВ-8.14). Право `Calculation.View`.",
-        "tags": [
-          "Methodologies"
-        ]
-      }
-    },
     "/api/v1/methodologies/{id}/versions/{vid}/coverage": {
       "get": {
         "parameters": [
@@ -54044,6 +53814,92 @@
       }
     },
     "/api/v1/methodologies/{id}/versions/{vid}/required-inputs/{columnDefId}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Колонка вимоги.",
+            "in": "path",
+            "name": "columnDefId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Прибирає обов'язкову вхідну колонку чернетки (✎ P-1124-1). Право `Calculation.ManageRequiredInputs` —\nте саме, що й запис.",
+        "tags": [
+          "Methodologies"
+        ]
+      },
       "put": {
         "description": "⛔ Окреме право від `Calculation.EditRule`/`EditFormula`\nнавмисно: gate перед збереженням клітинки (`PatchCellsHandler`)\nзастосовується до ВСІХ, хто вводить дані, а хто вирішує, ЯКІ колонки\nобов'язкові, — окрема, вужча відповідальність.",
         "parameters": [
@@ -54167,127 +54023,6 @@
         "summary": "Заводить або змінює обов'язкову вхідну колонку. Право\n`Calculation.ManageRequiredInputs` (директива «обов'язкові вхідні\nколонки методології»).",
         "tags": [
           "Methodologies"
-        ]
-      }
-    },
-    "/api/v1/methodologies/{id}/versions/{vid}/rule-coverage": {
-      "get": {
-        "parameters": [
-          {
-            "description": "Методологія.",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "format": "int32",
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Версія.",
-            "in": "path",
-            "name": "vid",
-            "required": true,
-            "schema": {
-              "format": "int32",
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Лише одна з таблиць прив'язок.",
-            "in": "query",
-            "name": "tableDefId",
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Нижня межа вікна періодів; типово — початок минулого року.",
-            "in": "query",
-            "name": "periodFrom",
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Верхня межа; типово — кінець поточного року.",
-            "in": "query",
-            "name": "periodTo",
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RuleCoverageDto"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RuleCoverageDto"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/RuleCoverageDto"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "summary": "Матриця покриття «рядки реальних даних × правила» (ФВ-13.9). Право `Calculation.View`.",
-        "tags": [
-          "MethodologyVersions"
         ]
       }
     },

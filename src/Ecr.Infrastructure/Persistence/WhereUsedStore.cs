@@ -1,4 +1,4 @@
-﻿// src/Ecr.Infrastructure/Persistence/WhereUsedStore.cs
+// src/Ecr.Infrastructure/Persistence/WhereUsedStore.cs
 using System.Globalization;
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
@@ -11,24 +11,6 @@ namespace Ecr.Infrastructure.Persistence;
 /// <summary>Реалізація <see cref="IWhereUsedStore"/> над <see cref="EcrDbContext"/>.</summary>
 public sealed class WhereUsedStore(EcrDbContext db) : IWhereUsedStore
 {
-    /// <inheritdoc />
-    public async Task<int?> FindConstantMethodologyAsync(
-        int methodologyVersionId, string code, CancellationToken ct)
-        => await (from c in db.MethodologyConstants
-                  where c.MethodologyVersionId == methodologyVersionId && c.Code == code
-                  join v in db.MethodologyVersions on c.MethodologyVersionId equals v.Id
-                  select (int?)v.MethodologyId)
-            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-
-    /// <inheritdoc />
-    public async Task<IReadOnlyList<VersionFormulaText>> ListVersionFormulasAsync(
-        int methodologyVersionId, CancellationToken ct)
-        => await db.MethodologyFormulas
-            .Where(f => f.MethodologyVersionId == methodologyVersionId)
-            .OrderBy(f => f.Id)
-            .Select(f => new VersionFormulaText(f.Id, f.Code, f.Expression))
-            .ToListAsync(ct).ConfigureAwait(false);
-
     /// <inheritdoc />
     public Task<bool> ColumnExistsAsync(int columnDefId, CancellationToken ct)
         => db.ColumnDefs.AnyAsync(c => c.Id == columnDefId && !c.IsDeleted, ct);
