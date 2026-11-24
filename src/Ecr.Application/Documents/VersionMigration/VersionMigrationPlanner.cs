@@ -276,6 +276,8 @@ public static partial class VersionMigrationPlanner
         var sourceSheets = Live(source.Sheets).ToList();
 
         var touched = new HashSet<int>();
+        // ✎ P-1124-2: колонки Formula -> Calculated (обидві обчислювані): похідні значення відтворить методологія, не перенос.
+        var derived = new HashSet<int>();
 
         foreach (var sheet in sourceSheets)
         {
@@ -343,7 +345,7 @@ public static partial class VersionMigrationPlanner
                 var columnsBefore = columns.Count;
                 PresentationDiff(items, tablePath, "Name", table.NameL10n, otherTable.NameL10n);
                 CompareTableShape(items, tablePath, table, otherTable, valuesByColumn);
-                CompareColumns(items, columns, conflicts, tablePath, table, otherTable, valuesByColumn, columnRenames, month, unitRelabels);
+                CompareColumns(items, columns, conflicts, tablePath, table, otherTable, valuesByColumn, columnRenames, month, unitRelabels, derived);
                 CompareRows(items, rows, newRows, tablePath, table, otherTable, valuesByRow);
                 CompareFormulas(formulaChanges, tablePath, table, otherTable, columns, rows);
                 CompareCellFormulas(items, overwrites, sheet.Code.ToString(), table.Code.ToString(), tablePath, table, otherTable, valuesByCell);
@@ -402,6 +404,11 @@ public static partial class VersionMigrationPlanner
             else if (!rowLost && month is not null && month.Recomputed.Contains(usage.ColumnDefId))
             {
                 // ✎ LAND-YEAR L3: похідне значення селектора — відтворить перерахунок; ні перенос, ні втрата.
+                recomputed += usage.Values;
+            }
+            else if (!rowLost && derived.Contains(usage.ColumnDefId))
+            {
+                // ✎ P-1124-2: похідне значення формули таблиці, яку замінила методологія — відтворить перерахунок.
                 recomputed += usage.Values;
             }
             else if (!mappedColumns.ContainsKey(usage.ColumnDefId) || rowLost)
@@ -589,7 +596,7 @@ public static partial class VersionMigrationPlanner
         List<VersionMigrationItem> items, List<VersionMigrationColumn> map, List<string> conflicts, string tablePath,
         TableDef from, TableDef to, IReadOnlyDictionary<int, long> valuesByColumn,
         IReadOnlyList<VersionMigrationColumnRename>? columnRenames, MonthOutcome? month,
-        IReadOnlyDictionary<string, VersionMigrationResolvedRelabel>? unitRelabels = null)
+        IReadOnlyDictionary<string, VersionMigrationResolvedRelabel>? unitRelabels = null, HashSet<int>? derived = null)
     {
         var targetColumns = Live(to.Columns).ToDictionary(c => c.Code, StringComparer.Ordinal);
         var sourceColumnCodes = Live(from.Columns).Select(c => c.Code).ToHashSet(StringComparer.Ordinal);
@@ -633,6 +640,18 @@ public static partial class VersionMigrationPlanner
 
                     continue;
                 }
+            }
+
+            // ✎ P-1124-2 (вода T7b_00, Land 1.0.21.0): формула таблиці -> вихід методології. Значення колонки — ОБЧИСЛЕНІ (формула),
+            // не введені людиною: їх відтворює методологія (результати — у calc.CalculationResult через прив'язку, D-69), тож комірки
+            // не переносяться (знімаються разом із колонкою джерела) і рахуються «перераховано», а не «втрачено». Клас Guarded, вид
+            // Recomputed: не guardedWithData (той рахує лише Modified), але подані/затверджені аркуші (LP-32) такий перенос не пропускають —
+            // їхні числа заморожені й не перераховуються.
+            if (derived is not null && column.DataType == CellDataType.Formula && other.DataType == CellDataType.Calculated)
+            {
+                derived.Add(column.Id);
+                items.Add(new(path, RecomputedKind, ChangeClass.Guarded, values, nameof(ColumnDef.DataType), Text(column.DataType), Text(other.DataType)));
+                continue;
             }
 
             map.Add(new VersionMigrationColumn(column.Id, other.Id, to.Id));
