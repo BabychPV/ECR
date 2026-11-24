@@ -82,6 +82,8 @@ describe('MethodologyVersionsPage: лише редактор скрипта', { 
 
     const card = await screen.findByTestId('current-script-version');
     expect(within(card).getByText('V2')).toBeTruthy();
+    // Опублікована чинна — «розрахунки використовують цю версію».
+    expect(within(card).getByTestId('current-script-hint').textContent).toBe('⟦methodologies.currentScript.hint⟧');
     expect(within(card).getByRole('link', { name: '⟦methodologyScript.versions.openEditor⟧' }).getAttribute('href')).toBe(
       '/admin/methodologies/1/versions/12/script',
     );
@@ -135,6 +137,13 @@ describe('MethodologyVersionsPage: лише редактор скрипта', { 
     expect(screen.queryByRole('link', { name: '⟦methodologyScript.versions.openEditor⟧' })).toBeNull();
   });
 
+  it('поточна — чернетка (нічого не опубліковано): картка не каже «розрахунки використовують цю версію»', async () => {
+    holdWrites({ read: reader([V3]) });
+    show();
+
+    const card = await screen.findByTestId('current-script-version');
+    expect(within(card).getByTestId('current-script-hint').textContent).toBe('⟦methodologies.currentScript.draftHint⟧');
+  });
   it('без жодної версії: «версій немає», а не «переноситься»', async () => {
     holdWrites({ read: reader([]) });
     show();

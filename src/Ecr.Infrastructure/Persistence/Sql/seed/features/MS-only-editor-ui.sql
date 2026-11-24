@@ -6,6 +6,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'methodologies.currentScript.title', N'kz', N'Ағымдағы скрипт нұсқасы'),
     (N'methodologies.currentScript.hint', N'ru', N'Расчёты используют эту версию. Скрипт, его тесты и обязательные входные столбцы правятся в редакторе скрипта.'),
     (N'methodologies.currentScript.hint', N'kz', N'Есептеулер осы нұсқаны пайдаланады. Скрипт, оның тесттері және міндетті кіріс бағандары скрипт редакторында өзгертіледі.'),
+    (N'methodologies.currentScript.draftHint', N'ru', N'Версия ещё не опубликована: расчёты её не используют, пока её не опубликуют. Скрипт, его тесты и обязательные входные столбцы правятся в редакторе скрипта.'),
+    (N'methodologies.currentScript.draftHint', N'kz', N'Нұсқа әлі жарияланбаған: ол жарияланғанша есептеулер оны пайдаланбайды. Скрипт, оның тесттері және міндетті кіріс бағандары скрипт редакторында өзгертіледі.'),
     (N'methodologies.noVersions', N'ru', N'У этой методики нет версий'),
     (N'methodologies.noVersions', N'kz', N'Бұл әдістеменің нұсқалары жоқ'),
     (N'methodologies.noVersionsHint', N'ru', N'Расчёт выполняет именно версия. Чтобы начать, создайте черновик.'),
@@ -33,6 +35,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
     (N'methodologies.currentScript.title', N'en', N'Current script version', 1),
     (N'methodologies.currentScript.hint', N'en', N'Calculations use this version. Edit the script, its tests and required input columns in the script editor.', 1),
+    (N'methodologies.currentScript.draftHint', N'en', N'This version is not published yet: calculations do not use it until it is published. Edit the script, its tests and required input columns in the script editor.', 1),
     (N'methodologies.noVersions', N'en', N'This methodology has no versions', 1),
     (N'methodologies.noVersionsHint', N'en', N'A version is what actually calculates. Create a draft to start.', 1),
     (N'methodologies.converting.title', N'en', N'This methodology is being moved to the script editor', 1),
