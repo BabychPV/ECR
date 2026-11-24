@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { CurrentUserDto } from '@/api/types';
 import { HomeRoute, startsOnReportsNotice } from '@/app/HomeRoute';
 import { MeQueryKey } from '@/shared/session/useSession';
+import { PageDescriptionContext } from '@/shared/ui/pageDescription';
 import { theme } from '@/shared/theme/theme';
 
 /**
@@ -42,9 +43,12 @@ function renderHome(me: CurrentUserDto): ReturnType<typeof render> {
             <Route
               path="/"
               element={
-                <HomeRoute>
-                  <div data-testid="documents">Documents list</div>
-                </HomeRoute>
+                // Як у роутері: маршрут / несе опис переліку документів (handle.descriptionKey).
+                <PageDescriptionContext.Provider value="nav.documents.description">
+                  <HomeRoute>
+                    <div data-testid="documents">Documents list</div>
+                  </HomeRoute>
+                </PageDescriptionContext.Provider>
               }
             />
           </Routes>
@@ -76,6 +80,8 @@ describe('HomeRoute — стартова сторінка ролі без пер
     // Мертвого посилання немає: адресу сервера звітів застосунок не знає.
     expect(notice.querySelector('a')).toBeNull();
     expect(screen.queryByTestId('documents')).toBeNull();
+    // Опис маршруту / («відкрийте документ…») цій ролі не показується: документів у неї немає.
+    expect(screen.queryByTestId('page-description')).toBeNull();
   });
 
   it('оператор із Document.View лишається на переліку документів (навіть із правом звітів)', () => {

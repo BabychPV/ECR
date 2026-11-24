@@ -26,7 +26,10 @@ export function startsOnReportsNotice(me: CurrentUserDto | undefined): boolean {
 export function ReportsInSsrsHome(): JSX.Element {
   return (
     <Stack gap="md" data-testid="reports-in-ssrs">
-      <PageHeader title={t('home.reportsInSsrs.title')} />
+      {/* ⛔ Без опису маршруту / (
+av.documents.description: «…Open a document to work in it»): для ролі без документів він
+          радив би те, чого вона зробити не може (знімок 24.11). Пояснення — у підказці нижче. */}
+      <PageHeader title={t('home.reportsInSsrs.title')} description={null} />
       <EmptyState headingOrder={2} title={t('home.reportsInSsrs.heading')} hint={t('home.reportsInSsrs.hint')} />
     </Stack>
   );
