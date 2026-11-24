@@ -1283,19 +1283,12 @@ _arg_bridges()
 #     (S3_9 - порожній статус, результату немає);
 #   * бракує аргументу (порожня концентрація чи об'єм) - результату немає (MissingInputs), а не нуль.
 # Після YearMonths: ECW_EC_tons_M01..M12 = та сама умова з колонкою місяця m і Volume_Mmm (змінна формула).
-DECIDED_TABLE_FORMULAS = {
-    'T7b_00': {
-        'ECW_EC_tons': {
-            'methodology': 'ECW_C09_02_01',
-            'status': ('Land_Status', 'LAND_GENERIC_EQUIPSTATUS', 'RUNNING'),
-            # IF(...) повертає концентрацію лише для рядка, що рахується, і знімає з неї одиницю: діалект шаблону не має похідної
-            # одиниці «мг/л x м3» (expr.unit.productUndeclared), а перехід у тонни - це сам k1 = 1e6 методології. NULL з IF
-            # (не RUNNING або бракує аргументу) дає порожню комірку, як «немає результату» методології.
-            'expression': "IF(REGFIELD([Land_Status], 'NAME') = '%s' AND NOT ([Concentration] = NULL OR [Volume] = NULL),"
-                          " [Concentration], NULL) * [Volume] / 1000000",
-        },
-    },
-}
+# ✎ P-1124-2 (людина 24.11: «перенести систему на нове представлення без втрат ... лише наш новий редактор скриптів»; одна дорога
+# розрахунку, без формули таблиці): T7b_00.ECW_EC_tons знову ВИХІД методології ECW_C09_02_01 (V2 на ECR Script: місячні
+# псевдоніми Concentration/Volume, active when RUNNING, k1 = 1e6 мг/л*м3 -> т; паритет зі старою системою 25/25). Запис води
+# прибрано з переліку; механізм лишається для майбутніх рішень. Шаблон Land 1.0.21.0: будівник повертає Formula -> Calculated
+# у чернетці-клоні (Build-LandTemplate.ps1, D-474 крок), етап Methodologies кладе прив'язки ECW_EC_tons_Mnn.
+DECIDED_TABLE_FORMULAS = {}
 
 
 def _decided_table_formulas():

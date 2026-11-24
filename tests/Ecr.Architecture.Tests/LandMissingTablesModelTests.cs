@@ -103,12 +103,13 @@ public sealed class LandMissingTablesModelTests
         // вихід C09_02_01: одна формула ECW_EC_tons (т), назва без компонента; взято зі стенда, у AF XML методології немає
         var column = tables[0].GetProperty("columns").EnumerateArray()
             .Single(c => c.GetProperty("code").GetString() == "ECW_EC_tons");
-        // ✎ P-1123-4 (людина 23.11: «Вода має прості формули тому ми їх рахуємо в таблиці»): формула таблиці, а не вихід
-        // методології; прив'язки ECW_C09_02_01 до таблиці немає (LandT7bVolumeModelTests - семантика формули).
-        Assert.Equal("Formula", column.GetProperty("dataType").GetString());
+        // ✎ P-1124-2 (людина 24.11: одна дорога розрахунку, лише редактор скриптів): знову вихід методології ECW_C09_02_01
+        // (на ECR Script), а не формула таблиці P-1123-4.
+        Assert.Equal("Calculated", column.GetProperty("dataType").GetString());
         Assert.Equal("t", column.GetProperty("unit").GetString());
         Assert.True(column.GetProperty("readOnly").GetBoolean());
-        Assert.False(tables[0].TryGetProperty("calc", out _));
+        Assert.False(column.TryGetProperty("expression", out _));
+        Assert.Contains("ECW_C09_02_01", tables[0].GetProperty("calc").GetProperty("methodologies").EnumerateArray().Select(x => x.GetString()));
     }
 
     [Fact]
