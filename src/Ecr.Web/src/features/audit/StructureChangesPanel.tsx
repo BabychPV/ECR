@@ -1,6 +1,6 @@
 import { useMemo, type JSX } from 'react';
-import { Select, Table, Text, TextInput } from '@mantine/core';
-import { structureChangesQuery, type StructureChangePage } from '@/features/audit/api';
+import { Select, Table, Text } from '@mantine/core';
+import { structureChangesQuery, useStructureEntityTypes, type StructureChangePage } from '@/features/audit/api';
 import { useStructureChangePages } from '@/features/audit/journalPages';
 import { InfiniteListFooter } from '@/features/common/infiniteList/InfiniteListFooter';
 import { mergePages } from '@/features/common/infiniteList/mergePages';
@@ -10,12 +10,11 @@ import { SortableTh } from '@/features/audit/SortableTh';
 import { FilterHints, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
-import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { entityTypeLabel, operationLabel } from './auditLabels';
 import { structureChangeReasonText, structureChangeReasonZone } from './structureChangeReason';
-import { SiteChangedAt } from './SiteChangedAt';
+import { AuditChangedAt } from './AuditChangedAt';
 import './auditTable.css';
 
 /**
@@ -32,18 +31,14 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
   const [entityType, setEntityType] = useUrlState('entityType');
   const [changedBy, setChangedBy] = useUrlNumber('changedBy');
 
-  // ⛔ Набір у полях — у запит після паузи, як у журналі комірок (`AuditPage`).
-  const appliedEntityType = useDebouncedFilter(entityType);
+  // ✎ P-1124-4: тип сутності — ВИБОРОМ (дискретне значення, без паузи); автор — як у журналі комірок.
   const appliedChangedBy = useDebouncedFilter(changedBy);
   const [sort, setSort] = useAuditSort();
-  // ⛔ Поля показують ВЛАСНЕ значення, не адресу (`useFieldDraft`; той самий
-  // дефект втрати символів, що в «Row key» журналу комірок).
-  const entityTypeField = useFieldDraft(entityType ?? '');
 
   const applied = {
     from,
     to,
-    entityType: appliedEntityType,
+    entityType,
     changedByUserId: appliedChangedBy,
     sort,
     limit: 100,
@@ -53,20 +48,34 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
   const changes = useStructureChangePages(applied);
   const changePage = useMemo(() => mergePages(changes.data?.pages), [changes.data]);
   const authorOptions = useAuthorOptions(changePage?.items, changedBy);
+  const entityTypes = useStructureEntityTypes(from, to);
+  const entityTypeOptions = useMemo(() => {
+    const codes = new Set(Array.isArray(entityTypes.data) ? entityTypes.data : []);
+    for (const item of changePage?.items ?? []) codes.add(item.entityType);
+    if (entityType !== null && entityType !== '') codes.add(entityType);
+
+    return [...codes]
+      .map((value) => ({ value, label: entityTypeLabel(value) }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [entityTypes.data, changePage, entityType]);
 
   return (
     <>
       <FilterRow mb="xs" data-audit-filter-row="structure">
-        <TextInput
+        {/* ⛔ Було: вільний текст із точним збігом КОДУ (`cfg.RegistryDef`) на сервері. Тепер — типи, що є у вікні,
+            підписами мовою інтерфейсу; значення — код сервера. */}
+        <Select
           size="xs"
           miw={200}
+          searchable
+          clearable
           label={t('audit.entityType')}
-          value={entityTypeField.value}
-          onFocus={entityTypeField.onFocus}
-          onBlur={entityTypeField.onBlur}
-          onChange={(event) => {
-            entityTypeField.setValue(event.currentTarget.value);
-            setEntityType(event.currentTarget.value);
+          placeholder={t('audit.entityTypeAny')}
+          nothingFoundMessage={t('audit.filterNothing')}
+          data={entityTypeOptions}
+          value={entityType === '' ? null : entityType}
+          onChange={(value) => {
+            setEntityType(value);
           }}
         />
         {/* ⛔ `R-18`: автор — вибором за іменем, а не номером `UserId`. */}
@@ -79,6 +88,7 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
           description={t('audit.authorHint')}
           styles={readerOnlyDescription}
           placeholder={t('audit.authorAny')}
+          nothingFoundMessage={t('audit.filterNothing')}
           data={authorOptions}
           value={changedBy === null ? null : String(changedBy)}
           onChange={(value) => {
@@ -123,12 +133,14 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
                         читабельним стає лише те, що бачить око.
                         ⚠ `key` рядка й далі бере СИРИЙ `changedAt`: ключ — для
                         React, а не для ока. */}
-                    <Table.Td>
-                      {/* ✎ debt-1109 F13 (P3 A): журнал «Reopen» — «коли» і «до …» в одному часі (пояс із конверта). */}
-                      <SiteChangedAt value={change.changedAt} zone={structureChangeReasonZone(change.changeReason)} />
+                    <Table.Td data-audit-time-cell="">
+                      {/* ✎ P-1124-4: місцевий час читача; пояс майданчика з конверта «Reopen» — у підказці. */}
+                      <AuditChangedAt value={change.changedAt} zone={structureChangeReasonZone(change.changeReason)} />
                     </Table.Td>
                     {/* ⛔ `R-18`: ім'я з сервера; номер — у підказці. */}
-                    <Table.Td title={`#${String(change.changedByUserId)}`}>{authorName(change)}</Table.Td>
+                    <Table.Td title={`#${String(change.changedByUserId)}`} data-audit-author="">
+                      {authorName(change)}
+                    </Table.Td>
                     <Table.Td>
                       {/* Читабельний код сутності (якщо сервер його визначив), номер — другим рядком: журнал є
                           доказом, номер лишається доступним. Видалена сутність — як і раніше номер. */}

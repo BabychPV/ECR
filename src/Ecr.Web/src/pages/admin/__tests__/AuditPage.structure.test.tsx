@@ -105,10 +105,12 @@ describe('AuditPage: вкладка структурних змін', () => {
       // ⛔ Мутація: прибрати `!structure` з `useCellChangePages(applied, !structure)`
       // — тут з'явиться другий запит, по партиціях `aud.CellChange`, заради
       // таблиці, якої на вкладці не видно.
-      expect(seen).toHaveLength(1);
-      expect(seen[0]).toContain('/api/v1/audit/structure?');
+      // ✎ P-1124-4: варіанти «Entity type» (`/structure/entity-types`) — окремий легкий запит; журналів — рівно один.
+      const journals = seen.filter((url) => !url.includes('/entity-types') && !url.includes('/audit/authors'));
+      expect(journals).toHaveLength(1);
+      expect(journals[0]).toContain('/api/v1/audit/structure?');
 
-      const query = new URLSearchParams(seen[0]!.split('?')[1]);
+      const query = new URLSearchParams(journals[0]!.split('?')[1]);
       expect(query.get('from')).toBe(new Date(2026, 0, 1).toISOString());
       // ⚠ `U-20`: кінець вікна — північ НАСТУПНОЇ доби: названий день у вікні.
       expect(query.get('to')).toBe(new Date(2026, 0, 9).toISOString());

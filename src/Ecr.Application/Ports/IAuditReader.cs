@@ -404,6 +404,28 @@ public interface IAuditReader
         SecurityEventFilter filter, CursorRequest page, CancellationToken ct);
 
     /// <summary>
+    /// ✎ P-1124-4: різні типи подій безпеки у вікні — для вибору у фільтрі «Event type» (точний збіг коду замість
+    /// вільного тексту, якого людина не знає).
+    /// </summary>
+    /// <param name="from">Початок вікна в UTC, включно.</param>
+    /// <param name="to">Кінець вікна в UTC, виключно.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<string>> ReadSecurityEventTypesAsync(DateTime from, DateTime to, CancellationToken ct);
+
+    /// <summary>✎ P-1124-4: різні типи сутностей журналу структурних змін у вікні — для вибору у фільтрі «Entity type».</summary>
+    /// <param name="from">Початок вікна в UTC, включно.</param>
+    /// <param name="to">Кінець вікна в UTC, виключно.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<string>> ReadStructureEntityTypesAsync(DateTime from, DateTime to, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ P-1124-4: усі користувачі (Id + ім'я, без логіна й SID) — для фільтра «By user» журналів аудиту за правом
+    /// <c>Security.ViewAudit</c>, без <c>Security.ManageUsers</c>.
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<AuditAuthorView>> ReadAuditAuthorsAsync(CancellationToken ct);
+
+    /// <summary>
     /// Остання зміна кожної названої комірки — ОДНИМ запитом на весь перелік
     /// (<c>BE-06</c>).
     /// </summary>

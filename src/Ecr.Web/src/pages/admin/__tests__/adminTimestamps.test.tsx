@@ -7,6 +7,7 @@ import { AuditPage } from '@/pages/admin/AuditPage';
 import { PeriodsPage } from '@/pages/admin/PeriodsPage';
 import { StructureChangesPanel } from '@/features/audit/StructureChangesPanel';
 import { formatDateTime } from '@/shared/format';
+import { formatDateTime24 } from '@/shared/format/datetime';
 import { testTheme } from '@/test/render';
 
 /**
@@ -134,7 +135,8 @@ describe('AuditPage: момент правки', () => {
        * те, що бачить око.
        */
       expect(node, 'момент не пройшов через набір').not.toBeNull();
-      expect(node?.textContent).toBe(formatDateTime(ChangedAt));
+      // ✎ P-1124-4: журнали аудиту — 24-годинний запис у поясі читача (`formatDateTime24`).
+      expect(node?.textContent).toBe(formatDateTime24(ChangedAt));
       expect(node?.textContent).not.toBe(ChangedAt);
       expect(node?.textContent).not.toMatch(/T\d{2}:\d{2}/);
     },
@@ -179,7 +181,7 @@ describe('Журнал структурних змін: момент правк�
       const node = timeNode(ChangedAt);
 
       expect(node, 'момент структурної зміни не пройшов через набір').not.toBeNull();
-      expect(node?.textContent).toBe(formatDateTime(ChangedAt));
+      expect(node?.textContent).toBe(formatDateTime24(ChangedAt));
       expect(node?.textContent).not.toBe(ChangedAt);
     },
     SlowEnvTimeout,

@@ -135,6 +135,75 @@ public sealed class AuditSecurityEventsTests(SqlServerFixture sql)
         Assert.Contains("audit/security",evt.GetProperty("detailsJson").GetString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-5.24")]
+    public async Task Типи_подій_у_вікні_для_вибору_у_фільтрі_і_той_самий_поріг_права()
+    {
+        // ✎ P-1124-4: «Event type» був вільним текстом із ТОЧНИМ збігом коду — людина не знає `AccessDenied`.
+        using var app = new EcrApiFactory(sql);
+        var (auditor, _) = await LoginAsync(app, "et", ["Security.ViewAudit"]);
+        var (stranger, _) = await LoginAsync(app, "en", ["Template.Edit"]);
+
+        var inside = $"T{_tag}E";
+        await WriteAsync(inside, 1);
+        await WriteAsync(inside, 2);
+
+        var from = DateTime.UtcNow.AddDays(-1);
+        var to = DateTime.UtcNow.AddMinutes(1);
+        var response = await auditor.GetAsync(new Uri(TypesUrl(from, to), UriKind.Relative));
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {app.ErrorsText}");
+
+        // ⛔ Мутація: прибрати `DISTINCT` — тип прийде двічі.
+        var types = (await response.Content.ReadFromJsonAsync<List<string>>())!;
+        Assert.Single(types, t => t == inside);
+
+        // ⛔ Мутація: прибрати вікно з запиту — тип із вікна в минулому теж приїде.
+        var past = await auditor.GetAsync(new Uri(TypesUrl(from.AddDays(-30), from.AddDays(-29)), UriKind.Relative));
+        Assert.DoesNotContain(inside, (await past.Content.ReadFromJsonAsync<List<string>>())!);
+
+        // ⛔ Мутація: прибрати перевірку права в `EventTypesAsync` — стане 200.
+        Assert.Equal(HttpStatusCode.Forbidden, (await stranger.GetAsync(new Uri(TypesUrl(from, to), UriKind.Relative))).StatusCode);
+
+        // ⛔ Мутація: прибрати `AuditWindow.Require` — рік читав би кожну партицію.
+        Assert.Equal(
+            HttpStatusCode.UnprocessableEntity,
+            (await auditor.GetAsync(new Uri(TypesUrl(to.AddDays(-365), to), UriKind.Relative))).StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-5.24")]
+    public async Task Автори_для_фільтра_за_правом_аудиту_без_ManageUsers_і_без_логіна()
+    {
+        // ✎ P-1124-4: «By user» брав перелік із `GET /users` (лише `Security.ManageUsers`) — в аудитора порожньо.
+        using var app = new EcrApiFactory(sql);
+        var (auditor, auditorId) = await LoginAsync(app, "ab", ["Security.ViewAudit"]);
+        var (stranger, _) = await LoginAsync(app, "an", ["Template.Edit"]);
+
+        var response = await auditor.GetAsync(new Uri("/api/v1/audit/authors", UriKind.Relative));
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {app.ErrorsText}");
+
+        var authors = (await response.Content.ReadFromJsonAsync<JsonElement>()).EnumerateArray().ToList();
+        var self = Assert.Single(authors, a => a.GetProperty("userId").GetInt32() == auditorId);
+        Assert.Equal($"audse_ab_{_tag}", self.GetProperty("displayName").GetString());
+
+        // ⛔ R-A2/D-86: лише номер і ім'я — логін і SID не віддаються.
+        Assert.Equal(["displayName", "userId"], self.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+
+        // ⛔ Мутація: прибрати перевірку права в `AuthorsAsync` — стане 200 (перелік людей кожному).
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            (await stranger.GetAsync(new Uri("/api/v1/audit/authors", UriKind.Relative))).StatusCode);
+    }
+
+    private static string TypesUrl(DateTime from, DateTime to)
+        => "/api/v1/audit/security/event-types"
+           + $"?from={Uri.EscapeDataString(from.ToString("O", CultureInfo.InvariantCulture))}"
+           + $"&to={Uri.EscapeDataString(to.ToString("O", CultureInfo.InvariantCulture))}";
+
     private static string Url(string filters)
         => Url(filters, DateTime.UtcNow.AddDays(-1), DateTime.UtcNow.AddMinutes(1), 50);
 

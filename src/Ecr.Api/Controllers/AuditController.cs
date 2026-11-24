@@ -222,6 +222,49 @@ public sealed class AuditController(
     }
 
     /// <summary>
+    /// Типи сутностей журналу структурних змін, що є у вікні, — варіанти фільтра «Entity type» (✎ P-1124-4). Право й
+    /// вікно — як у <c>structure</c>.
+    /// </summary>
+    /// <param name="from">Початок вікна в UTC, включно.</param>
+    /// <param name="to">Кінець вікна в UTC, виключно.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("structure/entity-types")]
+    [ProducesResponseType<IReadOnlyList<string>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> StructureEntityTypes(
+        [FromQuery] DateTime from, [FromQuery] DateTime to, CancellationToken ct)
+        => Ok(await structureChanges.EntityTypesAsync(from, to, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Типи подій безпеки, що є у вікні, — варіанти фільтра «Event type» (✎ P-1124-4). Право й вікно — як у
+    /// <c>security</c>.
+    /// </summary>
+    /// <param name="from">Початок вікна в UTC, включно.</param>
+    /// <param name="to">Кінець вікна в UTC, виключно.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("security/event-types")]
+    [ProducesResponseType<IReadOnlyList<string>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> SecurityEventTypes(
+        [FromQuery] DateTime from, [FromQuery] DateTime to, CancellationToken ct)
+        => Ok(await securityEvents.EventTypesAsync(from, to, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Автори для фільтра «By user» журналів аудиту (✎ P-1124-4): номер і ім'я, без логіна й SID. Право
+    /// <c>Security.ViewAudit</c> — те саме, що відкриває журнали; <c>GET /users</c> вимагає <c>Security.ManageUsers</c>.
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("authors")]
+    [ProducesResponseType<IReadOnlyList<Ecr.Application.Ports.AuditAuthorView>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> Authors(CancellationToken ct)
+        => Ok(await securityEvents.AuthorsAsync(ct).ConfigureAwait(false));
+
+    /// <summary>
     /// Експорт журналу структурних змін у CSV (<c>BE-16</c>). Право й фільтри — як у <c>structure</c>.
     /// </summary>
     /// <remarks>

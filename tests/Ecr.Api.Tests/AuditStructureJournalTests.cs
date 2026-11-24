@@ -67,6 +67,17 @@ public sealed partial class AuditStructureJournalTests(SqlServerFixture sql)
         // ⚠ Разом — кон'юнкція, а не об'єднання.
         var both = await ReadAsync(client, app, $"entityType={typeB}&changedByUserId={author + 1}");
         Assert.Empty(both);
+
+        // ✎ P-1124-4: варіанти фільтра «Entity type» — типи, що є у вікні, кожен рівно раз.
+        // ⛔ Мутація: прибрати `DISTINCT` — `typeA` прийде двічі.
+        var typesUrl = "/api/v1/audit/structure/entity-types"
+            + $"?from={Uri.EscapeDataString(DateTime.UtcNow.AddDays(-1).ToString("O", CultureInfo.InvariantCulture))}"
+            + $"&to={Uri.EscapeDataString(DateTime.UtcNow.AddMinutes(1).ToString("O", CultureInfo.InvariantCulture))}";
+        var typesResponse = await client.GetAsync(new Uri(typesUrl, UriKind.Relative));
+        Assert.True(typesResponse.StatusCode == HttpStatusCode.OK, $"{typesResponse.StatusCode}: {app.ErrorsText}");
+        var types = (await typesResponse.Content.ReadFromJsonAsync<List<string>>())!;
+        Assert.Single(types, t => t == typeA);
+        Assert.Single(types, t => t == typeB);
     }
 
     [Fact]
