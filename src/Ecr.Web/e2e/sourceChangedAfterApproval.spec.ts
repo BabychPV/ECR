@@ -141,6 +141,8 @@ test.describe('Джерело змінено після затвердження
     // ✎ Огляд b11 (F): `scrollToCoordinate({ y })` RevoGrid — пікселі; рядок R40 за межами вікна сітки має стати видимим.
     await panel.locator('[data-kind="stepError"]').getByTestId('document-calc-issue-show').click();
     await expect(page.locator('.ecr-cell-nav-target'), 'сітка не прокрутилась до рядка R40').toBeInViewport({ timeout: 30_000 });
+    // ✎ Рішення людини 24.11: позначки «RevoGrid» (посилання attribution) під сіткою немає.
+    await expect(page.locator('revo-grid a[href*="rv-grid.com"]')).toHaveCount(0);
 
     // ✎ Огляд M4 (4): «Open HSE400» веде на МІСЯЦЬ річного документа (`?periodKey=жовтень`) — сторінка лишається на якорі
     // для даних, але сітка переходить до колонки жовтня (підсвічена комірка, заголовок «Month M10» у вікні).
