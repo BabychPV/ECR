@@ -48,6 +48,8 @@ public sealed partial class SheetCopyQuerySitesTests
         ["src/Ecr.Infrastructure/Persistence/StepApproverStore.cs"] = "AN-59: подані стани оригіналів І копій документа за період — кожен несе SheetCopyId у SubmittedStepRef",
         ["src/Ecr.Infrastructure/Persistence/ApprovalQueueStore.cs"] = "кандидати несуть SheetCopyId; склад і журнал — своєї копії",
         ["src/Ecr.Infrastructure/Jobs/SubmissionSnapshotRetentionJob.cs"] = "ранжування й зрізи погодження — на (аркуш, копія)",
+        ["src/Ecr.Infrastructure/Jobs/CalculationConsistencyChecks.cs"] =
+            "правила узгодженості розрахунку: екземпляри оригіналів І копій, проблеми й затвердження — на (документ, таблиця/аркуш, копія); R1 «затверджений місяць» — оригінал",
         ["src/Ecr.Infrastructure/Persistence/CalculationIssueStore.cs"] =
             "AN-69: прохід замінює проблеми на (документ, таблиця, копія); читання — за sheetCopyId, null — оригінал",
 
