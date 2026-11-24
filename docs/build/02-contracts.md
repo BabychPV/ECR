@@ -5265,11 +5265,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/row-window-maps/{id}` | `Integration.Manage` | 7 |
 | `DELETE` | `/api/v1/row-window-maps/{id}` | `Integration.Manage` | 7 |
 | `GET` | `/api/v1/campaign/summary` | `Report.ViewCampaign` | 5 |
-| `GET` | `/api/v1/reports/snapshots` | `Report.ViewRegulatory` | 5 |
-| `POST` | `/api/v1/reports/snapshots/{id}/verify` | `Report.ViewRegulatory` | 5 |
-| `GET` | `/api/v1/reports/snapshots/{id}/rows` | `Report.ViewRegulatory` | 5 |
-| `GET` | `/api/v1/reports/snapshots/{id}/export.xlsx` | `Report.Export` | 5 |
-| `POST` | `/api/v1/reports/{code}/build` | `Report.BuildSnapshot` (PT-6: той самий кошик `document-export`, 429 `tooManyExports`) | 5 |
+| — | ~~`/api/v1/reports*`~~ (описи звітів, зрізи: перелік, побудова, перевірка, рядки, XLSX) | ✎ 2026-11-24, `D-NEW` (P-1124-3): прибрано разом із конструктором звітів; звітність — SSRS над сирим шаром `rpt.*` | — |
 | `GET` | `/api/v1/languages` | — (будь-який автентифікований) | 3 |
 | `GET` | `/api/v1/public/bootstrap` | — (анонімний) | 7 |
 | `POST` | `/api/v1/csp-report` | — (анонімний; приймач звітів CSP від браузера, S14) | 7 |
@@ -5389,10 +5385,6 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/permits/{id}/activate` | `Registry.EditData` | 8 |
 | `POST` | `/api/v1/permits/{id}/end` | `Registry.EditData` | 8 |
 | `POST` | `/api/v1/permits/{id}/renew` | `Registry.EditData` | 8 |
-| `GET` | `/api/v1/reports` | `Report.ViewRegulatory` | 5 |
-| `POST` | `/api/v1/reports` | `Report.EditDefinition` | 5 |
-| `POST` | `/api/v1/reports/{id}/versions` | `Report.EditDefinition` | 5 |
-| `POST` | `/api/v1/reports/{id}/versions/{vid}/publish` | `Report.EditDefinition` | 5 |
 | `GET` | `/api/v1/search` | — (кожен тип під правом свого переліку й грантами проєкту) | 8 |
 | `GET` | `/api/v1/registries/{code}/external-keys?entryId=&dataSourceId=&cursor=&limit=` | `Registry.View` | 8 |
 | `POST` | `/api/v1/registries/{code}/external-keys` | `Registry.EditData` | 8 |
@@ -5705,6 +5697,8 @@ public sealed class NotFoundException(string errorCode, string message)
 > `OutboxDispatcher` лишає події в черзі без спроби. Умова одна —
 > `SmtpNotificationSender.IsConfigured`.
 
+> ✎ **2026-11-24, `D-NEW` (P-1124-3): ендпоінти `/api/v1/reports*` і порт `IReportSnapshotBuilder` прибрано разом із конструктором звітів і зрізами. Абзаци нижче про `/reports` — історія рішень.**
+>
 > ✎ **R7 — `GET /reports/snapshots/{id}/export.xlsx`.** Книга приходить
 > ВІДПОВІДДЮ, без `202` і фонової задачі: аркуш плаский, стеля —
 > `ExportSnapshotHandler.MaxRows` = 50 000 рядків, понад неї `422 ECR-RPT-0422`,
