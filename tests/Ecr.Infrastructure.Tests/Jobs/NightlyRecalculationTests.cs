@@ -96,6 +96,7 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
         RecalculationWrite,
         CalcErrorEvent,
         SheetRecalcJournal,
+        ReportSnapshotJournal,
         RowLockJournal,
         Approved,
         OtherTemplateVersionChange,
@@ -413,6 +414,7 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
     [InlineData(QuietKind.RecalculationWrite)]
     [InlineData(QuietKind.CalcErrorEvent)]
     [InlineData(QuietKind.SheetRecalcJournal)]
+    [InlineData(QuietKind.ReportSnapshotJournal)]
     [InlineData(QuietKind.RowLockJournal)]
     [InlineData(QuietKind.Approved)]
     [InlineData(QuietKind.OtherTemplateVersionChange)]
@@ -441,6 +443,10 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
                     break;
                 case QuietKind.SheetRecalcJournal:
                     await StructureChangeAsync(db, d.TemplateVersionId, RecalculationSkips.AuditEntityType, at);
+                    break;
+                case QuietKind.ReportSnapshotJournal:
+                    // ✎ P-1124-3: історичні записи «зріз застарів» (до прибрання зрізів) теж не будять.
+                    await StructureChangeAsync(db, d.TemplateVersionId, NightlyInputChangeQuery.LegacyReportSnapshotEntityType, at);
                     break;
                 case QuietKind.RowLockJournal:
                     await StructureChangeAsync(
