@@ -1168,6 +1168,8 @@ public sealed partial class QuartzJobScheduler(
             .Build();
 
         // ✎ Огляд b11-2 (E): у індекс — ДО триґера, нове покоління (перевірка голови не викине повернену задачу).
+        // ✎ Огляд b11 №3 (LOW): збій планування повертає ПОПЕРЕДНІЙ запис точно, а не знімає задачу з індексу.
+        var previous = QuartzDocumentFifo.EntryOf(instance.SchedulerName, jobId);
         var generation = await instance.GetJobDetail(jobKey, ct).ConfigureAwait(false) is { } restarted
             ? QuartzDocumentFifo.Track(instance.SchedulerName, restarted)
             : 0;
@@ -1177,7 +1179,7 @@ public sealed partial class QuartzJobScheduler(
         }
         catch
         {
-            QuartzDocumentFifo.ForgetIfGeneration(instance.SchedulerName, jobId, generation);
+            QuartzDocumentFifo.RollbackIfGeneration(instance.SchedulerName, jobId, generation, previous);
             throw;
         }
 

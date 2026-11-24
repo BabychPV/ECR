@@ -45,8 +45,7 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
 
     private readonly Dictionary<(int BindingId, int Year), SourceYear?> years = [];
     private readonly Dictionary<long, (string ProjectCode, string DocumentKey)> sources = [];
-    private readonly Dictionary<(long DocumentId, int PeriodKey, DateTime Since), DateTime?> changes = [];
-    private readonly Dictionary<(long DocumentId, int PeriodKey), DateTime?> runs = [];
+    private readonly Dictionary<(long DocumentId, int PeriodKey, DateTime Since, long ConsumerId, int ConsumerPeriod), DateTime?> changes = [];
     private (bool ApprovedOnly, bool Any)? kindsCache;
 
     /// <summary>✎ F5-R (D-570): причина <c>SourceChangedAfterApproval</c> за <c>Any</c> — дані місяця джерела змінено після затвердження.</summary>
@@ -152,18 +151,13 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
                     DateTime? changedAt = null;
                     if (binding.State == DocumentSourceState.Any)
                     {
-                        changedAt = await SourceChangedAtAsync(source, year, month, approvedAt!.Value, ct).ConfigureAwait(false);
-
-                        // ✎ W15z M7 (огляд b11-2): правка в межах запасу ДО затвердження, яку вже порахував прогін споживача
-                        // (чинний прогін періоду стартував після неї), — не «змінено після»: числа, що затверджено, її містять.
-                        // Доти повторне затвердження протягом 5 хв після правки джерела (повернути → F9 → подати → затвердити,
-                        // ~1 хв на звуженому каскаді) лишалося позначеним назавжди.
-                        if (changedAt is { } at && at <= approvedAt.Value
-                            && await ConsumerRunStartedAsync(documentId, periodKey, ct).ConfigureAwait(false) is { } runStarted
-                            && runStarted >= at)
-                        {
-                            changedAt = null;
-                        }
+                        // ✎ W15z M7 (огляд b11-2, b11 №3): правка, яку вже містять числа періоду споживача (Id не вищий за
+                        // межу входів чинного прогону документа — InputsCellChangeWatermark), — не «змінено після». Доти
+                        // повторне затвердження протягом 5 хв після правки джерела (повернути → F9 → подати → затвердити)
+                        // лишалося позначеним назавжди. Межа — без годинників: Id закоміченого журналу, а не ChangedAt (мітка
+                        // початку транзакції правки, годинник Api) проти StartedAt (годинник воркера); прогін, що не
+                        // перерахував затверджене (перенесення, пропуск), межі не піднімає — і копії аркушів теж.
+                        changedAt = await SourceChangedAtAsync(source, year, month, approvedAt!.Value, documentId, periodKey, ct).ConfigureAwait(false);
 
                         (kind, reason) = changedAt is null
                             ? (null, null)
@@ -209,11 +203,19 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
     /// мінус <see cref="ApprovalRaceMargin"/>; <c>null</c> — не змінено. Позначки помилок формул (<c>CalcError*</c>) — не
     /// зміна чисел. Один запит (ключ <c>IX_CellChange_DocPeriodChanged</c>), кеш на документ × період × поріг.
     /// </summary>
-    private async Task<DateTime?> SourceChangedAtAsync(SourceYear source, int year, int month, DateTime approvedAt, CancellationToken ct)
+    /// <remarks>✎ W15z M7 (огляд b11 №3): правки з <c>Id</c> ≤ межі входів чинного прогону документа-споживача <paramref name="consumerId"/> за
+    /// період <paramref name="consumerPeriod"/> (<c>InputsCellChangeWatermark</c>) числа споживача вже містять — не рахуються. Межа —
+    /// підзапитом у тому самому запиті (нуль додаткових звернень); немає прогону чи межі — 0 (рахується кожна правка).
+    /// ⛔ Лише ЧИННИЙ прогін осі документа: прогін, що став чинним ПІСЛЯ затвердження, затверджених аркушів (оригіналів і копій) не
+    /// переписує й переносить їхні результати — його межа за побудовою не вища за межу прогону, чиї числа затверджено
+    /// (<c>RecalculationJob.EffectiveInputsWatermark</c>). Тому «завершився до затвердження» годинником не перевіряється, а
+    /// витіснений прогін (його прибирає SupersededResultsPurger) не потрібен.</remarks>
+    private async Task<DateTime?> SourceChangedAtAsync(
+        SourceYear source, int year, int month, DateTime approvedAt, long consumerId, int consumerPeriod, CancellationToken ct)
     {
         var owner = OwnerPeriod(source.PeriodKind, year, month);
         var since = approvedAt - ApprovalRaceMargin;
-        if (changes.TryGetValue((source.DocumentId, owner, since), out var cached))
+        if (changes.TryGetValue((source.DocumentId, owner, since, consumerId, consumerPeriod), out var cached))
         {
             return cached;
         }
@@ -229,35 +231,21 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
                 SELECT MAX(c.ChangedAt) AS Value
                   FROM aud.CellChange AS c
                  WHERE c.DocumentId = @doc AND c.PeriodKey = @period AND c.ChangedAt > @since
+                   AND c.Id > ISNULL((SELECT MAX(r.InputsCellChangeWatermark) FROM calc.CalculationRun AS r
+                                       WHERE r.DocumentId = @consumer AND r.PeriodKey = @consumerPeriod AND r.Status = N'Current'), 0)
                    AND c.Origin NOT IN (N'CalcError', N'CalcErrorResolved')
                    AND c.ColumnDefId IN (SELECT CAST(j.[value] AS int) FROM OPENJSON(@columns) AS j)
                 """,
                 new Microsoft.Data.SqlClient.SqlParameter("@doc", source.DocumentId),
                 new Microsoft.Data.SqlClient.SqlParameter("@period", owner),
                 new Microsoft.Data.SqlClient.SqlParameter("@since", System.Data.SqlDbType.DateTime2) { Value = since },
+                new Microsoft.Data.SqlClient.SqlParameter("@consumer", consumerId),
+                new Microsoft.Data.SqlClient.SqlParameter("@consumerPeriod", consumerPeriod),
                 new Microsoft.Data.SqlClient.SqlParameter("@columns", System.Text.Json.JsonSerializer.Serialize(source.ColumnIds)))
             .ToListAsync(ct).ConfigureAwait(false);
 
         var result = found.FirstOrDefault() is { } at ? DateTime.SpecifyKind(at, DateTimeKind.Utc) : (DateTime?)null;
-        changes[(source.DocumentId, owner, since)] = result;
-        return result;
-    }
-
-    /// <summary>Старт чинного прогону методологій документа-споживача за період; <c>null</c> — прогону немає. Кеш на екземпляр.</summary>
-    private async Task<DateTime?> ConsumerRunStartedAsync(long documentId, int periodKey, CancellationToken ct)
-    {
-        if (runs.TryGetValue((documentId, periodKey), out var cached))
-        {
-            return cached;
-        }
-
-        var started = await db.CalculationRuns.AsNoTracking()
-            .Where(r => r.DocumentId == documentId && r.PeriodKey == periodKey && r.Status == Ecr.Domain.Entities.Calculations.CalculationRun.CurrentStatus)
-            .Select(r => (DateTime?)r.StartedAt)
-            .MaxAsync(ct)
-            .ConfigureAwait(false);
-        var result = started is { } s ? DateTime.SpecifyKind(s, DateTimeKind.Utc) : (DateTime?)null;
-        runs[(documentId, periodKey)] = result;
+        changes[(source.DocumentId, owner, since, consumerId, consumerPeriod)] = result;
         return result;
     }
 

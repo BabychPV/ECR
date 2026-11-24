@@ -217,6 +217,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("InputsAsOfUtc")
                         .HasColumnType("datetime2(3)");
 
+                    b.Property<long?>("InputsCellChangeWatermark")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("ModulesProfileJson")
                         .HasColumnType("nvarchar(max)");
 

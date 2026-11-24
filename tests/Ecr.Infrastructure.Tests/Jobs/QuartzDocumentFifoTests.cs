@@ -227,6 +227,45 @@ public sealed class QuartzDocumentFifoTests : IAsyncLifetime
         QuartzDocumentFifo.Forget(name, first);
     }
 
+    /// <summary>
+    /// ✎ Огляд b11 №3 (LOW): ручний перезапуск, чий <c>ScheduleJob</c> упав, повертає запис задачі в індексі ТОЧНО (номер,
+    /// покоління, ознака планування) — задача, що ще чекає, далі тримає пізніші задачі документа.
+    /// </summary>
+    /// <remarks>Мутація: відкат через <c>ForgetIfGeneration</c> (як доти) — червоний (запис зник).</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "M11")]
+    public async Task Збій_перезапуску_повертає_попередній_запис_індексу()
+    {
+        var scheduler = Substitute.For<IScheduler>();
+        var name = $"ecr-fifo-restart-{Guid.NewGuid():N}";
+        scheduler.SchedulerName.Returns(name);
+        var factory = Substitute.For<ISchedulerFactory>();
+        factory.GetScheduler(Arg.Any<CancellationToken>()).Returns(scheduler);
+
+        var document = Random.Shared.NextInt64(1_000_000, 9_000_000);
+        var waiting = Detail($"IRecalculationJob-restart-{Guid.NewGuid():N}", document, 7);
+        var generation = QuartzDocumentFifo.Track(name, waiting);
+        QuartzDocumentFifo.Scheduled(name, waiting.Key.Name, generation);
+        var before = QuartzDocumentFifo.EntryOf(name, waiting.Key.Name);
+
+        scheduler.CheckExists(Arg.Any<JobKey>(), Arg.Any<CancellationToken>()).Returns(true);
+        scheduler.GetJobDetail(Arg.Any<JobKey>(), Arg.Any<CancellationToken>()).Returns(waiting);
+        scheduler.ScheduleJob(Arg.Any<ITrigger>(), Arg.Any<CancellationToken>())
+            .Returns<DateTimeOffset>(_ => throw new SchedulerException("boom"));
+
+        await Assert.ThrowsAsync<SchedulerException>(
+            () => new QuartzJobScheduler(factory).RestartAsync(waiting.Key.Name, CancellationToken.None));
+
+        Assert.Equal(before, QuartzDocumentFifo.EntryOf(name, waiting.Key.Name));
+        var later = Detail($"IRecalculationJob-later-{Guid.NewGuid():N}", document, 8);
+        scheduler.GetCurrentlyExecutingJobs(Arg.Any<CancellationToken>()).Returns(Array.Empty<IJobExecutionContext>());
+        scheduler.GetTriggersOfJob(Arg.Any<JobKey>(), Arg.Any<CancellationToken>()).Returns(new[] { Substitute.For<ITrigger>() });
+        Assert.Equal(waiting.Key.Name, await QuartzDocumentFifo.EarlierPendingAsync(scheduler, later, CancellationToken.None).WaitAsync(Safety));
+
+        QuartzDocumentFifo.Forget(name, waiting.Key.Name);
+    }
+
     private static int IndexedFor(string scheduler, string jobId) => QuartzDocumentFifo.GenerationOf(scheduler, jobId) > 0 ? 1 : 0;
 
     private static IJobDetail Detail(string id, long document, long sequence) => JobBuilder.Create<QuartzJobAdapter>()

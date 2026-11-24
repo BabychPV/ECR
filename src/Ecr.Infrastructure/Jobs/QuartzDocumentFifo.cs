@@ -144,6 +144,51 @@ public static class QuartzDocumentFifo
         }
     }
 
+    /// <summary>Запис задачі в індексі (знімок для відкату перезапуску); <c>null</c> — немає.</summary>
+    internal static (long Document, long Sequence, long Generation, bool Scheduling)? EntryOf(string scheduler, string jobId)
+    {
+        lock (IndexGate)
+        {
+            return ByJob.TryGetValue((scheduler, jobId), out var entry) ? entry : null;
+        }
+    }
+
+    /// <summary>
+    /// ✎ Огляд b11 №3 (LOW): відкат <see cref="Track"/> перезапуску, чий <c>ScheduleJob</c> упав, — ТОЧНО до стану перед ним:
+    /// запис покоління <paramref name="generation"/> знімається, а попередній (<paramref name="previous"/>; задача, що ще
+    /// чекала чи виконувалась) повертається з тим самим номером, поколінням і ознакою планування. Доти відкат знімав запис
+    /// цілком — і жива задача, яку не вдалося перезапустити, переставала тримати пізніші задачі документа.
+    /// </summary>
+    /// <param name="scheduler">Ім'я планувальника.</param>
+    /// <param name="jobId">Задача.</param>
+    /// <param name="generation">Покоління відкатуваного <see cref="Track"/>.</param>
+    /// <param name="previous">Запис до нього (<see cref="EntryOf"/>); <c>null</c> — не було.</param>
+    internal static void RollbackIfGeneration(
+        string scheduler, string jobId, long generation, (long Document, long Sequence, long Generation, bool Scheduling)? previous)
+    {
+        lock (IndexGate)
+        {
+            if (!ByJob.TryGetValue((scheduler, jobId), out var entry) || entry.Generation != generation)
+            {
+                return;
+            }
+
+            ForgetLocked(scheduler, jobId);
+            if (previous is not { } before)
+            {
+                return;
+            }
+
+            if (!Index.TryGetValue((scheduler, before.Document), out var queue))
+            {
+                Index[(scheduler, before.Document)] = queue = [];
+            }
+
+            queue[before.Sequence] = jobId;
+            ByJob[(scheduler, jobId)] = before;
+        }
+    }
+
     /// <summary>Задача більше не чекає й не виконується (успіх, скасування, остаточний провал, зняття).</summary>
     /// <param name="scheduler">Ім'я планувальника.</param>
     /// <param name="jobId">Задача.</param>

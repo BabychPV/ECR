@@ -182,42 +182,128 @@ public sealed class SourceCascadePendingGateUpstreamTests(SqlServerFixture sql)
         ];
         IReadOnlyCollection<int> auto = [xToA, aToB];
         var a = w.Source.DocumentId.ToString(CultureInfo.InvariantCulture);
+        var chosen = new Dictionary<(int, int), long> { [(aToB, w.Year)] = w.Source.DocumentId, [(xToA, w.Year)] = x.DocumentId };
+        Task<bool> PendingChainAsync(TestDocument document) => PendingAsync(w, document, auto, edges, chosen);
 
-        Assert.False(await PendingAsync(w, w.Consumer, auto, edges));
+        Assert.False(await PendingChainAsync(w.Consumer));
 
         // Задача впливу X→A (споживач A — предок B).
         var impact = Impact(RegistryImpactRecalculationTarget.ForSourceChange(xToA, w.Year, 3));
         await InsertAsync(impact, "Queued", documentId: null, payload: "{}");
-        Assert.True(await PendingAsync(w, w.Consumer, auto, edges));
-        Assert.False(await PendingAsync(w, w.Other, auto, edges));
+        Assert.True(await PendingChainAsync(w.Consumer));
+        Assert.False(await PendingChainAsync(w.Other));
         await SetStateAsync(impact, "Succeeded");
 
         // Каскад року A (черга в базі) — той самий рік тримає, інший — ні.
         var cascade = DbBackgroundJobScheduler.TargetKeyOf<IRecalculationJob>($"doc{a}-y{w.Year.ToString(CultureInfo.InvariantCulture)}-dependents");
         await InsertAsync(cascade, "Running", w.Source.DocumentId, $$"""{"documentId":{{a}},"year":{{w.Year}}}""");
-        Assert.True(await PendingAsync(w, w.Consumer, auto, edges));
+        Assert.True(await PendingChainAsync(w.Consumer));
         await SetStateAsync(cascade, "Succeeded");
 
         var otherYear = DbBackgroundJobScheduler.TargetKeyOf<IRecalculationJob>($"doc{a}-y{(w.Year + 1).ToString(CultureInfo.InvariantCulture)}-dependents");
         await InsertAsync(otherYear, "Queued", w.Source.DocumentId, $$"""{"documentId":{{a}},"year":{{w.Year + 1}}}""");
-        Assert.False(await PendingAsync(w, w.Consumer, auto, edges));
+        Assert.False(await PendingChainAsync(w.Consumer));
         await SetStateAsync(otherYear, "Succeeded");
 
         // Документ X (предок через дві ланки): будь-яка задача — теж тримає B.
         var xAuto = DbBackgroundJobScheduler.TargetKeyOf<IRecalculationJob>(
             $"doc{x.DocumentId.ToString(CultureInfo.InvariantCulture)}-p{x.PeriodKey.Value.ToString(CultureInfo.InvariantCulture)}-auto");
         await InsertAsync(xAuto, "Queued", x.DocumentId, $$"""{"documentId":{{x.DocumentId}},"periodKey":{{x.PeriodKey.Value}}}""");
-        Assert.True(await PendingAsync(w, w.Consumer, auto, edges));
+        Assert.True(await PendingChainAsync(w.Consumer));
         await SetStateAsync(xAuto, "Succeeded");
 
         // Дзеркало Quartz: залежні A за період (ціль — з JobId, без TargetKey і payload).
         var period = w.Source.PeriodKey.Value.ToString(CultureInfo.InvariantCulture);
         var quartzId = $"{nameof(IRecalculationJob)}~doc{a}-p{period}-dependents~{Guid.NewGuid():N}";
         await InsertQuartzAsync(quartzId, w.Source.DocumentId);
-        Assert.True(await PendingAsync(w, w.Consumer, auto, edges));
+        Assert.True(await PendingChainAsync(w.Consumer));
         await SetQuartzStateAsync(quartzId, "Succeeded");
-        Assert.False(await PendingAsync(w, w.Consumer, auto, edges));
+        Assert.False(await PendingChainAsync(w.Consumer));
     }
+    /// <summary>
+    /// ✎ Огляд b11 №3 (MEDIUM): тримає задача лише СПРАВЖНЬОГО документа-джерела B (документ, обраний за рік зв'язки), а не
+    /// будь-якого документа шаблону-предка (інший проєкт/об'єкт); лише каскадна зв'язка (ApprovedOnly — ні); лише рік, що
+    /// перетинається: перерахунок іншого року й формули людини з комірками іншого року не тримають, свого — тримають.
+    /// </summary>
+    /// <remarks>
+    /// Мутації: (1) <c>ResolvedPends</c> без звірки документа — червоний «не обраний документ»; (2) без звірки року — червоні
+    /// «інший рік»; (3) <c>ActualSourcesAsync</c> бере всі ребра графа, не лише каскадні — червоний «ApprovedOnly».
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "F5")]
+    public async Task Тримає_лише_справжнє_джерело_каскадною_зв_язкою_за_свій_рік()
+    {
+        var w = await ArrangeAsync();
+        var otherTemplate = await TemplateOfAsync(w.Other);
+        var otherBinding = Interlocked.Decrement(ref _binding);
+        IReadOnlyList<TemplateDependency> edges =
+        [
+            new(w.SourceTemplateId, w.ConsumerTemplateId, w.BindingId, 1, PeriodScope.Year, true, false),
+            new(otherTemplate, w.ConsumerTemplateId, otherBinding, 1, PeriodScope.Year, true, false),
+        ];
+
+        // Документ шаблону-предка «Other» — НЕ обраний джерелом зв'язки за рік (обрано документ іншого проєкту): не тримає.
+        var chosen = new Dictionary<(int, int), long> { [(w.BindingId, w.Year)] = w.Source.DocumentId };
+        IReadOnlyCollection<int> auto = [w.BindingId, otherBinding];
+        var src = w.Source.DocumentId.ToString(CultureInfo.InvariantCulture);
+        var oth = w.Other.DocumentId.ToString(CultureInfo.InvariantCulture);
+        var year = w.Year.ToString(CultureInfo.InvariantCulture);
+        var next = (w.Year + 1).ToString(CultureInfo.InvariantCulture);
+
+        var foreign = DbBackgroundJobScheduler.TargetKeyOf<IRecalculationJob>($"doc{oth}-y{year}-dependents");
+        await InsertAsync(foreign, "Running", w.Other.DocumentId, $$"""{"documentId":{{oth}},"year":{{w.Year}}}""");
+        try
+        {
+            Assert.False(await PendingAsync(w, w.Consumer, auto, edges, chosen));
+        }
+        finally
+        {
+            await SetStateAsync(foreign, "Succeeded");
+        }
+
+        // Справжнє джерело — тримає; лише за ApprovedOnly (зв'язка не каскадна) — ні.
+        var real = DbBackgroundJobScheduler.TargetKeyOf<IRecalculationJob>($"doc{src}-y{year}-dependents");
+        await InsertAsync(real, "Running", w.Source.DocumentId, $$"""{"documentId":{{src}},"year":{{w.Year}}}""");
+        try
+        {
+            Assert.True(await PendingAsync(w, w.Consumer, auto, edges, chosen));
+            Assert.False(await PendingAsync(w, w.Consumer, [otherBinding], edges, chosen));
+        }
+        finally
+        {
+            await SetStateAsync(real, "Succeeded");
+        }
+
+        // Справжнє джерело, інший рік — не тримає.
+        var later = DbBackgroundJobScheduler.TargetKeyOf<IRecalculationJob>($"doc{src}-y{next}-dependents");
+        await InsertAsync(later, "Queued", w.Source.DocumentId, $$"""{"documentId":{{src}},"year":{{w.Year + 1}}}""");
+        try
+        {
+            Assert.False(await PendingAsync(w, w.Consumer, auto, edges, chosen));
+        }
+        finally
+        {
+            await SetStateAsync(later, "Succeeded");
+        }
+
+        // Формули людини на справжньому джерелі: комірки іншого року — ні; свого — так.
+        foreach (var (cellYear, expected) in new[] { (w.Year + 1, false), (w.Year, true) })
+        {
+            var formula = DbBackgroundJobScheduler.TargetKeyOf<IFormulaRecalculationJob>($"doc{src}-formula-u{Random.Shared.Next(1_000_000, 9_000_000)}");
+            var cellPeriod = ((cellYear * 100) + 3).ToString(CultureInfo.InvariantCulture);
+            await InsertAsync(formula, "Queued", w.Source.DocumentId, $$"""{"documentId":{{src}},"cells":[{"periodKey":{{cellPeriod}}}]}""");
+            try
+            {
+                Assert.Equal(expected, await PendingAsync(w, w.Consumer, auto, edges, chosen));
+            }
+            finally
+            {
+                await SetStateAsync(formula, "Succeeded");
+            }
+        }
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
 
     /// <summary>Ціль задачі впливу так, як її пише черга в базі (`IRegistryImpactRecalculationJob~…`, огляд b9).</summary>
@@ -242,8 +328,11 @@ public sealed class SourceCascadePendingGateUpstreamTests(SqlServerFixture sql)
     }
 
     private async Task<bool> PendingAsync(
-        World w, TestDocument document, IReadOnlyCollection<int>? autoBindings = null, IReadOnlyList<TemplateDependency>? edges = null)
+        World w, TestDocument document, IReadOnlyCollection<int>? autoBindings = null, IReadOnlyList<TemplateDependency>? edges = null,
+        IReadOnlyDictionary<(int Binding, int Year), long>? chosen = null)
     {
+        // ✎ Огляд b11 №3: справжнє джерело зв'язки за рік (вибір документа року); за замовчуванням — документ-джерело світу.
+        chosen ??= new Dictionary<(int, int), long> { [(w.BindingId, w.Year)] = w.Source.DocumentId };
         var graph = Substitute.For<IDependencyGraphProvider>();
         graph.GetAsync(Arg.Any<CancellationToken>()).Returns(new DependencyGraphSnapshot(
             "f5", [], [],
@@ -256,6 +345,8 @@ public sealed class SourceCascadePendingGateUpstreamTests(SqlServerFixture sql)
         var gate = new SourceCascadePendingGate(db, gateCache: null, graph)
         {
             AutoBindingsProbe = _ => Task.FromResult(bindings),
+            ChosenSourcesProbe = (_, _) => Task.FromResult<IReadOnlyDictionary<(int Binding, int Year), long>>(
+                chosen.ToDictionary(p => (p.Key.Binding, p.Key.Year), p => p.Value)),
         };
         return await gate.IsPendingAsync(document.DocumentId, document.PeriodKey.Value, CancellationToken.None);
     }

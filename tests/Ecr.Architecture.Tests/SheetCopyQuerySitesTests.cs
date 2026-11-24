@@ -54,6 +54,8 @@ public sealed partial class SheetCopyQuerySitesTests
         // ── лише оригінал (Q5: інтеграція, збір, події джерел, дозволи) ──
         ["src/Ecr.Infrastructure/Integration/IntegrationCellPatcher.cs"] = "запис у екземпляр копії відхиляється",
         ["src/Ecr.Infrastructure/Jobs/MaterializationScheduler.cs"] = "OriginalOnly",
+        ["src/Ecr.Infrastructure/Jobs/SourceCascadePendingGate.cs"] =
+            "огляд b11 №3: обраний документ-джерело зв'язки за рік — лише екземпляри оригіналу (SheetCopyId = NULL), як DocumentSourceBindingStore",
         ["src/Ecr.Infrastructure/Jobs/PeriodStateJob.cs"] =
             "P-1123-18: лише факт ЗАТВЕРДЖЕНОГО стану в періоді — оригінал чи будь-яка копія однаково знімає період із прибирання",
         ["src/Ecr.Infrastructure/Jobs/OpenedPeriodRecalculation.cs"] =
