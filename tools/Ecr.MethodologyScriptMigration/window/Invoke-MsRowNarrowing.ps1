@@ -6,6 +6,8 @@
     C11_10 -> на кожному такому рядку лише CategoryRuleRejected («категорію не визначено»), жодного значення. Логіка відбору умов —
     MsRowNarrowing.Lib.ps1 (тест MsRowNarrowingLibTests).
 
+    Правила-рядки клону (calc.MethodologyRule) з тими самими значеннями, що й зняті умови, вимикаються в чернетці (PUT rule
+    isActive=false — єдина дозволена правка правила версії-скрипта), рівно -ExpectRemoved; причина публікації це називає.
     Шлях — звичайний продуктовий API (як стадія GoldenVersions): клон чинної версії -> текст скрипта -> публікація з датою чинності
     «чинна + 1 день». Значення не змінюються за побудовою: прибрані рядки не давали жодного результату. Перерахунок відкритих періодів —
     окремий крок вікна (нічний або recalc), не тут.
@@ -105,11 +107,27 @@ if ($put.StatusCode -ne 200) { Stop-Step "save script of $next (draft $newId) HT
 $saved = $put.Content | ConvertFrom-Json
 if (@($saved.diagnostics).Count -gt 0) { Stop-Step "script of $next (draft $newId) has $(@($saved.diagnostics).Count) diagnostic(s); draft left for review" @($saved.diagnostics | ForEach-Object { "$($_.code) L$($_.line): $($_.message)" }) }
 if ([string]$saved.text -ne $plan.Text) { Stop-Step "saved text of draft $newId differs from the plan" $null }
+# Правила (calc.MethodologyRule) клону з тими самими значеннями, що й зняті умови, — вимкнути: рядки відбирає текст, а ці правила
+# інакше лишались би джерелом підказок, покриття й вимог обов'язкових входів для рядків, яких нова версія не рахує.
+$rr = Invoke-Api GET "/api/v1/methodologies/$mid/versions/$newId/rules" $null
+if ($rr.StatusCode -ne 200) { Stop-Step "GET rules of draft $newId HTTP $($rr.StatusCode); draft left for review" $rr.Content }
+# PowerShell 5.1: ConvertFrom-Json віддає JSON-масив ОДНИМ об'єктом — розгорнути явно.
+$rules = @(($rr.Content | ConvertFrom-Json) | ForEach-Object { $_ })
+$retire = @(Get-MsRulesOfRemovedClauses -Rules $rules -Removed $plan.Removed)
+if ($retire.Count -ne $ExpectRemoved) { Stop-Step "draft $newId has $($retire.Count) rule row(s) matching the removed clauses, expected $ExpectRemoved; draft left for review" @{ codes = $retire } }
+foreach ($code in $retire) {
+    $rule = $rules | Where-Object { $_.code -eq $code } | Select-Object -First 1
+    $put = Invoke-Api PUT "/api/v1/methodologies/$mid/versions/$newId/rules/$code" (@{ matchJson = [string]$rule.matchJson; priority = [int]$rule.priority; isActive = $false } | ConvertTo-Json)
+    if ($put.StatusCode -ne 200) { Stop-Step "retire rule $code of draft $newId HTTP $($put.StatusCode); draft left for review" $put.Content }
+}
+Write-Step "draft $newId ($next): $($retire.Count) rule row(s) of the removed clauses retired" @{ codes = $retire }
+
 if ($ReviewerCredentialFile) { Connect-Api $ReviewerCredentialFile }
-$reason = "c11-10 (P-1124-2): $Methodology $next = $ver without $($plan.Removed.Count) row clause(s) the category rule always rejected (W15z borrowed rules; values unchanged)"
+$reason = "c11-10 (P-1124-2): $Methodology $next = $ver without $($plan.Removed.Count) row clause(s) the category rule always rejected and with their $($retire.Count) rule row(s) retired (W15z borrowed rules; values unchanged)"
 $pub = Invoke-Api POST "/api/v1/methodologies/$mid/versions/$newId/publish" (@{ changeReason = $reason; effectiveFrom = $from } | ConvertTo-Json)
 if ($pub.StatusCode -ne 200) { Stop-Step "publish $next (draft $newId) HTTP $($pub.StatusCode); draft left for review" $pub.Content }
-$after = @(Invoke-Sql "SELECT CONCAT(v.Status, '|', v.Engine, '|', LOWER(CONVERT(varchar(64), v.ScriptHash, 2)), '|', (SELECT COUNT(*) FROM calc.TestCase t WHERE t.MethodologyVersionId = v.Id)) FROM calc.MethodologyVersion v WHERE v.Id = $newId")[0] -split '\|'
+$after = @(Invoke-Sql "SELECT CONCAT(v.Status, '|', v.Engine, '|', LOWER(CONVERT(varchar(64), v.ScriptHash, 2)), '|', (SELECT COUNT(*) FROM calc.TestCase t WHERE t.MethodologyVersionId = v.Id), '|', (SELECT COUNT(*) FROM calc.MethodologyRule r WHERE r.MethodologyVersionId = v.Id AND r.IsActive = 0)) FROM calc.MethodologyVersion v WHERE v.Id = $newId")[0] -split '\|'
 if ($after[0] -ne '1' -or $after[1] -ne '1' -or $after[2] -ne [string]$saved.hash) { Stop-Step "published $next (id $newId) is not Published/Script with the saved hash: $($after -join '|')" $null }
+if ([int]$after[4] -lt $retire.Count) { Stop-Step "published $next (id $newId) has $($after[4]) inactive rule row(s), expected at least $($retire.Count)" $null }
 [IO.File]::WriteAllText((Join-Path $Work 'row-narrowing-result.json'), (@{ methodology = $Methodology; fromVersionId = $vid; versionId = $newId; version = $next; effectiveFrom = $from; scriptHash = [string]$saved.hash; testCases = [int]$after[3]; removed = $plan.Removed.Count } | ConvertTo-Json), $utf8)
 Write-Step "published $Methodology $next (id $newId) from $from, script hash $($saved.hash), golden cases $($after[3])" $null

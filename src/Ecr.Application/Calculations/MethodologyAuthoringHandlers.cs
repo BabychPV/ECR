@@ -413,7 +413,25 @@ public sealed class SaveMethodologyRuleHandler(
                 });
 
         // ⛔ MS: версія-скрипт не редагується вручну — і тоді, коли обробник кличуть повз контролер.
-        MethodologyVersionScope.RequireHandEditable(version);
+        // ✎ c11-10: єдиний виняток — ВИМКНЕННЯ наявного правила чернетки-скрипта з тим самим предикатом і пріоритетом. Рядки
+        // відбирає текст скрипта; правила мігрованої версії живлять лише підказки, покриття й вимоги обов'язкових входів. Коли
+        // текст звужено (ECW_C11_10 V5 без 28 позичених умов), правило без умови в тексті вимикається, а не лишається хибним
+        // джерелом «рахується методологією». Увімкнути, додати чи змінити правило скрипта так само не можна.
+        if (version.Engine == MethodologyEngine.Script)
+        {
+            var retired = await drafts.FindRuleAsync(methodologyVersionId, ruleCode.Value, ct).ConfigureAwait(false);
+            if (isActive
+                || retired is null
+                || !string.Equals(retired.MatchJson, matchJson, StringComparison.Ordinal)
+                || retired.Priority != priority)
+            {
+                MethodologyVersionScope.RequireHandEditable(version);
+            }
+
+            version.EditRule(retired!, retired!.MatchJson, retired.Priority, isActive: false);
+            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            return MethodologyAuthoringMap.Rule(retired);
+        }
 
         // ⛔ V-18: предикат і узгодженість набору перевіряються ДО зміни
         // сутності. Доти зберігалося будь-що — `{not json`, `[1,2]`, однакові

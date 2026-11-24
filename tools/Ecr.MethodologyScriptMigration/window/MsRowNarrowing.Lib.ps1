@@ -27,6 +27,59 @@ function Get-MsScriptCategoryFacts {
     return [pscustomobject]@{ Literals = $literals; Allowed = $allowed }
 }
 
+function Get-MsFormulaCategoryFacts {
+    <#
+    .SYNOPSIS  Те саме для ФОРМУЛЬНОЇ версії: літерали правила категорії (calc.CategoryRule.Expression, рядки в '…') і перелік
+               категорій версії (calc.MethodologyCategory). Правила категорії немає — $null (версія нічого не відкидає за категорією).
+    #>
+    param([string]$Expression, [string[]]$Categories = @())
+    if ([string]::IsNullOrWhiteSpace($Expression)) { return $null }
+    $literals = @([regex]::Matches($Expression, "'([^']*)'") | ForEach-Object { $_.Groups[1].Value -replace '\s', '' })
+    return [pscustomobject]@{ Literals = $literals; Allowed = @($Categories | Where-Object { $_ }) }
+}
+
+function Select-MsBorrowableRules {
+    <#
+    .SYNOPSIS  c11-10: чуже правило старої системи позичається методології M, лише коли M може ВИЗНАЧИТИ КАТЕГОРІЮ його рядків.
+    .DESCRIPTION
+        W15z позичив ECW_C11_10 28 правил, чиї NAE (0640–0645, 6640–6657, 0880–0883) правило категорії C11_10 завжди відкидає:
+        стара система писала на ці рядки записи C11_10 без жодного значення (тип не визначено), і нова версія дала лише
+        CategoryRuleRejected. Умова NAE правила (ключ Land_NAE / IDCodeNAEProject) мусить бути серед літералів виразу категорії
+        або в переліку категорій. Правило без умови NAE чи версія без правила категорії ($Facts = $null) — не фільтруються.
+    .OUTPUTS  {Kept = правила; Rejected = правила з NAE поза категоріями}.
+    #>
+    param([object[]]$Rules = @(), $Facts)
+    $kept = New-Object System.Collections.Generic.List[object]; $rejected = New-Object System.Collections.Generic.List[object]
+    foreach ($r in @($Rules)) {
+        $naeKey = @($r.Conditions.Keys | Where-Object { $_ -match '^(Land_NAE|IDCodeNAEProject)$' }) | Select-Object -First 1
+        if ($null -eq $Facts -or $null -eq $naeKey) { $kept.Add($r); continue }
+        $nae = ([string]$r.Conditions[$naeKey]) -replace '\s', ''
+        if ($Facts.Literals -contains $nae -or $Facts.Allowed -contains $nae) { $kept.Add($r) } else { $rejected.Add($r) }
+    }
+    return [pscustomobject]@{ Kept = @($kept.ToArray()); Rejected = @($rejected.ToArray()) }
+}
+
+function Get-MsRulesOfRemovedClauses {
+    <#
+    .SYNOPSIS  c11-10: правила версії (calc.MethodologyRule, предикат «Id колонки -> значення»), чий НАБІР ЗНАЧЕНЬ збігається з
+               набором літералів знятої умови, — їх стадія вимикає в чернетці, щоб підказки, покриття й вимоги входів не вважали
+               ці рядки рядками методології. Активні правила лише; повертає коди.
+    #>
+    param([object[]]$Rules = @(), [object[]]$Removed = @())
+    $sets = @{}
+    foreach ($x in @($Removed)) {
+        $values = @([regex]::Matches([string]$x.Clause, '==\s*"([^"]*)"') | ForEach-Object { $_.Groups[1].Value } | Sort-Object)
+        if ($values.Count -gt 0) { $sets[($values -join [char]1)] = 1 }
+    }
+    $codes = New-Object System.Collections.Generic.List[string]
+    foreach ($r in @($Rules)) {
+        if (-not $r.isActive) { continue }
+        $values = @(([string]$r.matchJson | ConvertFrom-Json).PSObject.Properties | ForEach-Object { [string]$_.Value } | Sort-Object)
+        if ($values.Count -gt 0 -and $sets.ContainsKey($values -join [char]1)) { $codes.Add([string]$r.code) }
+    }
+    return @($codes.ToArray())
+}
+
 function Remove-MsUnreachableRowClauses {
     <#
     .SYNOPSIS  Повертає {Text; Removed = @({Table; Nae; Clause})}. Заголовок «// Methodology M, version Vn» / «// Effective from …»

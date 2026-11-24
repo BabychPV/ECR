@@ -121,6 +121,39 @@ public sealed class ScriptManagedHandlerGuardTests
         await _uow.DidNotReceiveWithAnyArgs().SaveChangesAsync(default);
     }
 
+    /// <summary>
+    /// c11-10: правило мігрованої чернетки-скрипта, умову якого прибрано з тексту, вимикається (лише вимкнення наявного правила
+    /// з тим самим предикатом і пріоритетом); увімкнути чи змінити — далі <c>scriptManaged</c>.
+    /// </summary>
+    /// <remarks>Мутація: прибрати виняток (завжди <c>RequireHandEditable</c>) — червоніє перша частина.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "MS-T3.2")]
+    public async Task На_чернетці_скрипті_можна_лише_вимкнути_наявне_правило_з_тим_самим_предикатом()
+    {
+        var version = ScriptTestKit.WithId(
+            new MethodologyVersion(1, "V5", CalculationLevel.Configuration, 9, Now, MethodologyEngine.Script), VersionId);
+        _drafts.FindVersionAsync(VersionId, Arg.Any<CancellationToken>()).Returns(version);
+        var rule = version.AddRule(Ecr.Domain.ValueObjects.EcrCode.Create("R_B01"), """{"2119":"0880"}""", 520);
+        _drafts.FindRuleAsync(VersionId, "R_B01", Arg.Any<CancellationToken>()).Returns(rule);
+        var handler = new SaveMethodologyRuleHandler(_drafts, _uow, _access, _user);
+
+        var dto = await handler.HandleAsync(VersionId, "R_B01", """{"2119":"0880"}""", 520, false, default);
+
+        Assert.False(rule.IsActive);
+        Assert.False(dto.IsActive);
+        await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+
+        foreach (var (match, priority, active) in new[] { ("""{"2119":"0880"}""", 520, true), ("""{"2119":"0881"}""", 520, false), ("""{"2119":"0880"}""", 1, false) })
+        {
+            var error = await Assert.ThrowsAsync<BusinessRuleException>(() => handler.HandleAsync(VersionId, "R_B01", match, priority, active, default));
+            Assert.Equal("err.ECR-CALC-0409.scriptManaged", (string?)error.Details!["messageKey"]);
+        }
+
+        Assert.False(rule.IsActive);
+        Assert.Equal("""{"2119":"0880"}""", rule.MatchJson);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait("Requirement", "MS-T3.2")]
