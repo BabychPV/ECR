@@ -88,7 +88,8 @@ public sealed class CalculationTrigger(
             return null;
         }
 
-        int[]? months = jobs.MergesCascadePeriods && sourceMonths.Count > 0 ? [.. sourceMonths.Distinct().Order()] : null;
+        // ✎ PERF-06b (D-572, live Quartz): і Quartz зливає місяці об'єднанням (QuartzSourceMonths) — не лише черга в базі.
+        int[]? months = jobs.MergesSourceMonths && sourceMonths.Count > 0 ? [.. sourceMonths.Distinct().Order()] : null;
         return await EnqueueSubmittedAsync(AutoTargetOf(documentId, periodKey), documentId, periodKey, ct, sourceMonths: months)
             .ConfigureAwait(false);
     }
@@ -196,6 +197,9 @@ public sealed class CalculationTrigger(
     /// <inheritdoc />
     /// <remarks>✎ PERF-06 (<c>D-566</c>): лише коли черга об'єднує періоди каскаду при злитті (черга в базі).</remarks>
     public bool CoalescesCascadePeriods => jobs.MergesCascadePeriods;
+
+    /// <inheritdoc />
+    public bool CarriesSourceMonths => jobs.MergesSourceMonths;
 
     /// <inheritdoc />
     /// <remarks>

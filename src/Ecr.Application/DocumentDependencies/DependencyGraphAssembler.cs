@@ -45,10 +45,14 @@ public static class DependencyGraphAssembler
                 new DependencyEvidence("sourceBinding", binding.BindingId, null, binding.SourceState.ToString()));
         }
 
+        // ✎ PERF-06b: «кожне читання формулою — комірка періоду-власника літерального місяця» (AND по всіх доказах ребра).
+        var monthOwned = new Dictionary<(int Registry, int Template), bool>();
         foreach (var read in inputs.TemplateReads)
         {
             Add(R(read.RegistryDefId), T(read.TemplateId), DependencyEdgeKind.TemplateFormula, read.Scope,
                 new DependencyEvidence(read.Source, read.FormulaDefId, read.TemplateVersionId, read.Detail));
+            var key = (read.RegistryDefId, read.TemplateId);
+            monthOwned[key] = monthOwned.GetValueOrDefault(key, true) && read.MonthOwned;
         }
 
         foreach (var read in inputs.MethodologyReads)
@@ -75,7 +79,7 @@ public static class DependencyGraphAssembler
                 new DependencyEvidence("registryRule", rule.RuleId, null, null));
         }
 
-        var dependencies = Collapse(inputs, edges.ToDictionary(e => e.Key, e => e.Value.Scope));
+        var dependencies = Collapse(inputs, edges.ToDictionary(e => e.Key, e => e.Value.Scope), monthOwned);
 
         var templateIds = edges.Keys
             .SelectMany(k => new[] { k.From, k.To })
@@ -108,7 +112,8 @@ public static class DependencyGraphAssembler
 
     private static List<TemplateDependency> Collapse(
         DependencyGraphInputs inputs,
-        Dictionary<(DependencyNodeRef From, DependencyNodeRef To, DependencyEdgeKind Kind), PeriodScope> edges)
+        Dictionary<(DependencyNodeRef From, DependencyNodeRef To, DependencyEdgeKind Kind), PeriodScope> edges,
+        Dictionary<(int Registry, int Template), bool> monthOwned)
     {
         var ruleNext = inputs.RuleReads.ToLookup(r => r.ReadRegistryDefId, r => r.RuleRegistryDefId);
         var templateReaders = edges
@@ -147,6 +152,10 @@ public static class DependencyGraphAssembler
                 foreach (var (template, scope, formula) in consumers)
                 {
                     var effective = direct ? scope : PeriodScope.All;
+
+                    // ✎ PERF-06b: лише прямі читання формулами, кожне — у комірці періоду-власника місяця; методологія чи
+                    // похідний довідник (правило) знімають позначку для всього ребра.
+                    var owned = direct && formula && monthOwned.GetValueOrDefault((registry, template));
                     var key = (binding.SourceTemplateId, template, binding.BindingId);
                     result[key] = result.TryGetValue(key, out var known)
                         ? known with
@@ -154,9 +163,11 @@ public static class DependencyGraphAssembler
                             Scope = known.Scope.Join(effective),
                             ViaTemplateFormula = known.ViaTemplateFormula || formula,
                             ViaMethodology = known.ViaMethodology || !formula,
+                            MonthOwned = known.MonthOwned && owned,
                         }
                         : new TemplateDependency(
-                            binding.SourceTemplateId, template, binding.BindingId, binding.RegistryDefId, effective, formula, !formula);
+                            binding.SourceTemplateId, template, binding.BindingId, binding.RegistryDefId, effective, formula, !formula,
+                            owned);
                 }
             }
         }

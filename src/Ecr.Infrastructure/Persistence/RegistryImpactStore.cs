@@ -86,8 +86,13 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
     /// <c>ApprovedOnly</c>).
     /// </para>
     /// </remarks>
-    public async Task<IReadOnlyList<RegistryImpactRow>> ListTemplateConsumersAsync(
+    public Task<IReadOnlyList<RegistryImpactRow>> ListTemplateConsumersAsync(
         IReadOnlyCollection<int> templateIds, int firstPeriod, int lastPeriod, int? month, CancellationToken ct)
+        => ListTemplateConsumersRoutedAsync(templateIds, firstPeriod, lastPeriod, month, routedMonth: null, ct);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<RegistryImpactRow>> ListTemplateConsumersRoutedAsync(
+        IReadOnlyCollection<int> templateIds, int firstPeriod, int lastPeriod, int? month, int? routedMonth, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(templateIds);
         if (templateIds.Count == 0)
@@ -117,9 +122,30 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // ✎ PERF-06b (D-572): ребро «комірка періоду-власника місяця» — у місячному проєкті лише період (рік, m), якщо він є в
+        // календарі проєкту (будь-який стан: закритий власник не рахується, а інші періоди цю комірку не рахують). Без
+        // рядка календаря маршрутизація віддає комірку екземпляру перегляду — тоді всі періоди, як доти.
+        HashSet<(int ProjectId, int Year)>? owners = null;
+        if (routedMonth is { } rm && rows.Exists(r => r.PeriodKind == PeriodKind.Monthly))
+        {
+            var projects = rows.Where(r => r.PeriodKind == PeriodKind.Monthly).Select(r => r.ProjectId).Distinct().ToList();
+            var keys = rows.Select(r => (r.PeriodKey / 100 * 100) + rm).Distinct().ToList();
+            owners = [.. (await db.Periods.AsNoTracking()
+                    .Where(p => projects.Contains(p.ProjectId) && keys.Contains(p.PeriodKeyValue))
+                    .Select(p => new { p.ProjectId, p.PeriodKeyValue })
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false))
+                .Select(p => (p.ProjectId, p.PeriodKeyValue / 100))];
+        }
+
         // B179 L2: обсяг «місяць» — лише період, що володіє місяцем (те саме правило, що ворота затверджених місяців).
         return [.. rows
             .Where(r => month is not { } m || DocumentSourceGate.OwnedMonths(r.PeriodKind, r.PeriodKey % 100).Contains(m))
+            .Where(r => routedMonth is not { } owned
+                        || r.PeriodKind != PeriodKind.Monthly
+                        || owners is null
+                        || !owners.Contains((r.ProjectId, r.PeriodKey / 100))
+                        || r.PeriodKey % 100 == owned)
             .Select(r => new RegistryImpactRow(r.Id, r.BusinessKey, r.ProjectId, r.PeriodKey, r.State, string.Empty))];
     }
 

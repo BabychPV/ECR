@@ -237,8 +237,16 @@ public sealed partial class RegistryImpactRecalculationJob(
 
             var (first, last) = scope.Kind == PeriodScopeKind.All ? (int.MinValue, int.MaxValue) : (year * 100, (year * 100) + 99);
             var onlyMonth = scope.Kind == PeriodScopeKind.Month ? month : null;
+
+            // ✎ PERF-06b (D-572): «рік з літеральними місяцями», де КОЖНЕ читання — комірка періоду-власника свого місяця
+            // (TemplateDependency.MonthOwned, без методологій) — зміна місяця m будить у місячному проєкті лише період m.
+            // Пізніших читачів його чисел будить прогін цього періоду (CrossPeriodFanOut, RecalculationJob.FormulasAsync).
+            var routedMonth = scope.Kind == PeriodScopeKind.Year && scope.MonthMask != 0 && month is { } changed
+                              && consumer.All(e => e.MonthOwned && !e.ViaMethodology)
+                ? changed
+                : (int?)null;
             rows.AddRange(await impact
-                .ListTemplateConsumersAsync([consumer.Key], first, last, onlyMonth, ct)
+                .ListTemplateConsumersRoutedAsync([consumer.Key], first, last, onlyMonth, routedMonth, ct)
                 .ConfigureAwait(false));
         }
 

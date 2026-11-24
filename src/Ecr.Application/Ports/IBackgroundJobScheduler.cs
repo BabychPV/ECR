@@ -32,6 +32,16 @@ public interface IBackgroundJobScheduler
     /// </remarks>
     public bool MergesCascadePeriods => false;
 
+    /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>): чи злиття постановок перерахунку на ту саму ціль ОБ'ЄДНУЄ місяці правки джерела (payload
+    /// <c>sourceMonths</c>: обидві з місяцями — об'єднання, хоч одна без — увесь рік), тож місяці можна нести в payload.
+    /// </summary>
+    /// <remarks>
+    /// Черга в базі — так (<c>DbJobQueue.MergePressFieldsSql</c>, разом із періодами каскаду); Quartz — так з PERF-06b live
+    /// (<c>QuartzSourceMonths</c>). Типово — як <see cref="MergesCascadePeriods"/> (фейки тестів: ні).
+    /// </remarks>
+    public bool MergesSourceMonths => MergesCascadePeriods;
+
     /// <summary>Ставить задачу в чергу негайно.</summary>
     /// <param name="payload">Завдання.</param>
     /// <param name="ct">Токен скасування.</param>

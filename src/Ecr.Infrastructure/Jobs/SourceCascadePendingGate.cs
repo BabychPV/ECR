@@ -233,9 +233,10 @@ public sealed class SourceCascadePendingGate(
         if (SourceChangeKey.TryParse(BareTarget(row.TargetKey), out var bindingId, out var year, out var month, out var approved))
         {
             // «З затвердженими» перераховує й затверджені аркуші — затвердження не закріпить старих чисел.
+            var byBinding = edges.Where(e => e.BindingId == bindingId).ToList();
             return !approved
-                   && ScopeOf(edges.Where(e => e.BindingId == bindingId)) is { } scope
-                   && Affects(scope, year, month, periodKey, consumerKind);
+                   && ScopeOf(byBinding) is { } scope
+                   && Affects(scope, year, month, periodKey, consumerKind, byBinding.TrueForAll(e => e.MonthOwned && !e.ViaMethodology));
         }
 
         // Документна ланка (задача формул чи -auto) документа-джерела зв'язки, що ставить каскад з -auto (стан Any).
@@ -277,8 +278,18 @@ public sealed class SourceCascadePendingGate(
     /// (<c>Month</c> — період-власник місяця, <c>Year</c> — увесь рік з маскою літеральних місяців, <c>All</c> — усі роки),
     /// плюс ПІЗНІШІ періоди року при ребрі «місяць» (каскад дописує читачів обчислених чисел, D-566 п. 2 — консервативно).
     /// </summary>
+    /// <param name="scope">Обсяг ребер зв'язки.</param>
+    /// <param name="sourceYear">Рік зміни джерела.</param>
+    /// <param name="sourceMonth">Місяць зміни; <c>null</c> — увесь рік.</param>
+    /// <param name="periodKey">Період споживача.</param>
+    /// <param name="consumerKind">Періодичність проєкту споживача.</param>
+    /// <param name="monthOwned">
+    /// ✎ PERF-06b (<c>D-572</c>): кожне ребро зв'язки — <c>TemplateDependency.MonthOwned</c> (комірка періоду-власника місяця):
+    /// у місячному проєкті чекає період місяця зміни і ПІЗНІШІ (їх може дописати прогін власника — <c>CrossPeriodFanOut</c>),
+    /// раніші — ні; той самий звужений набір, що ставить <c>RegistryImpactRecalculationJob</c>, плюс консервативний хвіст.
+    /// </param>
     internal static bool Affects(
-        PeriodScope scope, int sourceYear, int? sourceMonth, int periodKey, PeriodKind consumerKind)
+        PeriodScope scope, int sourceYear, int? sourceMonth, int periodKey, PeriodKind consumerKind, bool monthOwned = false)
     {
         if (scope.Kind == PeriodScopeKind.All)
         {
@@ -292,7 +303,17 @@ public sealed class SourceCascadePendingGate(
 
         if (scope.Kind == PeriodScopeKind.Year)
         {
-            return scope.MonthMask == 0 || sourceMonth is not { } m || (scope.MonthMask & (1 << m)) != 0;
+            if (scope.MonthMask == 0 || sourceMonth is not { } m)
+            {
+                return true;
+            }
+
+            if ((scope.MonthMask & (1 << m)) == 0)
+            {
+                return false;
+            }
+
+            return !monthOwned || consumerKind != PeriodKind.Monthly || periodKey % 100 >= m;
         }
 
         return sourceMonth is not { } month

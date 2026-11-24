@@ -538,7 +538,8 @@ public sealed partial class RecalculationJob(
                 }
 
                 var stepChanged = chain ? new Dictionary<int, HashSet<(int TableDefId, int ColumnDefId)>>() : null;
-                var cells = await FormulasAsync(docRequest, periods, submittedChanges, ct, annualOnly, stepChanged)
+                var cells = await FormulasAsync(
+                        docRequest, periods, submittedChanges, ct, annualOnly, stepChanged, WakesLaterReaders(docRequest, chain))
                     .ConfigureAwait(false);
 
                 // ✎ PERF-01 (D-564a, огляд H1): план вужчий за рік — пізніші місяці, що читають обчислені числа цього кроку
@@ -2237,10 +2238,12 @@ public sealed partial class RecalculationJob(
     /// <param name="ct">Токен скасування.</param>
     /// <param name="annualOnly">✎ LAND-YEAR B24: закриті якорі річної розкладки → місяці їхнього року (лише не-місячні цілі).</param>
     /// <param name="changedOut">✎ PERF-01: куди скласти змінені колонки за періодом (дописування читачів у план ланцюжка).</param>
+    /// <param name="wakeLaterReaders">✎ PERF-06b: будити й пізніших читачів (<see cref="WakesLaterReaders"/>).</param>
     private async Task<int> FormulasAsync(
         RecalculationRequest request, IReadOnlyList<int> periods, SubmittedSheetChanges submittedChanges,
         CancellationToken ct, IReadOnlyDictionary<int, IReadOnlyList<int>>? annualOnly = null,
-        Dictionary<int, HashSet<(int TableDefId, int ColumnDefId)>>? changedOut = null)
+        Dictionary<int, HashSet<(int TableDefId, int ColumnDefId)>>? changedOut = null,
+        bool wakeLaterReaders = false)
     {
         var written = 0;
         var changedByPeriod = changedOut ?? new Dictionary<int, HashSet<(int TableDefId, int ColumnDefId)>>();
@@ -2294,7 +2297,7 @@ public sealed partial class RecalculationJob(
                 {
                     await fanOut
                         .EnqueueReadersAsync(
-                            request.DocumentId, new PeriodKey(period), changed, onlyEarlierReaders: true, hops: 1, ct)
+                            request.DocumentId, new PeriodKey(period), changed, onlyEarlierReaders: !wakeLaterReaders, hops: 1, ct)
                         .ConfigureAwait(false);
                 }
             }
@@ -2302,6 +2305,18 @@ public sealed partial class RecalculationJob(
 
         return written;
     }
+
+    /// <summary>
+    /// ✎ PERF-06b (<c>D-572</c>, live Quartz): чи прогін будить і ПІЗНІШИХ читачів своїх змінених чисел
+    /// (<c>[Period:-k]</c>, <c>[Period:#k]</c>, чужі колонки річної розкладки) — так для прогону ОДНОГО періоду поза ланцюжком
+    /// (залежні періоду, <c>-auto</c>, натискання місяця): пізніших періодів у ньому немає, і без цього вони лишалися б зі
+    /// старим числом — зокрема після звуження каскаду до періоду-власника місяця правки. Рік і ланцюжок (черга в базі:
+    /// <c>ExtendWithLaterReadersAsync</c>) рахують пізніші самі — там, як доти, лише раніші.
+    /// </summary>
+    /// <param name="request">Завдання документа.</param>
+    /// <param name="chain">Прогін — крок ланцюжка черги в базі.</param>
+    internal static bool WakesLaterReaders(RecalculationRequest request, bool chain)
+        => !chain && request is { PeriodKey: not null, CascadePeriods: null };
 
     /// <summary>
     /// Періоди документа, у які цей прогін має право писати, ЗА ЗРОСТАННЯМ.
