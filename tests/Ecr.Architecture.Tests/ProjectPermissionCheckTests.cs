@@ -187,10 +187,6 @@ public sealed class ProjectPermissionCheckTests
             + "в проєкті).",
             ["Ecr.Application.Workflow.ListApproverRolesHandler::HandleAsync"]),
         (
-            "Report.ViewRegulatory",
-            "Перелік ОПИСІВ державних звітів спільний для всіх проєктів; зрізи — з проєктом.",
-            ["Ecr.Application.Reporting.ListReportDefsHandler::HandleAsync"]),
-        (
             "Document.Export",
             "Лише підказка-посилання в «Моїх задачах»; завантаження перевіряє право в проєкті "
             + "документа (DownloadExportHandler).",

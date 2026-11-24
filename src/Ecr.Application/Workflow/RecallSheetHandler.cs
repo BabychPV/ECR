@@ -26,15 +26,12 @@ public sealed record RecallAvailabilityDto(bool CanRecall);
 /// <see cref="EditRules.Effective"/>.
 ///
 /// ⚠ Зріз подання (<c>calc.SubmissionSnapshot</c>) лишається — це факт, що
-/// подання було. Заморожений зріз ЗВІТНОСТІ теж не відкочується, як і при
-/// <c>Reopen</c> (<c>ReportSnapshotSync.MarkSubmittedAsync</c>, ФВ-9.17); статус
-/// незаморожених перераховується, бо він успадковується від даних (<c>D-65</c>).
+/// подання було.
 /// </remarks>
 public sealed class RecallSheetHandler(
     IWorkflowStore workflow,
     IDocumentStore documents,
     IAccessDecisionService access,
-    Reporting.ReportSnapshotSync reports,
     IUnitOfWork uow,
     ICurrentUser currentUser,
     IClock clock,
@@ -171,12 +168,6 @@ public sealed class RecallSheetHandler(
                 ApprovalEvent.For(state, fromStatus, ApprovalAction.Recall, userId, now, reason),
                 innerCt).ConfigureAwait(false);
 
-            // ⛔ R5-W1 / W1-01: перехід — у БД ДО перерахунку статусу зрізу.
-            // Інакше запит статусу (`AsNoTracking`) бачив аркуш ще `Submitted`,
-            // і повністю поданий період морозив зріз як `Submitted` саме в ту
-            // мить, коли аркуш повертався в `Draft`.
-            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
-            await reports.RefreshAsync(documentId, key, innerCt).ConfigureAwait(false);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
 
             // RS (Q5): збір пише лише в оригінал — для копії наздоганяти нічого.

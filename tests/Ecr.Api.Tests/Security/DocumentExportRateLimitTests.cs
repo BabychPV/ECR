@@ -25,12 +25,12 @@ namespace Ecr.Api.Tests.Security;
 
 /// <summary>
 /// PT-6 (пентест 2026-11): межа постановки важких задач вивантаження на КОРИСТУВАЧА — політика
-/// <c>document-export</c>, типово 6 за хвилину, ОДИН кошик на експорт документа, експорт огляду року й побудову
-/// зрізу; понад межу — 429 <c>ECR-REQ-0429</c> / <c>tooManyExports</c> із <c>Retry-After</c>.
+/// <c>document-export</c>, типово 6 за хвилину, ОДИН кошик на експорт документа й експорт огляду року (✎ P-1124-3:
+/// побудову зрізу звіту прибрано разом зі зрізами); понад межу — 429 <c>ECR-REQ-0429</c> / <c>tooManyExports</c> із <c>Retry-After</c>.
 /// </summary>
 /// <remarks>
-/// Детерміновано: вікно — хвилина, усі запити кейсу йдуть одразу; годинник не чекається. Документ і звіт —
-/// неіснуючі: обробник відповів би 403/404, а обмежувач рахує ДО нього.
+/// Детерміновано: вікно — хвилина, усі запити кейсу йдуть одразу; годинник не чекається. Документ —
+/// неіснуючий: обробник відповів би 403/404, а обмежувач рахує ДО нього.
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class DocumentExportRateLimitTests(SqlServerFixture sql)
@@ -38,7 +38,6 @@ public sealed class DocumentExportRateLimitTests(SqlServerFixture sql)
     private const string Password = "Export-Limit-2026!";
     private const string ExportPath = "/api/v1/documents/999999/export";
     private const string YearExportPath = "/api/v1/documents/999999/calculation-results/year/export";
-    private const string BuildPath = "/api/v1/reports/NOSUCHREPORT/build";
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
@@ -68,7 +67,7 @@ public sealed class DocumentExportRateLimitTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Finding", "PT-6")]
-    public void Експорти_і_побудова_зрізу_під_політикою_document_export()
+    public void Експорти_під_політикою_document_export()
     {
         Assert.Equal(
             DocumentExportRateLimitPolicy.PolicyName,
@@ -77,10 +76,6 @@ public sealed class DocumentExportRateLimitTests(SqlServerFixture sql)
         Assert.Equal(
             DocumentExportRateLimitPolicy.PolicyName,
             typeof(DocumentsController).GetMethod(nameof(DocumentsController.ExportCalculationResultsYear))!
-                .GetCustomAttribute<EnableRateLimitingAttribute>()?.PolicyName);
-        Assert.Equal(
-            DocumentExportRateLimitPolicy.PolicyName,
-            typeof(ReportsController).GetMethod(nameof(ReportsController.Build))!
                 .GetCustomAttribute<EnableRateLimitingAttribute>()?.PolicyName);
     }
 
@@ -111,11 +106,9 @@ public sealed class DocumentExportRateLimitTests(SqlServerFixture sql)
         using var rejected = await ExportAsync(greedy).ConfigureAwait(true);
         await AssertRejectedAsync(rejected).ConfigureAwait(true);
 
-        // Мутація: прибрати атрибут з `ExportCalculationResultsYear` / `ReportsController.Build` — не 429.
+        // Мутація: прибрати атрибут з `ExportCalculationResultsYear` — не 429.
         using var rejectedYear = await YearExportAsync(greedy).ConfigureAwait(true);
         await AssertRejectedAsync(rejectedYear).ConfigureAwait(true);
-        using var rejectedBuild = await BuildAsync(greedy).ConfigureAwait(true);
-        await AssertRejectedAsync(rejectedBuild).ConfigureAwait(true);
 
         // Сусід має свій розділ.
         using var neighbour = await ExportAsync(other).ConfigureAwait(true);
@@ -131,9 +124,6 @@ public sealed class DocumentExportRateLimitTests(SqlServerFixture sql)
 
     private static Task<HttpResponseMessage> YearExportAsync(HttpClient client)
         => client.PostAsJsonAsync(new Uri(YearExportPath, UriKind.Relative), new { year = 2026 });
-
-    private static Task<HttpResponseMessage> BuildAsync(HttpClient client)
-        => client.PostAsJsonAsync(new Uri(BuildPath, UriKind.Relative), new { projectId = 1, periodKey = 202601 });
 
     private static DefaultHttpContext ContextOf(string userId) => new()
     {

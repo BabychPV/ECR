@@ -41,25 +41,6 @@ public interface ICalculationResultStore
         TraceLevel traceLevel, CancellationToken ct);
 
     /// <summary>
-    /// Визначає поточні зрізи <c>rpt.*</c>, які цей прогін зробив застарілими
-    /// (ФВ-10.5): вони побудовані раніше, ніж прогін став актуальним, і досі
-    /// не були застарілими через інший прогін.
-    /// </summary>
-    /// <param name="calculationRunId">Прогін, щойно зроблений актуальним.</param>
-    /// <param name="ct">Токен скасування.</param>
-    /// <returns>Зрізи, що застаріли саме зараз; порожньо — таких немає.</returns>
-    /// <remarks>
-    /// ⛔ «Застарілий» — це СТАН, а не дія над зрізом: метод нічого не пише в
-    /// <c>rpt.ReportSnapshot</c>. Ні рядки, ні сума, ні статус зрізу не
-    /// змінюються, тож поданий зріз лишається іммутабельним (ФВ-9.17), а
-    /// регуляторна вʼюха віддає ті самі числа. Ознаку читач отримує в
-    /// <see cref="ReportSnapshotSummary.IsStale"/>; викликач пише перелік у
-    /// журнал у ТІЙ САМІЙ транзакції, що й перемикання актуальності.
-    /// </remarks>
-    public Task<IReadOnlyList<InvalidatedReportSnapshot>> InvalidateReportSnapshotsAsync(
-        long calculationRunId, CancellationToken ct);
-
-    /// <summary>
     /// Робить прогін актуальним: попередній перестає бути таким **у тій самій
     /// транзакції** (ФВ-9.11).
     /// </summary>
@@ -267,20 +248,3 @@ public sealed record CalculationResultRow(
     int UnitId,
     long? SubstanceEntryId,
     long? TableInstanceId = null);
-
-/// <summary>Зріз, який прогін зробив застарілим (ФВ-10.5).</summary>
-/// <param name="SnapshotId">Зріз.</param>
-/// <param name="ReportVersionId">Версія звіту.</param>
-/// <param name="ProjectId">Проєкт.</param>
-/// <param name="TemplateVersionId">Версія шаблону проєкту — ключ журналу структурних змін.</param>
-/// <param name="PeriodKey">Період зрізу; <c>null</c> — увесь рік.</param>
-/// <param name="Status">Статус даних зрізу (D-65); не змінюється.</param>
-/// <param name="BuiltAt">Коли зріз побудовано (UTC).</param>
-public sealed record InvalidatedReportSnapshot(
-    long SnapshotId,
-    int ReportVersionId,
-    int ProjectId,
-    int TemplateVersionId,
-    int? PeriodKey,
-    string Status,
-    DateTime BuiltAt);

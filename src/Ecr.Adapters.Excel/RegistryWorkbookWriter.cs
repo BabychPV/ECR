@@ -12,8 +12,7 @@ namespace Ecr.Adapters.Excel;
 /// рядка сервера (D-30). <c>decimal(34,16)</c> має до 34 значущих цифр, <c>double</c> — 15–17: число,
 /// записане числом «завжди», тихо обрізалося б, і повторний імпорт змінив би довідник.
 /// <para>
-/// ⚠ Тимчасовий ФАЙЛ, а не <c>MemoryStream</c> — той самий прийом, що в
-/// <see cref="SnapshotWorkbookWriter"/>.
+/// ⚠ Тимчасовий ФАЙЛ, а не <c>MemoryStream</c>: книга великого довідника не тримається в пам'яті цілком.
 /// </para>
 /// </remarks>
 public sealed class RegistryWorkbookWriter : IRegistryWorkbookWriter

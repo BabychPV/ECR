@@ -1270,8 +1270,7 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
             new UnitOfWork(db),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
-            clock,
-            Substitute.For<IAuditWriter>());
+            clock);
 
     private static RecalculationService FormulaService()
     {

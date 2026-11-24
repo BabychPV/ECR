@@ -203,16 +203,6 @@ function JobsIcon(): JSX.Element {
   );
 }
 
-/** Report snapshots — фотоапарат (знімок стану). */
-function SnapshotsIcon(): JSX.Element {
-  return (
-    <Icon>
-      <path d="M4 8.5h3l1.8-2h6.4l1.8 2h3v10.5H4V8.5Z" />
-      <circle cx="12" cy="13.5" r="3.25" />
-    </Icon>
-  );
-}
-
 /** Audit trail — годинник зі стрілкою повернення (історія). */
 function AuditIcon(): JSX.Element {
   return (
@@ -317,7 +307,6 @@ const navIcons: Record<string, () => JSX.Element> = {
   pipeline: PipelineIcon,
   piData: PiDataIcon,
   jobs: JobsIcon,
-  snapshots: SnapshotsIcon,
   audit: AuditIcon,
   consistency: ConsistencyIcon,
   dependencyGraph: DependencyGraphIcon,

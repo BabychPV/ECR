@@ -1,7 +1,6 @@
 // tests/Ecr.Application.Tests/Workflow/WorkflowTransactionTests.CascadePending.cs
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
-using Ecr.Application.Reporting;
 using Ecr.Application.Security;
 using Ecr.Application.Workflow;
 using Ecr.Domain.Enums;
@@ -153,8 +152,7 @@ public sealed partial class WorkflowTransactionTests
     {
         await using var db = CreateContext();
         await new ApproveSheetHandler(
-                new WorkflowStore(db), AccessAt(step), new ReportSnapshotSync(NoSnapshots(), Documents(world)),
-                new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db), Documents(world),
+                new WorkflowStore(db), AccessAt(step), new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db), Documents(world),
                 cascadeGate: gate)
             .HandleAsync(world.DocumentId, world.SheetDefId, PeriodKeyValue, approved, reason, CancellationToken.None)
             .ConfigureAwait(false);

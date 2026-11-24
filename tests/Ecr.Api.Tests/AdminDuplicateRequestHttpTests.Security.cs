@@ -8,68 +8,10 @@ using Xunit;
 
 namespace Ecr.Api.Tests;
 
-/// <summary>B158 (лінія d): версії звітів, групові призначення, переклади інтерфейсу, перейменування ролі.</summary>
+/// <summary>B158 (лінія d): групові призначення, переклади інтерфейсу, перейменування ролі.</summary>
+/// <remarks>✎ P-1124-3: d6 (версії опису звіту) прибрано разом із конструктором звітів.</remarks>
 public sealed partial class AdminDuplicateRequestHttpTests
 {
-    // ───────────────────────────── d6: версії опису звіту ─────────────────────────────
-
-    /// <summary>
-    /// d6: <c>POST /reports/{id}/versions</c> з тим самим номером двічі одночасно — один <c>200</c>, другий та сама
-    /// відмова <c>ECR-RPT-4091 version</c> з <c>{version}</c>, що й послідовний повтор (раніше — 500 на <c>UQ_ReportVersion</c>).
-    /// </summary>
-    [Fact]
-    [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Finding", "B158d")]
-    public async Task d6_Версія_звіту_двічі_одночасно_одне_200_друге_та_сама_відмова_що_й_послідовно()
-    {
-        var (one, two) = await SignInTwiceAsync(["Report.EditDefinition", "Report.ViewRegulatory"]).ConfigureAwait(true);
-        using var first = one;
-        using var second = two;
-
-        var definition = await SendAsync(
-            first,
-            HttpMethod.Post,
-            "/api/v1/reports",
-            new
-            {
-                code = NewCode("RV"),
-                nameL10n = new Dictionary<string, string> { ["en"] = "B158d report" },
-                isRegulatory = false,
-                version = "1.0",
-                columns = new[] { new { code = "Value", kind = "number" } },
-                rules = (object?)null,
-            }).ConfigureAwait(true);
-        Assert.True((int)definition.Status is >= 200 and < 300, $"{definition}\n{App.ErrorsText}");
-        var definitionId = definition.Json.GetProperty("id").GetInt32();
-
-        static object Body(string version) => new { version, columns = new[] { new { code = "Value", kind = "number" } }, rules = (object?)null };
-        var url = $"/api/v1/reports/{definitionId}/versions";
-
-        // Послідовно.
-        var created = await SendAsync(first, HttpMethod.Post, url, Body("2.0")).ConfigureAwait(true);
-        var repeated = await SendAsync(first, HttpMethod.Post, url, Body("2.0")).ConfigureAwait(true);
-
-        Assert.True(created.Status == HttpStatusCode.OK, $"{created}\n{App.ErrorsText}");
-        AssertRefusal(repeated, repeated.Status, "ECR-RPT-4091", "err.ECR-RPT-4091.version", ("version", "2.0"));
-
-        // Одночасно.
-        var replies = await RaceAsync(
-            "report-versions",
-            meet => SendAsync(first, HttpMethod.Post, url, Body("3.0"), meet),
-            meet => SendAsync(second, HttpMethod.Post, url, Body("3.0"), meet)).ConfigureAwait(true);
-
-        AssertNoServerError(replies);
-        Assert.Single(replies, r => r.Status == HttpStatusCode.OK);
-        AssertRefusal(
-            replies.Single(r => r.Status != HttpStatusCode.OK),
-            repeated.Status, "ECR-RPT-4091", "err.ECR-RPT-4091.version", ("version", "3.0"));
-
-        await using var db = Db();
-        Assert.Equal(
-            1,
-            await db.ReportVersions.CountAsync(v => v.ReportDefId == definitionId && v.Version == "3.0").ConfigureAwait(true));
-    }
-
     // ───────────────────────────── d7: ролі групам каталогу ─────────────────────────────
 
     /// <summary>

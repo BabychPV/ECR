@@ -509,8 +509,7 @@ public sealed class SourceDocumentChangeHookTests(SqlServerFixture sql) : DbJobQ
             Substitute.For<IUnitOfWork>(),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
-            new TestClock(Now),
-            Substitute.For<IAuditWriter>());
+            new TestClock(Now));
 
     /// <summary>Оркестратор-заглушка: успіх або збій методологій.</summary>
     private sealed class Runner(bool fail) : ICalculationRunner

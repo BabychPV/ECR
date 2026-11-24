@@ -406,8 +406,7 @@ public sealed class SourceYearlyMonthsTests(SqlServerFixture sql) : DbJobQueueTe
         => new(
             Substitute.For<IPeriodStore>(), Substitute.For<IWorkflowStore>(), Substitute.For<ICalculationResultStore>(),
             Substitute.For<IBackgroundJobScheduler>(), Substitute.For<IUnitOfWork>(),
-            Substitute.For<Ecr.Application.Security.IAccessDecisionService>(), Substitute.For<ICurrentUser>(), new TestClock(Now),
-            Substitute.For<IAuditWriter>());
+            Substitute.For<Ecr.Application.Security.IAccessDecisionService>(), Substitute.For<ICurrentUser>(), new TestClock(Now));
 
     private sealed class NoopRunner : ICalculationRunner
     {

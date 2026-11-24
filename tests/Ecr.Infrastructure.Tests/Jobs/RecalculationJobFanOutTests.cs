@@ -468,8 +468,7 @@ public sealed class RecalculationJobFanOutTests(SqlServerFixture sql)
             new UnitOfWork(db),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
-            clock,
-            Substitute.For<IAuditWriter>());
+            clock);
 
     /// <summary>Фаза формул шаблону нічого не пише — тести про розклад і прогони.</summary>
     private static RecalculationService FormulaService()

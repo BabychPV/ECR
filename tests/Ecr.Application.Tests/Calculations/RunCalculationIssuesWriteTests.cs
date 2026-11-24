@@ -164,8 +164,6 @@ public sealed class RunCalculationIssuesWriteTests
         var results = Substitute.For<ICalculationResultStore>();
         results.SwitchCurrentRunAsync(RunId, Arg.Any<string>(), Arg.Any<CancellationToken>())
                .Returns(supersededSelf ? [new SupersededRun(RunId, 202601, 900)] : []);
-        results.InvalidateReportSnapshotsAsync(RunId, Arg.Any<CancellationToken>())
-               .Returns(Array.Empty<InvalidatedReportSnapshot>());
 
         var uow = Substitute.For<IUnitOfWork>();
         uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
@@ -176,7 +174,7 @@ public sealed class RunCalculationIssuesWriteTests
             Substitute.For<IPeriodStore>(), Substitute.For<IWorkflowStore>(), results,
             Substitute.For<IBackgroundJobScheduler>(), uow, Substitute.For<IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(), Substitute.For<IClock>(),
-            Substitute.For<IAuditWriter>(), issues: issues);
+            issues: issues);
 
         return (handler, issues);
     }

@@ -377,8 +377,7 @@ public sealed partial class YearLayoutCalculatedRoutingSqlTests(SqlServerFixture
             Substitute.For<IUnitOfWork>(),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<Ecr.Application.Common.ICurrentUser>(),
-            new TestClock(JobNow),
-            Substitute.For<IAuditWriter>());
+            new TestClock(JobNow));
 
     private async Task SetLayoutAsync(World world, TemplateLayout layout)
         => await ExecuteAsync(

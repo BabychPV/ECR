@@ -222,8 +222,7 @@ public sealed class RecalculationJobSqlStallDeferralTests(SqlServerFixture sql)
             Substitute.For<IUnitOfWork>(),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
-            new TestClock(DateTime.UtcNow),
-            Substitute.For<IAuditWriter>());
+            new TestClock(DateTime.UtcNow));
 
     /// <summary><see cref="SqlException"/> із заданим номером: публічного конструктора немає, тож — рефлексією.</summary>
     private static SqlException Sql(int number)

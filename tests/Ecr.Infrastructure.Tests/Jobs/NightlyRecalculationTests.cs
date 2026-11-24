@@ -96,7 +96,6 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
         RecalculationWrite,
         CalcErrorEvent,
         SheetRecalcJournal,
-        ReportSnapshotJournal,
         RowLockJournal,
         Approved,
         OtherTemplateVersionChange,
@@ -414,7 +413,6 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
     [InlineData(QuietKind.RecalculationWrite)]
     [InlineData(QuietKind.CalcErrorEvent)]
     [InlineData(QuietKind.SheetRecalcJournal)]
-    [InlineData(QuietKind.ReportSnapshotJournal)]
     [InlineData(QuietKind.RowLockJournal)]
     [InlineData(QuietKind.Approved)]
     [InlineData(QuietKind.OtherTemplateVersionChange)]
@@ -443,9 +441,6 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
                     break;
                 case QuietKind.SheetRecalcJournal:
                     await StructureChangeAsync(db, d.TemplateVersionId, RecalculationSkips.AuditEntityType, at);
-                    break;
-                case QuietKind.ReportSnapshotJournal:
-                    await StructureChangeAsync(db, d.TemplateVersionId, RunCalculationHandler.SnapshotAuditEntityType, at);
                     break;
                 case QuietKind.RowLockJournal:
                     await StructureChangeAsync(
@@ -1066,8 +1061,7 @@ internal static class NightlyJobParts
             new UnitOfWork(db),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
-            clock,
-            Substitute.For<IAuditWriter>());
+            clock);
 
     /// <summary>Фаза формул шаблону нічого не пише — тести про розклад і прогони.</summary>
     private static RecalculationService FormulaService()

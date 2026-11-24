@@ -278,10 +278,8 @@ public static class DependencyInjection
         services.AddScoped<Periods.GetPeriodCalendarHandler>();
 
         // Робочий процес (модулі 3.4–3.6)
-        // ⚠ Проведення стану аркушів у зрізи звітності — окрема залежність
-        // обох обробників: питання «що тепер зі зрізом» одне, і відповідь на
-        // нього має бути одна (`H-23b`).
-        services.AddScoped<Reporting.ReportSnapshotSync>();
+        // ✎ P-1124-3 (D-NEW, людина 24.11): проведення стану аркушів у зрізи звітності прибрано разом
+        // із конструктором зрізів — звітність лише SSRS над сирим шаром rpt.*.
 
         // ✎ D-451: листи «Аркуш подано/повернуто» (вимкнені, доки немає правила матриці) — після коміту дії.
         services.AddScoped<Workflow.SheetWorkflowNotifier>();
@@ -555,20 +553,7 @@ public static class DependencyInjection
         services.AddScoped<Documents.DocumentDataExporter>();
         services.AddScoped<Documents.PreviewImportHandler>();
         services.AddScoped<Documents.ApplyImportHandler>();
-        services.AddScoped<Reporting.ListReportSnapshotsHandler>();
-        services.AddScoped<Reporting.BuildReportSnapshotHandler>();
-        services.AddScoped<Reporting.VerifyReportSnapshotHandler>();
-        services.AddScoped<Reporting.GetSnapshotRowsHandler>();
-        services.AddScoped<Reporting.ExportSnapshotHandler>();
         services.AddScoped<Reporting.GetCampaignSummaryHandler>();
-
-        // W7: опис звіту як ДАНІ (`ФВ-10.4`). Без цих чотирьох `rpt.ReportDef`
-        // і `rpt.ReportVersion` не створювало ніщо — ні код, ні seed, ні
-        // тести, — тому побудова зрізу не мала за що зачепитися.
-        services.AddScoped<Reporting.ListReportDefsHandler>();
-        services.AddScoped<Reporting.CreateReportDefHandler>();
-        services.AddScoped<Reporting.CreateReportVersionHandler>();
-        services.AddScoped<Reporting.PublishReportVersionHandler>();
         services.AddScoped<Integration.ListSourceEntitiesHandler>();
         services.AddScoped<Integration.CollectFromSourceHandler>();
         services.AddScoped<Integration.SyncFlertNowHandler>(); // D-476 F3: «Синхронізувати зараз»

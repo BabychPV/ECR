@@ -1,7 +1,6 @@
 // tests/Ecr.Application.Tests/Workflow/WorkflowTransactionTests.ApprovalEvents.cs
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
-using Ecr.Application.Reporting;
 using Ecr.Application.Security;
 using Ecr.Application.Workflow;
 using Ecr.Domain.Entities.Workflow;
@@ -130,8 +129,7 @@ public sealed partial class WorkflowTransactionTests
         // ⚠ F-25: `Approver()` — `world` подано від `UserId` (`ArrangeAsync`),
         // і той самий користувач більше не може себе ж і погодити.
         var handler = new ApproveSheetHandler(
-            new WorkflowStore(db), access, new ReportSnapshotSync(NoSnapshots(), Documents(world)),
-            new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db), Documents(world));
+            new WorkflowStore(db), access, new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db), Documents(world));
 
         await Assert.ThrowsAsync<Ecr.Application.Errors.ConcurrencyConflictException>(
             () => handler.HandleAsync(
@@ -164,8 +162,7 @@ public sealed partial class WorkflowTransactionTests
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(userId);
         var handler = new ApproveSheetHandler(
-            new WorkflowStore(db), AccessAt(step), new ReportSnapshotSync(NoSnapshots(), Documents(world)),
-            new UnitOfWork(db), user, new TestClock(Now), new AuditWriter(db), Documents(world));
+            new WorkflowStore(db), AccessAt(step), new UnitOfWork(db), user, new TestClock(Now), new AuditWriter(db), Documents(world));
 
         await handler
             .HandleAsync(world.DocumentId, world.SheetDefId, PeriodKeyValue, approved, reason, CancellationToken.None)
@@ -176,8 +173,7 @@ public sealed partial class WorkflowTransactionTests
     {
         await using var db = CreateContext();
         var handler = new ReopenDocumentHandler(
-            new WorkflowStore(db), AccessAt(step: null), new UnitOfWork(db), User(), new TestClock(Now), Documents(world),
-            new ReportSnapshotSync(NoSnapshots(), Documents(world)));
+            new WorkflowStore(db), AccessAt(step: null), new UnitOfWork(db), User(), new TestClock(Now), Documents(world));
 
         await handler
             .HandleAsync(world.DocumentId, world.SheetDefId, PeriodKeyValue, reason, CancellationToken.None)
@@ -238,15 +234,5 @@ public sealed partial class WorkflowTransactionTests
         var documents = Substitute.For<IDocumentStore>();
         documents.FindProjectIdAsync(world.DocumentId, Arg.Any<CancellationToken>()).Returns(world.ProjectId);
         return documents;
-    }
-
-    private static IReportSnapshotBuilder NoSnapshots()
-    {
-        var snapshots = Substitute.For<IReportSnapshotBuilder>();
-        snapshots.ListAsync(
-                     Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<IReadOnlyCollection<int>?>(),
-                     Arg.Any<CancellationToken>())
-                 .Returns<IReadOnlyList<ReportSnapshotSummary>>([]);
-        return snapshots;
     }
 }

@@ -666,8 +666,7 @@ public sealed class SupersededResultsSweepJobTests(SweepDatabase database) : ICl
             new UnitOfWork(db),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<Ecr.Application.Common.ICurrentUser>(),
-            clock,
-            Substitute.For<IAuditWriter>());
+            clock);
 
         await handler.CompleteAsync(runId, new Ecr.Application.Calculations.ModuleProfile(), ct);
     }
