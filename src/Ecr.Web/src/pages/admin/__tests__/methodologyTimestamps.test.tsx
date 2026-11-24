@@ -228,6 +228,8 @@ describe('MethodologiesPage: дата чинності в бейджі верс�
         traceLevel: 'Off',
         effectiveFrom: EffectiveFrom,
         effectiveTo: null,
+        // ✎ P-1124-1: перелік показує лише версії-скрипти (формульні — лише в базі, рішення людини 24.11).
+        engine: 'Script',
       },
     ],
   };
