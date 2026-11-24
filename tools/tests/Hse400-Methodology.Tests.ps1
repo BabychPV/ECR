@@ -226,6 +226,8 @@ Describe 'HSE400 methodology contract' {
         if ($mb.code -cne 'HSE400' -or $mb.kind -cne 'Bespoke' -or -not $mb.nameL10n.en -or -not $mb.nameL10n.ru) { throw 'методологія' }
         $vb = New-Hse400MethodologyVersionBody $m
         if ($vb.level -cne 'Module' -or $null -ne $vb.copyFromVersionId -or $vb.versionNumber -cne [string]$m.methodology.version) { throw 'версія' }
+        # P-1124-1: рушій явно Formulas - пропущений сервер з вимкненим формульним авторингом зробив би скрипт.
+        if ($vb.engine -cne 'Formulas') { throw 'рушій версії' }
         $rb = New-Hse400CatchAllRuleBody
         if ($rb.matchJson -cne '{}' -or -not $rb.isActive) { throw 'правило' }
         if ((Get-Hse400CatchAllRuleCode) -cnotmatch '^[A-Za-z][A-Za-z0-9_]{0,63}$') { throw 'код правила' }
