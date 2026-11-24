@@ -58,11 +58,7 @@ describe('queryKeys — фабрика ключів TanStack Query', () => {
       [...queryKeys.methodologies.list()],
       [...queryKeys.methodologies.versionsOf(sample)],
       [...queryKeys.methodologies.allVersionsOf()],
-      [...queryKeys.methodologies.formulas(sample)],
-      [...queryKeys.methodologies.allFormulas()],
-      [...queryKeys.methodologies.constants(sample)],
-      [...queryKeys.methodologies.rules(sample)],
-      [...queryKeys.methodologies.outputs(sample)],
+      [...queryKeys.methodologies.requiredInputs(sample)],
       [...queryKeys.methodologies.tests(sample)],
       [...queryKeys.methodologies.bindings(sample)],
     ];
@@ -133,7 +129,7 @@ describe('queryKeys — фабрика ключів TanStack Query', () => {
     expect(isPrefixOf(queryKeys.methodologies.all(), queryKeys.methodologies.bindings(1))).toBe(
       true,
     );
-    expect(isPrefixOf(queryKeys.methodologies.all(), queryKeys.methodologies.formulas(1))).toBe(
+    expect(isPrefixOf(queryKeys.methodologies.all(), queryKeys.methodologies.tests(1))).toBe(
       true,
     );
   });
@@ -149,12 +145,11 @@ describe('queryKeys — фабрика ключів TanStack Query', () => {
     );
   });
 
-  it('formulas(undefined) і versionsOf(undefined) лишаються стабільним ключем, а не порожнім масивом', () => {
+  it('versionsOf(undefined) лишається стабільним ключем, а не порожнім масивом', () => {
     // ⚠ Обидва домени приймають `undefined` (версія/шаблон ще не обрані на
     // екрані) — запит вимкнений (`enabled`), але ключ мусить лишатися
     // структурно стабільним між рендерами, інакше TanStack Query завів би
     // новий запис кешу на кожен рендер компонента.
-    expect(queryKeys.methodologies.formulas(undefined)).toEqual(['methodologies', 'formulas', undefined]);
     expect(queryKeys.templates.versionsOf(undefined)).toEqual(['templates', 'versionsOf', undefined]);
   });
   it('editAssignments: mine() - префікс mine(docId), all() - префікс усього домену, форми не розходяться', () => {

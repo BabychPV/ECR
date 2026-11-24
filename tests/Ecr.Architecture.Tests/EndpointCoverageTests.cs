@@ -1435,6 +1435,33 @@ public sealed partial class EndpointCoverageTests
         // із `script-migration/switch`); кнопки в редакторі немає й не планується — редактор працює з версіями на рушії Script.
         "POST /api/v1/methodologies/{p}/versions/{p}/script/parity",
 
+        // ✎ 24.11 (P-1124-1), рішення людини «має бути тільки наш новий редактор»: формульний авторинг виведено з
+        // інтерфейсу (сторінка методології — лише версії-скрипти; формульних версій в UI немає). Споживачі, що лишилися:
+        //   formulas/constants/categories/rules/category-rule/outputs/import — інструменти tools/land/Build-LandTemplate.ps1,
+        //   tools/hse400/Build-Hse400Template.ps1, tools/Ecr.MethodologyImport і tools/Ecr.MethodologyScriptMigration
+        //   (збирання з AF і перенесення на скрипт; на стенді збирання — Calculations:FormulaEngineAuthoring:Enabled=true);
+        //   constants/{p}/usage і rule-coverage — споживача немає (лише формульні версії).
+        // Усі ці дії прибираються разом із формульним рушієм у lane виведення після вікна P-1124-2 (перенесення всіх
+        // формульних версій на скрипт із паритетом) — одним зміненням контракту, а не по одній.
+        "GET /api/v1/methodologies/{p}/versions/{p}/formulas",
+        "PUT /api/v1/methodologies/{p}/versions/{p}/formulas/{p}",
+        "DELETE /api/v1/methodologies/{p}/versions/{p}/formulas/{p}",
+        "GET /api/v1/methodologies/{p}/versions/{p}/constants",
+        "PUT /api/v1/methodologies/{p}/versions/{p}/constants/{p}",
+        "GET /api/v1/methodologies/{p}/versions/{p}/constants/{p}/usage",
+        "GET /api/v1/methodologies/{p}/versions/{p}/categories",
+        "PUT /api/v1/methodologies/{p}/versions/{p}/categories/{p}",
+        "DELETE /api/v1/methodologies/{p}/versions/{p}/categories/{p}",
+        "GET /api/v1/methodologies/{p}/versions/{p}/rules",
+        "PUT /api/v1/methodologies/{p}/versions/{p}/rules/{p}",
+        "GET /api/v1/methodologies/{p}/versions/{p}/category-rule",
+        "PUT /api/v1/methodologies/{p}/versions/{p}/category-rule",
+        "DELETE /api/v1/methodologies/{p}/versions/{p}/category-rule",
+        "GET /api/v1/methodologies/{p}/versions/{p}/outputs",
+        "PUT /api/v1/methodologies/{p}/versions/{p}/outputs/{p}",
+        "GET /api/v1/methodologies/{p}/versions/{p}/rule-coverage",
+        "POST /api/v1/methodologies/import",
+
         // D-425 (Land «лише Running»): прапорець фільтра активності рядків ставить скрипт розгортання шаблону
         // (`tools/land/Build-LandTemplate.ps1`, етап RowFilter) за переліком `tools/land/land-row-filter.json`;
         // екрана налаштувань методології для цього прапорця ще немає — це рідкісна адмін-дія, що змінює числа.

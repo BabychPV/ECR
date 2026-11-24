@@ -1,4 +1,4 @@
-﻿import { useState, type JSX } from 'react';
+import { useState, type JSX } from 'react';
 import {
   Badge,
   Button,
@@ -23,7 +23,6 @@ import type {
   SimulationResultDto,
 } from '@/api/types';
 import { createMethodology } from '@/features/methodologies/api';
-import { MethodologyPackageImport } from '@/features/methodologies/MethodologyPackageImport';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -123,10 +122,8 @@ export function MethodologiesPage(): JSX.Element {
         title={t('methodologies.title')}
         actions={
           <Group gap="xs">
-            {/* Імпорт пакета з AF заводить і формули, і константи — тому обидва права. */}
-            {can(session.data, 'Calculation.EditFormula') && can(session.data, 'Calculation.EditConstant') && (
-              <MethodologyPackageImport />
-            )}
+            {/* ✎ 24.11 («має бути тільки наш новий редактор»): імпорт пакета з AF заводив ФОРМУЛЬНІ чернетки — кнопку
+                прибрано разом із формульним рушієм в інтерфейсі; пакет лишається серверним шляхом інструментів. */}
             {can(session.data, 'Calculation.EditFormula') && (
               <Button variant="default" onClick={() => setCreating(true)}>
                 {t('methodologies.newMethodology')}
