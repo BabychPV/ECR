@@ -39,7 +39,7 @@ public sealed class SourceCascadePendingGateReaderPassTests(SqlServerFixture sql
     private static long _doc = 9_300_000_000L + (Environment.ProcessId % 100_000 * 1000L);
 
     [Fact]
-    public async Task Живий_прохід_читача_тримає_свій_місяць_а_інший_місяць_документ_і_натискання_ні()
+    public async Task Живий_прохід_читача_тримає_рік_документа_а_інший_документ_і_натискання_ні()
     {
         var doc = NextDocument();
         var other = NextDocument();
@@ -48,8 +48,9 @@ public sealed class SourceCascadePendingGateReaderPassTests(SqlServerFixture sql
 
         Assert.True(await PendingAsync(doc, Period));
 
-        // Парно: інший місяць того самого документа, інший документ того самого місяця, звичайне натискання.
-        Assert.False(await PendingAsync(doc, Period + 1));
+        // ✎ Огляд b11: прохід читача тримає ВЕСЬ рік документа (інший місяць теж); парно: інший документ, звичайне натискання.
+        Assert.True(await PendingAsync(doc, Period + 1));
+        Assert.False(await PendingAsync(doc, Period + 100));
         Assert.False(await PendingAsync(NextDocument(), Period));
         Assert.False(await PendingAsync(other, Period));
 
@@ -115,7 +116,8 @@ public sealed class SourceCascadePendingGateReaderPassTests(SqlServerFixture sql
             CancellationToken.None);
 
         Assert.True(await PendingAsync(doc, Period));
-        Assert.False(await PendingAsync(doc, Period - 1));
+        Assert.True(await PendingAsync(doc, Period - 1)); // ✎ огляд b11: увесь рік
+        Assert.False(await PendingAsync(doc, Period + 100));
     }
 
     [Theory]

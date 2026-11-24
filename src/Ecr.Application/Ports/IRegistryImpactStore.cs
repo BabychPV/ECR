@@ -109,9 +109,14 @@ public interface IRegistryImpactStore
     /// <param name="lastPeriod">Найбільший ключ періоду (включно).</param>
     /// <param name="month">Обсяг «місяць» (див. перевантаження).</param>
     /// <param name="routedMonth">Місяць правки для ребра <c>MonthOwned</c>; <c>null</c> — без звуження.</param>
+    /// <param name="routedVersions">
+    /// ✎ W15z M1: версії шаблону, на яких звуження діє (<c>TemplateDependency.OwnedVersions</c>); період на іншій версії —
+    /// увесь рік. <c>null</c> — без звуження.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<RegistryImpactRow>> ListTemplateConsumersRoutedAsync(
-        IReadOnlyCollection<int> templateIds, int firstPeriod, int lastPeriod, int? month, int? routedMonth, CancellationToken ct)
+        IReadOnlyCollection<int> templateIds, int firstPeriod, int lastPeriod, int? month, int? routedMonth,
+        IReadOnlySet<int>? routedVersions, CancellationToken ct)
         => ListTemplateConsumersAsync(templateIds, firstPeriod, lastPeriod, month, ct);
 }
 

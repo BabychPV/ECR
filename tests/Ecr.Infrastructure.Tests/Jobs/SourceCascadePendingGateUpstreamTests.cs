@@ -131,7 +131,7 @@ public sealed class SourceCascadePendingGateUpstreamTests(SqlServerFixture sql)
     [Theory]
     [InlineData(PeriodScopeKind.Month, 0, 2026, 3, 202603, true)]   // період-власник місяця
     [InlineData(PeriodScopeKind.Month, 0, 2026, 3, 202605, true)]   // пізніший — каскад допише читачів
-    [InlineData(PeriodScopeKind.Month, 0, 2026, 3, 202602, false)]  // раніший
+    [InlineData(PeriodScopeKind.Month, 0, 2026, 3, 202602, true)]   // раніший теж (огляд b11: прогін будить раніших читачів, якір)
     [InlineData(PeriodScopeKind.Month, 0, 2026, null, 202601, true)] // місяць невідомий — увесь рік
     [InlineData(PeriodScopeKind.Month, 0, 2025, 3, 202603, false)]  // інший рік
     [InlineData(PeriodScopeKind.Year, 0, 2026, 3, 202601, true)]

@@ -71,8 +71,12 @@ public sealed class SubmitApproveCascadePendingHttpTests(SqlServerFixture sql)
         AssertCascadeRefusal(refused);
         Assert.Null(await StatusAsync(s).ConfigureAwait(true));
 
-        // 2. Крок місяця завершився (ланцюжок іде далі) — подання проходить.
+        // 2. ✎ Огляд b11 (HIGH-1): крок місяця завершився, але ланцюжок ще живий — наступний крок може розбудити раніших
+        // читачів (якір, [Period:#k]) — подання й далі 422; ланцюжок закінчився — проходить.
         await SetJobAsync(jobId, "Running", stepDone).ConfigureAwait(true);
+        AssertCascadeRefusal(
+            await ExpectAsync(app, HttpStatusCode.UnprocessableEntity, WorkflowAsync(author, s, "submit")).ConfigureAwait(true));
+        await SetJobAsync(jobId, "Succeeded", stepDone).ConfigureAwait(true);
         await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(author, s, "submit")).ConfigureAwait(true);
         Assert.Equal(DocumentStatus.Submitted, await StatusAsync(s).ConfigureAwait(true));
 

@@ -45,15 +45,25 @@ public static class DependencyGraphAssembler
                 new DependencyEvidence("sourceBinding", binding.BindingId, null, binding.SourceState.ToString()));
         }
 
-        // ✎ PERF-06b: «кожне читання формулою — комірка періоду-власника літерального місяця» (AND по всіх доказах ребра).
+        // ✎ PERF-06b: «кожне читання формулою — комірка періоду-власника літерального місяця» (AND по всіх доказах ребра),
+        // і окремо ПО ВЕРСІЯХ шаблону: старі версії (PerMonthCopies) не роблять неможливим звуження для періодів, що на
+        // версії YearWithMonthColumns (W15z: Land 1.0.8–1.0.18 читають довідник поза власником, 1.0.20 — у власника).
         var monthOwned = new Dictionary<(int Registry, int Template), bool>();
+        var ownedByVersion = new Dictionary<(int Registry, int Template, int Version), bool>();
         foreach (var read in inputs.TemplateReads)
         {
             Add(R(read.RegistryDefId), T(read.TemplateId), DependencyEdgeKind.TemplateFormula, read.Scope,
                 new DependencyEvidence(read.Source, read.FormulaDefId, read.TemplateVersionId, read.Detail));
             var key = (read.RegistryDefId, read.TemplateId);
             monthOwned[key] = monthOwned.GetValueOrDefault(key, true) && read.MonthOwned;
+            var byVersion = (read.RegistryDefId, read.TemplateId, read.TemplateVersionId);
+            ownedByVersion[byVersion] = ownedByVersion.GetValueOrDefault(byVersion, true) && read.MonthOwned;
         }
+
+        var ownedVersions = ownedByVersion
+            .Where(p => p.Value)
+            .GroupBy(p => (p.Key.Registry, p.Key.Template), p => p.Key.Version)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<int>)[.. g.Order()]);
 
         foreach (var read in inputs.MethodologyReads)
         {
@@ -79,7 +89,7 @@ public static class DependencyGraphAssembler
                 new DependencyEvidence("registryRule", rule.RuleId, null, null));
         }
 
-        var dependencies = Collapse(inputs, edges.ToDictionary(e => e.Key, e => e.Value.Scope), monthOwned);
+        var dependencies = Collapse(inputs, edges.ToDictionary(e => e.Key, e => e.Value.Scope), monthOwned, ownedVersions);
 
         var templateIds = edges.Keys
             .SelectMany(k => new[] { k.From, k.To })
@@ -113,7 +123,8 @@ public static class DependencyGraphAssembler
     private static List<TemplateDependency> Collapse(
         DependencyGraphInputs inputs,
         Dictionary<(DependencyNodeRef From, DependencyNodeRef To, DependencyEdgeKind Kind), PeriodScope> edges,
-        Dictionary<(int Registry, int Template), bool> monthOwned)
+        Dictionary<(int Registry, int Template), bool> monthOwned,
+        Dictionary<(int Registry, int Template), IReadOnlyList<int>> ownedVersions)
     {
         var ruleNext = inputs.RuleReads.ToLookup(r => r.ReadRegistryDefId, r => r.RuleRegistryDefId);
         var templateReaders = edges
@@ -156,6 +167,11 @@ public static class DependencyGraphAssembler
                     // ✎ PERF-06b: лише прямі читання формулами, кожне — у комірці періоду-власника місяця; методологія чи
                     // похідний довідник (правило) знімають позначку для всього ребра.
                     var owned = direct && formula && monthOwned.GetValueOrDefault((registry, template));
+                    IReadOnlyList<int>? versions = formula ? (direct ? ownedVersions.GetValueOrDefault((registry, template)) ?? [] : []) : null;
+
+                    // ✎ W15z M1: обсяг методологій — окремо від формул (ребро шаблону об'єднує обидва, і «місяць» методології з
+                    // «роком» старих версій формул давав «рік» без маски — звуження не діяло ніколи).
+                    PeriodScope? methodologyScope = formula ? null : effective;
                     var key = (binding.SourceTemplateId, template, binding.BindingId);
                     result[key] = result.TryGetValue(key, out var known)
                         ? known with
@@ -164,10 +180,16 @@ public static class DependencyGraphAssembler
                             ViaTemplateFormula = known.ViaTemplateFormula || formula,
                             ViaMethodology = known.ViaMethodology || !formula,
                             MonthOwned = known.MonthOwned && owned,
+                            OwnedVersions = versions is null
+                                ? known.OwnedVersions
+                                : known.OwnedVersions is null ? versions : [.. known.OwnedVersions.Intersect(versions).Order()],
+                            MethodologyScope = methodologyScope is not { } ms
+                                ? known.MethodologyScope
+                                : known.MethodologyScope is { } kms ? kms.Join(ms) : ms,
                         }
                         : new TemplateDependency(
                             binding.SourceTemplateId, template, binding.BindingId, binding.RegistryDefId, effective, formula, !formula,
-                            owned);
+                            owned, versions, methodologyScope);
                 }
             }
         }

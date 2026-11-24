@@ -25,7 +25,13 @@ namespace Ecr.Infrastructure.Jobs;
 /// (<c>-dependents-approved</c>) не блокує: вона й так переписує затверджені аркуші.
 /// </para>
 /// <para>
-/// Чи період ще в плані задачі року — <see cref="Pends"/>.
+/// ⛔ ✎ Огляд b11 (HIGH-1/2, рішення координатора 24.11): ворота тримають УВЕСЬ рік документа, поки жива будь-яка задача,
+/// що ще може змінити його числа: каскад року (<c>doc{id}-y{рік}-dependents</c>), залежні будь-якого місяця року
+/// (<c>doc{id}-p{рік}MM-dependents</c>), прохід читача будь-якого місяця (<see cref="IsReaderPass"/>; у Quartz — будь-яка задача
+/// цілі місяця), системна задача формул документа (<c>doc{id}-formula</c> — читачі <c>CrossPeriodFanOut</c>: пізніші місяці
+/// й ЯКІР року з річними підсумками) і ланка джерела, що доводить зміну до цього року. Доти ворота відпускали раніші місяці й
+/// завершені кроки ланцюжка, а прогін власника місяця читачами будив і раніші періоди (якір, <c>[Period:#k]</c>) — затверджений
+/// якір закріплював старий річний підсумок. Будити звужено (PERF-06b) — тримати консервативно.
 /// </para>
 /// <para>
 /// ✎ F5 (огляд b9, п. 1): і живий прохід читача періоду (ціль <c>doc{id}-p{період}</c>, <see cref="IsReaderPass"/>) — крок
@@ -64,8 +70,6 @@ namespace Ecr.Infrastructure.Jobs;
 public sealed class SourceCascadePendingGate(
     EcrDbContext db, SourceBindingGateCache? gateCache = null, IDependencyGraphProvider? graph = null) : ISourceCascadePendingGate
 {
-    private static readonly JsonSerializerOptions PayloadOptions = new(JsonSerializerDefaults.Web);
-
     // ✎ D-567 (4), b10: дзеркало Quartz у пам'яті (D-563, малі інсталяції; live — Quartz/InProcess) — рядок прогресу без
     // TargetKey, Lane і Payload, а JobId = `{тип}~{ціль}~{guid N}` (QuartzJobScheduler.TargetPrefixOf). Ціль такого рядка —
     // JobId без хвоста `~{guid}`: та сама форма, що TargetKey черги в базі. Рядок черги в базі — як доти (TargetKey).
@@ -86,7 +90,7 @@ public sealed class SourceCascadePendingGate(
           FROM itg.JobProgress AS q WITH (INDEX(IX_JobProgress_Document_Active))
         """ + "\n" + EffectiveTarget + "\n" + """
          WHERE q.DocumentId = @doc AND q.DocumentId IS NOT NULL AND q.[State] IN ('Queued', 'Running')
-           AND e.Tk IN (@yearTarget, @periodTarget, @readerTarget)
+           AND (e.Tk LIKE @recalcLike OR e.Tk = @formulaTarget)
         """;
 
     // ⛔ Огляд b9: ціль у черзі в базі — `{тип задачі}~{ціль}` (DbBackgroundJobScheduler.TargetKeyOf). Доти ворота порівнювали
@@ -148,9 +152,11 @@ public sealed class SourceCascadePendingGate(
     /// <inheritdoc />
     public async Task<bool> IsPendingAsync(long documentId, int periodKey, CancellationToken ct)
     {
-        var yearTarget = QueueKey(CalculationTrigger.SourceCascadeTargetOf(documentId, periodKey / 100));
-        var periodTarget = QueueKey(CalculationTrigger.DependentsTargetOf(documentId, new PeriodKey(periodKey)));
-        var readerTarget = QueueKey(Ecr.Application.Documents.RecalculateDocumentHandler.TargetOf(documentId, new PeriodKey(periodKey)));
+        var year = periodKey / 100;
+        var documentPrefix = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"doc{documentId}-");
+        var recalcLike = QueueKey(documentPrefix) + "%";
+        var formulaTarget = DbBackgroundJobScheduler.TargetKeyOf<IFormulaRecalculationJob>(
+            FormulaRecalculationTarget.OfDocument(documentId, createdByUserId: null));
 
         // Ребра «джерело → споживач» графа (будь-який стан зв'язки) і зв'язки, чиї документні ланки ведуть до каскаду.
         var upstream = await UpstreamAsync(ct).ConfigureAwait(false);
@@ -160,23 +166,13 @@ public sealed class SourceCascadePendingGate(
                 upstream is null ? CascadeSql : ExtendedSql,
                 new SqlParameter("@doc", documentId),
                 new SqlParameter("@period", periodKey),
-                new SqlParameter("@yearTarget", yearTarget),
-                new SqlParameter("@periodTarget", periodTarget),
-                new SqlParameter("@readerTarget", readerTarget))
+                new SqlParameter("@recalcLike", recalcLike),
+                new SqlParameter("@formulaTarget", formulaTarget))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        // ✎ D-567 (4), b10: жива задача Quartz на ціль каскаду чи проходу місяця — чекає (payload немає, D-567 (3)).
-        if (rows.Exists(r => r.Kind == "Q"))
-        {
-            return true;
-        }
-
-        if (rows.Exists(r => r.Kind == "C"
-                             && (r.TargetKey == periodTarget
-                                 || (r.TargetKey == readerTarget
-                                     ? IsReaderPass(r.Payload)
-                                     : Pends(r.State == "Running", r.Payload, periodKey)))))
+        // ✎ Огляд b11: будь-яка жива задача документа, що ще може змінити числа року, — чекає ввесь рік.
+        if (rows.Exists(r => r.Kind is "Q" or "C" && HoldsYear(r, documentPrefix, formulaTarget, year)))
         {
             return true;
         }
@@ -187,46 +183,103 @@ public sealed class SourceCascadePendingGate(
         }
 
         var consumerKind = (PeriodKind)(self.ConsumerPeriodKind ?? 0);
-        var owners = await OwnerRowsAsync(upstream, rows, consumer, consumerKind, documentId, ct).ConfigureAwait(false);
-        return rows.Exists(r => r.Kind == "U" && UpstreamPends(upstream, r, consumer, consumerKind, periodKey, owners));
+        return rows.Exists(r => r.Kind == "U" && UpstreamPends(upstream, r, consumer, consumerKind, periodKey));
     }
 
     /// <summary>
-    /// ✎ PERF-06b: ключі періодів-власників (<c>рік·100 + m</c>), які є в календарі проєкту документа, — для живих задач зв'язки
-    /// з місяцем на ребрах «комірка періоду-власника» (<see cref="MonthOwnerRouting"/>, те саме рішення, що постановка).
-    /// Звернень немає, коли таких задач немає чи проєкт не місячний.
+    /// ✎ Огляд b11 (HIGH-1/2): чи жива задача документа <paramref name="row"/> тримає рік <paramref name="year"/>.
     /// </summary>
-    private async Task<HashSet<int>> OwnerRowsAsync(
-        Upstream upstream, List<GateRow> rows, int consumerTemplateId, PeriodKind consumerKind, long documentId, CancellationToken ct)
+    /// <remarks>
+    /// Тримають: каскад року (<c>y{рік}-dependents</c>); залежні будь-якого місяця року (<c>p{рік}MM-dependents</c>); ціль
+    /// місяця року (<c>p{рік}MM</c>) — у Quartz завжди (payload немає), у черзі в базі — прохід читача (<see cref="IsReaderPass"/>,
+    /// звичайне натискання «Перерахувати» — ні); системна задача формул документа (<c>doc{id}-formula</c>: читачі fan-out) —
+    /// якщо в її комірках є період року або payload не читається. Не тримають: <c>-auto</c>, <c>-dependents-approved</c>
+    /// (переписує й затверджені), задачі формул людини (<c>-formula-u{id}</c>), інший рік.
+    /// </remarks>
+    private static bool HoldsYear(GateRow row, string documentPrefix, string formulaTarget, int year)
     {
-        if (consumerKind != PeriodKind.Monthly)
+        ArgumentNullException.ThrowIfNull(row);
+        if (row.TargetKey is not { } key)
         {
-            return [];
+            return false;
         }
 
-        var keys = new HashSet<int>();
-        foreach (var row in rows.Where(r => r.Kind == "U" && r.TargetKey is not null))
+        if (string.Equals(key, formulaTarget, StringComparison.Ordinal))
         {
-            if (SourceChangeKey.TryParse(BareTarget(row.TargetKey!), out var bindingId, out var year, out var month, out _)
-                && month is { } m
-                && MonthOwnerRouting.EdgesOwned(
-                    upstream.Edges.Where(e => e.ConsumerTemplateId == consumerTemplateId && e.BindingId == bindingId)))
+            return row.Kind == "Q" || FormulaTouchesYear(row.Payload, year);
+        }
+
+        var bare = BareTarget(key);
+        if (!bare.StartsWith(documentPrefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var rest = bare[documentPrefix.Length..];
+        var yearText = year.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (string.Equals(rest, $"y{yearText}-dependents", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (rest.Length < 7 || rest[0] != 'p' || !rest.AsSpan(1, 4).SequenceEqual(yearText)
+            || !int.TryParse(rest.AsSpan(5, 2), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out _))
+        {
+            return false;
+        }
+
+        var suffix = rest[7..];
+        return suffix switch
+        {
+            "-dependents" => true,
+            "" => row.Kind == "Q" || IsReaderPass(row.Payload),
+            _ => false,
+        };
+    }
+
+    /// <summary>Чи системна задача формул торкається року: період комірки (<c>cells[].periodKey</c>) чи тіла в році; сумнів — так.</summary>
+    private static bool FormulaTouchesYear(string? payload, int year)
+    {
+        if (string.IsNullOrEmpty(payload))
+        {
+            return true;
+        }
+
+        try
+        {
+            using var json = JsonDocument.Parse(payload);
+            var root = json.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
             {
-                keys.Add((year * 100) + m);
+                return true;
             }
-        }
 
-        if (keys.Count == 0)
+            var fallback = root.TryGetProperty("periodKey", out var body) && body.ValueKind == JsonValueKind.Number
+                ? body.GetInt32()
+                : (int?)null;
+            if (!root.TryGetProperty("cells", out var cells) || cells.ValueKind != JsonValueKind.Array)
+            {
+                return fallback is not { } only || only / 100 == year;
+            }
+
+            foreach (var cell in cells.EnumerateArray())
+            {
+                var period = cell.ValueKind == JsonValueKind.Object
+                             && cell.TryGetProperty("periodKey", out var p) && p.ValueKind == JsonValueKind.Number
+                    ? p.GetInt32()
+                    : fallback;
+                if (period is not { } known || known / 100 == year)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch (JsonException)
         {
-            return [];
+            return true;
         }
-
-        var projectId = await db.Documents.AsNoTracking()
-            .Where(d => d.Id == documentId)
-            .Select(d => d.ProjectId)
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
-        return [.. (await MonthOwnerRouting.ExistingOwnersAsync(db, [projectId], keys, ct).ConfigureAwait(false)).Select(o => o.PeriodKey)];
     }
 
     /// <summary>Ціль задачі перерахунку так, як її пише черга в базі (<c>IRecalculationJob~{ціль}</c>).</summary>
@@ -261,7 +314,7 @@ public sealed class SourceCascadePendingGate(
 
     /// <summary>Чи жива ланка джерела <paramref name="row"/> доведе каскад до періоду споживача.</summary>
     private static bool UpstreamPends(
-        Upstream upstream, GateRow row, int consumerTemplateId, PeriodKind consumerKind, int periodKey, HashSet<int> owners)
+        Upstream upstream, GateRow row, int consumerTemplateId, PeriodKind consumerKind, int periodKey)
     {
         var edges = upstream.Edges.Where(e => e.ConsumerTemplateId == consumerTemplateId).ToList();
         if (edges.Count == 0 || row.TargetKey is null)
@@ -275,11 +328,8 @@ public sealed class SourceCascadePendingGate(
             var byBinding = edges.Where(e => e.BindingId == bindingId).ToList();
             return !approved
                    && ScopeOf(byBinding) is { } scope
-                   && Affects(
-                       scope, year, month, periodKey, consumerKind,
-                       MonthOwnerRouting.EdgesOwned(byBinding)
-                       && month is { } m
-                       && MonthOwnerRouting.Narrows(consumerKind, owners.Contains((year * 100) + m)));
+                   && Affects(scope, year, month, periodKey, consumerKind);
+
         }
 
         // Документна ланка (задача формул чи -auto) документа-джерела зв'язки, що ставить каскад з -auto (стан Any).
@@ -317,23 +367,23 @@ public sealed class SourceCascadePendingGate(
 
     /// <summary>
     /// Чи зміна джерела (рік <paramref name="sourceYear"/>, місяць <paramref name="sourceMonth"/>; <c>null</c> — увесь рік)
-    /// дійде каскадом до періоду споживача — те саме відображення, що в <c>RegistryImpactRecalculationJob</c>
-    /// (<c>Month</c> — період-власник місяця, <c>Year</c> — увесь рік з маскою літеральних місяців, <c>All</c> — усі роки),
-    /// плюс ПІЗНІШІ періоди року при ребрі «місяць» (каскад дописує читачів обчислених чисел, D-566 п. 2 — консервативно).
+    /// зачіпає РІК споживача: <c>All</c> — так; <c>Year</c> з маскою літеральних місяців — коли маска містить місяць зміни;
+    /// інакше — той самий рік.
     /// </summary>
+    /// <remarks>
+    /// ⛔ ✎ Огляд b11 (HIGH-1): увесь рік, а не «період-власник і пізніші». Прогін власника місяця будить читачів його чисел,
+    /// зокрема РАНІШІ періоди — якір річної розкладки з річними підсумками (<c>PeriodCalendar.AnchorOf</c>) і
+    /// <c>[Period:#k]</c>; відпущений раніший місяць затвердили б зі старим підсумком. Будить постановка звужено (PERF-06b),
+    /// тримають ворота — рік.
+    /// </remarks>
     /// <param name="scope">Обсяг ребер зв'язки.</param>
     /// <param name="sourceYear">Рік зміни джерела.</param>
     /// <param name="sourceMonth">Місяць зміни; <c>null</c> — увесь рік.</param>
     /// <param name="periodKey">Період споживача.</param>
-    /// <param name="consumerKind">Періодичність проєкту споживача.</param>
-    /// <param name="monthOwned">
-    /// ✎ PERF-06b (<c>D-572</c>): кожне ребро зв'язки — <c>TemplateDependency.MonthOwned</c> (комірка періоду-власника місяця):
-    /// у місячному проєкті чекає період місяця зміни і ПІЗНІШІ (їх може дописати прогін власника — <c>CrossPeriodFanOut</c>),
-    /// раніші — ні; той самий звужений набір, що ставить <c>RegistryImpactRecalculationJob</c>, плюс консервативний хвіст.
-    /// </param>
-    internal static bool Affects(
-        PeriodScope scope, int sourceYear, int? sourceMonth, int periodKey, PeriodKind consumerKind, bool monthOwned = false)
+    /// <param name="consumerKind">Періодичність проєкту споживача (не звужує: тримається рік).</param>
+    internal static bool Affects(PeriodScope scope, int sourceYear, int? sourceMonth, int periodKey, PeriodKind consumerKind)
     {
+        _ = consumerKind;
         if (scope.Kind == PeriodScopeKind.All)
         {
             return true;
@@ -344,103 +394,15 @@ public sealed class SourceCascadePendingGate(
             return false;
         }
 
-        if (scope.Kind == PeriodScopeKind.Year)
-        {
-            if (scope.MonthMask == 0 || sourceMonth is not { } m)
-            {
-                return true;
-            }
-
-            if ((scope.MonthMask & (1 << m)) == 0)
-            {
-                return false;
-            }
-
-            return !monthOwned || consumerKind != PeriodKind.Monthly || periodKey % 100 >= m;
-        }
-
-        return sourceMonth is not { } month
-               || DocumentSourceGate.OwnedMonths(consumerKind, periodKey % 100).Any(owned => owned >= month);
+        return scope.Kind != PeriodScopeKind.Year
+               || scope.MonthMask == 0
+               || sourceMonth is not { } m
+               || (scope.MonthMask & (1 << m)) != 0;
     }
 
     /// <summary>Ребра графа й зв'язки, документні ланки яких ведуть до каскаду.</summary>
     private sealed record Upstream(
         IReadOnlyList<TemplateDependency> Edges, HashSet<int> AutoBindings);
-
-    /// <summary>
-    /// Чи задача каскаду року (payload <see cref="RecalculationRequest"/>) ще має порахувати період <paramref name="periodKey"/>.
-    /// </summary>
-    /// <remarks>
-    /// <list type="bullet">
-    /// <item>Перший крок ще не завершився (<c>chainAfter</c> = <c>null</c>, план не записано): період у
-    /// <c>cascadePeriods</c>/<c>cascadeAppend</c> — так.</item>
-    /// <item>Після першого кроку — період у решті плану <c>chainPlan</c> (з кроком, що виконується) чи в <c>cascadeAppend</c>.
-    /// Крок, що завершився, знімає свій період із <c>chainPlan</c> продовження — і відмова зникає. (<c>cascadePeriods</c>
-    /// продовження несе далі незмінними — після першого кроку вони не ознака.)</item>
-    /// <item>План ще не ухвалено чи до ухваленого злилися нові періоди (<c>cascadeAppend</c>): план допише ПІЗНІШІ місяці,
-    /// що читають обчислені числа (<c>CrossReadsAsync</c>, <c>D-566</c> п. 2), — тому кожен період, пізніший за найменший
-    /// із ще не спланованих (<c>cascadePeriods</c>/<c>cascadeAppend</c>/<c>cascadeSeeds</c>), теж чекає. Сумнів — у бік
-    /// «чекати»: це секунди вікна злиття й черги, а хибне «можна» закріпило б застарілі числа.</item>
-    /// <item>Крок, що виконується (<c>Running</c>), може дописати в план пізніших читачів своїх змінених чисел — поки він
-    /// іде, кожен період, пізніший за його (перший у <c>chainPlan</c>), теж чекає.</item>
-    /// <item>Старий payload ланцюжка без плану — усі періоди після <c>chainAfter</c>.</item>
-    /// <item>Payload не читається — чекає (консервативно).</item>
-    /// </list>
-    /// </remarks>
-    /// <param name="running">Рядок у стані <c>Running</c> (крок виконується).</param>
-    /// <param name="payload">Тіло задачі.</param>
-    /// <param name="periodKey">Період споживача.</param>
-    internal static bool Pends(bool running, string? payload, int periodKey)
-    {
-        RecalculationRequest? request;
-        try
-        {
-            request = payload is null ? null : JsonSerializer.Deserialize<RecalculationRequest>(payload, PayloadOptions);
-        }
-        catch (JsonException)
-        {
-            request = null;
-        }
-
-        if (request is null)
-        {
-            return true;
-        }
-
-        if (request.ChainAfter is not { } after)
-        {
-            // Перший крок ще не завершився: план не записано. Задача року без періодів каскаду — не наша форма: увесь рік.
-            if (request.CascadePeriods is null)
-            {
-                return true;
-            }
-
-            return Has(request.CascadePeriods, periodKey)
-                   || Has(request.CascadeAppend, periodKey)
-                   || periodKey > Floor(request.CascadePeriods, request.CascadeAppend, request.CascadeSeeds);
-        }
-
-        // ⚠ Продовження ланцюжка несе ПЕРШІ cascadePeriods далі (`request with { … }`) — після першого кроку вони вже не
-        // ознака роботи; чинні решта плану (chainPlan) і злиті після нього періоди (cascadeAppend).
-        if (Has(request.ChainPlan, periodKey) || Has(request.CascadeAppend, periodKey))
-        {
-            return true;
-        }
-
-        if (request.CascadeAppend is not null)
-        {
-            return periodKey > Floor(request.CascadeAppend, request.CascadeSeeds);
-        }
-
-        // Крок, що ВИКОНУЄТЬСЯ (перший у chainPlan), дописує в план пізніших читачів своїх змінених чисел
-        // (`ExtendWithLaterReadersAsync`) — поки він іде, пізніші за нього теж чекають.
-        if (running && request.ChainPlan is { Length: > 0 } plan && periodKey > plan.Min())
-        {
-            return true;
-        }
-
-        return request.ChainPlan is null && periodKey > after;
-    }
 
     /// <summary>
     /// ✎ F5 (огляд b9, п. 1): чи задача цілі <c>doc{id}-p{період}</c> — прохід читача (<c>foreignOwnerPass</c>, його ставить
@@ -476,11 +438,6 @@ public sealed class SourceCascadePendingGate(
     /// при поверненні в чергу): воріт вона тримає місяць, поки задача жива.
     /// </summary>
     internal const string ReaderPassMergedField = "readerPassMerged";
-
-    private static int Floor(params int[]?[] sets)
-        => sets.SelectMany(s => s ?? []).DefaultIfEmpty(int.MaxValue).Min();
-
-    private static bool Has(int[]? periods, int periodKey) => periods is not null && Array.IndexOf(periods, periodKey) >= 0;
 
     /// <summary>Рядок відповіді воріт.</summary>
     /// <param name="Kind"><c>C</c> — задача каскаду документа; <c>U</c> — ланка джерела; <c>T</c> — шаблон документа.</param>
