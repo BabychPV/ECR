@@ -95,22 +95,6 @@ function show(page: JSX.Element, path: string): void {
 
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, FilterDebounceMs * 2));
 
-/** Гортає на другу сторінку, набирає `text` у поле й повертає запити ПІСЛЯ гортання. */
-async function pageThenType(seen: URLSearchParams[], label: string, text: string): Promise<URLSearchParams[]> {
-  const user = userEvent.setup();
-  const more = await screen.findByRole('button', { name: t('documents.more') }, { timeout: SlowEnvTimeout });
-
-  await user.click(more);
-  await waitFor(() => expect(seen).toHaveLength(2));
-  expect(seen[1]?.get('cursor')).toBe('page-2');
-
-  await user.type(screen.getByRole('textbox', { name: label }), text);
-  await waitFor(() => expect(seen.length).toBeGreaterThan(2));
-  await settle();
-
-  return seen.slice(2);
-}
-
 /** Гортає на другу сторінку, обирає варіант `option` у переліку `label` і повертає запити ПІСЛЯ гортання. */
 async function pageThenSelect(seen: URLSearchParams[], label: string, option: string): Promise<URLSearchParams[]> {
   const user = userEvent.setup();
