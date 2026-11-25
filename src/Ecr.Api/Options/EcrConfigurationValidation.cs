@@ -193,6 +193,9 @@ public static partial class EcrConfigurationValidation
         // Q-17: читається `GetValue<bool>` у DependencyInjection (Infrastructure).
         "Collection:MonthColumnRouting",
 
+        // P-1124-1: опечатка («ture») мовчки лишила б формульний авторинг вимкненим на стенді збирання — краще стоп.
+        Ecr.Application.Calculations.FormulaEngineAuthoring.EnabledKey,
+
         // ✎ B179 L2, P-0118-31/33: ключів HSE400 «перерахунок залежних Land» і «склад із документа» більше немає —
         // вирішує лише біт зв'язки. Залишкова змінна середовища не перевіряється й не читається (старт не падає).
 

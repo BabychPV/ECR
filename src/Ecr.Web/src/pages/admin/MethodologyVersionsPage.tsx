@@ -1,4 +1,5 @@
-import { lazy, Suspense, useMemo, useState, type JSX } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from 'react';
+import { preloadScriptEditorWhenIdle } from '@/features/methodologyScript/preloadScriptEditor';
 import { Alert, Button, Group, Select, Skeleton, Stack, Table, Text, TextInput } from '@mantine/core';
 import { ResizableModal } from '@/shared/ui/ResizableModal';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -100,6 +101,9 @@ export function MethodologyVersionsPage(): JSX.Element {
   const current = useMemo(() => currentScriptVersion(all, todayIso()), [all]);
   // ⚠ Режими править чернетка: є чернетка-скрипт — форма її (редагована), інакше — поточної (на читання).
   const modesTarget = useMemo(() => modesVersion(all, current), [all, current]);
+
+  // ✎ P-1124-1 (замір 25.11): звідси людина йде в редактор скрипта — Monaco прогрівається у вільний час браузера.
+  useEffect(() => preloadScriptEditorWhenIdle(), []);
 
   const versionDeletion = useDeleteVersionAction({ methodologyId, allowed: mayEdit });
   const [compareTarget, setCompareTarget] = useState<MethodologyDraftVersionDto | null>(null);

@@ -417,6 +417,31 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
     await requiredDialog.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(requiredDialog).toBeHidden({ timeout: 30_000 });
     await expect(required.getByRole('table')).toContainText('A', { timeout: 30_000 });
+
+    // Змінити (підказка) → у переліку; завести KIND → прибрати з підтвердженням → KIND зник, A лишилась.
+    await required.getByRole('button', { name: 'Edit', exact: true }).first().click();
+    const editDialog = ui.getByRole('dialog');
+    await editDialog.getByRole('textbox', { name: 'Hint' }).fill('e2e: A is required');
+    await editDialog.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(editDialog).toBeHidden({ timeout: 30_000 });
+    await expect(required.getByRole('table')).toContainText('e2e: A is required', { timeout: 30_000 });
+
+    await required.getByRole('button', { name: 'Add required input' }).click();
+    const kindDialog = ui.getByRole('dialog');
+    const kindField = kindDialog.getByRole('textbox', { name: 'Column' });
+    await kindField.click();
+    await kindField.fill('KIND');
+    await ui.getByRole('option', { name: new RegExp(`^KIND · S1/${TableCode}$`) }).first().click();
+    await kindDialog.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(kindDialog).toBeHidden({ timeout: 30_000 });
+    const kindRow = required.getByRole('row', { name: /KIND/ });
+    await expect(kindRow).toBeVisible({ timeout: 30_000 });
+    await kindRow.getByRole('button', { name: 'Remove' }).click();
+    const confirmRemove = ui.getByRole('dialog', { name: 'Remove the required input column?' });
+    await confirmRemove.getByRole('button', { name: 'Remove' }).click();
+    await expect(confirmRemove).toBeHidden({ timeout: 30_000 });
+    await expect(required.getByRole('row', { name: /KIND/ })).toHaveCount(0, { timeout: 30_000 });
+    await expect(required.getByRole('table')).toContainText('A');
     await shot(ui, 'ms-ui-required-light');
 
     // 5c. Код на весь екран: незбережена правка, курсор і «Problems» переживають вхід/вихід; Ctrl+S працює всередині.
