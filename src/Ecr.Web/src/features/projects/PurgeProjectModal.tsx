@@ -1,5 +1,5 @@
 import { useEffect, useState, type JSX } from 'react';
-import { Alert, Button, Group, List, Loader, Modal, Stack, Text, Textarea, TextInput } from '@mantine/core';
+import { Alert, Button, Code, Group, List, Loader, Modal, Stack, Text, Textarea, TextInput } from '@mantine/core';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -8,6 +8,23 @@ import { usePurgePreview, usePurgeProject } from './purgeProject';
 
 /** Найдовша причина — та сама межа, що на сервері (`PurgeProjectHandler.MaxReasonLength`). */
 const MaxReasonLength = 500;
+
+/** Місце коду в перекладі підпису: переклад може ставити `{code}` будь-де в реченні. */
+const CodeMarker = '⁣';
+
+/** Підпис звичайним текстом, у якому моноширинний лише сам код проєкту. */
+function CodeLabel({ text, code }: { readonly text: string; readonly code: string }): JSX.Element {
+  const [before, ...rest] = text.split(CodeMarker);
+  if (rest.length === 0) return <>{text}</>;
+
+  return (
+    <>
+      {before}
+      <Code data-purge-code="">{code}</Code>
+      {rest.join(code)}
+    </>
+  );
+}
 
 /**
  * ✎ 25.11: діалог «Видалити проєкт з усіма даними» (вкладка Lifecycle, лише `Project.DeleteWithData`).
@@ -140,12 +157,13 @@ export function PurgeProjectModal({
           disabled={blocked}
         />
         <TextInput
-          label={t('projects.purge.typeCode', { code })}
+          label={<CodeLabel text={t('projects.purge.typeCode', { code: CodeMarker })} code={code} />}
           value={typed}
           onChange={(event) => setTyped(event.currentTarget.value)}
           autoComplete="off"
           spellCheck={false}
-          ff="monospace"
+          // ⚠ Моноширинний — лише саме поле вводу коду; `ff` на TextInput лягав і на підпис (увесь підпис моноширинним).
+          styles={{ input: { fontFamily: 'var(--mantine-font-family-monospace)' } }}
           disabled={blocked}
           data-autofocus
         />
