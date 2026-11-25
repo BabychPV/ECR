@@ -184,7 +184,7 @@ export function RequiredInputsSummary({ cells, columns, rows }: RequiredInputsPr
   return (
     <Popover position="bottom-start" withArrow shadow="md" width={480} trapFocus={false}>
       <Popover.Target>
-        <Button variant="light" color="statusWarning" size="compact-sm" data-required-inputs="warning">
+        <Button variant="light" color="statusWarning" data-required-inputs="warning">
           {t('grid.requiredInput.summary', { count: groups.length })}
         </Button>
       </Popover.Target>
