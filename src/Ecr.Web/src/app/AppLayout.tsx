@@ -28,6 +28,8 @@ import { NavbarDesktopBreakpoint, NavbarDesktopQuery } from '@/app/navbarBreakpo
 import { notifications } from '@mantine/notifications';
 import { Navigate, Outlet, useLocation, useMatches } from 'react-router-dom';
 import { AppScrollRestoration } from './AppScrollRestoration';
+// ✎ 25.11: шматки КАРКАСА — через lazyWithReload: їхня відмова після оновлення перезавантажує сторінку, а не валить каркас.
+import { lazyWithReload } from './chunkReload';
 import { Breadcrumbs, isRouteHandle } from './Breadcrumbs';
 import { NavbarCollapseToggle } from './NavbarCollapseToggle';
 import { NavRouteLink } from './NavRouteLink';
@@ -43,9 +45,9 @@ import { useRouteTransitionFocus } from './useRouteTransitionFocus';
 import { usePreferenceSync } from '@/features/preferences/usePreferenceSync';
 // ✎ debt-1109 x8: кнопка «My tasks» з лічильниками (черги завдань, передач, погоджень, повернень) — лінивим чанком,
 // як і 404 та годинник бездіяльності: спільний чанк оболонки довів DocumentPage/DocumentsPage до межі 250 КБ (D-132).
-const MyTasksLauncher = lazy(async () => ({ default: (await import('@/features/jobs/MyTasksLauncher')).MyTasksLauncher }));
+const MyTasksLauncher = lazyWithReload(async () => ({ default: (await import('@/features/jobs/MyTasksLauncher')).MyTasksLauncher }));
 // ✎ debt-1109 x8: кнопка палітри (Ctrl+K) — теж лінивим чанком; після #792 DocumentPage знову вийшов за 250 КБ.
-const SearchLauncher = lazy(async () => ({ default: (await import('@/features/search/SearchLauncher')).SearchLauncher }));
+const SearchLauncher = lazyWithReload(async () => ({ default: (await import('@/features/search/SearchLauncher')).SearchLauncher }));
 import { useSession } from '@/shared/session/useSession';
 import { isCatalogResolved, language, loadCatalog, loginChosenLanguage, t } from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
@@ -54,7 +56,7 @@ import { BrandMark } from '@/shared/ui/BrandMark';
 import { RouteAnnouncer } from '@/shared/ui/RouteAnnouncer';
 import { UnsavedGuard } from '@/shared/ui/UnsavedGuard';
 // D-471: годинник бездіяльності — лінивий чанк, як і 404: бюджет спільного чанка оболонки (D-132).
-const IdleSignOut = lazy(async () => ({ default: (await import('@/shared/session/IdleSignOut')).IdleSignOut }));
+const IdleSignOut = lazyWithReload(async () => ({ default: (await import('@/shared/session/IdleSignOut')).IdleSignOut }));
 import { flushUnsaved, hasUnsavedChanges } from '@/shared/ui/unsavedSources';
 import { UserMenu } from '@/shared/ui/UserMenu';
 
