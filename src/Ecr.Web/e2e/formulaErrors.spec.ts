@@ -281,6 +281,9 @@ test('C-1 formula errors (помилка формули): value kept, dependents
 
   // 3. Клієнт: позначки комірок і ✎ B78 панель «Проблеми розрахунку» — рядок на причину, формула лише в деталях.
   await page.goto(`/documents/${String(arranged.documentId)}?periodKey=${String(arranged.periodKey)}`);
+  // ✎ b14 doc-notices-compact: смуга над сіткою — блокувальна (помилка формули), панель місяця — у її деталях.
+  await expect(page.getByTestId('document-calc-strip')).toHaveAttribute('data-blocking', 'true', { timeout: 60_000 });
+  await revealCalcPanels(page);
   const panel = page.getByTestId('document-calc-issues');
   await expect(panel).toBeVisible({ timeout: 60_000 });
   await expect(panel).toHaveAttribute('data-blocking', 'true');
@@ -332,3 +335,16 @@ test('C-1 formula errors (помилка формули): value kept, dependents
   });
   expect(submit.status(), `submit: ${await submit.text()}`).toBe(204);
 });
+
+/**
+ * ✎ b14 doc-notices-compact: проблеми розрахунку над сіткою — ОДНА смуга, згорнута; панелі місяців — у її «Details →
+ * Technical details». Розгорнути обидва рівні (Details пам'ятається між відкриттями, Technical details — ні).
+ */
+async function revealCalcPanels(page: Page): Promise<void> {
+  const toggle = page.getByTestId('document-calc-strip-toggle');
+  await expect(toggle, 'смуги проблем розрахунку немає').toBeVisible({ timeout: 60_000 });
+  if ((await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click();
+  const technical = page.getByTestId('document-calc-strip-technical-toggle');
+  await expect(technical).toBeVisible();
+  if ((await technical.getAttribute('aria-expanded')) === 'false') await technical.click();
+}
