@@ -16,6 +16,7 @@ import {
   initialValues,
   isNumericColumn,
   num,
+  numTitle,
   scopeLabel,
   scopeNamesOf,
   type ScopeNames,
@@ -107,9 +108,9 @@ function SubstancesTable({ source, id, context }: { readonly source: AirSource; 
           <tr key={substance.id} data-testid="air-substance-row">
             <td className="pa-code">{substance.substanceCode}</td>
             <td>{cell(substance.substanceName)}</td>
-            <td className="pa-num">{num(substance.gramsPerSecond)}</td>
-            <td className="pa-num">{num(substance.mgPerNm3)}</td>
-            <td className="pa-num">{num(substance.tonsPerYear)}</td>
+            <td className="pa-num" title={numTitle(substance.gramsPerSecond)}>{num(substance.gramsPerSecond)}</td>
+            <td className="pa-num" title={numTitle(substance.mgPerNm3)}>{num(substance.mgPerNm3)}</td>
+            <td className="pa-num" title={numTitle(substance.tonsPerYear)}>{num(substance.tonsPerYear)}</td>
             <AddedCells columns={substanceColumns} values={substance.added} />
             {onEditSubstance !== null && (
               <td className="pa-actions">
@@ -216,13 +217,13 @@ function SourcesTable({ sources, context }: { readonly sources: readonly AirSour
                   <td>{cell(source.sourceName)}</td>
                   <td>{cell(source.emissionPointName)}</td>
                   <td title={sourceTypeLabel(source.sourceType)}>{sourceTypeShort(source.sourceType)}</td>
-                  <td className="pa-num">{num(source.quantity)}</td>
-                  <td className="pa-num">{num(source.hoursPerYear)}</td>
-                  <td className="pa-num">{num(source.height)}</td>
-                  <td className="pa-num">{num(source.diameter)}</td>
-                  <td className="pa-num">{num(source.velocity)}</td>
-                  <td className="pa-num">{num(source.volume)}</td>
-                  <td className="pa-num">{num(source.temperature)}</td>
+                  <td className="pa-num" title={numTitle(source.quantity)}>{num(source.quantity)}</td>
+                  <td className="pa-num" title={numTitle(source.hoursPerYear)}>{num(source.hoursPerYear)}</td>
+                  <td className="pa-num" title={numTitle(source.height)}>{num(source.height)}</td>
+                  <td className="pa-num" title={numTitle(source.diameter)}>{num(source.diameter)}</td>
+                  <td className="pa-num" title={numTitle(source.velocity)}>{num(source.velocity)}</td>
+                  <td className="pa-num" title={numTitle(source.volume)}>{num(source.volume)}</td>
+                  <td className="pa-num" title={numTitle(source.temperature)}>{num(source.temperature)}</td>
                   <td className="pa-num">{formatNumber(source.substances.length)}</td>
                   <AddedCells columns={sourceColumns} values={source.added} />
                   {onEditSource !== null && (
@@ -275,8 +276,8 @@ function TotalsTable({ totals }: { readonly totals: readonly AirTotal[] }): JSX.
               </th>
               <td>{cell(total.substanceName)}</td>
               <td className="pa-num">{formatNumber(total.sources)}</td>
-              <td className="pa-num">{num(total.gramsPerSecond)}</td>
-              <td className="pa-num">{num(total.tonsPerYear)}</td>
+              <td className="pa-num" title={numTitle(total.gramsPerSecond)}>{num(total.gramsPerSecond)}</td>
+              <td className="pa-num" title={numTitle(total.tonsPerYear)}>{num(total.tonsPerYear)}</td>
             </tr>
           ))}
         </tbody>

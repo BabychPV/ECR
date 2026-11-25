@@ -1,3 +1,4 @@
+import { formatDecimalReadable } from '@/shared/format/number';
 import { t } from '@/shared/i18n';
 import type { AirAddedColumn, AirLimitsPermit, AirScopeFields, AirSource, AirSubstance } from './airTypes';
 
@@ -13,16 +14,20 @@ export function cell(value: string | null | undefined): string {
 }
 
 /**
- * Десяткове число з сервера для показу. Реальний сервер віддає рядок із повною шкалою колонки
- * (`0.5000000000000000`, `0.0000000000035000`): нулі в хвості дробу не несуть значення і засмічують таблицю. Відкидаємо лише
- * їх (і крапку, якщо дріб порожній) — ЗНАЧЕННЯ не змінюється й не округлюється (`3.5e-12` лишається `0.0000000000035`).
+ * Десяткове число з сервера для показу — спільним читабельним поданням (`formatDecimalReadable`, людина 25.11: «числа в
+ * пермітах не вистачає місця»): без хвостових нулів шкали (`0.5000000000000000` → `0.5`), ≤ 7 значущих, мовою інтерфейсу,
+ * крихітні — науковим записом (`0.0000000000035` → `3.5E-12`). Точне значення — `numTitle` (підказка комірки).
  * Не десятковий текст показується як є.
  */
 export function num(value: string | null | undefined): string {
   const text = cell(value);
-  if (!/^-?\d+\.\d+$/.test(text)) return text;
+  return formatDecimalReadable(text)?.text ?? text;
+}
 
-  return text.replace(/0+$/, '').replace(/\.$/, '');
+/** Точне значення для підказки комірки, коли `num` його скоротив; інакше `undefined`. */
+export function numTitle(value: string | null | undefined): string | undefined {
+  const readable = formatDecimalReadable(value);
+  return readable?.rounded === true ? readable.exact : undefined;
 }
 
 /**

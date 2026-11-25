@@ -1,9 +1,10 @@
 import { useState, type JSX } from 'react';
-import { Button, Group, Modal, NumberInput, Stack, TextInput } from '@mantine/core';
+import { Button, Group, Modal, Stack, TextInput } from '@mantine/core';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { serverMessage } from '@/features/registries/rc816/serverMessage';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
+import { DecimalInput } from '@/shared/ui/DecimalInput';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showErrorText } from '@/shared/ui/notify';
 import { changedValues, type EditField } from './airCardModel';
@@ -103,14 +104,11 @@ export function AirRowEditor({
           <div className="pa-edit-grid">
             {target.fields.map((field) =>
               field.kind === 'number' ? (
-                <NumberInput
+                <DecimalInput
                   key={field.code}
                   label={field.label}
                   value={draft[field.code] ?? ''}
-                  onChange={(value) => set(field.code, typeof value === 'number' ? String(value) : value)}
-                  hideControls
-                  allowDecimal
-                  decimalSeparator="."
+                  onValueChange={(value) => set(field.code, value)}
                   data-field={field.code}
                 />
               ) : (
