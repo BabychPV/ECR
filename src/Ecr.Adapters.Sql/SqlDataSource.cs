@@ -306,7 +306,8 @@ public sealed partial class SqlDataSource(
     /// замовника (як у <see cref="DiscoverAsync"/>).
     /// </para>
     /// </remarks>
-    public async Task<ExternalTable> ReadTableAsync(int dataSourceId, string queryKey, int maxRows, CancellationToken ct)
+    public async Task<ExternalTable> ReadTableAsync(
+        int dataSourceId, string queryKey, string? fallbackQuery, int maxRows, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(queryKey);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxRows);
@@ -318,7 +319,7 @@ public sealed partial class SqlDataSource(
         var source = await store.FindDataSourceAsync(dataSourceId, ct).ConfigureAwait(false)
                      ?? throw Unavailable(dataSourceId);
 
-        var query = Query(source.Code, queryKey);
+        var query = Query(source.Code, queryKey, fallbackQuery);
 
         await using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
         await using var transaction = (SqlTransaction)await connection
@@ -361,22 +362,25 @@ public sealed partial class SqlDataSource(
         return new ExternalTable(columns, rows, truncated);
     }
 
-    /// <summary>Текст запиту: спершу власний запит джерела, далі спільний.</summary>
+    /// <summary>Текст запиту: спершу власний запит джерела, далі спільний, далі несекретний запасний викликача.</summary>
     /// <param name="code">Код джерела — щоб FLERT і сусідня SQL-база не ділили один запит.</param>
     /// <param name="key">Ключ запиту.</param>
+    /// <param name="fallback">Текст із appsettings викликача (<c>Flert:Sync:CompositionQuery</c>); <c>null</c> — немає.</param>
     /// <remarks>
     /// ⚠ Канал налаштувань тут той самий <see cref="ISecretProvider"/>, що й у
     /// <c>PiSqlClientDataSource</c>. Запит не секрет, і читати його через порт
     /// секретів — не краса; але друга дорога до конфігурації в сусідньому
     /// адаптері коштувала б дорожче за цю незграбність.
     /// </remarks>
-    private string Query(string code, string key)
+    private string Query(string code, string key, string? fallback = null)
     {
         var scoped = key.Insert("Sql:".Length, $"{code}:");
 
         var configured = settings?.Find(scoped) is { Length: > 0 } own
             ? own
-            : settings?.Find(key);
+            : settings?.Find(key) is { Length: > 0 } shared
+                ? shared
+                : fallback;
 
         if (string.IsNullOrWhiteSpace(configured))
         {
