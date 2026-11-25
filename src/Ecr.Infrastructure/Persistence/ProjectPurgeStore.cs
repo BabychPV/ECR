@@ -106,9 +106,24 @@ public sealed class ProjectPurgeStore(
                  WHERE a.DocumentId IN (SELECT CAST([value] AS bigint) FROM OPENJSON({JsonSerializer.Serialize(docIds)}))
                 """).OrderBy(k => k).Take(1_000).ToListAsync(ct).ConfigureAwait(false);
 
-        var dependants = new List<ProjectPurgeDependant>();
-        dependants.AddRange(await EventMapDependantsAsync(row.Code, docIds, ct).ConfigureAwait(false));
-        dependants.AddRange(await SourceBindingDependantsAsync(projectId, row.Code, docIds, ct).ConfigureAwait(false));
+        // ✎ R3 C2-b: мапи подій на ВЛАСНІ документи — окремий перелік (інша причина й інший вихід: прибрати в Sources),
+        // а не «залежні інших проєктів».
+        var eventMaps = await EventMapDependantsAsync(row.Code, docIds, ct).ConfigureAwait(false);
+        var dependants = await SourceBindingDependantsAsync(projectId, row.Code, docIds, ct).ConfigureAwait(false);
+
+        // ✎ R3 C2-f: місяці із затвердженими аркушами — видаляються без повернення; у перегляд і журнал.
+        var approvedMonths = await db.ApprovalStates.AsNoTracking()
+            .Where(s => docIds.Contains(s.DocumentId) && s.Status == Domain.Enums.DocumentStatus.Approved)
+            .Select(s => s.PeriodKey)
+            .Distinct()
+            .OrderBy(k => k)
+            .Take(1_000)
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        // ✎ R3 C2-g: проєкт золотих тестів HSE400 — попередження (інструменти tools/hse400), не блок: вирішує людина.
+        IReadOnlyList<string> warnings = string.Equals(row.Code, Hse400CompositionMapping.GoldProjectCode, StringComparison.Ordinal)
+            ? [ProjectPurgeWarnings.Hse400Tools]
+            : [];
 
         return new ProjectPurgeFacts(
             row.Code,
@@ -120,13 +135,52 @@ public sealed class ProjectPurgeStore(
             counts,
             months,
             archived,
-            dependants);
+            dependants,
+            eventMaps,
+            approvedMonths,
+            warnings);
     }
 
     /// <inheritdoc />
-    public async Task<long> PurgeAsync(int projectId, IReadOnlyList<long> documentIds, CancellationToken ct)
+    public async Task<ProjectPurgeResult> PurgeAsync(int projectId, IReadOnlyList<long> documentIds, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(documentIds);
+
+        try
+        {
+            return await PurgeCoreAsync(projectId, documentIds, ct).ConfigureAwait(false);
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 547)
+        {
+            // ✎ R3 C2-e: під час видалення в проєкті з'явився рядок, якого немає у фактах (новий документ, період, прогін):
+            // DELETE падає на FK. Транзакція викликача відкочується — нічого не видалено; людині 409 з причиною, не 500.
+            throw new Application.Errors.ConcurrencyConflictException(
+                "ECR-PRD-0409",
+                $"Проєкт {projectId} змінився під час видалення (FK: {ex.Message}). Нічого не видалено — повторіть.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-0409.purgeConcurrentChange",
+                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+    }
+
+    private async Task<ProjectPurgeResult> PurgeCoreAsync(int projectId, IReadOnlyList<long> documentIds, CancellationToken ct)
+    {
+        // ✎ R3 C2-d: задачі документів проєкту — та сама семантика, що «Скасувати» в черзі (DbJobQueue.RequestCancelAsync):
+        // у черзі — Cancelled одразу, виконувана — позначка CancelRequestedAt (робітник зупиниться на найближчій перевірці).
+        // Рядки задач лишаються історією (itg.JobProgress без FK на документ).
+        var cancelledJobs = documentIds.Count == 0
+            ? 0
+            : await db.Database.ExecuteSqlAsync($"""
+                UPDATE itg.JobProgress
+                   SET [State] = CASE WHEN [State] = 'Queued' THEN 'Cancelled' ELSE [State] END,
+                       CancelRequestedAt = CASE WHEN [State] = 'Running'
+                           THEN ISNULL(CancelRequestedAt, SYSUTCDATETIME()) ELSE CancelRequestedAt END,
+                       UpdatedAt = SYSUTCDATETIME()
+                 WHERE [State] IN ('Queued', 'Running')
+                   AND DocumentId IN (SELECT CAST([value] AS bigint) FROM OPENJSON({JsonSerializer.Serialize(documentIds)}))
+                """, ct).ConfigureAwait(false);
 
         long cells = 0;
         foreach (var documentId in documentIds)
@@ -186,7 +240,7 @@ public sealed class ProjectPurgeStore(
             """, ct).ConfigureAwait(false);
 
         await projects.DeleteAsync(projectId, ct).ConfigureAwait(false);
-        return cells;
+        return new ProjectPurgeResult(cells, cancelledJobs);
     }
 
     private Task<long> CellCountAsync(long documentId, CancellationToken ct)

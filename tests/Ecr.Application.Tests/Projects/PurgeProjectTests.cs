@@ -62,7 +62,9 @@ public sealed class PurgeProjectTests
         ProjectStatus status = ProjectStatus.Active,
         bool archiving = false,
         IReadOnlyList<int>? archived = null,
-        IReadOnlyList<ProjectPurgeDependant>? dependants = null)
+        IReadOnlyList<ProjectPurgeDependant>? dependants = null,
+        IReadOnlyList<ProjectPurgeDependant>? eventMaps = null,
+        IReadOnlyList<string>? warnings = null)
         => _purge.ReadFactsAsync(ProjectId, Arg.Any<bool>(), Arg.Any<CancellationToken>())
             .Returns(new ProjectPurgeFacts(
                 Code, status, archiving, 2,
@@ -70,7 +72,10 @@ public sealed class PurgeProjectTests
                 new ProjectPurgeCounts(42, 7, 2, 1, 5, 4, 3, 12),
                 [202601, 202602],
                 archived ?? [],
-                dependants ?? []));
+                dependants ?? [],
+                eventMaps ?? [],
+                [202602],
+                warnings ?? []));
 
     private PurgeProjectHandler Handler() => new(_purge, _gate, _access, _user, _uow, _audit, _clock);
 
@@ -82,7 +87,7 @@ public sealed class PurgeProjectTests
     public async Task Активний_проєкт_видаляється_з_даними_і_журнал_безпеки_має_причину_й_підсумок()
     {
         Facts();
-        _purge.PurgeAsync(ProjectId, Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>()).Returns(42L);
+        _purge.PurgeAsync(ProjectId, Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>()).Returns(new ProjectPurgeResult(42, 3));
 
         await Handler().HandleAsync(ProjectId, Request(), CancellationToken.None);
 
@@ -97,7 +102,9 @@ public sealed class PurgeProjectTests
                 && e.DetailsJson!.Contains(Code)
                 && e.DetailsJson.Contains("HSE401-A")
                 && e.DetailsJson.Contains("\"cells\":42")
-                && e.DetailsJson.Contains("202602")),
+                && e.DetailsJson.Contains("202602")
+                && e.DetailsJson.Contains("\"approvedMonthsDeletedWithoutReopen\":[202602]")
+                && e.DetailsJson.Contains("\"cancelledJobs\":3")),
             Arg.Any<CancellationToken>());
         await _audit.Received(1).WriteSecurityEventAsync(
             Arg.Is<SecurityEventRecord>(e => System.Text.Json.JsonDocument.Parse(e.DetailsJson!).RootElement
@@ -168,6 +175,43 @@ public sealed class PurgeProjectTests
         Assert.Equal(PurgeProjectHandler.DependantsKey, preview.Blocker);
         Assert.Single(preview.Dependants);
         await _purge.DidNotReceive().PurgeAsync(Arg.Any<int>(), Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <remarks>
+    /// ✎ R3 C2-b: мапа подій на ВЛАСНОМУ документі — своя причина («приберіть у Sources»), а не «читають інші проєкти».
+    /// Мутація: прибрати гілку <c>EventMaps.Count &gt; 0</c> у <c>BlockerKey</c> — червоніє (відмови немає).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Мапа_подій_на_власному_документі_окрема_відмова_а_не_залежні_інших_проєктів()
+    {
+        Facts(eventMaps: [new ProjectPurgeDependant(101, "HSE401-A", Code, "SourceEventMap")]);
+
+        var error = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => Handler().HandleAsync(ProjectId, Request(), CancellationToken.None));
+
+        Assert.Equal(PurgeProjectHandler.EventMapKey, error.Details!["messageKey"]);
+        Assert.Equal("HSE401-A", error.Details["documents"]);
+        var preview = await Handler().PreviewAsync(ProjectId, CancellationToken.None);
+        Assert.Equal(PurgeProjectHandler.EventMapKey, preview.Blocker);
+        Assert.Empty(preview.Dependants);
+        await _purge.DidNotReceive().PurgeAsync(Arg.Any<int>(), Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <remarks>✎ R3 C2-g: попередження (інструменти tools/hse400) показується, але видалення НЕ блокує.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Попередження_не_блокує_видалення()
+    {
+        Facts(warnings: [ProjectPurgeWarnings.Hse400Tools]);
+        _purge.PurgeAsync(ProjectId, Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>()).Returns(new ProjectPurgeResult(1, 0));
+
+        var preview = await Handler().PreviewAsync(ProjectId, CancellationToken.None);
+        Assert.Null(preview.Blocker);
+        Assert.Equal([ProjectPurgeWarnings.Hse400Tools], preview.Warnings);
+
+        await Handler().HandleAsync(ProjectId, Request(), CancellationToken.None);
+        await _purge.Received(1).PurgeAsync(ProjectId, Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>());
     }
 
     [Theory]

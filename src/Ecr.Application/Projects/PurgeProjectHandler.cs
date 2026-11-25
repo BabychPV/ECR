@@ -18,6 +18,9 @@ namespace Ecr.Application.Projects;
 /// <param name="DataMonths">Місяці з даними (<c>yyyyMM</c>).</param>
 /// <param name="ArchivedPeriodKeys">Заархівовані періоди (B69) — видалення заборонене.</param>
 /// <param name="Dependants">Документи інших проєктів, що читають цей (B80) — видалення заборонене.</param>
+/// <param name="EventMaps">Документи ЦЬОГО проєкту з мапами подій джерела — прибрати в Sources (✎ R3 C2-b).</param>
+/// <param name="ApprovedMonths">Періоди із затвердженими аркушами — видаляються без повернення (C2-f, у журнал).</param>
+/// <param name="Warnings">Попередження без блокування (<see cref="ProjectPurgeWarnings"/>): рішення за людиною.</param>
 /// <param name="Blocker">
 /// Чому видалити не можна: <c>null</c> — можна; інакше ключ каталогу причини (той самий, що у відмові 409).
 /// </param>
@@ -30,6 +33,9 @@ public sealed record ProjectPurgePreviewDto(
     IReadOnlyList<int> DataMonths,
     IReadOnlyList<int> ArchivedPeriodKeys,
     IReadOnlyList<ProjectPurgeDependant> Dependants,
+    IReadOnlyList<ProjectPurgeDependant> EventMaps,
+    IReadOnlyList<int> ApprovedMonths,
+    IReadOnlyList<string> Warnings,
     string? Blocker);
 
 /// <summary>Тіло запиту видалення проєкту з даними.</summary>
@@ -87,6 +93,15 @@ public sealed class PurgeProjectHandler(
     /// <summary>Ключ відмови «є залежні».</summary>
     public const string DependantsKey = "err.ECR-PRD-0409.purgeHasDependants";
 
+    /// <summary>
+    /// ✎ R3 C2-b: ключ відмови «у документів ЦЬОГО проєкту є мапи подій джерела» — окремо від «читають інші проєкти»:
+    /// інший шлях виходу (прибрати мапи в Sources), інший текст.
+    /// </summary>
+    public const string EventMapKey = "err.ECR-PRD-0409.purgeHasEventMap";
+
+    /// <summary>✎ R3 C2-e: ключ відмови «проєкт змінився під час видалення» (новий документ тощо) — 409, не 500.</summary>
+    public const string ConcurrentChangeKey = "err.ECR-PRD-0409.purgeConcurrentChange";
+
     /// <summary>Попередній перегляд.</summary>
     /// <param name="projectId">Проєкт.</param>
     /// <param name="ct">Скасування.</param>
@@ -109,6 +124,9 @@ public sealed class PurgeProjectHandler(
             facts.DataMonths,
             facts.ArchivedPeriodKeys,
             facts.Dependants,
+            facts.EventMaps,
+            facts.ApprovedMonths,
+            facts.Warnings,
             BlockerKey(facts));
     }
 
@@ -173,7 +191,7 @@ public sealed class PurgeProjectHandler(
             }
 
             var documentIds = facts.Documents.Select(d => d.DocumentId).Order().ToList();
-            var cells = await purge.PurgeAsync(projectId, documentIds, innerCt).ConfigureAwait(false);
+            var result = await purge.PurgeAsync(projectId, documentIds, innerCt).ConfigureAwait(false);
 
             // ⛔ Журнал — у тій самій транзакції (F2-03): збій між видаленням і записом не лишає стирання без сліду.
             await audit.WriteSecurityEventAsync(
@@ -188,9 +206,15 @@ public sealed class PurgeProjectHandler(
                         code = facts.Code,
                         status = facts.Status.ToString(),
                         reason,
-                        cells,
+                        cells = result.Cells,
                         counts = facts.Counts,
                         months = facts.DataMonths,
+                        // ✎ R3 C2-f: затверджені місяці видаляються БЕЗ повернення (рішення людини «просто відкрий місяця і
+                        // видали» прочитане як дозвіл на видалення неархівних даних) — у журналі видно, які саме.
+                        approvedMonthsDeletedWithoutReopen = facts.ApprovedMonths,
+                        // ✎ R3 C2-d: задачі документів проєкту — у черзі скасовано, виконуваним поставлено запит скасування.
+                        cancelledJobs = result.CancelledJobs,
+                        warnings = facts.Warnings,
                         documents = facts.Documents.Select(d => new { d.DocumentId, d.BusinessKey, d.TemplateCode, d.Cells }),
                     }),
                     userId,
@@ -227,6 +251,11 @@ public sealed class PurgeProjectHandler(
             return ArchivedKey;
         }
 
+        if (facts.EventMaps.Count > 0)
+        {
+            return EventMapKey;
+        }
+
         return facts.Dependants.Count > 0 ? DependantsKey : null;
     }
 
@@ -256,6 +285,21 @@ public sealed class PurgeProjectHandler(
                     ["code"] = facts.Code,
                     ["status"] = facts.Status.ToString(),
                     ["periods"] = string.Join(", ", facts.ArchivedPeriodKeys.Select(k => k.ToString(CultureInfo.InvariantCulture))),
+                });
+        }
+
+        if (key == EventMapKey)
+        {
+            throw new ConcurrencyConflictException(
+                "ECR-PRD-0409",
+                $"Документи проєкту {facts.Code} мають мапи подій джерела ({facts.EventMaps.Count}): спершу приберіть їх у Sources.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = EventMapKey,
+                    ["projectId"] = id,
+                    ["code"] = facts.Code,
+                    ["count"] = facts.EventMaps.Count.ToString(CultureInfo.InvariantCulture),
+                    ["documents"] = string.Join(", ", facts.EventMaps.Select(d => d.BusinessKey)),
                 });
         }
 

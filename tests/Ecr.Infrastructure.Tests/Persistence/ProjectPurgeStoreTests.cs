@@ -63,10 +63,10 @@ public sealed class ProjectPurgeStoreTests(SqlServerFixture sql)
             await using var tx = await db.Database.BeginTransactionAsync();
             var store = Store(db, EmptyGraph());
             facts = (await store.ReadFactsAsync(a.ProjectId, lockForDelete: true, CancellationToken.None))!;
-            var cells = await store.PurgeAsync(a.ProjectId, [.. facts.Documents.Select(d => d.DocumentId)], CancellationToken.None);
+            var result = await store.PurgeAsync(a.ProjectId, [.. facts.Documents.Select(d => d.DocumentId)], CancellationToken.None);
             await tx.CommitAsync();
 
-            Assert.Equal(beforeA["doc.CellValue"], cells);
+            Assert.Equal(beforeA["doc.CellValue"], result.Cells);
         }
 
         var doc = Assert.Single(facts.Documents);
@@ -79,12 +79,146 @@ public sealed class ProjectPurgeStoreTests(SqlServerFixture sql)
         Assert.Equal([a.PeriodKey.Value], facts.DataMonths);
         Assert.Empty(facts.ArchivedPeriodKeys);
         Assert.Empty(facts.Dependants);
+        Assert.Empty(facts.EventMaps);
+        Assert.Empty(facts.Warnings);
+        // ✎ R3 C2-f: затверджений місяць — у фактах (і далі в журналі): видаляється без повернення.
+        Assert.Equal([a.PeriodKey.Value], facts.ApprovedMonths);
 
         var afterA = await RowCountsAsync(builder, a.ProjectId);
         var afterB = await RowCountsAsync(builder, b.ProjectId);
 
         Assert.All(afterA, pair => Assert.True(pair.Value == 0, $"{pair.Key}: лишилось {pair.Value} рядків видаленого проєкту"));
         Assert.Equal(beforeB, afterB);
+    }
+
+    /// <remarks>
+    /// ✎ R3 C2-d: задачі документів проєкту скасовуються тією самою семантикою, що «Скасувати» в черзі; чужі — ні.
+    /// Мутація: прибрати UPDATE itg.JobProgress у <c>PurgeCoreAsync</c> — червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Задачі_документів_проєкту_скасовуються_а_чужі_ні()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var a = await builder.BuildAsync(columnCount: 1, rowCount: 1);
+        var b = await builder.BuildAsync(columnCount: 1, rowCount: 1);
+        var tag = Guid.NewGuid().ToString("N")[..10];
+        string Id(string s) => $"purge-{tag}-{s}";
+
+        await using (var db = builder.CreateContext())
+        {
+            foreach (var (id, state, doc) in new[] { (Id("aq"), "Queued", a.DocumentId), (Id("ar"), "Running", a.DocumentId), (Id("bq"), "Queued", b.DocumentId) })
+            {
+                await db.Database.ExecuteSqlAsync($"""
+                    INSERT INTO itg.JobProgress (JobId, JobCode, [State], StartedAt, UpdatedAt, DocumentId)
+                    VALUES ({id}, N'Recalculate', {state}, {At}, {At}, {doc})
+                    """);
+            }
+        }
+
+        ProjectPurgeResult result;
+        await using (var db = builder.CreateContext())
+        {
+            await using var tx = await db.Database.BeginTransactionAsync();
+            var store = Store(db, EmptyGraph());
+            var facts = (await store.ReadFactsAsync(a.ProjectId, lockForDelete: true, CancellationToken.None))!;
+            result = await store.PurgeAsync(a.ProjectId, [.. facts.Documents.Select(d => d.DocumentId)], CancellationToken.None);
+            await tx.CommitAsync();
+        }
+
+        Assert.Equal(2, result.CancelledJobs);
+        await using var check = builder.CreateContext();
+        var rows = await check.Database.SqlQuery<JobRow>($"""
+            SELECT JobId, [State], CAST(CASE WHEN CancelRequestedAt IS NULL THEN 0 ELSE 1 END AS bit) AS CancelRequested
+              FROM itg.JobProgress WHERE JobId LIKE {"purge-" + tag + "%"}
+            """).ToListAsync();
+        Assert.Equal("Cancelled", rows.Single(r => r.JobId == Id("aq")).State);
+        Assert.True(rows.Single(r => r.JobId == Id("ar")).CancelRequested);
+        Assert.Equal("Queued", rows.Single(r => r.JobId == Id("bq")).State);
+    }
+
+    /// <remarks>
+    /// ✎ R3 C2-e: документ, створений у проєкті ПІСЛЯ читання фактів (його немає в переліку), — 409
+    /// <c>purgeConcurrentChange</c>, а не 500; транзакція відкочується, проєкт цілий.
+    /// Мутація: прибрати <c>catch (SqlException) when Number == 547</c> — червоніє (SqlException замість 409).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Документ_створений_під_час_видалення_дає_409_і_нічого_не_видалено()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var a = await builder.BuildAsync(columnCount: 1, rowCount: 1);
+
+        await using (var db = builder.CreateContext())
+        {
+            await using var tx = await db.Database.BeginTransactionAsync();
+            var store = Store(db, EmptyGraph());
+            var facts = (await store.ReadFactsAsync(a.ProjectId, lockForDelete: false, CancellationToken.None))!;
+
+            // «Паралельний» користувач створив документ, якого немає у фактах (у тій самій транзакції — без очікування блокувань).
+            db.Documents.Add(new Document(a.ProjectId, $"LATE{Guid.NewGuid().ToString("N")[..8]}", 1, At));
+            await db.SaveChangesAsync();
+
+            var error = await Assert.ThrowsAsync<Ecr.Application.Errors.ConcurrencyConflictException>(
+                () => store.PurgeAsync(a.ProjectId, [.. facts.Documents.Select(d => d.DocumentId)], CancellationToken.None));
+            Assert.Equal("ECR-PRD-0409", error.ErrorCode);
+            Assert.Equal(Ecr.Application.Projects.PurgeProjectHandler.ConcurrentChangeKey, error.Details!["messageKey"]);
+            await tx.RollbackAsync();
+        }
+
+        await using var check = builder.CreateContext();
+        Assert.True(await check.Projects.AnyAsync(p => p.Id == a.ProjectId));
+        Assert.True(await check.Documents.AnyAsync(d => d.Id == a.DocumentId));
+    }
+
+    /// <remarks>
+    /// ✎ R3 C2-b: мапа подій на ВЛАСНОМУ документі — у <c>EventMaps</c>, не в «залежних інших проєктів».
+    /// ✎ R3 C2-g: проєкт із кодом золотих тестів HSE400 — попередження <c>hse400Tools</c> (не блок).
+    /// Мутації: повернути мапи в <c>Dependants</c> — червоніє; прибрати попередження — червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Мапа_подій_власного_документа_окремо_від_залежних_і_попередження_GOLD()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var a = await builder.BuildAsync(columnCount: 1, rowCount: 1);
+        var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+
+        await using var db = builder.CreateContext();
+        var source = new Ecr.Domain.Entities.External.DataSource(
+            EcrCode.Create($"PSRC{tag}"), Name("purge"), ExternalTransport.PiWebApi, "https://example.test", "secret");
+        db.DataSources.Add(source);
+        await db.SaveChangesAsync();
+        var entity = new Ecr.Domain.Entities.External.SourceEntity(source.Id, $"PEnt{tag}", RegistrySourceKind.External);
+        db.SourceEntities.Add(entity);
+        await db.SaveChangesAsync();
+        await db.Database.ExecuteSqlAsync(
+            $"INSERT INTO ext.SourceEventMap (SourceEntityId, DocumentId, TableDefId, VolumeMode, IsActive) VALUES ({entity.Id}, {a.DocumentId}, {a.TableDefId}, 0, 1)");
+
+        // ⚠ Код GOLD — лише всередині транзакції, що відкочується: у спільній тестовій базі код унікальний.
+        await using var tx = await db.Database.BeginTransactionAsync();
+        await db.Database.ExecuteSqlAsync(
+            $"UPDATE doc.Project SET Code = {Ecr.Application.Registries.Hse400CompositionMapping.GoldProjectCode} WHERE Id = {a.ProjectId}");
+        var facts = await Store(db, EmptyGraph()).ReadFactsAsync(a.ProjectId, lockForDelete: false, CancellationToken.None);
+        await tx.RollbackAsync();
+
+        var map = Assert.Single(facts!.EventMaps);
+        Assert.Equal(a.DocumentId, map.DocumentId);
+        Assert.Empty(facts.Dependants);
+        Assert.Equal([ProjectPurgeWarnings.Hse400Tools], facts.Warnings);
+        Assert.Equal(Ecr.Application.Projects.PurgeProjectHandler.EventMapKey, Ecr.Application.Projects.PurgeProjectHandler.BlockerKey(facts));
+
+        await db.Database.ExecuteSqlAsync($"DELETE FROM ext.SourceEventMap WHERE DocumentId = {a.DocumentId}");
+    }
+
+    private sealed class JobRow
+    {
+        public string JobId { get; set; } = null!;
+        public string State { get; set; } = null!;
+        public bool CancelRequested { get; set; }
     }
 
     [Fact]
