@@ -151,8 +151,14 @@ USING (VALUES
   -- датою дії, замкнені періоди незмінні, усе в журналі. `SystemAdministrator` бере обидва шаблоном `%`; перегляд решті
   -- вбудованих ролей із `Registry.View` — секція `GAS:composition` нижче; зміну іншим ролям адміністратор видає свідомо.
   (N'GasComposition.View',      N'GasComposition', 0),
-  (N'GasComposition.Edit',      N'GasComposition', 0)
+  (N'GasComposition.Edit',      N'GasComposition', 0),
   -- GAS:composition ── кінець секції ──
+  -- PURGE:project ── право «Видалити проєкт з усіма даними» (✎ 25.11, людина: видалити активні проєкти через інтерфейс) ──
+  -- Глобальне (`PermissionScopes.Global`), не небезпечне (0) — як `Calculation.RecalculateApprovedDependents`: з вбудованих
+  -- ролей його бере лише `SystemAdministrator` шаблоном `%` (небезпечні сід не дає ЖОДНІЙ вбудованій ролі). Кожне
+  -- застосування — набраний код проєкту, обов'язкова причина, подія `ProjectDeletedWithData` у журналі безпеки.
+  (N'Project.DeleteWithData',   N'Project',     0)
+  -- PURGE:project ── кінець секції ──
 ) AS s (Code, [Group], IsDangerous)
 ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code, [Group], NameL10n, IsDangerous)

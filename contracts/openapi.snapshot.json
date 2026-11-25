@@ -20873,6 +20873,195 @@
         ],
         "type": "object"
       },
+      "ProjectPurgeCounts": {
+        "description": "Кількості рядків, що зникнуть разом із проєктом.",
+        "properties": {
+          "approvalEvents": {
+            "description": "Події погодження.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "approvalStates": {
+            "description": "Стани аркуш × період.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "calculationIssues": {
+            "description": "Проблеми розрахунків.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "calculationResults": {
+            "description": "Результати розрахунків.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "calculationRuns": {
+            "description": "Прогони розрахунків.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "cells": {
+            "description": "Комірки.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "periods": {
+            "description": "Періоди проєкту.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "submissionSnapshots": {
+            "description": "Зрізи подання.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cells",
+          "calculationResults",
+          "calculationRuns",
+          "calculationIssues",
+          "approvalEvents",
+          "approvalStates",
+          "submissionSnapshots",
+          "periods"
+        ],
+        "type": "object"
+      },
+      "ProjectPurgeDependant": {
+        "description": "Документ ІНШОГО проєкту, що читає дані цього (B80: зв'язка документа-джерела).",
+        "properties": {
+          "businessKey": {
+            "description": "Його ключ.",
+            "type": "string"
+          },
+          "documentId": {
+            "description": "Документ-споживач.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "projectCode": {
+            "description": "Його проєкт.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Чим залежить: `SourceBinding:&lt;код зв'язки&gt;:&lt;рік&gt;` або `SourceEventMap`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documentId",
+          "businessKey",
+          "projectCode",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "ProjectPurgeDocument": {
+        "description": "Документ, що буде видалений.",
+        "properties": {
+          "businessKey": {
+            "description": "Ключ документа.",
+            "type": "string"
+          },
+          "cells": {
+            "description": "Скільки комірок зі значеннями.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "templateCode": {
+            "description": "Код шаблону (може бути `null` для документів до B74).",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "documentId",
+          "businessKey",
+          "templateCode",
+          "cells"
+        ],
+        "type": "object"
+      },
+      "ProjectPurgePreviewDto": {
+        "description": "Попередній перегляд видалення проєкту з даними — що зникне і що заважає.",
+        "properties": {
+          "archivedPeriodKeys": {
+            "description": "Заархівовані періоди (B69) — видалення заборонене.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "blocker": {
+            "description": "Чому видалити не можна: `null` — можна; інакше ключ каталогу причини (той самий, що у відмові 409).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "code": {
+            "description": "Код (людина набирає його для підтвердження).",
+            "type": "string"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/ProjectPurgeCounts",
+            "description": "Кількості рядків."
+          },
+          "dataMonths": {
+            "description": "Місяці з даними (`yyyyMM`).",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "dependants": {
+            "description": "Документи інших проєктів, що читають цей (B80) — видалення заборонене.",
+            "items": {
+              "$ref": "#/components/schemas/ProjectPurgeDependant"
+            },
+            "type": "array"
+          },
+          "documents": {
+            "description": "Документи з ключами й кількістю комірок.",
+            "items": {
+              "$ref": "#/components/schemas/ProjectPurgeDocument"
+            },
+            "type": "array"
+          },
+          "projectId": {
+            "description": "Проєкт.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "status": {
+            "description": "Стан.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "code",
+          "status",
+          "documents",
+          "counts",
+          "dataMonths",
+          "archivedPeriodKeys",
+          "dependants",
+          "blocker"
+        ],
+        "type": "object"
+      },
       "ProjectRecalculationAcceptedResponse": {
         "description": "Прийнятий у чергу перерахунок УСЬОГО проєкту (Q-151).",
         "properties": {
@@ -21265,6 +21454,30 @@
           }
         },
         "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
+      "PurgeProjectRequest": {
+        "description": "Тіло запиту видалення проєкту з даними.",
+        "properties": {
+          "code": {
+            "description": "Код проєкту, набраний людиною (має збігтися точно).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reason": {
+            "description": "Причина (обов'язкова; іде в журнал безпеки).",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "code",
           "reason"
         ],
         "type": "object"
@@ -62645,6 +62858,89 @@
         ]
       }
     },
+    "/api/v1/projects/{id}/deletion-preview": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Проєкт.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectPurgePreviewDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectPurgePreviewDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectPurgePreviewDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "✎ 25.11: попередній перегляд видалення проєкту З ДАНИМИ — документи з ключами, кількості комірок, результатів,\nпроблем, погоджень, місяці; заархівовані періоди (B69) і документи інших проєктів, що читають цей (B80), — тоді\n`blocker` називає причину. Право `Project.DeleteWithData` (глобальне, лише SystemAdministrator).",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
     "/api/v1/projects/{id}/document-template": {
       "get": {
         "description": "⚠ Не потребує `Template.View`: це не перегляд шаблону, а рівно те,\nбез чого не створити документ, — версію визначає проєкт.",
@@ -62802,6 +63098,134 @@
           }
         },
         "summary": "Календар періодів проєкту. Право `Document.View`.",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{id}/purge": {
+      "post": {
+        "description": "Тіло — набраний код проєкту (точний збіг) і обов'язкова причина (`422 ECR-PRD-0422`: `purgeCodeMismatch`,\n`purgeReasonRequired`). Відмова `409 ECR-PRD-0409`: `purgeArchived` (архів незмінний, B69),\n`purgeHasDependants` (документи інших проєктів читають цей, B80). Одна транзакція; подія журналу безпеки\n`ProjectDeletedWithData` з причиною й підсумком.",
+        "parameters": [
+          {
+            "description": "Проєкт.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurgeProjectRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurgeProjectRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurgeProjectRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "✎ 25.11: видаляє проєкт будь-якого стану з УСІМА даними — незворотно. Право `Project.DeleteWithData`.",
         "tags": [
           "Projects"
         ]

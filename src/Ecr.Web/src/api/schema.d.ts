@@ -19094,6 +19094,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{id}/deletion-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** ✎ 25.11: попередній перегляд видалення проєкту З ДАНИМИ — документи з ключами, кількості комірок, результатів,
+         *     проблем, погоджень, місяці; заархівовані періоди (B69) і документи інших проєктів, що читають цей (B80), — тоді
+         *     `blocker` називає причину. Право `Project.DeleteWithData` (глобальне, лише SystemAdministrator). */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Проєкт. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProjectPurgePreviewDto"];
+                        "text/json": components["schemas"]["ProjectPurgePreviewDto"];
+                        "text/plain": components["schemas"]["ProjectPurgePreviewDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{id}/document-template": {
         parameters: {
             query?: never;
@@ -19213,6 +19278,100 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/purge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * ✎ 25.11: видаляє проєкт будь-якого стану з УСІМА даними — незворотно. Право `Project.DeleteWithData`.
+         * @description Тіло — набраний код проєкту (точний збіг) і обов'язкова причина (`422 ECR-PRD-0422`: `purgeCodeMismatch`,
+         *     `purgeReasonRequired`). Відмова `409 ECR-PRD-0409`: `purgeArchived` (архів незмінний, B69),
+         *     `purgeHasDependants` (документи інших проєктів читають цей, B80). Одна транзакція; подія журналу безпеки
+         *     `ProjectDeletedWithData` з причиною й підсумком.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Проєкт. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["PurgeProjectRequest"];
+                    "application/json": components["schemas"]["PurgeProjectRequest"];
+                    "text/json": components["schemas"]["PurgeProjectRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -41321,6 +41480,104 @@ export interface components {
              */
             projectId: number;
         };
+        /** @description Кількості рядків, що зникнуть разом із проєктом. */
+        ProjectPurgeCounts: {
+            /**
+             * Format: int64
+             * @description Події погодження.
+             */
+            approvalEvents: number;
+            /**
+             * Format: int64
+             * @description Стани аркуш × період.
+             */
+            approvalStates: number;
+            /**
+             * Format: int64
+             * @description Проблеми розрахунків.
+             */
+            calculationIssues: number;
+            /**
+             * Format: int64
+             * @description Результати розрахунків.
+             */
+            calculationResults: number;
+            /**
+             * Format: int64
+             * @description Прогони розрахунків.
+             */
+            calculationRuns: number;
+            /**
+             * Format: int64
+             * @description Комірки.
+             */
+            cells: number;
+            /**
+             * Format: int64
+             * @description Періоди проєкту.
+             */
+            periods: number;
+            /**
+             * Format: int64
+             * @description Зрізи подання.
+             */
+            submissionSnapshots: number;
+        };
+        /** @description Документ ІНШОГО проєкту, що читає дані цього (B80: зв'язка документа-джерела). */
+        ProjectPurgeDependant: {
+            /** @description Його ключ. */
+            businessKey: string;
+            /**
+             * Format: int64
+             * @description Документ-споживач.
+             */
+            documentId: number;
+            /** @description Його проєкт. */
+            projectCode: string;
+            /** @description Чим залежить: `SourceBinding:&lt;код зв'язки&gt;:&lt;рік&gt;` або `SourceEventMap`. */
+            reason: string;
+        };
+        /** @description Документ, що буде видалений. */
+        ProjectPurgeDocument: {
+            /** @description Ключ документа. */
+            businessKey: string;
+            /**
+             * Format: int64
+             * @description Скільки комірок зі значеннями.
+             */
+            cells: number;
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            /** @description Код шаблону (може бути `null` для документів до B74). */
+            templateCode: null | string;
+        };
+        /** @description Попередній перегляд видалення проєкту з даними — що зникне і що заважає. */
+        ProjectPurgePreviewDto: {
+            /** @description Заархівовані періоди (B69) — видалення заборонене. */
+            archivedPeriodKeys: number[];
+            /** @description Чому видалити не можна: `null` — можна; інакше ключ каталогу причини (той самий, що у відмові 409). */
+            blocker: null | string;
+            /** @description Код (людина набирає його для підтвердження). */
+            code: string;
+            /** @description Кількості рядків. */
+            counts: components["schemas"]["ProjectPurgeCounts"];
+            /** @description Місяці з даними (`yyyyMM`). */
+            dataMonths: number[];
+            /** @description Документи інших проєктів, що читають цей (B80) — видалення заборонене. */
+            dependants: components["schemas"]["ProjectPurgeDependant"][];
+            /** @description Документи з ключами й кількістю комірок. */
+            documents: components["schemas"]["ProjectPurgeDocument"][];
+            /**
+             * Format: int32
+             * @description Проєкт.
+             */
+            projectId: number;
+            /** @description Стан. */
+            status: string;
+        };
         /** @description Прийнятий у чергу перерахунок УСЬОГО проєкту (Q-151). */
         ProjectRecalculationAcceptedResponse: {
             /** @description Задача. */
@@ -41521,6 +41778,13 @@ export interface components {
              *     має бути відповідь, а не літерал `"Publish"`, однаковий для кожної
              *     публікації. */
             reason: string;
+        };
+        /** @description Тіло запиту видалення проєкту з даними. */
+        PurgeProjectRequest: {
+            /** @description Код проєкту, набраний людиною (має збігтися точно). */
+            code: null | string;
+            /** @description Причина (обов'язкова; іде в журнал безпеки). */
+            reason: null | string;
         };
         /** @description Стан збору сутності. */
         RawCollectionStatus: {

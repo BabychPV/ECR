@@ -1,0 +1,90 @@
+using Ecr.Domain.Enums;
+
+namespace Ecr.Application.Ports;
+
+/// <summary>
+/// ✎ 25.11 (людина: видалити АКТИВНІ проєкти HSE401_2026, TEST_COORD_2026, HSE400_GOLD через інтерфейс): повне
+/// видалення проєкту з усіма даними — факти для попереднього перегляду й саме видалення.
+/// </summary>
+/// <remarks>
+/// Окремий порт, а не методи <see cref="IProjectStore"/>: у того десяток тестових підробок, і кожна мусила б
+/// реалізувати видалення, якого не торкається (той самий аргумент, що в <see cref="IDocumentDeletionStore"/>).
+/// </remarks>
+public interface IProjectPurgeStore
+{
+    /// <summary>
+    /// Що буде видалено і що цьому заважає. <c>null</c> — проєкту немає.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="lockForDelete">
+    /// <c>true</c> — у транзакції видалення: рядок проєкту під <c>UPDLOCK</c>, щоб паралельна активація/архівація не
+    /// проскочила між перевіркою і видаленням.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<ProjectPurgeFacts?> ReadFactsAsync(int projectId, bool lockForDelete, CancellationToken ct);
+
+    /// <summary>
+    /// Видаляє всі дані проєкту: кожен документ (робочі дані — тим самим <see cref="IDocumentDeletionStore.DeleteAsync"/>,
+    /// що й видалення чернетки, плюс історія погодження, якої в чернетки немає), прогони проєкту, похідні рядки — і
+    /// сам проєкт (<see cref="IProjectStore.DeleteAsync"/>). Кличеться всередині транзакції викликача.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="documentIds">Документи проєкту (з <see cref="ReadFactsAsync"/> тієї самої транзакції).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Скільки комірок видалено (сума по документах) — для сліду в журналі безпеки.</returns>
+    public Task<long> PurgeAsync(int projectId, IReadOnlyList<long> documentIds, CancellationToken ct);
+}
+
+/// <summary>Документ, що буде видалений.</summary>
+/// <param name="DocumentId">Документ.</param>
+/// <param name="BusinessKey">Ключ документа.</param>
+/// <param name="TemplateCode">Код шаблону (може бути <c>null</c> для документів до B74).</param>
+/// <param name="Cells">Скільки комірок зі значеннями.</param>
+public sealed record ProjectPurgeDocument(long DocumentId, string BusinessKey, string? TemplateCode, long Cells);
+
+/// <summary>Документ ІНШОГО проєкту, що читає дані цього (B80: зв'язка документа-джерела).</summary>
+/// <param name="DocumentId">Документ-споживач.</param>
+/// <param name="BusinessKey">Його ключ.</param>
+/// <param name="ProjectCode">Його проєкт.</param>
+/// <param name="Reason">Чим залежить: <c>SourceBinding:&lt;код зв'язки&gt;:&lt;рік&gt;</c> або <c>SourceEventMap</c>.</param>
+public sealed record ProjectPurgeDependant(long DocumentId, string BusinessKey, string ProjectCode, string Reason);
+
+/// <summary>Кількості рядків, що зникнуть разом із проєктом.</summary>
+/// <param name="Cells">Комірки.</param>
+/// <param name="CalculationResults">Результати розрахунків.</param>
+/// <param name="CalculationRuns">Прогони розрахунків.</param>
+/// <param name="CalculationIssues">Проблеми розрахунків.</param>
+/// <param name="ApprovalEvents">Події погодження.</param>
+/// <param name="ApprovalStates">Стани аркуш × період.</param>
+/// <param name="SubmissionSnapshots">Зрізи подання.</param>
+/// <param name="Periods">Періоди проєкту.</param>
+public sealed record ProjectPurgeCounts(
+    long Cells,
+    long CalculationResults,
+    long CalculationRuns,
+    long CalculationIssues,
+    long ApprovalEvents,
+    long ApprovalStates,
+    long SubmissionSnapshots,
+    long Periods);
+
+/// <summary>Усе, з чого обробник вирішує, чи проєкт можна видалити з даними, і що показати людині.</summary>
+/// <param name="Code">Код проєкту.</param>
+/// <param name="Status">Стан.</param>
+/// <param name="IsArchiving">Триває архівація.</param>
+/// <param name="TemplateVersionId">Основна версія шаблону (для журналу змін).</param>
+/// <param name="Documents">Документи проєкту.</param>
+/// <param name="Counts">Кількості.</param>
+/// <param name="DataMonths">Ключі періодів (<c>yyyyMM</c>), у яких документи проєкту мають екземпляри таблиць.</param>
+/// <param name="ArchivedPeriodKeys">Ключі періодів, дані яких перенесено в архів (<c>arc.*</c>, B69).</param>
+/// <param name="Dependants">Документи інших проєктів, що читають цей.</param>
+public sealed record ProjectPurgeFacts(
+    string Code,
+    ProjectStatus Status,
+    bool IsArchiving,
+    int TemplateVersionId,
+    IReadOnlyList<ProjectPurgeDocument> Documents,
+    ProjectPurgeCounts Counts,
+    IReadOnlyList<int> DataMonths,
+    IReadOnlyList<int> ArchivedPeriodKeys,
+    IReadOnlyList<ProjectPurgeDependant> Dependants);

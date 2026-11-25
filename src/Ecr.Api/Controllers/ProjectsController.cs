@@ -22,6 +22,7 @@ public sealed class ProjectsController(
     ActivateProjectHandler activate,
     ArchiveProjectHandler archive,
     DeleteProjectHandler delete,
+    PurgeProjectHandler purge,
     ListPeriodPoliciesHandler policies,
     CreatePeriodPolicyHandler createPolicy,
     UpdatePeriodPolicyHandler updatePolicy,
@@ -346,6 +347,45 @@ public sealed class ProjectsController(
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         await delete.HandleAsync(id, ct).ConfigureAwait(false);
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// ✎ 25.11: попередній перегляд видалення проєкту З ДАНИМИ — документи з ключами, кількості комірок, результатів,
+    /// проблем, погоджень, місяці; заархівовані періоди (B69) і документи інших проєктів, що читають цей (B80), — тоді
+    /// <c>blocker</c> називає причину. Право <c>Project.DeleteWithData</c> (глобальне, лише SystemAdministrator).
+    /// </summary>
+    /// <param name="id">Проєкт.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("{id:int}/deletion-preview")]
+    [ProducesResponseType<ProjectPurgePreviewDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ProjectPurgePreviewDto>> DeletionPreview(int id, CancellationToken ct)
+        => Ok(await purge.PreviewAsync(id, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// ✎ 25.11: видаляє проєкт будь-якого стану з УСІМА даними — незворотно. Право <c>Project.DeleteWithData</c>.
+    /// </summary>
+    /// <remarks>
+    /// Тіло — набраний код проєкту (точний збіг) і обов'язкова причина (<c>422 ECR-PRD-0422</c>: <c>purgeCodeMismatch</c>,
+    /// <c>purgeReasonRequired</c>). Відмова <c>409 ECR-PRD-0409</c>: <c>purgeArchived</c> (архів незмінний, B69),
+    /// <c>purgeHasDependants</c> (документи інших проєктів читають цей, B80). Одна транзакція; подія журналу безпеки
+    /// <c>ProjectDeletedWithData</c> з причиною й підсумком.
+    /// </remarks>
+    /// <param name="id">Проєкт.</param>
+    /// <param name="request">Код і причина.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpPost("{id:int}/purge")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Purge(int id, [FromBody] PurgeProjectRequest request, CancellationToken ct)
+    {
+        await purge.HandleAsync(id, request, ct).ConfigureAwait(false);
 
         return NoContent();
     }

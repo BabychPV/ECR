@@ -157,6 +157,8 @@ public sealed partial class SheetCopyQuerySitesTests
             "додає/перейменовує/видаляє копії; видалення — по періодах за SheetCopyId, потім перенумерація",
         ["src/Ecr.Infrastructure/Persistence/DocumentDeletionStore.cs"] =
             "видалення документа забирає ВСІ екземпляри, стани й склад (копії теж); стани копій входять у «чернетка»",
+        ["src/Ecr.Infrastructure/Persistence/ProjectPurgeStore.cs"] =
+            "✎ 25.11: видалення проєкту з даними забирає ВСІ екземпляри, стани, події й зрізи (копії теж); вибір джерела B80 — лише оригінал (SheetCopyId == null), як у завантажувачі",
         ["src/Ecr.Infrastructure/Persistence/DocumentVersionMigrationStore.cs"] =
             "перенос версії міняє TableDefId/SheetDefId на місці — SheetCopyId лишається; значення копій входять у «втрату» (Q4)",
         ["src/Ecr.Infrastructure/Persistence/DocumentVersionStore.cs"] =
