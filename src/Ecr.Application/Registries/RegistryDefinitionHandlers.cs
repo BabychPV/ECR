@@ -473,16 +473,6 @@ public sealed class SaveRegistryDefinitionHandler(
 
         RequireCurrentVersion(definition, ifMatch);
 
-        // ✎ SGF AC-10 (C4(b)): зміна опису довідника факелів (поля, ключі, правила) міняє те, що прочитав замкнений
-        // період, на всьому вікні (−∞, +∞) — GasComposition.Edit і 409, щойно довідник має замкнений період.
-        await ExternalRegistryGuard.EnsureFlaringEditAllowedAsync(
-                definition,
-                () => Task.FromResult<IReadOnlyCollection<FlaringRegistryEdit>>(
-                    [FlaringRegistryEdit.Change(new Domain.ValueObjects.ValidityWindow(null, null))]),
-                flaring,
-                ct)
-            .ConfigureAwait(false);
-
         return await ApplyAsync(definition, dto, "SaveDefinition", userId, profile, ct).ConfigureAwait(false);
     }
 
@@ -599,6 +589,18 @@ public sealed class SaveRegistryDefinitionHandler(
             {
                 throw DefinitionChanged(definition);
             }
+
+            // ✎ SGF AC-10 / F1-1: зміна опису довідника факелів (поля, ключі, правила) міняє те, що прочитав замкнений
+            // період, на всьому вікні (−∞, +∞) — GasComposition.Edit і 409, щойно довідник має замкнений період. Тут, а
+            // не в обробниках: ApplyAsync — єдиний шлях і збереження, і публікації чернетки; замкнені періоди читаються
+            // в тій самій транзакції, під блокуванням рядка опису.
+            await ExternalRegistryGuard.EnsureFlaringEditAllowedAsync(
+                    definition,
+                    () => Task.FromResult<IReadOnlyCollection<FlaringRegistryEdit>>(
+                        [FlaringRegistryEdit.Change(new Domain.ValueObjects.ValidityWindow(null, null))]),
+                    flaring,
+                    innerCt)
+                .ConfigureAwait(false);
 
             version = await ApplyInTransactionAsync(definition, dto, operation, userId, profile, innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);

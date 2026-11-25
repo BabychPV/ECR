@@ -98,6 +98,67 @@ public sealed class FlaringRegistryLockGuardTests
         }
     }
 
+    private const string DefinitionHandler = "Ecr.Application.Registries.SaveRegistryDefinitionHandler";
+
+    /// <summary>
+    /// ✎ F1-1 (приймання b13): опис довідника застосовує ЄДИНИЙ метод <c>SaveRegistryDefinitionHandler.ApplyAsync</c>
+    /// (збереження й публікація чернетки), і саме в ньому стоїть запобіжник факелів; внутрішнє застосування
+    /// (<c>ApplyInTransactionAsync</c>) кличе лише він — обійти запобіжник іншим обробником не можна.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [Trait("Requirement", "SGF-F1-1")]
+    public void Застосування_опису_довідника_кличе_запобіжник_і_не_обходиться()
+    {
+        var calls = DefinitionCalls().ToList();
+
+        Assert.Contains(calls, c => c.Origin == "ApplyAsync" && c.Target == nameof(ExternalRegistryGuard.EnsureFlaringEditAllowedAsync));
+        Assert.All(
+            calls.Where(c => c.Target == "ApplyInTransactionAsync"),
+            c => Assert.True(c.Owner == DefinitionHandler && c.Origin == "ApplyAsync", $"{c.Owner}.{c.Origin} застосовує опис повз ApplyAsync"));
+
+        // Сито бачить обидва шляхи: збереження й публікацію.
+        Assert.Contains(calls, c => c.Owner == DefinitionHandler && c.Target == "ApplyAsync");
+        Assert.Contains(calls, c => c.Owner == "Ecr.Application.Registries.PublishRegistryDefinitionHandler" && c.Target == "ApplyAsync");
+    }
+
+    private sealed record DefinitionCall(string Owner, string Origin, string Target);
+
+    private static IEnumerable<DefinitionCall> DefinitionCalls()
+    {
+        using var module = ModuleDefinition.ReadModule(typeof(ExternalRegistryGuard).Assembly.Location);
+        foreach (var method in module.GetTypes().SelectMany(t => t.Methods).Where(m => m.HasBody))
+        {
+            var owner = Owner(method.DeclaringType);
+            var origin = OriginOf(method);
+            foreach (var instruction in method.Body.Instructions)
+            {
+                if (instruction.OpCode.Code is not (Code.Call or Code.Callvirt) || instruction.Operand is not MethodReference target)
+                {
+                    continue;
+                }
+
+                var type = target.DeclaringType.FullName;
+                if ((type == DefinitionHandler && target.Name is "ApplyAsync" or "ApplyInTransactionAsync")
+                    || (type == GuardType && target.Name == nameof(ExternalRegistryGuard.EnsureFlaringEditAllowedAsync)))
+                {
+                    yield return new DefinitionCall(owner, origin, target.Name);
+                }
+            }
+        }
+    }
+
+    /// <summary>Метод джерела крізь машину станів (<c>&lt;X&gt;d__N</c>) і замикання (<c>&lt;X&gt;b__N</c>).</summary>
+    private static string OriginOf(MethodDefinition method)
+    {
+        // `<ApplyAsync>d__5`, `<ApplyAsync>b__0`, `<<ApplyAsync>b__0>d` (async-лямбда) → ApplyAsync.
+        static string? Angle(string name)
+            => System.Text.RegularExpressions.Regex.Match(name, "^<+([^<>]+)>") is { Success: true } m ? m.Groups[1].Value : null;
+
+        return Angle(method.Name) ?? Angle(method.DeclaringType.Name) ?? method.Name;
+    }
+
     private static List<string> Violations(IReadOnlyList<Call> calls)
     {
         var flaring = calls.Where(c => c.Kind == Kind.Flaring).Select(c => c.Owner).ToHashSet(StringComparer.Ordinal);

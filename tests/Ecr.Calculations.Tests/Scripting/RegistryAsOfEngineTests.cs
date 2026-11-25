@@ -91,6 +91,26 @@ public sealed class RegistryAsOfEngineTests(ITestOutputHelper output)
         Assert.Contains(february.Trace, s => s.StepCode == "RegistryAsOf" && s.Expression!.Contains("2099-02-10", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// F1-2: без <c>registry as of</c> Date-колонка в рядку скрипта — порожня, як до лінії (паритет із живими версіями);
+    /// дату значенням бачить лише скрипт із реченням.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "SGF-F1-2")]
+    public async Task Без_речення_Date_колонка_як_до_лінії__з_реченням_дата()
+    {
+        var (plain, _) = Monthly("rows from T1;\nvar d = row.D;\noutput X : t = REGFIELD(REGFIND(\"GAS\", \"H2S\"), \"MOL\");\n");
+        var (withClause, _) = Monthly("rows from T1;\nregistry as of row.D;\nvar d = row.D;\noutput X : t = REGFIELD(REGFIND(\"GAS\", \"H2S\"), \"MOL\");\n");
+
+        var (plainOutput, plainValues) = await plain.RunAsync("R1");
+        var (_, clauseValues) = await withClause.RunAsync("R1");
+
+        Assert.Equal("Null", plainValues.Single(v => v.Name == "d").ValueType);
+        Assert.Equal(2m, ScriptStand.Value(plainOutput, "X"));
+        Assert.Equal("Date", clauseValues.Single(v => v.Name == "d").ValueType);
+    }
+
     // ───── AC-2: порожня дата або дата поза періодом → відхилено з причиною ─────
 
     [Theory]

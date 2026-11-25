@@ -445,7 +445,7 @@ public sealed class ScriptCalculationModule(
 
                 if (!arguments.TryGetValue(field.Name, out var argument)
                     || (argument.Value is null && string.IsNullOrWhiteSpace(argument.ValueString) && argument.EntryId is null
-                        && argument.ValueDate is null))
+                        && (argument.ValueDate is null || program.Main.RegistryAsOf is null)))
                 {
                     missing.Add(field.Name);
                 }

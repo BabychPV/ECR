@@ -293,8 +293,36 @@ public sealed class FlaringRegistryLockTests
         var error = await Assert.ThrowsAsync<BusinessRuleException>(() => SaveDefinitionAsync("FLARE_LOCATION"));
 
         Assert.Equal(GasCompositionRules.LockedKey, error.Details!["messageKey"]);
-        await _uow.DidNotReceiveWithAnyArgs().ExecuteInTransactionAsync(default!, default);
+        await _uow.DidNotReceiveWithAnyArgs().SaveChangesAsync(default);
     }
+
+    /// <summary>F1-1: публікація чернетки опису — той самий запобіжник (ApplyAsync), а не обхід.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "SGF-F1-1")]
+    public async Task Публікація_чернетки_опису_довідника_факелів__замкнений_період__409()
+    {
+        Locked(JanuaryClosed);
+        Grant(GasCompositionPermissions.Edit, SaveRegistryDefinitionHandler.Permission, PublishRegistryDefinitionHandler.Permission);
+        InTransaction();
+        var drafts = Substitute.For<IRegistryDraftStore>();
+        var draft = new RegistryDefinitionDraft(
+            LocationId, _location.DefinitionVersion,
+            System.Text.Json.JsonSerializer.Serialize(new RegistryDefinitionDraftContent([], [])), "SGF F1-1", UserId, _clock.UtcNow);
+        typeof(RegistryDefinitionDraft).GetProperty(nameof(RegistryDefinitionDraft.RowVersion))!.SetValue(draft, new byte[] { 1 });
+        drafts.FindAsync(LocationId, Arg.Any<CancellationToken>()).Returns(draft);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => new PublishRegistryDefinitionHandler(
+                _registries, drafts, DefinitionHandler(), _access, _user)
+            .HandleAsync("FLARE_LOCATION", new PublishRegistryDefinitionRequest("AQ=="), default));
+
+        Assert.Equal(GasCompositionRules.LockedKey, error.Details!["messageKey"]);
+        await _uow.DidNotReceiveWithAnyArgs().SaveChangesAsync(default);
+    }
+
+    private void InTransaction()
+        => _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.Arg<Func<CancellationToken, Task>>()(CancellationToken.None));
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
@@ -311,11 +339,17 @@ public sealed class FlaringRegistryLockTests
 
     private Task<int> SaveDefinitionAsync(string code)
     {
+        InTransaction();
+        return DefinitionHandler()
+            .HandleAsync(code, new SaveRegistryDefinitionDto([], [], "SGF AC-10", [], null), default, "\"1\"");
+    }
+
+    private SaveRegistryDefinitionHandler DefinitionHandler()
+    {
         var keys = Substitute.For<IRegistryKeyStore>();
         return new SaveRegistryDefinitionHandler(
-                _registries, _uow, _audit, _access, _user, _clock, Substitute.For<IUnitCatalog>(), keys,
-                new Ecr.Application.Registries.Keys.RegistryKeyService(keys, _uow), flaring: Lock())
-            .HandleAsync(code, new SaveRegistryDefinitionDto([], [], "SGF AC-10", [], null), default, "\"1\"");
+            _registries, _uow, _audit, _access, _user, _clock, Substitute.For<IUnitCatalog>(), keys,
+            new Ecr.Application.Registries.Keys.RegistryKeyService(keys, _uow), flaring: Lock());
     }
 
     // ───── допоміжне ─────
