@@ -17,7 +17,7 @@ public sealed class SeedTests(SqlServerFixture sql)
     /// сюди, тест впаде — і це правильно. Право, якого немає в цьому списку,
     /// ніхто не перевіряв.
     /// </remarks>
-    private const int ExpectedPermissions = 47; // P-1124-3: − Report.BuildSnapshot/ViewSnapshot/Export/EditDefinition (зрізи й конструктор звітів прибрано); B80 N5: + Calculation.RecalculateApprovedDependents (безпечне, глобальне; лише SystemAdministrator); B80 N1: + Calculation.ManageSourceBinding (безпечне, глобальне); B75: + Document.RowLock (безпечне, проєктне); D-461: + Document.OverrideFormula (безпечне, проєктне); TC: + Document.Discuss/DiscussModerate (безпечні, чат таблиці); D-285: + Document.Submit; PM-04: + Permit.EditType/PublishType (безпечні; джерело — MERGE sec.Permission у 09-seed.sql)
+    private const int ExpectedPermissions = 49; // зведення b12: 51 − 4 + 2. D-NEW 25.11: + GasComposition.View/Edit (сторінка «Склад газу», глобальні); P-1124-3: − Report.BuildSnapshot/ViewSnapshot/Export/EditDefinition (зрізи й конструктор звітів прибрано); B80 N5: + Calculation.RecalculateApprovedDependents (безпечне, глобальне; лише SystemAdministrator); B80 N1: + Calculation.ManageSourceBinding (безпечне, глобальне); B75: + Document.RowLock (безпечне, проєктне); D-461: + Document.OverrideFormula (безпечне, проєктне); TC: + Document.Discuss/DiscussModerate (безпечні, чат таблиці); D-285: + Document.Submit; PM-04: + Permit.EditType/PublishType (безпечні; джерело — MERGE sec.Permission у 09-seed.sql)
 
     private const int ExpectedDangerous = 10; // P-1124-3: − Report.EditDefinition
 
