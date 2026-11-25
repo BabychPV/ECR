@@ -838,9 +838,11 @@ GRANT EXECUTE ON OBJECT::[dbo].[usp_GetAllStreamDataFlattened] TO [ecr_flert_rea
 ```
 
 `SELECT` на таблиці не потрібен: процедура і таблиці належать `dbo` (ланцюжок власності). ECR у FLERT не пише: запит
-іде в транзакції, яку застосунок завжди відкочує. Далі — джерело `FLERT` (транспорт `Sql`), текст запиту
-`ECR_Secrets__Sql__FLERT__CompositionQuery` = `EXEC dbo.usp_GetAllStreamDataFlattened;` і `ECR_Flert__Sync__Enabled=true`
-(до цього синк вимкнено); статуси прогону — `operations-runbook.md` п. 4.3.
+іде в транзакції, яку застосунок завжди відкочує. Далі — разовий імпорт кроком
+`tools/gas-composition/Import-GasCompositionFromFlert.ps1` (сухий прогін, потім `-Apply`): джерело `FLERT` (транспорт `Sql`)
+він заводить сам, якщо його немає; текст запиту — `Flert:Sync:CompositionQuery` з appsettings
+(`EXEC dbo.usp_GetAllStreamDataFlattened;`), змінна `ECR_Secrets__Sql__FLERT__CompositionQuery` його перекриває. Щоденного
+синку немає; статуси прогону — `operations-runbook.md` п. 4.3.
 
 ### 2.10 Налаштування SQL Server: рекомендації DBA (MAXDOP, Resource Governor) {#2-10-sql-інстанс}
 
