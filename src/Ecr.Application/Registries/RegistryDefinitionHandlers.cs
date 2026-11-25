@@ -400,7 +400,8 @@ public sealed class SaveRegistryDefinitionHandler(
     IRegistryKeyStore keys,
     Keys.RegistryKeyService keyService,
     Rules.RegistryRuleCompiler? ruleCompiler = null,
-    IRegistryHierarchyStore? hierarchy = null)
+    IRegistryHierarchyStore? hierarchy = null,
+    FlaringRegistryLock? flaring = null)
 {
     // ⚠ `hierarchy` (типи вузлів НАЕ) — лише для прив'язки поля до рівня (`LevelCode`); контейнер підставляє його завжди.
     // ⚠ `ruleCompiler` (RT-17a) необов'язковий лише для тестів, що будують обробник руками: їхні
@@ -471,6 +472,16 @@ public sealed class SaveRegistryDefinitionHandler(
         Permits.Groups.PermitGroupRegistryGuard.RequireNotManaged(definition.Code);
 
         RequireCurrentVersion(definition, ifMatch);
+
+        // ✎ SGF AC-10 (C4(b)): зміна опису довідника факелів (поля, ключі, правила) міняє те, що прочитав замкнений
+        // період, на всьому вікні (−∞, +∞) — GasComposition.Edit і 409, щойно довідник має замкнений період.
+        await ExternalRegistryGuard.EnsureFlaringEditAllowedAsync(
+                definition,
+                () => Task.FromResult<IReadOnlyCollection<FlaringRegistryEdit>>(
+                    [FlaringRegistryEdit.Change(new Domain.ValueObjects.ValidityWindow(null, null))]),
+                flaring,
+                ct)
+            .ConfigureAwait(false);
 
         return await ApplyAsync(definition, dto, "SaveDefinition", userId, profile, ct).ConfigureAwait(false);
     }
