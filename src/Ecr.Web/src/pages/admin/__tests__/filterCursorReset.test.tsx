@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { JSX } from 'react';
 import { AuditPage } from '@/pages/admin/AuditPage';
+import { ConsistencyIssuesPage } from '@/pages/admin/ConsistencyIssuesPage';
 import { FilterDebounceMs } from '@/shared/ui/useDebouncedFilter';
 import { t } from '@/shared/i18n';
 import { testTheme } from '@/test/render';
@@ -40,6 +41,16 @@ const structureRow = {
   entityId: 3,
   operation: 'Update',
   changeReason: null,
+};
+
+const issueRow = {
+  id: 1,
+  ruleCode: 'CNS-01',
+  entityType: 'cfg.Template',
+  entityId: 3,
+  message: 'broken',
+  detectedAt: '2026-01-05T10:00:00Z',
+  resolvedAt: null,
 };
 
 /**
@@ -100,6 +111,23 @@ async function pageThenType(seen: URLSearchParams[], label: string, text: string
   return seen.slice(2);
 }
 
+/** Гортає на другу сторінку, обирає варіант `option` у переліку `label` і повертає запити ПІСЛЯ гортання. */
+async function pageThenSelect(seen: URLSearchParams[], label: string, option: string): Promise<URLSearchParams[]> {
+  const user = userEvent.setup();
+  const more = await screen.findByRole('button', { name: t('documents.more') }, { timeout: SlowEnvTimeout });
+
+  await user.click(more);
+  await waitFor(() => expect(seen).toHaveLength(2));
+  expect(seen[1]?.get('cursor')).toBe('page-2');
+
+  await user.click(screen.getByLabelText(label));
+  await user.click(await screen.findByRole('option', { name: option }));
+  await waitFor(() => expect(seen.length).toBeGreaterThan(2));
+  await settle();
+
+  return seen.slice(2);
+}
+
 describe('скидання курсора разом із відкладеним фільтром', () => {
   // ✎ `R-18`: «By user» став вибором за іменем (`Select`) — набору, який треба
   // відкладати, у нього більше немає; скидання курсора стережуть поля нижче.
@@ -127,6 +155,18 @@ describe('скидання курсора разом із відкладеним
     SlowEnvTimeout,
   );
 
-  // ✎ 24.11: «Rule» на /admin/consistency — перелік відомих правил (select), а не поле набору; нова сторінка журналу
-  // починається з першої (ruleCode — у ключі запиту), див. ConsistencyIssuesPage.checksPerformed.test.tsx.
+  it(
+    '/admin/consistency: «Rule» після «More» — один запит',
+    async () => {
+      const seen = serve('/api/v1/consistency/issues', issueRow);
+      show(<ConsistencyIssuesPage />, '/admin/consistency');
+
+      // ✎ 24.11: «Rule» — перелік відомих правил (select), а не поле набору; поведінка та сама — зміна фільтра після
+      // «More» дає рівно один запит із новим правилом і БЕЗ курсора (перша сторінка).
+      const after = await pageThenSelect(seen, '⟦consistency.rule⟧', '⟦consistency.rule.BROKEN_FK⟧');
+
+      expect(after.map((query) => [query.get('ruleCode'), query.get('cursor')])).toEqual([['BROKEN_FK', null]]);
+    },
+    SlowEnvTimeout,
+  );
 });
