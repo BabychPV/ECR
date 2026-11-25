@@ -19,44 +19,42 @@ export type GasVersionCreateRequest = components['schemas']['GasVersionCreateReq
 export type GasVersionUpdateRequest = components['schemas']['GasVersionUpdateRequest'];
 export type GasImportRun = components['schemas']['FlertSyncRunDto'];
 
-const Base = '/api/v1/gas-composition';
+/*
+ * ⛔ Адреса і метод — літералами поруч (`{ method: 'PUT', … }`): сторож `Кожна_дія_сервера_має_споживача_в_інтерфейсі`
+ * шукає в коді клієнта літерал `/api/v1/…` разом із методом одразу після нього.
+ */
+const JsonHeaders = { 'Content-Type': 'application/json' };
 
-const json = (method: string, body: unknown): RequestInit => ({
-  method,
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(body),
-});
+export const listStreams = (): Promise<GasStreamList> => apiFetch<GasStreamList>('/api/v1/gas-composition/streams');
 
-export const listStreams = (): Promise<GasStreamList> => apiFetch<GasStreamList>(`${Base}/streams`);
-
-export const listComponents = (): Promise<GasComponent[]> => apiFetch<GasComponent[]>(`${Base}/components`);
+export const listComponents = (): Promise<GasComponent[]> => apiFetch<GasComponent[]>('/api/v1/gas-composition/components');
 
 export const getStream = (id: number): Promise<GasStreamDetail> =>
-  apiFetch<GasStreamDetail>(`${Base}/streams/${String(id)}`);
+  apiFetch<GasStreamDetail>(`/api/v1/gas-composition/streams/${String(id)}`);
 
 export const createStream = (request: GasStreamRequest): Promise<GasChangeResult> =>
-  apiFetch<GasChangeResult>(`${Base}/streams`, json('POST', request));
+  apiFetch<GasChangeResult>('/api/v1/gas-composition/streams', { method: 'POST', headers: JsonHeaders, body: JSON.stringify(request) });
 
 export const updateStream = (id: number, request: GasStreamRequest): Promise<GasChangeResult> =>
-  apiFetch<GasChangeResult>(`${Base}/streams/${String(id)}`, json('PUT', request));
+  apiFetch<GasChangeResult>(`/api/v1/gas-composition/streams/${String(id)}`, { method: 'PUT', headers: JsonHeaders, body: JSON.stringify(request) });
 
 export const deleteStream = (id: number): Promise<GasChangeResult> =>
-  apiFetch<GasChangeResult>(`${Base}/streams/${String(id)}`, { method: 'DELETE' });
+  apiFetch<GasChangeResult>(`/api/v1/gas-composition/streams/${String(id)}`, { method: 'DELETE' });
 
 export const createVersion = (streamId: number, request: GasVersionCreateRequest): Promise<GasChangeResult> =>
-  apiFetch<GasChangeResult>(`${Base}/streams/${String(streamId)}/versions`, json('POST', request));
+  apiFetch<GasChangeResult>(`/api/v1/gas-composition/streams/${String(streamId)}/versions`, { method: 'POST', headers: JsonHeaders, body: JSON.stringify(request) });
 
 export const renameCase = (streamId: number, from: string, to: string): Promise<GasChangeResult> =>
-  apiFetch<GasChangeResult>(`${Base}/streams/${String(streamId)}/cases`, json('PUT', { from, to }));
+  apiFetch<GasChangeResult>(`/api/v1/gas-composition/streams/${String(streamId)}/cases`, { method: 'PUT', headers: JsonHeaders, body: JSON.stringify({ from, to }) });
 
 export const updateVersion = (versionId: number, request: GasVersionUpdateRequest): Promise<GasChangeResult> =>
-  apiFetch<GasChangeResult>(`${Base}/versions/${String(versionId)}`, json('PUT', request));
+  apiFetch<GasChangeResult>(`/api/v1/gas-composition/versions/${String(versionId)}`, { method: 'PUT', headers: JsonHeaders, body: JSON.stringify(request) });
 
 export const deleteVersion = (versionId: number): Promise<GasChangeResult> =>
-  apiFetch<GasChangeResult>(`${Base}/versions/${String(versionId)}`, { method: 'DELETE' });
+  apiFetch<GasChangeResult>(`/api/v1/gas-composition/versions/${String(versionId)}`, { method: 'DELETE' });
 
 /** Разовий імпорт із FLERT (лише в порожню базу): 202 з `jobId`. */
-export const startImport = (): Promise<{ jobId: string }> => apiEnqueue(`${Base}/import`);
+export const startImport = (): Promise<{ jobId: string }> => apiEnqueue('/api/v1/gas-composition/import');
 
 /**
  * Σ мол.% для показу (індикатор, «Σ = 99.98 %»), з точністю до 1e-9. ⚠ Самі значення на дроті — рядки `decimal`

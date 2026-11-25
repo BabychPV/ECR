@@ -11052,9 +11052,19 @@
               "string"
             ]
           },
+          "lowSumVersions": {
+            "description": "Версій, у яких 0 &lt; Σ &lt; 90 % (у FLERT — 7 кейсів): найімовірніше неповний склад.",
+            "format": "int32",
+            "type": "integer"
+          },
           "name": {
             "description": "Назва.",
             "type": "string"
+          },
+          "noCompositionVersions": {
+            "description": "Версій без складу (Σ = 0, «No composition»; у FLERT — 16).",
+            "format": "int32",
+            "type": "integer"
           },
           "number": {
             "description": "Номер.",
@@ -11086,7 +11096,9 @@
           "caseCount",
           "versionCount",
           "latestFrom",
-          "deviatingVersions"
+          "deviatingVersions",
+          "lowSumVersions",
+          "noCompositionVersions"
         ],
         "type": "object"
       },

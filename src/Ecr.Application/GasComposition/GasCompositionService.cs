@@ -124,7 +124,9 @@ public sealed partial class GasCompositionService(
                     own.Select(v => v.CaseName).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
                     own.Count,
                     own.Count == 0 ? null : own.Max(v => v.ValidFrom),
-                    own.Count(v => Deviates(Sum(v))));
+                    own.Count(v => Deviates(Sum(v))),
+                    own.Count(v => Sum(v) is > 0m and < LowSum),
+                    own.Count(v => Sum(v) == 0m));
             })
             .OrderBy(s => s.StreamId)
             .ToList();
@@ -190,7 +192,7 @@ public sealed partial class GasCompositionService(
                 RequireApplied(result);
                 created = result.Rows[0].Entry.Id;
 
-                await LogAsync(userId, "createStream", new { streamId, name, isOnshore = request.IsOnshore }, tx).ConfigureAwait(false);
+                await LogAsync(userId, "createStream", $"{streamId} {name}", new() { ["location"] = request.IsOnshore ? "onshore" : "offshore", ["number"] = values[FlertCompositionSchema.StreamNumber] }, tx).ConfigureAwait(false);
             },
             ct).ConfigureAwait(false);
 
@@ -240,11 +242,10 @@ public sealed partial class GasCompositionService(
                 RequireNoErrors(result);
                 await uow.SaveChangesAsync(tx).ConfigureAwait(false);
 
-                await LogAsync(userId, "updateStream", new
+                await LogAsync(userId, "updateStream", Label(stream), new()
                 {
-                    streamId = stream.StreamId,
-                    before = stream,
-                    after = request,
+                    ["before"] = new { stream.Name, stream.Number, stream.IsOnshore, stream.IsSour, stream.IsHmb, stream.HmbDoc, stream.Group, stream.Hidden },
+                    ["after"] = new { Name = name, request.Number, request.IsOnshore, request.IsSour, request.IsHmb, request.HmbDoc, request.Group, request.Hidden },
                 }, tx).ConfigureAwait(false);
             },
             ct).ConfigureAwait(false);
@@ -292,7 +293,7 @@ public sealed partial class GasCompositionService(
                 }
 
                 await SoftDeleteAsync(ids.Stream, [streamEntryId], userId, tx).ConfigureAwait(false);
-                await LogAsync(userId, "deleteStream", new { streamId = stream.StreamId, name = stream.Name, versions = versions.Select(Snapshot) }, tx)
+                await LogAsync(userId, "deleteStream", Label(stream), new() { ["versions"] = versions.Select(Snapshot).ToList() }, tx)
                     .ConfigureAwait(false);
             },
             ct).ConfigureAwait(false);
@@ -320,7 +321,7 @@ public sealed partial class GasCompositionService(
         await uow.ExecuteInTransactionAsync(
             async tx =>
             {
-                _ = (await store.ListStreamsAsync(ids, tx).ConfigureAwait(false)).FirstOrDefault(s => s.Id == streamEntryId)
+                var stream = (await store.ListStreamsAsync(ids, tx).ConfigureAwait(false)).FirstOrDefault(s => s.Id == streamEntryId)
                     ?? throw StreamNotFound(streamEntryId);
                 var versions = await store.ListVersionsAsync(ids, streamEntryId, tx).ConfigureAwait(false);
                 var timeline = versions.Where(v => SameCase(v.CaseName, caseName)).ToList();
@@ -348,14 +349,13 @@ public sealed partial class GasCompositionService(
                 var versionId = result.Rows[0].Entry.Id;
 
                 await WriteRowsAsync(ids, versionId, code, [], validated.Components, tx).ConfigureAwait(false);
-                await LogAsync(userId, "createVersion", new
+                await LogAsync(userId, "createVersion", Label(stream), new()
                 {
-                    stream = streamEntryId,
-                    caseName = name,
-                    window = Window(plan.NewWindow!.Value),
-                    adjusted = plan.Adjustments.Select(a => new { a.Id, window = Window(a.Window) }),
-                    sum = validated.Sum,
-                    components = validated.Components,
+                    ["case"] = name,
+                    ["window"] = Window(plan.NewWindow!.Value),
+                    ["previousNow"] = plan.Adjustments.Select(a => Window(a.Window)).FirstOrDefault(),
+                    ["sum"] = validated.Sum,
+                    ["components"] = validated.Components,
                 }, tx).ConfigureAwait(false);
             },
             ct).ConfigureAwait(false);
@@ -416,12 +416,21 @@ public sealed partial class GasCompositionService(
                 }
 
                 await WriteRowsAsync(ids, versionId, version.Code, version.Rows, validated.Components, tx).ConfigureAwait(false);
-                await LogAsync(userId, "updateVersion", new
+                await LogAsync(userId, "updateVersion", await LabelAsync(ids, version.StreamEntryId, tx).ConfigureAwait(false), new()
                 {
-                    version = versionId,
-                    before = Snapshot(version),
-                    after = new { window = Window(plan.NewWindow!.Value), sum = validated.Sum, components = validated.Components },
-                    adjusted = plan.Adjustments.Select(a => new { a.Id, window = Window(a.Window) }),
+                    ["case"] = version.CaseName,
+                    ["before"] = Snapshot(version),
+                    ["after"] = new
+                    {
+                        window = Window(plan.NewWindow!.Value),
+                        t = values.TemperatureC,
+                        density = values.DensityOp,
+                        mw = values.MwHysys,
+                        z = values.Z,
+                        sum = validated.Sum,
+                        components = validated.Components,
+                    },
+                    ["neighbourNow"] = plan.Adjustments.Select(a => Window(a.Window)).FirstOrDefault(),
                 }, tx).ConfigureAwait(false);
             },
             ct).ConfigureAwait(false);
@@ -453,10 +462,11 @@ public sealed partial class GasCompositionService(
                 // Спершу видалити (звільнити ключ у вікні), потім продовжити попередню.
                 await SoftDeleteVersionAsync(ids, version, userId, tx).ConfigureAwait(false);
                 await AdjustAsync(ids, plan.Adjustments, tx).ConfigureAwait(false);
-                await LogAsync(userId, "deleteVersion", new
+                await LogAsync(userId, "deleteVersion", await LabelAsync(ids, version.StreamEntryId, tx).ConfigureAwait(false), new()
                 {
-                    version = Snapshot(version),
-                    adjusted = plan.Adjustments.Select(a => new { a.Id, window = Window(a.Window) }),
+                    ["case"] = version.CaseName,
+                    ["deleted"] = Snapshot(version),
+                    ["previousNow"] = plan.Adjustments.Select(a => Window(a.Window)).FirstOrDefault(),
                 }, tx).ConfigureAwait(false);
             },
             ct).ConfigureAwait(false);
@@ -516,7 +526,7 @@ public sealed partial class GasCompositionService(
                     tx).ConfigureAwait(false);
                 RequireNoErrors(result);
                 await uow.SaveChangesAsync(tx).ConfigureAwait(false);
-                await LogAsync(userId, "renameCase", new { stream = streamEntryId, from = timeline[0].CaseName, to }, tx).ConfigureAwait(false);
+                await LogAsync(userId, "renameCase", await LabelAsync(ids, streamEntryId, tx).ConfigureAwait(false), new() { ["from"] = timeline[0].CaseName, ["to"] = to, ["versions"] = timeline.Count }, tx).ConfigureAwait(false);
             },
             ct).ConfigureAwait(false);
 
@@ -567,6 +577,9 @@ public sealed partial class GasCompositionService(
         _ => "other",
     };
 
+    /// <summary>Межа «явно неповного складу» для позначки в переліку (FLERT: 7 кейсів із Σ &lt; 90 %).</summary>
+    private const decimal LowSum = 90m;
+
     private static bool Deviates(decimal sum) => sum == 0m || Math.Abs(sum - 100m) > GasCompositionRules.SumTolerance;
 
     private static decimal Sum(GasVersionRecord version) => version.ActiveRows.Sum(r => r.MolPct);
@@ -588,7 +601,6 @@ public sealed partial class GasCompositionService(
 
     private static object Snapshot(GasVersionRecord v) => new
     {
-        v.Id,
         v.CaseName,
         window = Window(v.Slot.Window),
         t = v.TemperatureC,
@@ -935,18 +947,38 @@ public sealed partial class GasCompositionService(
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
-    private Task LogAsync(int userId, string operation, object details, CancellationToken ct)
-        => audit.WriteSecurityEventAsync(
+    /// <summary>Потік у журналі: «Id назва» — те, що людина знає, а не Id запису довідника.</summary>
+    private static string Label(GasStreamRecord stream) => $"{stream.StreamId} {stream.Name}";
+
+    private async Task<string> LabelAsync(GasRegistryIds ids, long streamEntryId, CancellationToken ct)
+        => (await store.ListStreamsAsync(ids, ct).ConfigureAwait(false)).FirstOrDefault(s => s.Id == streamEntryId) is { } stream
+            ? Label(stream)
+            : streamEntryId.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Подія <see cref="ChangedEventType"/>: плоский JSON «operation, stream, …» — журнал безпеки показує його парами
+    /// «ключ: значення» (auditDetails), тож тут лише людські поля: Id і назва потоку, кейс, вікна дати, Σ, компоненти; Id записів
+    /// довідника не пишуться (у журналі значень <c>RegistryValueChanged</c> вони й так є).
+    /// </summary>
+    private Task LogAsync(int userId, string operation, string stream, Dictionary<string, object?> fields, CancellationToken ct)
+    {
+        var details = new Dictionary<string, object?> { ["operation"] = operation, ["stream"] = stream };
+        foreach (var (key, value) in fields)
+        {
+            details[key] = value;
+        }
+
+        return audit.WriteSecurityEventAsync(
             new SecurityEventRecord(
                 clock.UtcNow,
                 ChangedEventType,
                 TargetUserId: null,
                 TargetRoleId: null,
-                JsonSerializer.Serialize(new { operation, details }),
+                JsonSerializer.Serialize(details),
                 userId,
                 currentUser.CorrelationId),
             ct);
-
+    }
     /// <summary>
     /// Після коміту: злита задача перерахунку на довідник × рік, лише роки з відкритими залежними, перетнуті із зачепленими
     /// датами. Збій черги не валить зміну (вона вже закомічена) — рік у <c>failed</c>, запис у журнал.

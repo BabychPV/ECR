@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, type JSX } from 'react';
-import { Anchor, Badge, Button, Text } from '@mantine/core';
+import { Anchor, Badge, Button, Group, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { queryKeys } from '@/api/queryKeys';
@@ -40,15 +40,54 @@ export function streamPanelId(id: number): string {
 /** Показник смуги, що фільтрує: потоки з версією, де Σ поза 100 ± 0.5. */
 const DeviatingStat = 'deviating';
 
-/** Стан прогону імпорту текстом мовою інтерфейсу. */
-function importRunText(run: GasImportRun): string {
-  const status = t(`gasComposition.import.status.${run.status.toLowerCase()}`);
-  const time = formatDateTime(run.startedAt);
-  const head = t('gasComposition.import.lastRun', { time, status });
-  if (run.reason !== null && run.reason !== undefined) return `${head} ${t(`gasComposition.import.reason.${run.reason}`)}`;
-  return `${head} ${t('gasComposition.import.counts', { rows: run.sourceRows, added: run.added })}`;
+/** Показник смуги, що фільтрує: потоки з версією, де 0 < Σ < 90 % (найімовірніше неповний склад). */
+const LowSumStat = 'lowSum';
+
+/** Показник смуги, що фільтрує: потоки з версією без складу («No composition»). */
+const NoCompositionStat = 'noComposition';
+
+/** Стан прогону імпорту — ключі літералами (сторож каталогу бачить кожен). */
+function importStatusText(status: string): string {
+  switch (status) {
+    case 'Running':
+      return t('gasComposition.import.status.running');
+    case 'Succeeded':
+      return t('gasComposition.import.status.succeeded');
+    case 'Degraded':
+      return t('gasComposition.import.status.degraded');
+    default:
+      return t('gasComposition.import.status.failed');
+  }
 }
 
+/** Чому імпорт не застосовано; невідома причина — без пояснення (статус уже сказав головне). */
+function importReasonText(reason: string): string {
+  switch (reason) {
+    case 'emptyResult':
+      return t('gasComposition.import.reason.emptyResult');
+    case 'deactivationLimit':
+      return t('gasComposition.import.reason.deactivationLimit');
+    case 'mappingErrors':
+      return t('gasComposition.import.reason.mappingErrors');
+    case 'truncated':
+      return t('gasComposition.import.reason.truncated');
+    case 'registryIncompatible':
+      return t('gasComposition.import.reason.registryIncompatible');
+    case 'writerRejected':
+      return t('gasComposition.import.reason.writerRejected');
+    case 'alreadyImported':
+      return t('gasComposition.import.reason.alreadyImported');
+    default:
+      return '';
+  }
+}
+
+/** Стан прогону імпорту текстом мовою інтерфейсу. */
+function importRunText(run: GasImportRun): string {
+  const head = t('gasComposition.import.lastRun', { time: formatDateTime(run.startedAt), status: importStatusText(run.status) });
+  if (run.reason !== null && run.reason !== undefined) return `${head} ${importReasonText(run.reason)}`.trim();
+  return `${head} ${t('gasComposition.import.counts', { rows: run.sourceRows, added: run.added })}`;
+}
 /**
  * Склад газу (D-NEW, людина 24.11): потоки з кейсами й версіями складу, власник — ECR. Перелік — фільтри й Σ-перевірка;
  * шторка потоку — шкала версій кожного кейсу й редактор. Поки в ECR немає жодного потоку, угорі — разовий імпорт із
@@ -137,14 +176,18 @@ export function GasCompositionPage(): JSX.Element {
               String(s.streamId) === query) &&
             (location === null || (location === 'onshore') === s.isOnshore) &&
             (sour === null || (sour === 'yes') === s.isSour) &&
-            (stat !== DeviatingStat || s.deviatingVersions > 0),
+            (stat !== DeviatingStat || s.deviatingVersions > 0) &&
+            (stat !== LowSumStat || s.lowSumVersions > 0) &&
+            (stat !== NoCompositionStat || s.noCompositionVersions > 0),
         );
   const filtered = query.length > 0 || location !== null || sour !== null || stat !== null;
 
-  const stats: readonly [StatItem, StatItem, StatItem] = [
-    { id: 'streams', label: t('gasComposition.statStreams'), value: streams?.length ?? 0, filter: false },
-    { id: 'versions', label: t('gasComposition.statVersions'), value: (streams ?? []).reduce((n, s) => n + s.versionCount, 0), filter: false },
-    { id: DeviatingStat, label: t('gasComposition.statDeviating'), value: (streams ?? []).filter((s) => s.deviatingVersions > 0).length },
+  const all = streams ?? [];
+  const stats: readonly [StatItem, StatItem, StatItem, StatItem] = [
+    { id: 'streams', label: t('gasComposition.statStreams'), value: all.length, filter: false },
+    { id: DeviatingStat, label: t('gasComposition.statDeviating'), value: all.filter((s) => s.deviatingVersions > 0).length },
+    { id: LowSumStat, label: t('gasComposition.statLowSum'), value: all.filter((s) => s.lowSumVersions > 0).length },
+    { id: NoCompositionStat, label: t('gasComposition.statNoComposition'), value: all.filter((s) => s.noCompositionVersions > 0).length },
   ];
 
   const columns: readonly DataTableColumn<GasStreamListItem>[] = [
@@ -186,15 +229,30 @@ export function GasCompositionPage(): JSX.Element {
       key: 'deviatingVersions',
       label: t('gasComposition.col.sum'),
       sortValue: (s) => s.deviatingVersions,
+      // Позначки, які людина шукає: «без складу» і «Σ < 90 %» — окремо від загального «не 100 %».
       render: (s) =>
         s.deviatingVersions === 0 ? (
           <Text span size="sm" c="dimmed">
             {t('gasComposition.sumOk')}
           </Text>
         ) : (
-          <Badge size="sm" variant="light" color="statusWarning">
-            {t('gasComposition.sumDeviating', { count: s.deviatingVersions })}
-          </Badge>
+          <Group gap="xs" wrap="wrap">
+            {s.noCompositionVersions > 0 && (
+              <Badge size="sm" variant="light" color="statusError">
+                {t('gasComposition.badgeNoComposition', { count: s.noCompositionVersions })}
+              </Badge>
+            )}
+            {s.lowSumVersions > 0 && (
+              <Badge size="sm" variant="light" color="statusWarning">
+                {t('gasComposition.badgeLowSum', { count: s.lowSumVersions })}
+              </Badge>
+            )}
+            {s.deviatingVersions - s.noCompositionVersions - s.lowSumVersions > 0 && (
+              <Badge size="sm" variant="light" color="statusWarning">
+                {t('gasComposition.sumDeviating', { count: s.deviatingVersions - s.noCompositionVersions - s.lowSumVersions })}
+              </Badge>
+            )}
+          </Group>
         ),
     },
   ];
@@ -202,6 +260,37 @@ export function GasCompositionPage(): JSX.Element {
   const canEdit = list.data?.canEdit === true;
   const open = detail.data;
   const lastRun = list.data?.import.lastRun ?? null;
+
+  /*
+   * ⛔ Діалоги потоку (правка, видалення) мусять бути в DOM ПІСЛЯ шторки: Mantine кладе портали за порядком, і діалог,
+   * змонтований до шторки, малювався під нею — кнопка «Remove» була видима, але не натискалась (знайдено e2e).
+   */
+  const streamModals = (
+    <>
+        <StreamFormModal
+          target={form}
+          onClose={() => setForm(null)}
+          onSaved={(result) => {
+            setForm(null);
+            void applied(result);
+            if (result.stream !== null && result.stream !== undefined) setPanel(streamPanelId(result.stream.id));
+          }}
+        />
+  
+        <ConfirmModal
+          opened={deleting !== null}
+          title={t('gasComposition.deleteStreamTitle', { name: deleting?.name ?? '' })}
+          verb={t('common.delete')}
+          isPending={remove.isPending}
+          onConfirm={() => {
+            if (deleting !== null) remove.mutate(deleting.id);
+          }}
+          onClose={() => setDeleting(null)}
+        >
+          <Text size="sm">{t('gasComposition.deleteStreamText')}</Text>
+        </ConfirmModal>
+    </>
+  );
 
   return (
     <ListPage
@@ -312,33 +401,14 @@ export function GasCompositionPage(): JSX.Element {
               children: (
                 <Suspense fallback={<Text size="sm" c="dimmed">{t('common.loading')}</Text>}>
                   <StreamDetailBody stream={open} components={components.data ?? []} onChanged={(result) => void applied(result)} />
+                  {streamModals}
                 </Suspense>
               ),
             }
       }
     >
-      <StreamFormModal
-        target={form}
-        onClose={() => setForm(null)}
-        onSaved={(result) => {
-          setForm(null);
-          void applied(result);
-          if (result.stream !== null && result.stream !== undefined) setPanel(streamPanelId(result.stream.id));
-        }}
-      />
-
-      <ConfirmModal
-        opened={deleting !== null}
-        title={t('gasComposition.deleteStreamTitle', { name: deleting?.name ?? '' })}
-        verb={t('common.delete')}
-        isPending={remove.isPending}
-        onConfirm={() => {
-          if (deleting !== null) remove.mutate(deleting.id);
-        }}
-        onClose={() => setDeleting(null)}
-      >
-        <Text size="sm">{t('gasComposition.deleteStreamText')}</Text>
-      </ConfirmModal>
+      {/* Без відкритої шторки — тут; з нею — усередині шторки (інакше діалог опинився б ПІД нею). */}
+      {open === undefined || openId === undefined ? streamModals : null}
     </ListPage>
   );
 }

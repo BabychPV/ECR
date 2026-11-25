@@ -1528,6 +1528,11 @@ public sealed record ExternalTable(
 (злита постановка `IFlertCompositionSyncJob`, лише в порожню базу); стан останнього прогону — у відповіді
 `GET /api/v1/gas-composition/streams` (`import.lastRun`, той самий `FlertSyncRunDto`).
 
+Порти сторінки «Склад газу» (`src/Ecr.Application/Ports/IGasCompositionStore.cs`): `IGasCompositionStore` — читання
+потоків, версій кейсів із рядками складу, компонентів, замкнених періодів (закритий період або затверджений аркуш оригіналу,
+що читав склад) і років залежних документів; `IGasCompositionProvisioning` — заведення довідників складу (`Local`) і
+перехід колишнього дзеркала `External` у власність ECR.
+
 ```csharp
 // src/Ecr.Application/Ports/IFlertSyncStatusReader.cs
 public interface IFlertCompositionSyncJob : IBackgroundJob;

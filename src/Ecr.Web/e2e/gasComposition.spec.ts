@@ -86,7 +86,7 @@ test.describe('Склад газу: потік, кейс, версії (D-NEW)',
     await editor.getByRole('button', { name: 'Save' }).click();
     await expect(editor).toBeHidden({ timeout: 30_000 });
     const winter = detail.locator('[data-case="370 Winter"]');
-    await expect(winter.getByTestId('gas-version-row')).toHaveCount(1);
+    await expect(winter.getByTestId('gas-version-row')).toHaveCount(1, { timeout: 30_000 });
 
     // Нова версія з 2026-03 (копія попередньої): попередня тепер діє «по лютий 2026».
     await winter.getByTestId('gas-add-version').click();
@@ -98,7 +98,7 @@ test.describe('Склад газу: потік, кейс, версії (D-NEW)',
     await expect(winter.getByTestId('gas-version-row')).toHaveCount(2, { timeout: 30_000 });
     await expect(winter.locator('[data-from="2025-01-01"]')).toContainText('February 2026');
 
-    await page.screenshot({ path: test.info().outputPath('gas-composition-light-1440.png'), fullPage: true });
+    await page.screenshot({ path: test.info().outputPath('gas-composition-light-1440.png') });
 
     // Правка новішої версії зі Σ поза допуском — «Save» недоступна до підтвердження.
     await winter.locator('[data-from="2026-03-01"]').getByRole('button', { name: 'Edit' }).click();
@@ -117,27 +117,29 @@ test.describe('Склад газу: потік, кейс, версії (D-NEW)',
     await setScheme(page, 'dark');
     await page.getByRole('button', { name }).click();
     await expect(detail).toBeVisible({ timeout: 30_000 });
-    await page.screenshot({ path: test.info().outputPath('gas-composition-dark-1440.png'), fullPage: true });
+    await page.screenshot({ path: test.info().outputPath('gas-composition-dark-1440.png') });
     await page.setViewportSize({ width: 375, height: 812 });
-    await page.screenshot({ path: test.info().outputPath('gas-composition-dark-375.png'), fullPage: true });
+    await page.screenshot({ path: test.info().outputPath('gas-composition-dark-375.png') });
     await page.keyboard.press('Escape');
     await expect(detail).toBeHidden({ timeout: 15_000 });
     await setScheme(page, 'light');
     await page.getByRole('button', { name }).click();
     await expect(detail).toBeVisible({ timeout: 30_000 });
-    await page.screenshot({ path: test.info().outputPath('gas-composition-light-375.png'), fullPage: true });
+    await page.screenshot({ path: test.info().outputPath('gas-composition-light-375.png') });
     await page.setViewportSize({ width: 1440, height: 900 });
+    if (!(await detail.isVisible())) await page.getByRole('button', { name }).click();
+    await expect(winter.getByTestId('gas-version-row')).toHaveCount(2, { timeout: 30_000 });
 
     // Видалення новішої версії: попередня знову чинна.
     await winter.locator('[data-from="2026-03-01"]').getByRole('button', { name: 'Delete' }).click();
-    await page.getByRole('dialog', { name: /Delete the version/ }).getByRole('button', { name: 'Delete' }).click();
+    await page.getByRole('dialog', { name: /Delete the version/ }).getByRole('button', { name: 'Remove' }).click();
     await expect(winter.getByTestId('gas-version-row')).toHaveCount(1, { timeout: 30_000 });
     await expect(winter.locator('[data-from="2025-01-01"]')).toContainText('current');
 
     // Видалення потоку.
     await page.getByRole('button', { name: 'Delete stream…' }).click();
     const removed = page.waitForResponse((r) => r.url().includes('/api/v1/gas-composition/streams/') && r.request().method() === 'DELETE');
-    await page.getByRole('dialog', { name: /Delete stream/ }).getByRole('button', { name: 'Delete' }).click();
+    await page.getByRole('dialog', { name: /Delete stream/ }).getByRole('button', { name: 'Remove' }).click();
     expect((await removed).status()).toBe(200);
     await expect(page.getByRole('button', { name })).toHaveCount(0, { timeout: 30_000 });
   });

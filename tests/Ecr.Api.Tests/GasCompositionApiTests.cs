@@ -72,6 +72,12 @@ public sealed class GasCompositionApiTests(SqlServerFixture sql)
         using var app = new EcrApiFactory(sql);
         using var editor = await SignedInAsync(app, ["GasComposition.View", "GasComposition.Edit"]);
 
+        long eventsBefore;
+        await using (var db = Context())
+        {
+            eventsBefore = await db.Database.SqlQuery<long>($"SELECT CAST(ISNULL(MAX(Id), 0) AS bigint) AS [Value] FROM aud.SecurityEvent").SingleAsync();
+        }
+
         // Потік: Id = найбільший + 1.
         var name = $"Test stream {Guid.NewGuid():N}"[..30];
         var created = await OkAsync(await editor.PostAsJsonAsync(Url("streams"), Stream(name)), app);
@@ -136,13 +142,14 @@ public sealed class GasCompositionApiTests(SqlServerFixture sql)
         var left = Assert.Single(Versions(deleted, "370 Winter (rev 2)"));
         Assert.Equal(JsonValueKind.Null, left.GetProperty("validTo").ValueKind);
 
-        // Журнал: подія на кожну дію людини.
+        // Журнал: подія на кожну дію людини (потік, 2 версії, перенесення, перейменування, видалення версії = 6).
+        // ⚠ Колекція "SqlServer" серіалізована — інших писачів журналу між двома замірами немає.
         await using (var db = Context())
         {
             var events = await db.Database
-                .SqlQuery<int>($"SELECT COUNT(*) AS [Value] FROM aud.SecurityEvent WHERE EventType = N'GasCompositionChanged' AND DetailsJson LIKE {"%" + streamEntryId.ToString(System.Globalization.CultureInfo.InvariantCulture) + "%"}")
+                .SqlQuery<int>($"SELECT COUNT(*) AS [Value] FROM aud.SecurityEvent WHERE EventType = N'GasCompositionChanged' AND Id > {eventsBefore}")
                 .SingleAsync();
-            Assert.True(events >= 5, $"подій GasCompositionChanged: {events}");
+            Assert.Equal(6, events);
         }
 
         // Імпорт у непорожню базу — 409.
