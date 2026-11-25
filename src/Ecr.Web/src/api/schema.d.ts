@@ -37096,8 +37096,18 @@ export interface components {
              * @description Найпізніша дата дії серед версій; `null` — версій немає.
              */
             latestFrom: null | string;
+            /**
+             * Format: int32
+             * @description Версій, у яких 0 &lt; Σ &lt; 90 % (у FLERT — 7 кейсів): найімовірніше неповний склад.
+             */
+            lowSumVersions: number;
             /** @description Назва. */
             name: string;
+            /**
+             * Format: int32
+             * @description Версій без складу (Σ = 0, «No composition»; у FLERT — 16).
+             */
+            noCompositionVersions: number;
             /** @description Номер. */
             number: null | string;
             /**

@@ -20,6 +20,15 @@ import {
 /** Порядок груп компонентів у редакторі (як у FLERT/HYSYS: інерти, вуглеводні, ароматика, сірка, інше). */
 const GroupOrder = ['inert', 'hydrocarbon', 'aromatic', 'sulphur', 'other'] as const;
 
+/** Підпис групи — ключі літералами (сторож каталогу бачить кожен). */
+const GroupLabel: Record<(typeof GroupOrder)[number], () => string> = {
+  inert: () => t('gasComposition.editor.group.inert'),
+  hydrocarbon: () => t('gasComposition.editor.group.hydrocarbon'),
+  aromatic: () => t('gasComposition.editor.group.aromatic'),
+  sulphur: () => t('gasComposition.editor.group.sulphur'),
+  other: () => t('gasComposition.editor.group.other'),
+};
+
 /** Що редагується. */
 export type VersionEditorTarget =
   /** Нова версія наявного кейсу (значення — копія попередньої). */
@@ -228,15 +237,15 @@ function Editor({ streamId, target, components, onClose, onSaved }: Props & { re
           <SimpleGrid cols={{ base: 1, xs: 2, md: 4 }} spacing="sm">
             {(
               [
-                ['temperature', temperature, setTemperature],
-                ['density', density, setDensity],
-                ['mw', mw, setMw],
-                ['z', z, setZ],
+                ['temperature', t('gasComposition.editor.temperature'), temperature, setTemperature],
+                ['density', t('gasComposition.editor.density'), density, setDensity],
+                ['mw', t('gasComposition.editor.mw'), mw, setMw],
+                ['z', t('gasComposition.editor.z'), z, setZ],
               ] as const
-            ).map(([name, value, set], index) => (
+            ).map(([name, label, value, set], index) => (
               <TextInput
                 key={name}
-                label={t(`gasComposition.editor.${name}`)}
+                label={label}
                 inputMode="decimal"
                 value={value}
                 readOnly={readOnly}
@@ -278,7 +287,7 @@ function Editor({ streamId, target, components, onClose, onSaved }: Props & { re
         {grouped.map(({ group, items }) => (
           <Table key={group} striped withTableBorder verticalSpacing={4} captionSide="top" data-testid={`gas-group-${group}`}>
             <Table.Caption ta="start" fw={600}>
-              {t(`gasComposition.editor.group.${group}`)}
+              {GroupLabel[group]()}
             </Table.Caption>
             <Table.Thead>
               <Table.Tr>

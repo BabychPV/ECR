@@ -33,6 +33,8 @@ const Stream = {
   versionCount: 2,
   latestFrom: '2022-01-01',
   deviatingVersions: 1,
+  lowSumVersions: 0,
+  noCompositionVersions: 0,
 };
 
 const Detail = {

@@ -27,9 +27,19 @@ interface Props {
 
 const yesNo = (value: boolean): string => (value ? t('gasComposition.yes') : t('gasComposition.no'));
 
-/** «По який місяць» для тексту діалогу; без кінця — «без окончания». */
-const untilText = (validTo: string | null | undefined): string =>
-  validTo === null || validTo === undefined ? t('gasComposition.openEnded') : lastMonthOf(validTo);
+/** Що станеться після видалення версії — словами, без дат «по без окончания». */
+function deleteText(deleting: { version: GasVersion; previous: GasVersion | undefined } | null): string {
+  if (deleting === null) return '';
+  const { version, previous } = deleting;
+  if (previous !== undefined && previous.validTo === version.validFrom) {
+    return version.validTo === null || version.validTo === undefined
+      ? t('gasComposition.deleteVersionExtendsOpen', { from: monthOf(previous.validFrom) })
+      : t('gasComposition.deleteVersionExtends', { to: lastMonthOf(version.validTo) });
+  }
+  return version.validTo === null || version.validTo === undefined
+    ? t('gasComposition.deleteVersionLast')
+    : t('gasComposition.deleteVersionGap', { to: lastMonthOf(version.validTo) });
+}
 
 /** Σ версії текстом: до шести знаків, без хвостових нулів. */
 const sumText = (sum: string): string => String(Math.round(Number(sum) * 1e6) / 1e6);
@@ -241,9 +251,7 @@ export default function StreamDetailBody({ stream, components, onChanged }: Prop
         onClose={() => setDeleting(null)}
       >
         <Text size="sm">
-          {deleting?.previous !== undefined && deleting.previous.validTo === deleting.version.validFrom
-            ? t('gasComposition.deleteVersionExtends', { to: untilText(deleting.version.validTo) })
-            : t('gasComposition.deleteVersionGap', { to: untilText(deleting?.version.validTo) })}
+          {deleteText(deleting)}
         </Text>
       </ConfirmModal>
 

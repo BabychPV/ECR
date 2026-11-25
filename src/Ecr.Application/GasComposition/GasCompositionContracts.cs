@@ -24,6 +24,8 @@ public static class GasCompositionPermissions
 /// <param name="VersionCount">Версій усіх кейсів.</param>
 /// <param name="LatestFrom">Найпізніша дата дії серед версій; <c>null</c> — версій немає.</param>
 /// <param name="DeviatingVersions">Версій, у яких Σ поза 100 ± 0.5 (зокрема без складу).</param>
+/// <param name="LowSumVersions">Версій, у яких 0 &lt; Σ &lt; 90 % (у FLERT — 7 кейсів): найімовірніше неповний склад.</param>
+/// <param name="NoCompositionVersions">Версій без складу (Σ = 0, «No composition»; у FLERT — 16).</param>
 public sealed record GasStreamListItemDto(
     long Id,
     int StreamId,
@@ -36,7 +38,9 @@ public sealed record GasStreamListItemDto(
     int CaseCount,
     int VersionCount,
     DateOnly? LatestFrom,
-    int DeviatingVersions);
+    int DeviatingVersions,
+    int LowSumVersions,
+    int NoCompositionVersions);
 
 /// <summary>Стан разового імпорту з FLERT.</summary>
 /// <param name="Available">Імпорт можливий: у ECR ще немає жодного потоку.</param>

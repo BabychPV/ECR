@@ -768,7 +768,7 @@ public sealed partial class EndpointCoverageTests
         "registries.data.title",
         "nav.permits", "permits.types.title", "permits.typeEditor.title", "permits.lists.title",
         "permits.bindings.title", "permits.binding.title", "permits.detail.title",
-        "nav.piData",
+        "nav.piData", "nav.gasComposition",
         "projects.tab.periods", "projects.tab.settings", "projects.tab.lifecycle",
     ];
 
@@ -785,7 +785,7 @@ public sealed partial class EndpointCoverageTests
         "nav.jobs.description", "nav.snapshots.description", "nav.audit.description",
         "nav.consistency.description", "nav.uiStrings.description", "nav.health.description", "nav.dependencyGraph.description",
         "nav.permits.description", "permits.types.description", "permits.lists.description",
-        "permits.bindings.description", "nav.piData.description",
+        "permits.bindings.description", "nav.piData.description", "nav.gasComposition.description",
     ];
 
     /// <summary>Назви прав <c>permission.&lt;Code&gt;</c> — 45 прав каталогу <c>sec.Permission</c>.</summary>
