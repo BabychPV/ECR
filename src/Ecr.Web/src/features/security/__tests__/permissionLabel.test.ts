@@ -109,10 +109,12 @@ describe('Сід покриває ВЕСЬ каталог прав (U-11)', () =
   // seed/features/B80-source-binding.sql; матриця будується з каталогу сервера, окремого клієнтського переліку немає).
   // ✎ 2026-11-19: 51-ше — `Calculation.RecalculateApprovedDependents` (B80 N5, перерахунок затверджених залежних;
   // назви ru/kz/en у сіді — перевірка «кожне право має назву» нижче).
-  // ✎ 2026-11-24: 47 — прибрано `Report.BuildSnapshot`, `Report.ViewSnapshot`, `Report.Export`, `Report.EditDefinition`
+  // ✎ 2026-11-24: −4 — прибрано `Report.BuildSnapshot`, `Report.ViewSnapshot`, `Report.Export`, `Report.EditDefinition`
   // (P-1124-3, D-NEW: зрізи звітності й конструктор звітів прибрано, звіти — у SSRS).
-  it('у каталозі 47 прав — рівно стільки колонок і має матриця', () => {
-    expect(codes.size).toBe(47);
+  // ✎ 2026-11-25: +2 — `GasComposition.View`, `GasComposition.Edit` (D-NEW, сторінка «Склад газу»; назви ru/kz/en —
+  // seed/features/GAS-composition.sql). Разом 51 − 4 + 2 = 49 (зведення пачки b12).
+  it('у каталозі 49 прав — рівно стільки колонок і має матриця', () => {
+    expect(codes.size).toBe(49);
   });
 
   it('кожне право має назву в каталозі рядків', () => {

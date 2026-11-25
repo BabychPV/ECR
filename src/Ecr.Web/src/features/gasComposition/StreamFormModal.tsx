@@ -1,6 +1,7 @@
 import { useState, type JSX } from 'react';
 import { Button, Checkbox, Group, Modal, SegmentedControl, Stack, Text, TextInput } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { t } from '@/shared/i18n';
 import { showApiError } from '@/shared/ui/notify';
 import { createStream, updateStream, type GasChangeResult, type GasStreamDetail } from './api';
@@ -53,6 +54,7 @@ function Form({ target, onClose, onSaved }: Props & { readonly target: GasStream
   });
 
   const canSave = name.trim().length > 0 && !groupInvalid && !save.isPending;
+  const saveLoading = usePendingLoading(save.isPending);
 
   return (
     <Modal
@@ -128,7 +130,7 @@ function Form({ target, onClose, onSaved }: Props & { readonly target: GasStream
           </Button>
           <Button
             disabled={!canSave}
-            loading={save.isPending}
+            loading={saveLoading}
             onClick={() => {
               if (!canSave) return;
               save.mutate();

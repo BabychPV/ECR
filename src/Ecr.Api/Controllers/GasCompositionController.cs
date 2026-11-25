@@ -132,5 +132,8 @@ public sealed class GasCompositionController(GasCompositionService service) : Co
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Import(CancellationToken ct)
-        => Accepted(new Contracts.JobAcceptedResponse(await service.StartImportAsync(ct).ConfigureAwait(false)));
+    {
+        var jobId = await service.StartImportAsync(ct).ConfigureAwait(false);
+        return Accepted(new Contracts.JobAcceptedResponse(jobId));
+    }
 }
