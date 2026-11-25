@@ -65,13 +65,13 @@ test.describe('Projects 08.11', () => {
     await expect(nav.locator('a[href="/projects"]')).toContainText('Projects');
     await expect(nav.locator('a[href="/admin/periods"], a[href="/admin/projects"]')).toHaveCount(0);
     await expect(nav.getByText(/^(Periods|Project settings)$/)).toHaveCount(0);
-    // Порядок у групі Work: Documents, Projects, My groups (далі — кампанія, якщо є право).
+    // Порядок у групі Work: Documents, Projects (далі — кампанія, якщо є право); My groups — в Access (25.11).
     const hrefs = await nav.locator('a').evaluateAll((links) => links.map((link) => link.getAttribute('href') ?? ''));
     const at = (href: string): number => hrefs.indexOf(href);
     expect(at('/'), hrefs.join(' ')).toBeLessThan(at('/projects'));
-    expect(at('/projects'), hrefs.join(' ')).toBeLessThan(at('/my-groups'));
-    // Templates лишається в Configure — після групи Work.
+    // Templates лишається в Configure — після групи Work; My groups — в Access, після Configure.
     expect(at('/projects')).toBeLessThan(at('/admin/templates'));
+    expect(at('/admin/templates'), hrefs.join(' ')).toBeLessThan(at('/my-groups'));
   });
 
   test('f2: /admin/periods and /admin/projects redirect to Projects without an error page', async ({ page }) => {

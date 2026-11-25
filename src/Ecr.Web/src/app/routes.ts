@@ -817,8 +817,8 @@ export interface NavGroup {
  * (`routeConfig.test.ts`): пункт поза групами зник би з меню мовчки.
  */
 export const navGroups: readonly NavGroup[] = [
-  // ✎ Projects (людина 08.11: «проджект перенеси в розділ work»): Documents, Projects, My groups, Reporting campaign.
-  { id: 'work', labelKey: 'nav.group.work', routes: [routes.home, routes.projects, routes.myGroups, routes.adminCampaign] },
+  // ✎ Projects (людина 08.11: «проджект перенеси в розділ work»): Documents, Projects, Reporting campaign.
+  { id: 'work', labelKey: 'nav.group.work', routes: [routes.home, routes.projects, routes.adminCampaign] },
   {
     id: 'configure',
     labelKey: 'nav.group.configure',
@@ -837,7 +837,8 @@ export const navGroups: readonly NavGroup[] = [
       routes.adminPiData,
     ],
   },
-  { id: 'access', labelKey: 'nav.group.access', routes: [routes.adminSecurity] },
+  // ✎ людина 25.11: «my groups перенеси в секюріті бо не логічно» — My groups у Access після Security (маршрут /my-groups без змін).
+  { id: 'access', labelKey: 'nav.group.access', routes: [routes.adminSecurity, routes.myGroups] },
   {
     id: 'operate',
     labelKey: 'nav.group.operate',
