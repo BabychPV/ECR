@@ -44,6 +44,8 @@ const documents = [
   doc(14, { GEN: 'Approved', AIR: 'Approved' }),
 ];
 let items: unknown[] = documents;
+let summary: unknown = { draft: 1, submitted: 1, approved: 1, rejected: 1, withIssues: 1 };
+let calendar: unknown = null;
 
 const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
   const url = String(input);
@@ -55,8 +57,9 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
   }
   if (url.includes('/tables/status')) return json([]);
   if (url.includes('/workflow/history')) return json([]);
-  if (url.includes('/api/v1/documents/summary')) return json({ draft: 1, submitted: 1, approved: 1, rejected: 1, withIssues: 1 });
+  if (url.includes('/api/v1/documents/summary')) return json(summary);
   if (url.includes('/api/v1/documents')) return json({ items, nextCursor: null, totalCount: items.length });
+  if (url.includes('/periods') && calendar !== null) return json(calendar);
   if (url.includes('/api/v1/projects')) return json({ items: [{ id: 1, code: 'ATR', status: 'Active' }], nextCursor: null, totalCount: 1 });
 
   return json(null);
@@ -99,6 +102,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
   fetchMock.mockClear();
   items = documents;
+  summary = { draft: 1, submitted: 1, approved: 1, rejected: 1, withIssues: 1 };
+  calendar = null;
 });
 
 describe('DocumentsPage — подання Board (UI-40)', () => {
@@ -108,14 +113,17 @@ describe('DocumentsPage — подання Board (UI-40)', () => {
       show(`/?periodKey=${String(Period)}&view=board`);
       const root = await board();
 
+      // ✎ b14: «частково подано» — власний стовпець (DOC-000011: чернетка поруч із затвердженим).
       expect([...root.querySelectorAll('[data-board-column]')].map((node) => node.getAttribute('data-board-column'))).toEqual([
         'Draft',
+        'PartlySubmitted',
         'Submitted',
         'Rework',
         'Approved',
       ]);
       const cards = (id: string) => [...column(root, id).querySelectorAll('[data-board-card]')].map((node) => node.getAttribute('data-board-card'));
-      expect(cards('Draft')).toEqual(['DOC-000011']);
+      expect(cards('Draft')).toEqual([]);
+      expect(cards('PartlySubmitted')).toEqual(['DOC-000011']);
       expect(cards('Submitted')).toEqual(['DOC-000012']);
       expect(cards('Rework')).toEqual(['DOC-000013']);
       expect(cards('Approved')).toEqual(['DOC-000014']);
@@ -211,6 +219,63 @@ describe('DocumentsPage — подання Board (UI-40)', () => {
       expect(within(column(root, 'NoState')).getByRole('heading', { name: /documents\.board\.noState/ })).toBeTruthy();
       expect(column(root, 'NoState').querySelector('[data-board-card="DOC-000015"]')).not.toBeNull();
       expect(root.querySelectorAll('[data-board-card]').length).toBe(5);
+    },
+    TestTimeout,
+  );
+
+  /*
+   * ⛔ AC-1 (b14 documents-board-yearly, людина 25.11): перелік за РІК — у рядках немає станів аркушів (`sheetStates`
+   * порожній), є `periodStates`. Над дошкою «4 Draft · 1 Partly submitted», а всі 5 карток стояли в «No state for this
+   * period». Дошка й лічильники мають казати одне: число в заголовку стовпця = число на смузі.
+   * Без фіксу червоний: стовпці Draft/PartlySubmitted порожні, з'являється `NoState` з 5 картками.
+   */
+  it(
+    'AC-1: рік — картки в тих самих стовпцях, що й лічильники; стовпця «без стану» немає',
+    async () => {
+      const suffix = String(Date.now() % 100000);
+      const yearDoc = (id: number, states: readonly string[]) => ({
+        ...doc(id, {}),
+        businessKey: `Y-${suffix}-${String(id)}`,
+        sheets: [],
+        // Жовтень-грудень ще не відкрито (Scheduled): сервер віддає їх `Draft`, у рік вони не входять.
+        periodStates: [...states, 'Draft', 'Draft', 'Draft'].map((state, index) => ({ periodKey: 202601 + index, state })),
+      });
+      const nine = (state: string) => Array.from({ length: 9 }, () => state);
+      items = [
+        yearDoc(21, nine('Draft')),
+        yearDoc(22, nine('Draft')),
+        yearDoc(23, nine('Draft')),
+        yearDoc(24, nine('Draft')),
+        // Січень–серпень подано, вересень перевідкрито й повернуто в чернетку.
+        yearDoc(25, [...Array.from({ length: 8 }, () => 'Submitted'), 'Draft']),
+      ];
+      summary = { draft: 4, partlySubmitted: 1, submitted: 0, approved: 0, rejected: 0, withIssues: 0 };
+      calendar = {
+        timeZoneId: 'UTC',
+        periods: Array.from({ length: 12 }, (_, index) => ({
+          periodKey: 202601 + index,
+          state: index < 9 ? (index === 8 ? 'Open' : 'Closed') : 'Scheduled',
+          isCurrent: index === 8,
+        })),
+      };
+      show('/?year=2026&view=board');
+      const root = await board();
+
+      const counter = async (id: string): Promise<string> =>
+        waitFor(() => {
+          const node = document.querySelector(`[data-summary-counter="${id}"]`);
+          expect(node).not.toBeNull();
+          return (node as HTMLElement).textContent ?? '';
+        }, { timeout: SlowEnvTimeout });
+      expect(await counter('draft')).toMatch(/^4/);
+      expect(await counter('partlySubmitted')).toMatch(/^1/);
+
+      const count = (id: string) => column(root, id).querySelector('[data-board-count]')?.getAttribute('data-board-count');
+      await waitFor(() => expect(count('Draft')).toBe('4'), { timeout: SlowEnvTimeout });
+      expect(count('PartlySubmitted')).toBe('1');
+      expect(column(root, 'PartlySubmitted').querySelector(`[data-board-card="Y-${suffix}-25"]`)).not.toBeNull();
+      expect(count('Submitted')).toBe('0');
+      expect(root.querySelector('[data-board-column="NoState"]')).toBeNull();
     },
     TestTimeout,
   );

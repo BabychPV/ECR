@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { DocumentSummary } from '@/api/types';
 import { useTableStatus, type TableStatus } from '@/features/documents/api';
-import { documentState, hasSheetStates, sheetLabels, type SheetLabel } from '@/features/documents/documentSheets';
+import { documentYearState, hasSheetStates, sheetLabels, type SheetLabel } from '@/features/documents/documentSheets';
 import { DocumentStateBadge } from '@/features/documents/NoApprovalChip';
 import { useWorkflowHistory, type WorkflowEvent } from '@/features/workflow/api';
 import { formatPeriodKey } from '@/shared/format/periodKey';
@@ -51,6 +51,9 @@ interface DocumentQuickLookProps {
 
   /** Після закриття (Esc, хрестик, «Close») — щоб сторінка повернула фокус відкривачу. */
   readonly onClose?: (() => void) | undefined;
+
+  /** ✎ b14: розпочаті періоди проєкту — стан документа за рік (той самий, що на дошці й у лічильниках). */
+  readonly startedOf?: ((projectId: number) => ReadonlySet<number> | undefined) | undefined;
 }
 
 /**
@@ -85,6 +88,7 @@ export function DocumentQuickLook({
   projectCode,
   documentHref,
   onClose,
+  startedOf,
 }: DocumentQuickLookProps): JSX.Element | null {
   const documentId = Number(panelId);
   const valid = Number.isInteger(documentId) && documentId > 0;
@@ -119,7 +123,7 @@ export function DocumentQuickLook({
 
   const name = document === undefined ? '' : localized(document.nameL10n);
   const title = document === undefined ? '' : name.length > 0 ? name : document.businessKey;
-  const state = document === undefined ? null : documentState(document);
+  const state = document === undefined ? null : documentYearState(document, startedOf?.(document.projectId));
   const project = document === undefined ? undefined : projectCode(document.projectId);
   const subtitle = document === undefined ? undefined : [name.length > 0 ? document.businessKey : null, project].filter(Boolean).join(' · ');
 
