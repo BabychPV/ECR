@@ -67,7 +67,7 @@ describe('VersionEditorModal — доступність', { timeout: 120_000 }, 
 
       const dialog = await screen.findByRole('dialog');
       expect(dialog.textContent).not.toContain('⟦');
-      const temperature = screen.getByRole<HTMLInputElement>('textbox', { name: Catalog['gasComposition.editor.temperature'] });
+      const temperature = screen.getByRole<HTMLInputElement>('textbox', { name: Catalog['gasComposition.editor.temperature']! });
       expect(temperature.value).toBe('98.08355');
       expect(temperature.title).toBe('98.0835451945116');
 

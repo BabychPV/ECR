@@ -41,14 +41,14 @@
 }
 
 /*
- * Текстові стовпці — не ширші за ~26 знаків і не вищі за два рядки (людина 25.11: «числа в пермітах не вистачає
+ * Текстові стовпці — не ширші за ~19 знаків і не вищі за два рядки (людина 25.11: «числа в пермітах не вистачає
  * місця» — назва майданчика в 140 знаків одним рядком виштовхувала числові стовпці за край екрана). Повний текст —
  * у підказці комірки і в шторці рядка. Числа не переносяться й не обрізаються ніколи.
  */
 .pm-t tbody .pm-text {
   white-space: normal;
   min-width: 8ch;
-  max-width: 26ch;
+  max-width: 19ch;
 }
 
 .pm-t tbody .pm-text > .pm-stick {
@@ -201,4 +201,27 @@
   justify-content: space-between;
   gap: var(--mantine-spacing-sm);
   margin-bottom: var(--mantine-spacing-xs);
+}
+
+/*
+ * Хвіст числових стовпців закріплено справа (людина 25.11: «числа в пермітах не вистачає місця»): при довгому тексті
+ * прокручується лише текстова частина. `right` кожної комірки рахує `usePinnedNumbers`; `data-pin="off"` на таблиці —
+ * закріплення вимкнене (вузький екран: числа закрили б увесь текст).
+ */
+.pm-t[data-pin='on'] [data-pin] {
+  position: sticky;
+  z-index: 1;
+}
+
+.pm-t[data-pin='on'] thead [data-pin],
+.pm-t[data-pin='on'] tfoot [data-pin] {
+  z-index: 3;
+}
+
+.pm-t[data-pin='on'] tbody [data-pin] {
+  z-index: 1;
+}
+
+.pm-t[data-pin='on'] :is(th, td)[data-pin-edge] {
+  border-inline-start: 1px solid var(--mantine-color-default-border);
 }

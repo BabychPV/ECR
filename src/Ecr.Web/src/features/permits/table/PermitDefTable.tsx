@@ -116,6 +116,64 @@ function useFirstColumnWidth(layout: unknown): RefObject<HTMLTableElement | null
   return ref;
 }
 
+/** Чи елемент — число (стовпець `number` або підсумок суто числової групи). */
+function isNumericItem(item: VisibleItem): boolean {
+  return item.kind === 'summary' ? item.columns.every((column) => column.type === 'number') : item.column.type === 'number';
+}
+
+/**
+ * Звідки починається ХВІСТ числових стовпців (людина 25.11: «числа в пермітах не вистачає місця»): їх закріплено справа,
+ * тож при довгому тексті прокручується лише текстова частина, а числа видно завжди. `items.length` — хвоста немає.
+ */
+function trailingNumericStart(items: readonly VisibleItem[]): number {
+  let start = items.length;
+  while (start > 1 && isNumericItem(items[start - 1]!)) start -= 1;
+  return start;
+}
+
+/** Частка ширини області, яку можуть зайняти закріплені числа; більше — не закріплювати (вузький екран, 375 px). */
+const MaxPinnedShare = 0.5;
+
+/**
+ * Закріплює хвіст числових стовпців справа: для кожної комірки з `data-pin` (0 — крайній правий) рахує відступ `right` як
+ * суму ширин закріплених стовпців правіше. Якщо разом вони ширші за `MaxPinnedShare` області — не закріплює (на 375 px
+ * закріплені числа закрили б увесь текст; там таблиця просто прокручується).
+ */
+function usePinnedNumbers(
+  tableRef: RefObject<HTMLTableElement | null>,
+  regionRef: RefObject<HTMLDivElement | null>,
+  layout: unknown,
+): void {
+  useLayoutEffect(() => {
+    const table = tableRef.current;
+    const region = regionRef.current;
+    if (table === null || region === null) return undefined;
+    const apply = (): void => {
+      const heads = Array.from(table.querySelectorAll<HTMLElement>('thead tr.pm-cols > [data-pin]'));
+      const widths = new Map<string, number>();
+      for (const head of heads) widths.set(head.dataset['pin'] ?? '', head.getBoundingClientRect().width);
+      const total = [...widths.values()].reduce((sum, width) => sum + width, 0);
+      const pin = heads.length > 0 && total <= region.clientWidth * MaxPinnedShare;
+      table.dataset['pin'] = pin ? 'on' : 'off';
+      const offsets = new Map<string, string>();
+      let right = 0;
+      for (let k = 0; k < heads.length; k++) {
+        offsets.set(String(k), `${String(right)}px`);
+        right += widths.get(String(k)) ?? 0;
+      }
+      for (const cell of Array.from(table.querySelectorAll<HTMLElement>('[data-pin]'))) {
+        cell.style.right = pin ? (offsets.get(cell.dataset['pin'] ?? '') ?? '') : '';
+      }
+    };
+    apply();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(apply);
+    observer.observe(region);
+    observer.observe(table);
+    return () => observer.disconnect();
+  }, [tableRef, regionRef, layout]);
+}
+
 function summaryHeader(item: Extract<VisibleItem, { kind: 'summary' }>): string {
   return item.columns.every((column) => column.type === 'number')
     ? t('permits.table.sumOf', { count: item.columns.length })
@@ -152,6 +210,13 @@ export function PermitDefTable({
   const hasGroups = useMemo(() => groupNames(columns).length > 0, [columns]);
   const spans = useMemo(() => groupSpans(items), [items]);
   const tableRef = useFirstColumnWidth(items);
+  const regionRef = useRef<HTMLDivElement | null>(null);
+  usePinnedNumbers(tableRef, regionRef, items);
+  const pinStart = trailingNumericStart(items);
+  /** `data-pin` комірки стовпця `index` (0 — крайній правий закріплений) або `undefined`. */
+  const pinOf = (index: number): number | undefined => (index >= pinStart ? items.length - 1 - index : undefined);
+  /** Лівий край закріпленої смуги — з рискою. */
+  const edgeOf = (index: number): '' | undefined => (index === pinStart && pinStart < items.length ? '' : undefined);
 
   function onKeyDown(event: KeyboardEvent<HTMLTableRowElement>, row: PermitRow): void {
     if (event.target !== event.currentTarget) return;
@@ -182,7 +247,7 @@ export function PermitDefTable({
         </div>
       )}
 
-      <div className="pm-tw" role="region" aria-label={caption} tabIndex={0}>
+      <div className="pm-tw" role="region" aria-label={caption} tabIndex={0} ref={regionRef}>
         <table className="pm-t" ref={tableRef}>
           <caption className="mantine-visually-hidden">{caption}</caption>
           <thead>
@@ -217,7 +282,7 @@ export function PermitDefTable({
               {items.map((item, index) => {
                 if (item.kind === 'summary') {
                   return (
-                    <th key={`s-${item.group}`} scope="col" className="num">
+                    <th key={`s-${item.group}`} scope="col" className="num" data-pin={pinOf(index)} data-pin-edge={edgeOf(index)}>
                       <span className="pm-stick">{summaryHeader(item)}</span>
                     </th>
                   );
@@ -241,6 +306,8 @@ export function PermitDefTable({
                     scope="col"
                     className={`${column.type === 'number' ? 'num' : ''} ${index === 0 ? 'pm-first' : ''}`.trim()}
                     title={column.code}
+                    data-pin={pinOf(index)}
+                    data-pin-edge={edgeOf(index)}
                   >
                     {index === 0 ? label : <span className="pm-stick">{label}</span>}
                   </th>
@@ -261,7 +328,7 @@ export function PermitDefTable({
                   if (item.kind === 'summary') {
                     const sum = summaryValue(row, item.columns);
                     return (
-                      <td key={`s-${item.group}`} className="num">
+                      <td key={`s-${item.group}`} className="num" data-pin={pinOf(index)} data-pin-edge={edgeOf(index)}>
                         {sum === null ? (
                           <span className="pm-faint pm-stick">…</span>
                         ) : (
@@ -302,6 +369,8 @@ export function PermitDefTable({
                       scope={index === 0 ? 'row' : undefined}
                       className={index === 0 ? `${classes} pm-first`.trim() : classes}
                       data-required-empty={missing ? 'true' : undefined}
+                      data-pin={pinOf(index)}
+                      data-pin-edge={edgeOf(index)}
                       title={warning ?? exactOf(column, value) ?? fullTextOf(column, value)}
                     >
                       {index === 0 ? content : <span className="pm-stick">{content}</span>}
@@ -316,7 +385,7 @@ export function PermitDefTable({
             <tfoot>
               <tr>
                 {items.map((item, index) => {
-                  if (item.kind === 'summary') return <td key={`s-${item.group}`} />;
+                  if (item.kind === 'summary') return <td key={`s-${item.group}`} data-pin={pinOf(index)} data-pin-edge={edgeOf(index)} />;
                   if (index === 0) {
                     return (
                       <th key={item.column.code} scope="row" className="pm-first">
@@ -326,7 +395,7 @@ export function PermitDefTable({
                   }
                   const sum = totals.sums[item.column.code];
                   return (
-                    <td key={item.column.code} className="num">
+                    <td key={item.column.code} className="num" data-pin={pinOf(index)} data-pin-edge={edgeOf(index)}>
                       {sum === undefined ? null : (
                         <span className="pm-stick" title={formatDecimalReadable(sum)?.exact}>
                           {readableSum(sum)}
