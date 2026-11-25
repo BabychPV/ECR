@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { JSX } from 'react';
 import { AuditPage } from '@/pages/admin/AuditPage';
+import { ConsistencyIssuesPage } from '@/pages/admin/ConsistencyIssuesPage';
 import { FilterDebounceMs } from '@/shared/ui/useDebouncedFilter';
 import { testTheme } from '@/test/render';
 
@@ -148,5 +149,26 @@ describe('/admin/audit?view=structure — журнал структурних з
   );
 });
 
-// ✎ 24.11: «Rule» на /admin/consistency — перелік відомих правил (select), а не поле набору; нова сторінка журналу
-// починається з першої (ruleCode — у ключі запиту), див. ConsistencyIssuesPage.checksPerformed.test.tsx.
+describe('/admin/consistency — перелік розбіжностей', () => {
+  it(
+    '«Rule»: вибір правила — один запит',
+    async () => {
+      const seen = count('/api/v1/consistency/issues', 'ruleCode');
+      show(<ConsistencyIssuesPage />, '/admin/consistency');
+
+      // ✎ 24.11: «Rule» — перелік відомих правил (select), набору посимвольно немає; стережена поведінка та сама — одна
+      // зміна фільтра дає рівно один запит із ним, а не по запиту на проміжний стан.
+      const user = userEvent.setup();
+      const field = await screen.findByLabelText('⟦consistency.rule⟧', undefined, { timeout: SlowEnvTimeout });
+      await waitFor(() => expect(seen).toEqual(['']));
+
+      await user.click(field);
+      await user.click(await screen.findByRole('option', { name: '⟦consistency.rule.BROKEN_FK⟧' }));
+
+      await waitFor(() => expect(seen).toEqual(['', 'BROKEN_FK']));
+      await settle();
+      expect(seen).toEqual(['', 'BROKEN_FK']);
+    },
+    SlowEnvTimeout,
+  );
+});

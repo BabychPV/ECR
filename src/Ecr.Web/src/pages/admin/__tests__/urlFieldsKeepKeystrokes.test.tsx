@@ -6,6 +6,7 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { JSX } from 'react';
 import { AuditPage } from '@/pages/admin/AuditPage';
+import { ConsistencyIssuesPage } from '@/pages/admin/ConsistencyIssuesPage';
 import { FilterBar } from '@/shared/ui/FilterBar';
 import { testTheme } from '@/test/render';
 
@@ -160,8 +161,32 @@ describe("поле, прив'язане до адреси, при запізні
     SlowEnvTimeout,
   );
 
-  // ✎ 24.11: «Rule» на /admin/consistency — перелік відомих правил (select), а не поле набору; нова сторінка журналу
-  // починається з першої (ruleCode — у ключі запиту), див. ConsistencyIssuesPage.checksPerformed.test.tsx.
+  it(
+    '/admin/consistency «Rule»: обране правило лишається в полі, адреса наздоганяє',
+    async () => {
+      serveEmpty();
+      show(<ConsistencyIssuesPage />, '/admin/consistency');
+
+      // ✎ 24.11: «Rule» — перелік відомих правил (select): посимвольного набору, клавіші якого могла б з'їсти запізніла
+      // адреса, більше НЕМАЄ — вибір один і атомарний. Що лишається стерегти: вибір не губиться й не підміняється
+      // запізнілим відлунням — після запізнення адреси в полі саме обране правило, а в адресі — його код.
+      // ⚠ Відмінність від полів набору: `FilterBar.SelectField` керований адресою, тож на час запізнення (тут 40 мс)
+      // поле показує попереднє значення; втрати даних це не дає (той самий компонент у всіх фільтрах-переліках).
+      const user = userEvent.setup({ delay: LagMs / 2 });
+      const input = await screen.findByLabelText<HTMLInputElement>('⟦consistency.rule⟧', undefined, {
+        timeout: SlowEnvTimeout,
+      });
+
+      await user.click(input);
+      await user.click(await screen.findByRole('option', { name: '⟦consistency.rule.BROKEN_FK⟧' }));
+
+      await settle();
+      expect(input.value).toBe('⟦consistency.rule.BROKEN_FK⟧');
+      await urlCaughtUp('ruleCode', 'BROKEN_FK');
+      expect(input.value).toBe('⟦consistency.rule.BROKEN_FK⟧');
+    },
+    SlowEnvTimeout,
+  );
 
   it(
     'FilterBar (пошук): documents — у полі рівно набране; «Clear filters» очищає поле',
