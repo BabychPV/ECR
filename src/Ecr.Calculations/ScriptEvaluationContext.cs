@@ -36,7 +36,10 @@ internal sealed class ScriptEvaluationContext : IHostFunctionContext, IBudgetedE
     private readonly CalculationInput _input;
     private readonly bool _entryRef;
     private readonly bool _legacyText;
-    private readonly IRegistrySnapshot? _registries;
+    private IRegistrySnapshot? _registries;
+
+    // ✎ §5.2a: дата рядка з `registry as of` (null — речення немає або дата ще не обчислена).
+    private DateOnly? _asOf;
 
     private readonly List<Frame> _frames = [];
     private readonly List<Dictionary<string, ExpressionValue>> _scopes = [[]];
@@ -85,6 +88,18 @@ internal sealed class ScriptEvaluationContext : IHostFunctionContext, IBudgetedE
 
     /// <inheritdoc />
     public string? CurrentSubstanceCode => _substances.TryPeek(out var top) ? top.Code : null;
+
+    /// <summary>
+    /// ✎ DESIGN-sg-flaring §5.2a (E5): знімок довідників на дату рядка з <c>registry as of</c> — для ВСІХ читань довідників
+    /// рядка (<c>REG*</c>, <c>ROW.&lt;lookup&gt;.&lt;поле&gt;</c>), і сама дата для <c>asof.*</c>.
+    /// </summary>
+    /// <param name="date">Бізнес-дата рядка (календар проєкту).</param>
+    /// <param name="snapshot">Знімок на цю дату.</param>
+    internal void UseRegistriesAsOf(DateOnly date, IRegistrySnapshot snapshot)
+    {
+        _asOf = date;
+        _registries = snapshot;
+    }
 
     /// <summary>Таблиці-псевдоніми скрипта для поточного екземпляра.</summary>
     internal void SetAliasRows(CompiledScript script, string alias, IReadOnlyList<AliasRow> rows)
@@ -311,8 +326,8 @@ internal sealed class ScriptEvaluationContext : IHostFunctionContext, IBudgetedE
         // Запис комірки є, але порожній, — `null` без помилки (так само, як `@X` у старому рушії); `#ARG` лише тоді, коли
         // аргументу немає зовсім (ScriptEvaluationContext, §3.5: «є, але порожнє» і «немає» — різні стани).
         return key
-            ? CalculationSteps.ToValue(argument, entryRef: true, legacyNumericText: false)
-            : CalculationSteps.ToValue(argument, _entryRef, _legacyText);
+            ? CalculationSteps.ToValue(argument, entryRef: true, legacyNumericText: false, dates: true)
+            : CalculationSteps.ToValue(argument, _entryRef, _legacyText, dates: true);
     }
 
     private static bool TryMonth(ExpressionValue value, out int month)
@@ -365,6 +380,10 @@ internal sealed class ScriptEvaluationContext : IHostFunctionContext, IBudgetedE
                 result = Month(args);
                 return true;
 
+            case "$asof":
+                result = AsOf(args);
+                return true;
+
             case "$cell":
                 result = Cell(args);
                 return true;
@@ -391,6 +410,25 @@ internal sealed class ScriptEvaluationContext : IHostFunctionContext, IBudgetedE
         }
     }
 
+    /// <summary><c>asof.Date</c> / <c>asof.Month</c> / <c>asof.Year</c> — дата рядка з <c>registry as of</c> (§5.2a).</summary>
+    private ExpressionValue AsOf(IReadOnlyList<ExpressionValue> args)
+    {
+        if (_asOf is not { } date)
+        {
+            return ExpressionValue.Null;
+        }
+
+        return args is [{ Value: string property }]
+            ? property switch
+            {
+                "Date" => ExpressionValue.Date(date.ToDateTime(TimeOnly.MinValue)),
+                "Month" => ExpressionValue.Number(date.Month),
+                "Year" => ExpressionValue.Number(date.Year),
+                _ => ExpressionValue.Error(ExpressionErrors.BadValue),
+            }
+            : ExpressionValue.Error(ExpressionErrors.BadValue);
+    }
+
     private ExpressionValue Month(IReadOnlyList<ExpressionValue> args)
     {
         if (args.Count != 3 || args[0].Value is not string field)
@@ -406,7 +444,7 @@ internal sealed class ScriptEvaluationContext : IHostFunctionContext, IBudgetedE
         var optional = args[2].Value is true;
         if (_arguments.TryGetValue(column, out var argument))
         {
-            return CalculationSteps.ToValue(argument, _entryRef, _legacyText);
+            return CalculationSteps.ToValue(argument, _entryRef, _legacyText, dates: true);
         }
 
         return optional ? ExpressionValue.Null : ExpressionValue.Error(ExpressionErrors.ArgumentNotFound);
@@ -446,7 +484,7 @@ internal sealed class ScriptEvaluationContext : IHostFunctionContext, IBudgetedE
                 : ExpressionValue.Error(ExpressionErrors.ArgumentNotFound);
         }
 
-        return CalculationSteps.ToValue(argument, _entryRef, _legacyText);
+        return CalculationSteps.ToValue(argument, _entryRef, _legacyText, dates: true);
     }
 
     /// <summary>

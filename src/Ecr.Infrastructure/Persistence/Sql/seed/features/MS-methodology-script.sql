@@ -684,3 +684,30 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
 OPTION (RECOMPILE);
 GO
 -- MS:methodology-script ── кінець секції ──
+
+-- MS:methodology-script ── (SGF registry-as-of: діагностики речення `registry as of`, DESIGN-sg-flaring §5.2a) ru/kz: власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'script.duplicateRegistryAsOf', N'ru', N'В скрипте может быть только одно предложение registry as of.'),
+    (N'script.duplicateRegistryAsOf', N'kz', N'Скриптте тек бір registry as of сөйлемі болуы мүмкін.'),
+    (N'script.registryAsOfNotDate', N'ru', N'Для registry as of нужна дата, например row.EVENT_START: число, текст, true/false или null датой не являются.'),
+    (N'script.registryAsOfNotDate', N'kz', N'registry as of үшін күн керек, мысалы row.EVENT_START: сан, мәтін, true/false немесе null күн емес.'),
+    (N'script.registryAsOfWithoutRegistries', N'ru', N'Предложение registry as of ничего не меняет: скрипт не читает ни одного справочника.'),
+    (N'script.registryAsOfWithoutRegistries', N'kz', N'registry as of сөйлемі ештеңені өзгертпейді: скрипт бірде-бір анықтамалықты оқымайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- MS:methodology-script ── кінець секції ──
+
+-- MS:methodology-script ── en-порція (SGF registry-as-of) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'script.duplicateRegistryAsOf', N'en', N'A script can have only one registry as of clause.', 1),
+    (N'script.registryAsOfNotDate', N'en', N'registry as of needs a date, for example row.EVENT_START: a number, text, true/false or null is not a date.', 1),
+    (N'script.registryAsOfWithoutRegistries', N'en', N'The registry as of clause changes nothing: the script reads no registry.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- MS:methodology-script ── кінець секції ──

@@ -128,6 +128,17 @@ public static class ScriptDiagnosticCodes
     public const string ParamOutsideLibrary = "paramOutsideLibrary";
     public const string TooDeep = "tooDeep";
 
+    // ✎ DESIGN-sg-flaring §5.2a: `registry as of <вираз>;`.
+
+    /// <summary>Друге речення <c>registry as of</c> у скрипті.</summary>
+    public const string DuplicateRegistryAsOf = "duplicateRegistryAsOf";
+
+    /// <summary>Вираз <c>registry as of</c> — літерал, що не є датою (число, текст, булеве, <c>null</c>).</summary>
+    public const string RegistryAsOfNotDate = "registryAsOfNotDate";
+
+    /// <summary><c>registry as of</c> у скрипті, що не читає жодного довідника (разом з імпортами).</summary>
+    public const string RegistryAsOfWithoutRegistries = "registryAsOfWithoutRegistries";
+
     // §13.7
     public const string TableColumnOutsideAggregate = "tableColumnOutsideAggregate";
     public const string AggregateNeedsTable = "aggregateNeedsTable";

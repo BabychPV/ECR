@@ -87,6 +87,13 @@ public sealed record ImportSyntax(string Name, ScriptSpan Span) : ItemSyntax(Spa
 /// <summary><c>rows from …;</c>.</summary>
 public sealed record RowsSyntax(IReadOnlyList<TableRef> Tables, MatchNode? Where, MatchNode? Active, ScriptSpan Span) : ItemSyntax(Span);
 
+/// <summary>
+/// <c>registry as of &lt;вираз&gt;;</c> (DESIGN-sg-flaring §5.2a): усі читання довідників рядка — на дату цього виразу.
+/// </summary>
+/// <param name="Date">Вираз дати; обчислюється на КОЖЕН рядок.</param>
+/// <param name="Span">Позиція всього речення.</param>
+public sealed record RegistryAsOfSyntax(Expr Date, ScriptSpan Span) : ItemSyntax(Span);
+
 /// <summary><c>table Alias = T;</c>.</summary>
 public sealed record TableSyntax(string Alias, ScriptSpan AliasSpan, TableRef Table, ScriptSpan Span) : ItemSyntax(Span);
 

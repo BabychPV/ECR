@@ -207,6 +207,16 @@ public sealed class CompiledScript
     /// <summary>Потрібен знімок довідників.</summary>
     public bool NeedsRegistries { get; internal init; }
 
+    /// <summary>
+    /// ✎ DESIGN-sg-flaring §5.2a: вираз <c>registry as of &lt;вираз&gt;;</c>, що обчислюється на КОЖЕН рядок; усі читання
+    /// довідників рядка бачать знімок на цю дату. <c>null</c> — речення немає (знімок на кінець періоду, як досі).
+    /// </summary>
+    /// <remarks>⚠ <see cref="RegistryCodes"/> від речення не змінюється: воно не додає й не прибирає довідників.</remarks>
+    public AstNode? RegistryAsOf { get; internal init; }
+
+    /// <summary>Текст виразу <see cref="RegistryAsOf"/> — для причини відхилення рядка й трейсу.</summary>
+    public string? RegistryAsOfText { get; internal init; }
+
     /// <summary>Усі згадані одиниці.</summary>
     public IReadOnlyList<UnitUse> Units { get; internal init; } = [];
 
