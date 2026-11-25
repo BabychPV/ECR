@@ -199,7 +199,7 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Collection:MaxEventPages` | 10 | `D-464`: скільки сторінок по 2 000 подій дочитувати за одне читання шаблону (за шматок, якщо `EventQueryChunk = Month`); від 1. Понад стелю — подія журналу покриття `coverageEvents.eventsTruncatedCap` (стеля і як її підняти), пізніші події не синхронізуються, видалення зниклих вимкнено — підніміть ключ або ввімкніть `Month`. Вікно синку — від найранішого відкритого періоду, у якому документ мапінгу має таблицю; вікно понад 400 діб — попередження в журналі сервера (закрийте забутий період). Поданий/затверджений аркуш — одна зведена подія на період; після повернення / відкликання / перевідкриття аркуша й відкриття періоду синк подій ставиться одразу. Масове видалення понад ліміт підтверджується у вкладці «Події з PI» («Підтвердити видалення», журнал змін) |
 | `PiSqlClient:CommandTimeoutSeconds` | 60 | `D-462`: тайм-аут однієї команди ODBC (кожної спроби з трьох), с; від 1. З'єднання ODBC одне на задачу збору. `SecondaryEndpoint` джерела вмикається сам при відмові з'єднання з основною адресою (не при відмові облікових даних) — у журналі сервера попередження «до кінця прогону джерело обслуговує ЗАПАСНА адреса» |
 | `Sql:CatalogQuery` / `Sql:ValueQuery` | немає (вбудовані) | те саме для SQL-джерела |
-| `Sql:<код джерела>:CompositionQuery` | немає | `D-476`: запит знімка складу газу FLERT для `FlertCompositionSyncJob` (п. 4.3) — еталон `EXEC dbo.usp_GetAllStreamDataFlattened;`; канал секретів, тобто змінна `ECR_Secrets__Sql__FLERT__CompositionQuery`. Типового тексту немає |
+| `Sql:<код джерела>:CompositionQuery` | немає (діє `Flert:Sync:CompositionQuery`) | `D-476`: перекриття запиту знімка складу газу FLERT для разового імпорту (п. 4.3) змінною `ECR_Secrets__Sql__FLERT__CompositionQuery`. Без неї діє несекретний `Flert:Sync:CompositionQuery` з appsettings (`EXEC dbo.usp_GetAllStreamDataFlattened;`) |
 | `Integration:AfTimeZoneId` | (порожньо = UTC) | ✎ 2026-09-30, D-212 PR-7: пояс, у якому AF віддає дати дії записів довідника без поясу (Windows або IANA, напр. `Asia/Atyrau`). Діє лише для синку темпорального довідника з атрибутами дат у політиці. Невідомий пояс зупиняє старт з ім'ям ключа. ⚠ Пояс серверів AF замовника — відкрите питання PI-адміністратору |
 | `PiWebApi:AllowedHosts` | `[]` (порожньо) | ✎ 2026-10-01: перелік хостів PI Web API, до яких дозволено підключати джерела. Елемент — точне ім'я хоста або `*.domain` (лише піддомени; сам `domain` не збігається); без урахування регістра. **Порожньо = без обмеження, окрім блок-листа** (loopback, link-local і хмарний metadata 169.254.x, unspecified, multicast — діє завжди, для всіх режимів автентифікації; перевіряється по кожній розв'язаній A/AAAA-адресі, у момент підключення — отже DNS rebinding не обійде). Приватні IP-літерали (`10.x`, `172.16–31.x`, `192.168.x`, `fc00::/7`) заборонені лише для джерел з Negotiate (потрібне ім'я хоста для Kerberos SPN). Адресу Negotiate-джерела можна змінити лише з явним `confirmEndpointChange: true` у запиті (в інтерфейсі — діалог підтвердження). Відповідь PI понад 50 МБ відхиляється. Масив задається так: у `appsettings.Production.json` — `"PiWebApi": { "AllowedHosts": [ "<хост PI Web API>", "*.<домен замовника>" ] }`, або змінними служби `ECR_PiWebApi__AllowedHosts__0`, `ECR_PiWebApi__AllowedHosts__1`, … ⚠ Інсталятор і `deploy-ecr.ps1` цього ключа не пишуть — задає адміністратор замовника вручну; імена хостів PI — дані замовника, у продукті їх немає (дефолт порожній; сторож `PiWebApiAllowedHostsDefaultTests`). Для вашого середовища кандидати allowlist: `ncatdevv08`, `ncatuatv12`, `ncatappv0154`; задає адміністратор замовника через `appsettings.Production.json` / `ECR_PiWebApi__AllowedHosts__0`. ⚠ Negotiate-джерело без списку: Warning у журнал і картка `sources` Degraded (`health.sources.negotiateNoAllowlist`, п. 3.1) — заповніть список. Після зміни — перезапуск `EcrApi` |
 | `Bootstrap:Password` | немає | запасний пароль `bootstrap`. Основний шлях — файл `bootstrap.secret` |
@@ -423,6 +423,7 @@ IF @@ROWCOUNT = 0
 | `Documents:StaleMapWarm:IntervalSeconds` | ні | `60` | Ціле число, не менше 10. |
 | `Documents:StaleMapWarm:RingIntervalSeconds` | ні | `600` | Ціле число, не менше 60. |
 | `Documents:VersionMigration:FromMonthEnabled` | ні | `false` | `true` або `false`. |
+| `Flert:Sync:CompositionQuery` | ні | `EXEC dbo.usp_GetAllStreamDataFlattened;` | Значення на старті не перевіряється. |
 | `Flert:Sync:DataSourceCode` | ні | `FLERT` | Значення на старті не перевіряється. |
 | `Flert:Sync:MaxDeactivatePercent` | ні | `10` | Ціле число, не менше 0. |
 | `Health:RawDataPointWarnRows` | ні | `20000000` | Ціле число, не менше 0. |
@@ -952,15 +953,21 @@ calc.CalculationStep WHERE …` — кроки до `D-565` лежать у `Tra
 **Разовий імпорт із FLERT** — кнопка «Import from FLERT» на сторінці (права `GasComposition.Edit` і `Integration.Manage`),
 видима, лише поки в ECR немає жодного потоку: у непорожню базу імпорт відмовляє (`reason=alreadyImported`, FLERT навіть
 не читається), тож правки ECR він не перетирає. Перед кнопкою (після того, як DBA FLERT видав права — нижче):
-1. Інтеграція → Джерела: джерело з кодом `FLERT` (або іншим — тоді `Flert:Sync:DataSourceCode`), транспорт `Sql`,
-   адреса — рядок з'єднання з базою FLERT під логіном лише для читання (`Server=<сервер FLERT>;Database=FLERT;User ID=ecr_flert_reader;Encrypt=True`),
-   секрет — ім'я секрету з паролем (`ECR_Secrets__<ім'я>`). Linked server і синоніми НЕ потрібні (`D-268`).
-2. Текст запиту — змінна служби `ECR_Secrets__Sql__FLERT__CompositionQuery` = `EXEC dbo.usp_GetAllStreamDataFlattened;`
-   (форма результату — 70+ колонок `usp_GetAllStreamDataFlattened`: поточні й історичні версії, усі компоненти).
-   Типового тексту немає: без нього прогін падає з `err.ECR-INT-0503.queryNotConfigured`.
+1. Джерело з кодом `FLERT` (або іншим — тоді `Flert:Sync:DataSourceCode`), транспорт `Sql`. Крок вікна
+   `tools/gas-composition/Import-GasCompositionFromFlert.ps1 -Apply` заводить його сам, якщо його немає (через
+   `POST /api/v1/data-sources` від імені оператора, з записом у журнал структурних змін): адреса
+   `Server=<сервер FLERT>;Integrated Security=True;TrustServerCertificate=True;Application Intent=ReadOnly`, каталог `FLERT`,
+   вхід — обліковий запис служби ECR (коли ECR і FLERT на одному сервері; новий SQL-логін не потрібен). Сухий прогін
+   скрипта лише друкує, що заведе; наявне джерело скрипт не змінює (вимкнене чи не-`Sql` — вихід 4). Інакше — вручну в
+   «Інтеграція → Джерела», зокрема під логіном лише для читання (`Server=<сервер FLERT>;Database=FLERT;User ID=ecr_flert_reader;Encrypt=True`,
+   секрет з паролем — `ECR_Secrets__<ім'я>`). Linked server і синоніми НЕ потрібні (`D-268`).
+2. Текст запиту — несекретний `Flert:Sync:CompositionQuery` в `appsettings.json`, типово `EXEC dbo.usp_GetAllStreamDataFlattened;`
+   (форма результату — 70+ колонок `usp_GetAllStreamDataFlattened`: поточні й історичні версії, усі компоненти). Змінна
+   служби `ECR_Secrets__Sql__FLERT__CompositionQuery`, якщо задана, його перекриває.
 
 **Права в базі FLERT** (DBA замовника; ECR у FLERT не пише нічого — запит виконується в транзакції, яку адаптер завжди
-відкочує):
+відкочує). Нижче — для логіна лише для читання; при вході обліковим записом служби той самий `GRANT EXECUTE` видається
+користувачу FLERT, зіставленому з цим обліковим записом (`CREATE USER [<домен>\<обліковий запис служби>] FROM LOGIN …`):
 
 ```sql
 USE [FLERT];

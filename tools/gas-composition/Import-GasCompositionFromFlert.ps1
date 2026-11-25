@@ -11,9 +11,13 @@
   Integration.Manage), очікування прогону itg.MaintenanceRun «flert-composition-sync» і звірка ECR з FLERT тими самими
   кількостями й контрольними сумами. Розбіжність — вихід 3.
 
-  ⛔ У FLERT скрипт не пише нічого (лише SELECT). Імпорт робить застосунок (джерело ext.DataSource «FLERT» і запит
-  Secrets:Sql:FLERT:CompositionQuery мають бути налаштовані — runbook §4.3). Повторний запуск безпечний: у непорожню
-  базу імпорт відмовляє.
+  ⛔ У FLERT скрипт не пише нічого (лише SELECT). Імпорт робить застосунок. З'єднання — джерело ext.DataSource з кодом
+  -DataSourceCode (типово FLERT). Немає — -Apply заводить його сам через POST /api/v1/data-sources від імені оператора
+  (журнал структурних змін пише застосунок): транспорт Sql, Windows-вхід служби ECR (Integrated Security, без SQL-логіна
+  і без секрету), сервер -FlertEndpointServer (типово -FlertServer), каталог -FlertDatabase. Сухий прогін лише друкує, що
+  заведе. Наявне джерело не змінюється: вимкнене чи не-Sql — відмова (вихід 4). Запит — Flert:Sync:CompositionQuery з
+  appsettings (EXEC dbo.usp_GetAllStreamDataFlattened;), якщо його не перекрито ECR_Secrets__Sql__<код>__CompositionQuery.
+  Повторний запуск безпечний: у непорожню базу імпорт відмовляє.
 
 .EXAMPLE
   powershell -File tools/gas-composition/Import-GasCompositionFromFlert.ps1 -EcrServer localhost -EcrDatabase EcrLandUi -FlertServer NCATSQLV42_PI
@@ -27,6 +31,8 @@ param(
     [Parameter(Mandatory)] [string] $EcrDatabase,
     [Parameter(Mandatory)] [string] $FlertServer,
     [string] $FlertDatabase = 'FLERT',
+    [string] $DataSourceCode = 'FLERT',
+    [string] $FlertEndpointServer,
     [switch] $Apply,
     [switch] $VerifyOnly,
     [string] $BaseUrl,
@@ -151,6 +157,27 @@ if ($existing -gt 0) {
     exit 2
 }
 
+# Джерело FLERT у ECR: є — лише перевіряємо; немає — -Apply заведе його через API (журнал структурних змін).
+if (-not $FlertEndpointServer) { $FlertEndpointServer = $FlertServer }
+$sourceEndpoint = "Server=$FlertEndpointServer;Integrated Security=True;TrustServerCertificate=True;Application Intent=ReadOnly"
+$sourceRow = Invoke-Sql $EcrServer $EcrDatabase "SELECT Id, Transport, IsActive, Endpoint, ISNULL(Catalog, N'-') FROM ext.DataSource WHERE Code = N'$($DataSourceCode -replace "'", "''")';"
+$createSource = $sourceRow.Count -eq 0
+if ($createSource) {
+    Write-Host "Джерела «$DataSourceCode» в ECR немає. $(if ($Apply) { 'Заводжу' } else { '-Apply заведе' }) через POST /api/v1/data-sources:"
+    Write-Host "  код $DataSourceCode, транспорт Sql, адреса «$sourceEndpoint», каталог $FlertDatabase,"
+    Write-Host '  вхід — обліковий запис служби ECR (Windows), SQL-логін і секрет не потрібні; запис — у журнал структурних змін.'
+    Write-Host '  ⚠ Обліковому запису служби ECR потрібне право EXECUTE на FLERT.dbo.usp_GetAllStreamDataFlattened (runbook §4.3).'
+}
+else {
+    $cols = $sourceRow[0] -split '\|'
+    Write-Host "Джерело «$DataSourceCode» вже є (Id $($cols[0]), транспорт $($cols[1]), увімкнене $($cols[2]), каталог $($cols[4])) — не змінюю."
+    if ($cols[1].Trim() -ne '2' -or $cols[2].Trim() -ne '1') {
+        Write-Host "Джерело «$DataSourceCode» не є увімкненим SQL-джерелом: виправте його в «Інтеграція → Джерела» і повторіть. Нічого не робимо."
+        exit 4
+    }
+}
+Write-Host "Запит знімка: Flert:Sync:CompositionQuery з appsettings, якщо не перекрито ECR_Secrets__Sql__$($DataSourceCode)__CompositionQuery."
+
 if (-not $Apply) {
     Write-Host 'Сухий прогін: нічого не записано. Для імпорту — той самий виклик із -Apply -BaseUrl … -Credential ….'
     exit 0
@@ -162,6 +189,16 @@ $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 $login = @{ userName = $Credential.UserName; password = $Credential.GetNetworkCredential().Password } | ConvertTo-Json -Compress
 Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/api/v1/login/local" -Method POST -ContentType 'application/json; charset=utf-8' `
     -Body ([Text.Encoding]::UTF8.GetBytes($login)) -WebSession $session -TimeoutSec 120 | Out-Null
+
+if ($createSource) {
+    $body = @{
+        code = $DataSourceCode; transport = 'Sql'; endpoint = $sourceEndpoint; catalog = $FlertDatabase; isActive = $true
+        nameL10n = @{ en = 'FLERT (gas composition, read only)'; ru = 'FLERT (состав газа, только чтение)'; kz = 'FLERT (газ құрамы, тек оқу)' }
+    } | ConvertTo-Json -Compress
+    $created = Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/api/v1/data-sources" -Method POST -ContentType 'application/json; charset=utf-8' `
+        -Body ([Text.Encoding]::UTF8.GetBytes($body)) -WebSession $session -TimeoutSec 120
+    Write-Host "Джерело заведено: HTTP $([int]$created.StatusCode)"
+}
 
 $lastRun = [long]((Invoke-Sql $EcrServer $EcrDatabase "SELECT ISNULL(MAX(Id), 0) FROM itg.MaintenanceRun WHERE JobCode = N'flert-composition-sync';")[0])
 $accepted = Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/api/v1/gas-composition/import" -Method POST -WebSession $session -TimeoutSec 120
