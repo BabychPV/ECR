@@ -112,6 +112,8 @@ async function preference(page: Page, value: 'light' | 'dark'): Promise<void> {
 }
 
 async function shot(page: Page, name: string): Promise<void> {
+  // Знімок — вкладення звіту Playwright (артефакт CI e2e-stand) і, з ECR_E2E_REPORT_DIR, файл.
+  await test.info().attach(name, { body: await page.screenshot(), contentType: 'image/png' });
   if (ReportDir === '') return;
   mkdirSync(ReportDir, { recursive: true });
   await page.screenshot({ path: `${ReportDir}\\${name}.png` });
