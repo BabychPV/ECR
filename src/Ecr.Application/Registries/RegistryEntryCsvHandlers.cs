@@ -113,7 +113,8 @@ public sealed class ImportRegistryEntriesHandler(
     IUnitOfWork? uow = null,
     Rules.IRegistryRuleEngine? rules = null,
     IUnitStore? units = null,
-    IRegistryKeyStore? keyStore = null)
+    IRegistryKeyStore? keyStore = null,
+    FlaringRegistryLock? flaring = null)
 {
     // ⚠ `units` (RT-16) — код одиниці в полі типу Unit: так його пише експорт. Без порту (тести, що
     // будують обробник руками) поле приймає лише Id, як і досі.
@@ -291,6 +292,25 @@ public sealed class ImportRegistryEntriesHandler(
         // dic.RegistryEntry і 80 ListValues; тепер набір запитів сталий.
         var prefetched = await PrefetchAsync(definition.Id, records, codeColumn, columns, ct).ConfigureAwait(false);
         var lookupCache = prefetched.LookupCache;
+
+        // ✎ DESIGN-sg-flaring §5.7 (C4): довідник факелів — і прев'ю, і застосування. Рядок із кодом наявного запису —
+        // зміна на його вікні; з новим кодом — вставка (CSV вікна не задає); без коду (авто-код, запис шукає первинний
+        // ключ) — обережно як зміна без меж.
+        await ExternalRegistryGuard.EnsureFlaringEditAllowedAsync(
+                definition,
+                () => Task.FromResult<IReadOnlyCollection<FlaringRegistryEdit>>(
+                    [.. records.Skip(1).Select(record =>
+                    {
+                        var rowCode = codeColumn >= 0 && codeColumn < record.Count ? record[codeColumn].Trim() : string.Empty;
+                        return rowCode.Length == 0
+                            ? FlaringRegistryEdit.Change(new ValidityWindow(null, null))
+                            : prefetched.EntriesByCode.TryGetValue(rowCode, out var existing)
+                                ? FlaringRegistryEdit.Change(existing.Window)
+                                : FlaringRegistryEdit.Insert(null);
+                    })]),
+                flaring,
+                ct)
+            .ConfigureAwait(false);
 
         // ⛔ RT-10b (§4.6): складений ключ довідника. Первинний ключ знаходить наявний запис
         // рядка раніше за код; дубль ключа у файлі — помилка обох рядків; вільність ключа

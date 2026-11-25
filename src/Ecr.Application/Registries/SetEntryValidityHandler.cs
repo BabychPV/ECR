@@ -4,6 +4,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Registries;
 
@@ -24,7 +25,8 @@ public sealed class SetEntryValidityHandler(
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock,
-    Keys.RegistryKeyService? keys = null)
+    Keys.RegistryKeyService? keys = null,
+    FlaringRegistryLock? flaring = null)
 {
     // ⚠ `keys` необов'язковий лише для тестів, що будують обробник руками (як в
     // `UpsertRegistryEntryHandler`); контейнер підставляє `RegistryKeyService` завжди. Що
@@ -79,6 +81,16 @@ public sealed class SetEntryValidityHandler(
 
         // ⛔ D-211: вікно чинності запису External-довідника — теж дані AF (опис — ДО зміни вікна).
         ExternalRegistryGuard.EnsureManualEditAllowed(definition);
+
+        // ✎ DESIGN-sg-flaring §5.7 (C4): довідник факелів — і старе, і нове вікно не перетинають замкнених періодів.
+        var oldWindow = entry.Window;
+        await ExternalRegistryGuard.EnsureFlaringEditAllowedAsync(
+                definition,
+                () => Task.FromResult<IReadOnlyCollection<FlaringRegistryEdit>>(
+                    [new FlaringRegistryEdit(oldWindow, new ValidityWindow(from, to))]),
+                flaring,
+                ct)
+            .ConfigureAwait(false);
 
         // Порожнє вікно відхиляє сутність (ECR-REG-0422) — до будь-яких змін
         // у документах.

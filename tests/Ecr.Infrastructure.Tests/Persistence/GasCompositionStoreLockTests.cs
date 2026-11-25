@@ -18,7 +18,7 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// ЗАКРИТОМУ періоді або на ЗАТВЕРДЖЕНОМУ аркуші — замикає; відкритий і незатверджений — лише залежний (перерахунок).
 /// </summary>
 /// <remarks>
-/// Мутаційні докази (локально, не в коміті): (1) прибрати <c>r.Closed ||</c> у <see cref="GasCompositionStore.ListLockedPeriodsAsync"/> →
+/// Мутаційні докази (локально, не в коміті): (1) прибрати <c>r.Closed ||</c> у <see cref="GasCompositionStore.ListLockedPeriodsAsync(GasRegistryIds, CancellationToken)"/> →
 /// <c>Закритий_період_замикає</c> червоний; (2) прибрати <c>|| r.Approved</c> → <c>Затверджений_аркуш_замикає_відкритий_період</c>
 /// червоний; (3) прибрати <c>run.Status == Current</c> → <c>Застарілий_прогін_не_замикає</c> червоний.
 /// </remarks>
@@ -81,6 +81,33 @@ public sealed class GasCompositionStoreLockTests(SqlServerFixture sql)
         Assert.Empty(await LockedAsync(f.Ids));
     }
 
+    /// <summary>
+    /// ✎ SGF AC-6 (C4(a), D4): перевантаження за id довідника — той самий зв'язок, а вікно періоду — з
+    /// <c>doc.Period.PeriodStart/PeriodEnd</c>, не з арифметики ключа.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "SGF-AC-6")]
+    public async Task Перевантаження_за_id_довідника_дає_вікно_з_doc_Period()
+    {
+        var f = await ArrangeAsync(PeriodState.Closed);
+        await using var db = Context();
+        var bounds = f.Bounds;
+
+        var locked = await new GasCompositionStore(db).ListLockedPeriodsAsync([f.Ids.Composition], CancellationToken.None);
+
+        var period = Assert.Single(locked);
+        Assert.Equal(f.PeriodKey, period.PeriodKey);
+        Assert.Equal(bounds.PeriodStart, period.PeriodStart);
+        Assert.Equal(bounds.PeriodEnd, period.PeriodEnd);
+        Assert.Equal(bounds.PeriodStart, period.Start);
+        Assert.Equal(bounds.PeriodEnd.AddDays(1), period.EndExclusive);
+
+        // Чужий довідник — нічого не замкнено.
+        Assert.Empty(await new GasCompositionStore(db).ListLockedPeriodsAsync([-77], CancellationToken.None));
+    }
+
     private async Task<IReadOnlyList<GasLockedPeriod>> LockedAsync(GasRegistryIds ids)
     {
         await using var db = Context();
@@ -93,7 +120,7 @@ public sealed class GasCompositionStoreLockTests(SqlServerFixture sql)
         return await new GasCompositionStore(db).ListDependentYearsAsync(ids, CancellationToken.None);
     }
 
-    private sealed record Fixture(GasRegistryIds Ids, int PeriodKey);
+    private sealed record Fixture(GasRegistryIds Ids, int PeriodKey, (DateOnly PeriodStart, DateOnly PeriodEnd) Bounds = default);
 
     /// <summary>Документ, методологія, що читає «склад» (власний довідник тесту), і актуальний прогін за період документа.</summary>
     private async Task<Fixture> ArrangeAsync(PeriodState state, bool approve = false, bool current = true)
@@ -145,7 +172,7 @@ public sealed class GasCompositionStoreLockTests(SqlServerFixture sql)
         await db.SaveChangesAsync();
 
         // Інші три Id — неіснуючі довідники: залежність тримає лише «склад».
-        return new Fixture(new GasRegistryIds(-1, -2, registry.Id, -3), document.PeriodKey.Value);
+        return new Fixture(new GasRegistryIds(-1, -2, registry.Id, -3), document.PeriodKey.Value, (period.PeriodStart, period.PeriodEnd));
     }
 
     private EcrDbContext Context()

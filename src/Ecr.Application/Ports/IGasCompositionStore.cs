@@ -117,6 +117,15 @@ public interface IGasCompositionStore
     /// <param name="ct">Скасування.</param>
     public Task<IReadOnlyList<GasLockedPeriod>> ListLockedPeriodsAsync(GasRegistryIds ids, CancellationToken ct);
 
+    /// <summary>
+    /// ✎ C4(a)/D4 (REVIEW-sg-flaring): те саме за довільними довідниками (<c>LP_SOUR_SPLIT</c>, <c>TOX_GAS_STREAM</c>,
+    /// <c>FLARE_LOCATION</c>) — той самий зв'язок <c>cfg.RegistryUse.SourceId = CalculationResult.MethodologyVersionId</c>;
+    /// вікно кожного періоду — з <c>doc.Period.PeriodStart/PeriodEnd</c>.
+    /// </summary>
+    /// <param name="registryDefIds">Довідники.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<IReadOnlyList<GasLockedPeriod>> ListLockedPeriodsAsync(IReadOnlyCollection<int> registryDefIds, CancellationToken ct);
+
     /// <summary>Роки з відкритими/пільговими залежними документами для кожного довідника складу.</summary>
     /// <param name="ids">Довідники.</param>
     /// <param name="ct">Скасування.</param>
