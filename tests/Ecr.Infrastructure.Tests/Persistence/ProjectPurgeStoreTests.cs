@@ -181,7 +181,7 @@ public sealed class ProjectPurgeStoreTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Мапа_подій_власного_документа_окремо_від_залежних_і_попередження_GOLD()
+    public async Task Мапа_подій_власного_документа_окремо_від_залежних()
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var a = await builder.BuildAsync(columnCount: 1, rowCount: 1);
@@ -198,17 +198,14 @@ public sealed class ProjectPurgeStoreTests(SqlServerFixture sql)
         await db.Database.ExecuteSqlAsync(
             $"INSERT INTO ext.SourceEventMap (SourceEntityId, DocumentId, TableDefId, VolumeMode, IsActive) VALUES ({entity.Id}, {a.DocumentId}, {a.TableDefId}, 0, 1)");
 
-        // ⚠ Код GOLD — лише всередині транзакції, що відкочується: у спільній тестовій базі код унікальний.
-        await using var tx = await db.Database.BeginTransactionAsync();
-        await db.Database.ExecuteSqlAsync(
-            $"UPDATE doc.Project SET Code = {Ecr.Application.Registries.Hse400CompositionMapping.GoldProjectCode} WHERE Id = {a.ProjectId}");
+        // ⚠ Попередження GOLD перевіряє PurgeProjectTests (ProjectPurgeWarnings.For): у спільній тестовій базі код HSE400_GOLD
+        // уже зайнятий іншими тестами (UQ_Project_Code), тож тут — лише те, що звичайний проєкт попередження не має.
         var facts = await Store(db, EmptyGraph()).ReadFactsAsync(a.ProjectId, lockForDelete: false, CancellationToken.None);
-        await tx.RollbackAsync();
 
         var map = Assert.Single(facts!.EventMaps);
         Assert.Equal(a.DocumentId, map.DocumentId);
         Assert.Empty(facts.Dependants);
-        Assert.Equal([ProjectPurgeWarnings.Hse400Tools], facts.Warnings);
+        Assert.Empty(facts.Warnings);
         Assert.Equal(Ecr.Application.Projects.PurgeProjectHandler.EventMapKey, Ecr.Application.Projects.PurgeProjectHandler.BlockerKey(facts));
 
         await db.Database.ExecuteSqlAsync($"DELETE FROM ext.SourceEventMap WHERE DocumentId = {a.DocumentId}");

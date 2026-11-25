@@ -198,6 +198,15 @@ public sealed class PurgeProjectTests
         await _purge.DidNotReceive().PurgeAsync(Arg.Any<int>(), Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>());
     }
 
+    /// <remarks>✎ R3 C2-g: попередження — лише для проєкту золотих тестів HSE400. Мутація: <c>For</c> завжди порожній — червоніє.</remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [InlineData("HSE400_GOLD", true)]
+    [InlineData("HSE400_2026", false)]
+    [InlineData("hse400_gold", false)]
+    public void Попередження_HSE400_GOLD_лише_для_проєкту_золотих_тестів(string code, bool warned)
+        => Assert.Equal(warned ? [ProjectPurgeWarnings.Hse400Tools] : [], ProjectPurgeWarnings.For(code));
+
     /// <remarks>✎ R3 C2-g: попередження (інструменти tools/hse400) показується, але видалення НЕ блокує.</remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]

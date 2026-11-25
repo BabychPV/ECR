@@ -2644,7 +2644,11 @@ public interface IDocumentDeletionStore
 `IProjectStore.DeleteAsync`; `aud.SecurityEvent` `ProjectDeletedWithData` (причина, кількості, документи) і журнал змін.
 Відмови: `422 ECR-PRD-0422` — `purgeCodeMismatch`, `purgeReasonRequired`; `409 ECR-PRD-0409` — `purgeArchived` (Archived,
 архівація або дані в `arc.*`, B69), `purgeHasDependants` (документ проєкту — обране джерело зв'язки B80 за рік і за той рік
-є документи-споживачі інших проєктів; мапа подій джерела). `aud.*` не чіпається.
+є документи-споживачі інших проєктів), `purgeHasEventMap` (✎ R3: мапи подій джерела на ВЛАСНИХ документах — прибрати в
+Sources), `purgeConcurrentChange` (FK 547 — у проєкті з'явився рядок, якого немає у фактах; відкат). Задачі документів
+проєкту в `itg.JobProgress` скасовуються (Queued → Cancelled, Running → `CancelRequestedAt`); у журнал — затверджені місяці,
+видалені без повернення, і кількість скасованих задач; `warnings` (`hse400Tools` для HSE400_GOLD) не блокують. `aud.*` не
+чіпається.
 
 ```csharp
 public interface IProjectPurgeStore

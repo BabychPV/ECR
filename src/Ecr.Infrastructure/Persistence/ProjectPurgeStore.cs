@@ -121,9 +121,7 @@ public sealed class ProjectPurgeStore(
             .ToListAsync(ct).ConfigureAwait(false);
 
         // ✎ R3 C2-g: проєкт золотих тестів HSE400 — попередження (інструменти tools/hse400), не блок: вирішує людина.
-        IReadOnlyList<string> warnings = string.Equals(row.Code, Hse400CompositionMapping.GoldProjectCode, StringComparison.Ordinal)
-            ? [ProjectPurgeWarnings.Hse400Tools]
-            : [];
+        var warnings = ProjectPurgeWarnings.For(row.Code);
 
         return new ProjectPurgeFacts(
             row.Code,

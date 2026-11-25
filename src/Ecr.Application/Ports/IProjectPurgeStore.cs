@@ -49,6 +49,13 @@ public static class ProjectPurgeWarnings
 {
     /// <summary>✎ 25.11 (R3 C2-g): проєкт золотих тестів HSE400 потрібен інструментам шаблону (<c>tools/hse400</c>).</summary>
     public const string Hse400Tools = "hse400Tools";
+
+    /// <summary>Попередження для проєкту з цим кодом (порожньо — немає).</summary>
+    /// <param name="projectCode">Код проєкту.</param>
+    public static IReadOnlyList<string> For(string projectCode)
+        => string.Equals(projectCode, Registries.Hse400CompositionMapping.GoldProjectCode, StringComparison.Ordinal)
+            ? [Hse400Tools]
+            : [];
 }
 
 /// <summary>Документ, що буде видалений.</summary>
