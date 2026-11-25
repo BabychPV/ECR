@@ -79,6 +79,13 @@ public sealed class FileLogTests(SqlServerFixture sql)
                 && l.Contains("[filelog-test-7f3a]", StringComparison.Ordinal));
             Assert.Contains($"[{Environment.MachineName}]", line, StringComparison.Ordinal);
 
+            // ⛔ B14F-06 (b14 source-test-flert, AC-4): рядок-маркер ЦЬОГО процесу з текою — за ним скрипт старту
+            // вікна (`tools/live/Start-LiveDetached.ps1`) доводить, що живий Api пише журнал (перелік каталогу
+            // показує розмір і час відкритого файлу застарілими — на live це читалося як «журналу немає»).
+            Assert.Contains(text.Split('\n'), l =>
+                l.Contains($"{FileLog.PidMarker}{Environment.ProcessId})", StringComparison.Ordinal)
+                && l.Contains(directory, StringComparison.Ordinal));
+
             // ⛔ Ні пароля, ні рядка підключення — на жодному рівні.
             Assert.DoesNotContain("Api-Health-Facts-2026!", text, StringComparison.Ordinal);
             Assert.DoesNotContain("Integrated Security", text, StringComparison.OrdinalIgnoreCase);
