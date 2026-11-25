@@ -34,6 +34,7 @@ import { useEditAssignmentsAction } from '@/features/editAssignments/EditAssignm
 import { documentLockOf, hasLockedSheet, locksDataActions } from '@/features/documents/documentLock';
 import { useDocumentPeriodReopen } from '@/features/documents/periodReopen/useDocumentPeriodReopen';
 import { DocumentProgress } from '@/features/documents/DocumentProgress';
+import { yearStateOfPeriods } from '@/features/documents/documentSheets';
 import { permitRowWarningsOf, publishRowFindings } from '@/features/grid/rowAttentionStore';
 import type { HeldEdit } from '@/features/grid/pendingStore';
 import { editsDeferToServer, isEditable } from '@/features/workflow/sheetEditability';
@@ -961,6 +962,39 @@ export function DocumentPage(): JSX.Element {
     if (layoutKnown && !yearLayout && focusMonth !== null) setFocusMonth(null);
   }, [layoutKnown, yearLayout, focusMonth, setFocusMonth]);
 
+  /*
+   * ✎ b14 documents-board-yearly (людина 25.11): «Sheet: Draft» без місяця не казав, ЧИЙ це стан — у документі «рік»
+   * це був стан аркуша за ЯКІР (січень), хоч документ «Partly submitted», а вересень перевідкрито. Тепер чип каже період:
+   * - «рік»: стан аркуша ЗА РІК — зведення станів місяців (`submission-target.monthColumns`, той самий запит і ключ, що в
+   *   рядку дій) по розпочатих місяцях тим самим правилом, що й стан документа за рік у переліку (`yearStateOfPeriods`);
+   *   місяців немає (річний проєкт без місячних колонок, збій, ще в дорозі) — стан якоря з назвою його місяця;
+   * - копія на місяць: «September 2026», а місяць, відкритий лише для цього документа, — «· Reopened for this document».
+   */
+  const yearSheetTarget = useQuery({
+    queryKey: submissionTargetKey(documentId, active?.sheetDefId ?? 0, periodKey, active?.sheetCopyId ?? null),
+    queryFn: () => fetchSubmissionTarget(documentId, active?.sheetDefId ?? 0, periodKey, active?.sheetCopyId ?? null),
+    enabled: yearLayout && active !== undefined && yearAnchor === periodKey,
+  });
+  const yearSheetMonths = useMemo(() => {
+    const columns = yearLayout && Array.isArray(yearSheetTarget.data?.monthColumns) ? yearSheetTarget.data.monthColumns : [];
+    const byKey = new Map<number, string>();
+    for (const column of columns) if (!byKey.has(column.periodKey)) byKey.set(column.periodKey, column.sheetStatus);
+    return [...byKey].map(([key, value]) => ({ periodKey: key, state: value }));
+  }, [yearLayout, yearSheetTarget.data]);
+  const startedYearMonths = useMemo(() => new Set(openYearMonths), [openYearMonths]);
+  const sheetYearState =
+    yearSheetMonths.length > 0 && calendar.data !== undefined ? yearStateOfPeriods(yearSheetMonths, startedYearMonths) : undefined;
+  const periodReopenedForDocument =
+    !yearLayout &&
+    calendar.data?.periods?.find((period) => period.periodKey === periodKey)?.state === 'Closed' &&
+    periodReopen.periodState === 'Grace';
+  const sheetStateScope =
+    sheetYearState !== undefined
+      ? t('calcResults.yearChip', { year: Math.trunc(periodKey / 100) })
+      : `${formatPeriodKey(periodKey, (summary.data ?? baseSummary.data)?.periodKind ?? undefined)}${
+          periodReopenedForDocument ? ` · ${t('documents.strip.reopened')}` : ''
+        }`;
+
   const refetchBoth = (): void => {
     void summary.refetch();
     void tables.refetch();
@@ -1131,6 +1165,8 @@ export function DocumentPage(): JSX.Element {
                   onShowIssues={() => undefined}
                   // ✎ B143 (B75): шаблон без подання й затвердження — «No approval» замість стану аркуша.
                   workflowOff={document.workflowMode === 'None'}
+                  stateScope={sheetStateScope}
+                  stateOverride={sheetYearState}
                 />
                 <DocumentSaveState readOnly={gridReadOnly} periodKey={periodKey} />
                 {/* ✎ D-446: застарілість не визначена — частину документа читачеві закрито (те саме, що в рядку переліку). */}

@@ -7,7 +7,7 @@ import { localized } from '@/shared/i18n/localized';
 import { SegmentBar } from '@/shared/ui/SegmentBar';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { EyeIcon, IssueCount } from './DocumentListMarks';
-import { documentState, hasSheetStates, sheetLabels } from './documentSheets';
+import { documentYearState, hasSheetStates, sheetLabels } from './documentSheets';
 import { boardColumns, type BoardColumnId } from './documentsBoardModel';
 import { DocumentStateBadge, NoApprovalState } from './NoApprovalChip';
 import { LateEditsMark } from './LateEditsMark';
@@ -23,6 +23,8 @@ interface DocumentsBoardProps {
   readonly projectCode: (projectId: number) => string | undefined;
   /** «Око» — швидкий перегляд у шторці (`UI-29`); кнопку-відкривач сторінка запам'ятовує сама. */
   readonly onQuickLook: (documentId: number, opener: HTMLButtonElement) => void;
+  /** ✎ b14: розпочаті періоди проєкту (календар, стан ≠ Scheduled) для стану за рік; `undefined` — календар у дорозі. */
+  readonly startedOf?: (projectId: number) => ReadonlySet<number> | undefined;
 }
 
 /**
@@ -38,9 +40,9 @@ interface DocumentsBoardProps {
  * ⚠ Стовпець — `<section>` зі списком `<ul>`: читалка чує «список, N елементів» (a11y з задачі).
  * ⛔ P1 приховані аркуші: усе на картці — лише з відповіді сервера; `null` помилок → «—».
  */
-export function DocumentsBoard({ documents, documentHref, projectCode, onQuickLook }: DocumentsBoardProps): JSX.Element {
+export function DocumentsBoard({ documents, documentHref, projectCode, onQuickLook, startedOf }: DocumentsBoardProps): JSX.Element {
   const navigate = useNavigate();
-  const columns = boardColumns(documents);
+  const columns = boardColumns(documents, startedOf);
 
   return (
     <div className="ecr-board" data-documents-board="">
@@ -71,7 +73,7 @@ export function DocumentsBoard({ documents, documentHref, projectCode, onQuickLo
               {column.items.map((document) => {
                 const name = localized(document.nameL10n);
                 const code = projectCode(document.projectId);
-                const state = documentState(document);
+                const state = documentYearState(document, startedOf?.(document.projectId));
                 const errors = document.errorCount;
 
                 return (
@@ -167,6 +169,8 @@ function columnLabel(id: BoardColumnId): string {
   switch (id) {
     case 'Draft':
       return t('documents.board.draft');
+    case 'PartlySubmitted':
+      return t('documents.statePartlySubmitted');
     case 'Submitted':
       return t('documents.board.waiting');
     case 'Rework':
