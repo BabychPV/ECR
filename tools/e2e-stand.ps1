@@ -663,7 +663,9 @@ try {
             # ✎ Q-2 (06.11): `Integration.EditSchedule` — частота синку подій PI (`piEventFrequencyLive.spec`): без нього
             # перелік розкладів `403`, а поля частоти на «Events from PI» немає.
             'Integration.View', 'Integration.Manage', 'Integration.EditSchedule', 'System.ViewHealth', 'System.ManageLocalization',
-            'System.ManageNotifications')
+            # ✎ 24.11: `System.RunJob` — `consistencyChecks.spec` запускає перевірку узгодженості кнопкою «Run check now»
+            # (без права кнопки немає). Лише тестова роль стенда; ролі продукту не змінюються.
+            'System.ManageNotifications', 'System.RunJob')
     } | Out-Null
 
     $roles = Call GET '/api/v1/roles'
