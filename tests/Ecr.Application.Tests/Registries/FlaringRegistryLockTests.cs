@@ -280,6 +280,44 @@ public sealed class FlaringRegistryLockTests
         Assert.IsNotType<AccessDeniedException>(exception);
     }
 
+    // ───── AC-10: зміна опису довідника факелів ─────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "SGF-AC-10")]
+    public async Task Опис_довідника_факелів__замкнений_період__409()
+    {
+        Locked(JanuaryClosed);
+        Grant(GasCompositionPermissions.Edit, SaveRegistryDefinitionHandler.Permission, PublishRegistryDefinitionHandler.Permission);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => SaveDefinitionAsync("FLARE_LOCATION"));
+
+        Assert.Equal(GasCompositionRules.LockedKey, error.Details!["messageKey"]);
+        await _uow.DidNotReceiveWithAnyArgs().ExecuteInTransactionAsync(default!, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "SGF-AC-10")]
+    public async Task Опис_довідника_факелів__без_GasComposition_Edit__403()
+    {
+        Locked();
+        Grant(SaveRegistryDefinitionHandler.Permission, PublishRegistryDefinitionHandler.Permission);
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(() => SaveDefinitionAsync("LP_SOUR_SPLIT"));
+
+        Assert.Equal(GasCompositionPermissions.Edit, error.Details!["permission"]);
+    }
+
+    private Task<int> SaveDefinitionAsync(string code)
+    {
+        var keys = Substitute.For<IRegistryKeyStore>();
+        return new SaveRegistryDefinitionHandler(
+                _registries, _uow, _audit, _access, _user, _clock, Substitute.For<IUnitCatalog>(), keys,
+                new Ecr.Application.Registries.Keys.RegistryKeyService(keys, _uow), flaring: Lock())
+            .HandleAsync(code, new SaveRegistryDefinitionDto([], [], "SGF AC-10", [], null), default, "\"1\"");
+    }
+
     // ───── допоміжне ─────
 
     private FlaringRegistryLock Lock() => new(_store, _access, _user);
