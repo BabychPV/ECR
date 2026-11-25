@@ -2,7 +2,7 @@ import type { JSX } from 'react';
 import { Anchor, Text, Title } from '@mantine/core';
 import { Link } from 'react-router-dom';
 import { formatDate } from '@/shared/format/datetime';
-import { formatNumber } from '@/shared/format/number';
+import { DecimalText } from '@/shared/ui/DecimalText';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
 import type { Permit } from '../api/types';
@@ -89,9 +89,7 @@ function Totals({ permit }: { readonly permit: Permit }): JSX.Element {
                 {t('permits.page.totals.rows', { count: table.rowCount })}
               </Text>
               {table.total !== null && (
-                <Text size="sm" fw={600} ff="monospace">
-                  {formatNumber(Number(table.total), { maximumFractionDigits: 5 })}
-                </Text>
+                <DecimalText value={table.total} size="sm" fw={600} />
               )}
             </div>
           </div>

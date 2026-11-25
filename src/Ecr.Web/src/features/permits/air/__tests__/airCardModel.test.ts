@@ -8,6 +8,7 @@ import {
   Dash,
   filterSources,
   num,
+  numTitle,
   scopeLabel,
   scopeNamesOf,
   sourceTypeLabel,
@@ -80,10 +81,14 @@ describe('airCardModel', () => {
   it('num: реальний сервер віддає повну шкалу (16 знаків) - нулі хвоста відкидаються, значення не округлюється', () => {
     expect(num('0.5000000000000000')).toBe('0.5');
     expect(num('25.0000000000000000')).toBe('25');
-    expect(num('0.0000000000035000')).toBe('0.0000000000035');
+    expect(num('0.0000000000035000')).toBe('3.5E-12');
+    expect(numTitle('0.0000000000035000')).toBe('0.0000000000035');
+    expect(num('0.1781872000000000')).toBe('0.1781872');
+    expect(numTitle('0.1781872000000000')).toBeUndefined();
+    expect(num('1234.123456789')).toBe('1234.123');
     expect(num('-1.2500')).toBe('-1.25');
     expect(num('100')).toBe('100');
-    expect(num('0.0000000000000001')).toBe('0.0000000000000001');
+    expect(num('0.0000000000000001')).toBe('1E-16');
     expect(num(null)).toBe(Dash);
     expect(num('n/a')).toBe('n/a');
   });

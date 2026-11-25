@@ -2,7 +2,7 @@
 import { useLayoutEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { SegmentedControl, VisuallyHidden } from '@mantine/core';
 import { formatDate } from '@/shared/format/datetime';
-import { formatNumber } from '@/shared/format/number';
+import { formatDecimalReadable, formatNumber } from '@/shared/format/number';
 import { t } from '@/shared/i18n';
 import { isEmptyCell, type PermitCellValue, type PermitColumn, type PermitRow } from '../lib/columns';
 import {
@@ -40,7 +40,26 @@ export interface PermitDefTableProps {
   readonly initialMode?: ColumnMode | undefined;
 }
 
-const FractionDigits = { small: 5, normal: 3 } as const;
+/**
+ * Число в комірці — спільним читабельним поданням (людина 25.11: «числа в пермітах не вистачає місця»): ≤ 7 значущих,
+ * без хвостових нулів, крихітні — науковим записом; точне значення — у підказці комірки (`exactOf`). Раніше дріб
+ * різався до 3/5 знаків, і `0.0000025` г/с показувався як `0`.
+ */
+function exactOf(column: PermitColumn, value: PermitCellValue): string | undefined {
+  if (column.type !== 'number' || isEmptyCell(value)) return undefined;
+  const readable = formatDecimalReadable(value);
+  return readable?.rounded === true ? readable.exact : undefined;
+}
+
+/** Повний текст для підказки текстової комірки: на екрані вона обмежена двома рядками (permitDefTable.css). */
+function fullTextOf(column: PermitColumn, value: PermitCellValue): string | undefined {
+  if (column.type === 'number' || column.type === 'bool' || column.type === 'date' || isEmptyCell(value)) return undefined;
+  return String(value);
+}
+
+function readableSum(sum: number): string {
+  return formatDecimalReadable(sum)?.text ?? formatNumber(sum);
+}
 
 function formatCell(column: PermitColumn, value: PermitCellValue): ReactNode {
   if (isEmptyCell(value)) return null;
@@ -48,9 +67,7 @@ function formatCell(column: PermitColumn, value: PermitCellValue): ReactNode {
   switch (column.type) {
     case 'number':
       if (typeof value !== 'number') return String(value);
-      return formatNumber(value, {
-        maximumFractionDigits: Math.abs(value) < 1 && value !== 0 ? FractionDigits.small : FractionDigits.normal,
-      });
+      return formatDecimalReadable(value)?.text ?? formatNumber(value);
     case 'date': {
       // ⚠ `formatDate` сам читає `РРРР-ММ-ДД` як місцеву північ (календарна дата без години),
       // тому день не зсувається; зону тут задавати не можна — вона якраз зсунула б.
@@ -248,7 +265,9 @@ export function PermitDefTable({
                         {sum === null ? (
                           <span className="pm-faint pm-stick">…</span>
                         ) : (
-                          <span className="pm-stick">{formatNumber(sum, { maximumFractionDigits: FractionDigits.normal })}</span>
+                          <span className="pm-stick" title={formatDecimalReadable(sum)?.exact}>
+                            {readableSum(sum)}
+                          </span>
                         )}
                       </td>
                     );
@@ -260,7 +279,7 @@ export function PermitDefTable({
                   const warning = missing || warnCell === undefined ? null : warnCell(row, column);
                   const shown = formatCell(column, value);
                   const classes = [
-                    column.type === 'number' ? 'num' : '',
+                    column.type === 'number' ? 'num' : 'pm-text',
                     column.derived === true ? 'pm-derived' : '',
                     missing ? 'pm-bad' : '',
                     warning !== null ? 'pm-warn' : '',
@@ -283,7 +302,7 @@ export function PermitDefTable({
                       scope={index === 0 ? 'row' : undefined}
                       className={index === 0 ? `${classes} pm-first`.trim() : classes}
                       data-required-empty={missing ? 'true' : undefined}
-                      title={warning ?? undefined}
+                      title={warning ?? exactOf(column, value) ?? fullTextOf(column, value)}
                     >
                       {index === 0 ? content : <span className="pm-stick">{content}</span>}
                       {warning !== null && <VisuallyHidden>{`. ${warning}`}</VisuallyHidden>}
@@ -308,7 +327,11 @@ export function PermitDefTable({
                   const sum = totals.sums[item.column.code];
                   return (
                     <td key={item.column.code} className="num">
-                      {sum === undefined ? null : <span className="pm-stick">{formatNumber(sum, { maximumFractionDigits: 5 })}</span>}
+                      {sum === undefined ? null : (
+                        <span className="pm-stick" title={formatDecimalReadable(sum)?.exact}>
+                          {readableSum(sum)}
+                        </span>
+                      )}
                     </td>
                   );
                 })}

@@ -40,6 +40,26 @@
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * Текстові стовпці — не ширші за ~26 знаків і не вищі за два рядки (людина 25.11: «числа в пермітах не вистачає
+ * місця» — назва майданчика в 140 знаків одним рядком виштовхувала числові стовпці за край екрана). Повний текст —
+ * у підказці комірки і в шторці рядка. Числа не переносяться й не обрізаються ніколи.
+ */
+.pm-t tbody .pm-text {
+  white-space: normal;
+  min-width: 8ch;
+  max-width: 26ch;
+}
+
+.pm-t tbody .pm-text > .pm-stick {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
 /* Шапка: рядок груп (1) і рядок стовпців (2). Обидва липнуть до верху. */
 .pm-t thead th,
 .pm-t thead td {

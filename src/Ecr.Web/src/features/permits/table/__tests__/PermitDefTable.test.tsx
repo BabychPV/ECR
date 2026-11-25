@@ -160,21 +160,26 @@ describe('PermitDefTable: вміст', () => {
     expect(cells.some((cell) => cell.textContent === '192.312')).toBe(true);
   });
 
-  it('числа менше за 1 — до 5 знаків, решта — до 3; булеве — Yes/No', () => {
+  // ✎ 25.11 (людина: «числа в пермітах не вистачає місця»): спільне читабельне подання — ≤ 7 значущих, крихітні науковим
+  // записом, точне — у підказці комірки (раніше 5/3 знаки дробу, і 0.0000025 показувався як 0).
+  it('числа — ≤ 7 значущих, крихітні науковим записом, точне в підказці; булеве — Yes/No', () => {
     const cols: PermitColumn[] = [
       { code: 'k', label: 'K', type: 'text' },
       { code: 'small', label: 'Small', type: 'number' },
       { code: 'big', label: 'Big', type: 'number' },
+      { code: 'tiny', label: 'Tiny', type: 'number' },
       { code: 'flag', label: 'Flag', type: 'bool' },
       { code: 'off', label: 'Off', type: 'bool' },
       { code: 'when', label: 'When', type: 'date' },
     ];
     show({
       columns: cols,
-      rows: [{ id: '1', k: 'r', small: 0.123456789, big: 1234.56789, flag: true, off: false, when: '2026-01-05' }],
+      rows: [{ id: '1', k: 'r', small: 0.123456789, big: 1234.56789, tiny: 0.0000002513, flag: true, off: false, when: '2026-01-05' }],
     });
     const cells = within(screen.getAllByRole('row')[1]!).getAllByRole('cell').map((c) => c.textContent);
-    expect(cells).toEqual(['0.12346', '1,234.568', 'text of permits.table.yes', 'text of permits.table.no', 'Jan 5, 2026']);
+    expect(cells).toEqual(['0.1234568', '1234.568', '2.513E-7', 'text of permits.table.yes', 'text of permits.table.no', 'Jan 5, 2026']);
+    const tiny = within(screen.getAllByRole('row')[1]!).getAllByRole('cell')[2]!;
+    expect(tiny.getAttribute('title')).toBe('0.0000002513');
   });
 
   it('порожнє необовʼязкове — тире', () => {
