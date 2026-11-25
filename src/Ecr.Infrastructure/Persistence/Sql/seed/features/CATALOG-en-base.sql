@@ -1212,7 +1212,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'grid.recalculated',               N'en', N'Recalculated {time}', 1),
     (N'grid.recalcFailed',               N'en', N'Recalculation failed', 1),
     (N'grid.requiredInputBlockedTitle',  N'en', N'Cannot save: {count} required column(s) missing', 1),
-    (N'grid.requiredInputWarningTitle',  N'en', N'{count} required column(s) missing (does not block saving)', 1),
     (N'grid.columnRequiredHint',         N'en', N'This column is required.', 1),
     (N'grid.confirmTitle',               N'en', N'Confirm this change', 1),
     (N'grid.confirmCancel',              N'en', N'Cancel', 1),
