@@ -242,7 +242,8 @@ describe('DocumentPage: застарілі числа методологій', (
       );
 
       // ✎ B78: одна панель «Проблеми розрахунку» — причина рядком, перелік рядків у «Технічних деталях».
-      const panel = await screen.findByTestId('document-calc-issues', undefined, { timeout: Slow });
+      // ✎ b14 doc-notices-compact: панель місяця — у «Technical details» смуги (Details → Technical details).
+      const panel = await openMonthPanel();
       expect(panel.getAttribute('data-blocking')).toBe('false');
       expect(screen.getByTestId('document-calc-issue').getAttribute('data-kind')).toBe('unmatched');
       fireEvent.click(screen.getByTestId('document-calc-issues-details-toggle'));
@@ -266,6 +267,7 @@ describe('DocumentPage: застарілі числа методологій', (
         expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).includes('/calculation-issues'))).toBe(true);
       });
       expect(screen.queryByTestId('document-calc-issues')).toBeNull();
+      expect(screen.queryByTestId('document-calc-strip')).toBeNull();
     },
     Slow,
   );
@@ -275,7 +277,7 @@ describe('DocumentPage: застарілі числа методологій', (
     async () => {
       show(['Document.View'], [false], false, { runId: 1, finishedAt: null, unmatchedRows: null }, [unmatched('R1', 1)]);
 
-      await screen.findByTestId('document-calc-issues', undefined, { timeout: Slow });
+      await openMonthPanel();
       expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).includes('/calculation-run'))).toBe(false);
       expect(screen.queryByTestId('document-calc-issues-updated')).toBeNull();
     },
@@ -339,3 +341,10 @@ describe('DocumentPage: застарілі числа методологій', (
     Slow,
   );
 });
+
+/** ✎ b14 doc-notices-compact: смуга над сіткою → Details → Technical details → панель місяця (як була). */
+async function openMonthPanel(): Promise<HTMLElement> {
+  fireEvent.click(await screen.findByTestId('document-calc-strip-toggle', undefined, { timeout: Slow }));
+  fireEvent.click(screen.getByTestId('document-calc-strip-technical-toggle'));
+  return screen.findByTestId('document-calc-issues', undefined, { timeout: Slow });
+}

@@ -4,7 +4,6 @@ import { useQuery } from '@tanstack/react-query';
 import type { components } from '@/api/schema';
 import { formatPeriodKey } from '@/shared/format';
 import { t } from '@/shared/i18n';
-import { untilTextInZone } from '@/shared/siteMoment';
 import { getDocumentPeriodReopen, periodReopenKey } from './api';
 
 type PeriodState = components['schemas']['PeriodState'];
@@ -18,6 +17,11 @@ export interface YearMonthReopenProps {
   /** Місяці року документа з календаря проєкту (лише цього року, за зростанням). */
   readonly months: readonly { readonly periodKey: number; readonly state?: PeriodState | null | undefined }[];
   readonly timeZoneId?: string | null | undefined;
+  /**
+   * ✎ b14 doc-notices-compact: місяці, уже відкриті для документа (eopenedPeriods картки) — пункт недоступний: про них
+   * каже чип у шапці, а рядок «Reopened for this document until …» поруч із кнопкою дублював його.
+   */
+  readonly reopened?: readonly number[] | undefined;
 }
 
 /**
@@ -31,7 +35,7 @@ export interface YearMonthReopenProps {
  * ⚠ Відкрити можна лише закритий місяць: інші пункти недоступні. Сторінка показує кнопку лише з правом `Period.Reopen`
  * і лише коли в році є закритий місяць.
  */
-export function YearMonthReopen({ documentId, months, timeZoneId }: YearMonthReopenProps): JSX.Element {
+export function YearMonthReopen({ documentId, months, timeZoneId, reopened = [] }: YearMonthReopenProps): JSX.Element {
   const [target, setTarget] = useState<number | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -57,7 +61,7 @@ export function YearMonthReopen({ documentId, months, timeZoneId }: YearMonthReo
           {months.map((month) => (
             <Menu.Item
               key={month.periodKey}
-              disabled={month.state !== 'Closed'}
+              disabled={month.state !== 'Closed' || reopened.includes(month.periodKey)}
               data-year-reopen-month={month.periodKey}
               onClick={() => {
                 setTarget(month.periodKey);
@@ -70,11 +74,8 @@ export function YearMonthReopen({ documentId, months, timeZoneId }: YearMonthReo
         </Menu.Dropdown>
       </Menu>
 
-      {target !== null && state !== undefined && state.active !== null && (
-        <Text size="sm" data-testid="year-month-reopen-active">
-          {t('document.reopen.activeTitle', { until: untilTextInZone(state.active.openUntil, timeZoneId) })}
-        </Text>
-      )}
+      {/* ✎ b14 doc-notices-compact: «відкрито до …» тут більше не пишемо — це каже чип у шапці (ReopenedMonthsChip). */}
+
       {target !== null && state !== undefined && state.active === null && !state.canOpen && state.denial === 'NoPermission' && (
         <Text size="sm" data-testid="year-month-reopen-denied">
           {t('document.reopen.noPermission')}
