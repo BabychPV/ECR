@@ -134,7 +134,7 @@ export function CalculationIssuesStrip({
     const label = `${kindLabel(reason.kind)} · ${formatPeriodKey(periodKey)}`;
     if (reason.kind === 'hse400' && onOpenHse400 !== undefined) {
       return (
-        <Button size="compact-xs" variant="subtle" loading={hse400 === 'pending'} aria-label={`${label} · ${t('document.calcIssues.openHse400')}`} onClick={() => void openHse400(periodKey)} data-testid="document-calc-strip-open-hse400">
+        <Button size="xs" variant="subtle" loading={hse400 === 'pending'} aria-label={`${label} · ${t('document.calcIssues.openHse400')}`} onClick={() => void openHse400(periodKey)} data-testid="document-calc-strip-open-hse400">
           {t('document.calcIssues.openHse400')}
         </Button>
       );
@@ -143,7 +143,7 @@ export function CalculationIssuesStrip({
     if (source !== undefined && source.documentId !== null && onOpenSource !== undefined) {
       const sourceId = source.documentId;
       return (
-        <Button size="compact-xs" variant="subtle" aria-label={`${label} · ${t('document.calcIssues.openHse400')}`} onClick={() => onOpenSource(sourceId, source.periodKey)} data-testid="document-calc-strip-open-source">
+        <Button size="xs" variant="subtle" aria-label={`${label} · ${t('document.calcIssues.openHse400')}`} onClick={() => onOpenSource(sourceId, source.periodKey)} data-testid="document-calc-strip-open-source">
           {t('document.calcIssues.openHse400')}
         </Button>
       );
@@ -155,7 +155,7 @@ export function CalculationIssuesStrip({
 
     return (
       <Button
-        size="compact-xs"
+        size="xs"
         variant="subtle"
         aria-label={`${label} · ${text}`}
         onClick={() => onOpenCell(goal.tableInstanceId, goal.rowKey, goal.columnCode)}
