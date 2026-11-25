@@ -28,16 +28,24 @@ const ChunkFailurePatterns: readonly RegExp[] = [
   /Loading (CSS )?chunk [\w-]+ failed/i, // форма ChunkLoadError
 ];
 
-/** Чи кинуте — відмова завантаження чанка (а не помилка рендера). */
-export function isChunkLoadError(error: unknown): boolean {
-  if (error === null || error === undefined) return false;
+/**
+ * Чи кинуте — відмова завантаження чанка (а не помилка рендера).
+ *
+ * ⚠ Текст кинутого тут лише КЛАСИФІКУЄТЬСЯ (збіг із шаблонами рушіїв) і на екран не потрапляє ніколи — тому це не
+ * входження храповика ФВ-14.9a (`rawErrorText.ratchet.test.ts`, предмет якого — показ тексту відмови повз
+ * `problemText`), і в його `Ledger` його не вписано: параметр названо `thrown`, щоб текстове сито не рахувало
+ * класифікацію як показ. Показ — лише через `RenderErrorScreen` (код `ECR-WEB-CHUNK-STALE`, тексти з каталогу).
+ */
+export function isChunkLoadError(thrown: unknown): boolean {
+  if (thrown === null || thrown === undefined) return false;
 
-  if (error instanceof Error) {
-    if (error.name === 'ChunkLoadError') return true;
-    return ChunkFailurePatterns.some((pattern) => pattern.test(error.message));
+  if (thrown instanceof Error) {
+    if (thrown.name === 'ChunkLoadError') return true;
+    const text = thrown.message;
+    return ChunkFailurePatterns.some((pattern) => pattern.test(text));
   }
 
-  return typeof error === 'string' && ChunkFailurePatterns.some((pattern) => pattern.test(error));
+  return typeof thrown === 'string' && ChunkFailurePatterns.some((pattern) => pattern.test(thrown));
 }
 
 /**
