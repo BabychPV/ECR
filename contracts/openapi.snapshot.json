@@ -10729,14 +10729,17 @@
               "string"
             ]
           },
-          "name": {
-            "description": "Назва.",
-            "type": "string"
+          "names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва з довідника `COMPONENT` за мовами — лише та, що відрізняється від коду (імпорт заводить компонент із назвою, рівною\nкоду FLERT). Порожньо — клієнт показує типову назву з каталогу рядків (`gasComposition.component.&lt;код&gt;`).",
+            "type": "object"
           }
         },
         "required": [
           "code",
-          "name",
+          "names",
           "formula",
           "mw",
           "group"

@@ -4,6 +4,7 @@ import { useMediaQuery } from '@mantine/hooks';
 import { useMutation } from '@tanstack/react-query';
 import { normalizeDecimal } from '@/shared/format';
 import { formatMonthName } from '@/shared/format/period';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { t } from '@/shared/i18n';
 import { showApiError } from '@/shared/ui/notify';
 import {
@@ -16,6 +17,7 @@ import {
   type GasComponent,
   type GasVersion,
 } from './api';
+import { componentName } from './componentNames';
 
 /** Порядок груп компонентів у редакторі (як у FLERT/HYSYS: інерти, вуглеводні, ароматика, сірка, інше). */
 const GroupOrder = ['inert', 'hydrocarbon', 'aromatic', 'sulphur', 'other'] as const;
@@ -151,6 +153,7 @@ function Editor({ streamId, target, components, onClose, onSaved }: Props & { re
     onSuccess: onSaved,
     onError: showApiError,
   });
+  const saveLoading = usePendingLoading(save.isPending);
 
   const grouped = GroupOrder.map((group) => ({
     group,
@@ -285,18 +288,18 @@ function Editor({ streamId, target, components, onClose, onSaved }: Props & { re
         </Text>
 
         {grouped.map(({ group, items }) => (
-          <Table key={group} striped withTableBorder verticalSpacing={4} captionSide="top" data-testid={`gas-group-${group}`}>
+          <Table key={group} layout={narrow === true ? 'auto' : 'fixed'} striped withTableBorder verticalSpacing={4} captionSide="top" data-testid={`gas-group-${group}`}>
             <Table.Caption ta="start" fw={600}>
               {GroupLabel[group]()}
             </Table.Caption>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th scope="col">{t('gasComposition.editor.component')}</Table.Th>
-                <Table.Th scope="col" ta="end">
+                <Table.Th scope="col" ta="end" w={150}>
                   {t('gasComposition.editor.value')}
                 </Table.Th>
                 {previous !== undefined && (
-                  <Table.Th scope="col" ta="end">
+                  <Table.Th scope="col" ta="end" w={170}>
                     {t('gasComposition.editor.previous')}
                   </Table.Th>
                 )}
@@ -304,6 +307,8 @@ function Editor({ streamId, target, components, onClose, onSaved }: Props & { re
             </Table.Thead>
             <Table.Tbody>
               {items.map((component) => {
+                const name = componentName(component);
+                const label = name === undefined ? component.code : `${name} (${component.code})`;
                 const text = values[component.code] ?? '';
                 const current = parse(text);
                 const before = previousValues.get(component.code);
@@ -313,9 +318,14 @@ function Editor({ streamId, target, components, onClose, onSaved }: Props & { re
                   <Table.Tr key={component.code} data-changed={changed ? '' : undefined}>
                     <Table.Th scope="row" fw={400}>
                       <Text size="sm" span>
-                        {component.name}
+                        {name ?? component.code}
                       </Text>
-                      {component.formula !== null && component.formula !== undefined && component.formula !== component.name && (
+                      {name !== undefined && (
+                        <Text size="xs" c="dimmed" span ml="xs" ff="monospace" data-testid="gas-component-code">
+                          {component.code}
+                        </Text>
+                      )}
+                      {component.formula !== null && component.formula !== undefined && component.formula !== component.code && (
                         <Text size="xs" c="dimmed" span ml="xs">
                           {component.formula}
                         </Text>
@@ -330,7 +340,7 @@ function Editor({ streamId, target, components, onClose, onSaved }: Props & { re
                       <TextInput
                         size="xs"
                         inputMode="decimal"
-                        aria-label={`${component.name}, ${t('gasComposition.editor.value')}`}
+                        aria-label={`${label}, ${t('gasComposition.editor.value')}`}
                         value={text}
                         readOnly={readOnly}
                         error={invalid.has(component.code) ? t('gasComposition.editor.invalidNumber') : undefined}
@@ -342,7 +352,7 @@ function Editor({ streamId, target, components, onClose, onSaved }: Props & { re
                       />
                     </Table.Td>
                     {previous !== undefined && (
-                      <Table.Td ta="end" c="dimmed" w={130}>
+                      <Table.Td ta="end" c="dimmed" w={170}>
                         {before ?? '—'}
                       </Table.Td>
                     )}
@@ -379,7 +389,7 @@ function Editor({ streamId, target, components, onClose, onSaved }: Props & { re
           {!readOnly && (
             <Button
               disabled={!canSave}
-              loading={save.isPending}
+              loading={saveLoading}
               onClick={() => {
                 if (!canSave) return;
                 save.mutate();

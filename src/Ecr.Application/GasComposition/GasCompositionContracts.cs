@@ -56,11 +56,14 @@ public sealed record GasStreamListDto(IReadOnlyList<GasStreamListItemDto> Stream
 
 /// <summary>Компонент для редактора.</summary>
 /// <param name="Code">Код.</param>
-/// <param name="Name">Назва.</param>
+/// <param name="Names">
+/// Назва з довідника <c>COMPONENT</c> за мовами — лише та, що відрізняється від коду (імпорт заводить компонент із назвою, рівною
+/// коду FLERT). Порожньо — клієнт показує типову назву з каталогу рядків (<c>gasComposition.component.&lt;код&gt;</c>).
+/// </param>
 /// <param name="Formula">Формула.</param>
 /// <param name="Mw">Молярна маса.</param>
 /// <param name="Group">Група для показу: <c>inert</c>, <c>hydrocarbon</c>, <c>aromatic</c>, <c>sulphur</c>, <c>other</c>.</param>
-public sealed record GasComponentDto(string Code, string Name, string? Formula, decimal? Mw, string Group);
+public sealed record GasComponentDto(string Code, IReadOnlyDictionary<string, string> Names, string? Formula, decimal? Mw, string Group);
 
 /// <summary>Замкнений період, що тримає версію.</summary>
 /// <param name="Period">Підпис періоду (<c>2026-03</c> або <c>2026</c>).</param>

@@ -36993,8 +36993,11 @@ export interface components {
              * @description Молярна маса.
              */
             mw: null | string;
-            /** @description Назва. */
-            name: string;
+            /** @description Назва з довідника `COMPONENT` за мовами — лише та, що відрізняється від коду (імпорт заводить компонент із назвою, рівною
+             *     коду FLERT). Порожньо — клієнт показує типову назву з каталогу рядків (`gasComposition.component.&lt;код&gt;`). */
+            names: {
+                [key: string]: string;
+            };
         };
         /** @description Компонент складу у запиті: код і мол.%. */
         GasComponentValue: {

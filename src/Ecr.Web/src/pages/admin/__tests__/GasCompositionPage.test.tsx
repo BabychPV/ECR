@@ -103,7 +103,7 @@ function serve(options: { streams?: unknown[]; available?: boolean; canImport?: 
     }
     if (url.endsWith('/api/v1/gas-composition/streams/11')) return json(Detail);
     if (url.endsWith('/api/v1/gas-composition/components')) {
-      return json([{ code: 'Methane', name: 'Methane', formula: 'CH4', mw: null, group: 'hydrocarbon' }]);
+      return json([{ code: 'Methane', names: {}, formula: 'CH4', mw: null, group: 'hydrocarbon' }]);
     }
     return json(null);
   });

@@ -19,9 +19,11 @@ import { VersionEditorModal, type VersionEditorTarget } from '../VersionEditorMo
 configure({ asyncUtilTimeout: 10_000 });
 
 const Components: GasComponent[] = [
-  { code: 'Methane', name: 'Methane', formula: 'CH4', mw: '16.043', group: 'hydrocarbon' },
-  { code: 'Ethane', name: 'Ethane', formula: 'C2H6', mw: '30.07', group: 'hydrocarbon' },
-  { code: 'H2S', name: 'H2S', formula: null, mw: null, group: 'sulphur' },
+  { code: 'Methane', names: {}, formula: 'CH4', mw: '16.043', group: 'hydrocarbon' },
+  { code: 'Ethane', names: {}, formula: 'C2H6', mw: '30.07', group: 'hydrocarbon' },
+  { code: 'H2S', names: {}, formula: null, mw: null, group: 'sulphur' },
+  { code: 'COS', names: { en: 'Carbonyl sulphide, plant name' }, formula: null, mw: null, group: 'sulphur' },
+  { code: 'CN1_2', names: {}, formula: null, mw: null, group: 'hydrocarbon' },
 ];
 
 const version = (id: number, from: string, to: string | null, components: Array<[string, string]>): GasVersion => ({
@@ -70,6 +72,19 @@ const input = (name: string): HTMLInputElement =>
 const saveButton = (): HTMLButtonElement => screen.getByRole('button', { name: Catalog['gasComposition.editor.save']! });
 
 describe('D-NEW: редактор версії складу газу', () => {
+  it('компонент показано людською назвою поруч із кодом: власна з довідника, інакше типова; без назви — сам код', () => {
+    show({ kind: 'newCase' });
+
+    // Типова назва з каталогу рядків, код лишається видимим.
+    expect(input(`${Catalog['gasComposition.component.H2S']!} (H2S)`)).toBeTruthy();
+    expect(screen.getAllByTestId('gas-component-code').map((n) => n.textContent)).toContain('H2S');
+    // Власна назва запису COMPONENT перекриває типову.
+    expect(input('Carbonyl sulphide, plant name (COS)')).toBeTruthy();
+    // Назва, рівна коду, не дублюється; невідомий код — лише код.
+    expect(input('Methane')).toBeTruthy();
+    expect(input('CN1_2')).toBeTruthy();
+  });
+
   it('Σ поза допуском блокує збереження до підтвердження, а підтвердження шле acceptSumDeviation', async () => {
     const calls: unknown[] = [];
     vi.stubGlobal(

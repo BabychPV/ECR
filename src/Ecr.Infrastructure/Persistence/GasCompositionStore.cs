@@ -5,6 +5,7 @@ using Ecr.Application.Registries.Flert;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -149,6 +150,15 @@ public sealed class GasCompositionStore(EcrDbContext db) : IGasCompositionStore
         })];
     }
 
+    /// <summary>
+    /// Назва компонента за мовами — лише справжня: імпорт заводить запис із назвою, рівною коду FLERT (<c>MMercaptan</c>), і
+    /// така «назва» нічого не каже; її відкидаємо, щоб клієнт показав типову з каталогу рядків.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> NamesOf(string code, LocalizedText? display)
+        => (display?.Values ?? new Dictionary<string, string>())
+            .Where(p => !string.IsNullOrWhiteSpace(p.Value) && !string.Equals(p.Value.Trim(), code, StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(p => p.Key, p => p.Value.Trim(), StringComparer.Ordinal);
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<GasComponentRecord>> ListComponentsAsync(GasRegistryIds ids, CancellationToken ct)
     {
@@ -156,7 +166,7 @@ public sealed class GasCompositionStore(EcrDbContext db) : IGasCompositionStore
         var fields = await FieldsAsync(ids.Component, ct).ConfigureAwait(false);
         var entries = await db.RegistryEntries.AsNoTracking()
             .Where(e => e.RegistryDefId == ids.Component && !e.IsDeleted && e.IsActive)
-            .Select(e => new { e.Id, e.Code, e.Ordinal })
+            .Select(e => new { e.Id, e.Code, e.DisplayL10n, e.Ordinal })
             .ToListAsync(ct)
             .ConfigureAwait(false);
         var values = await ValuesAsync(ids.Component, ct).ConfigureAwait(false);
@@ -164,7 +174,7 @@ public sealed class GasCompositionStore(EcrDbContext db) : IGasCompositionStore
         return [.. entries.Select(e =>
         {
             var v = new Row(values, fields, e.Id);
-            return new GasComponentRecord(e.Id, e.Code, e.Code, v.Text("FORMULA"), v.Number("MW"), e.Ordinal);
+            return new GasComponentRecord(e.Id, e.Code, NamesOf(e.Code, e.DisplayL10n), v.Text("FORMULA"), v.Number("MW"), e.Ordinal);
         })];
     }
 

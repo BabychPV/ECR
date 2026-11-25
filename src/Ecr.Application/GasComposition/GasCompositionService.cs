@@ -135,6 +135,9 @@ public sealed partial class GasCompositionService(
         return new GasStreamListDto(items, canEdit, canImport, new GasImportStatusDto(streams.Count == 0, status.LastRun));
     }
 
+    /// <summary>Компонент без власної назви: клієнт показує типову з каталогу рядків.</summary>
+    private static readonly IReadOnlyDictionary<string, string> NoNames = new Dictionary<string, string>(StringComparer.Ordinal);
+
     /// <summary>Компоненти для редактора.</summary>
     /// <param name="ct">Скасування.</param>
     public async Task<IReadOnlyList<GasComponentDto>> ListComponentsAsync(CancellationToken ct)
@@ -144,12 +147,12 @@ public sealed partial class GasCompositionService(
         if (ids is null)
         {
             // Довідників ще немає: редактор показує компоненти FLERT, довідник заведе перший запис.
-            return [.. FlertCompositionSchema.Components.Select(c => new GasComponentDto(c, c, null, null, GroupOf(c)))];
+            return [.. FlertCompositionSchema.Components.Select(c => new GasComponentDto(c, NoNames, null, null, GroupOf(c)))];
         }
 
         return [.. (await store.ListComponentsAsync(ids, ct).ConfigureAwait(false))
             .OrderBy(c => c.Ordinal).ThenBy(c => c.Code, StringComparer.Ordinal)
-            .Select(c => new GasComponentDto(c.Code, c.Name, c.Formula, c.Mw, GroupOf(c.Code)))];
+            .Select(c => new GasComponentDto(c.Code, c.Names, c.Formula, c.Mw, GroupOf(c.Code)))];
     }
 
     /// <summary>Потік з кейсами й версіями.</summary>

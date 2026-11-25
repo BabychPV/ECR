@@ -81,7 +81,11 @@ test.describe('Склад газу: потік, кейс, версії (D-NEW)',
     await editor.getByRole('textbox', { name: 'Case' }).fill('370 Winter');
     await setEffective(page, 'January', '2025');
     await molPct(page, 'Methane').fill('97');
-    await molPct(page, 'Ethane').fill('3');
+    await molPct(page, 'Ethane').fill('2.5');
+    // Компонент показано людською назвою з кодом поруч (рев'ю 25.11): «Hydrogen sulphide (H2S)», «Methyl mercaptan (CH3SH)».
+    await molPct(page, 'Hydrogen sulphide (H2S)').fill('0.5');
+    await expect(editor.getByText('Methyl mercaptan (CH3SH)', { exact: true })).toBeVisible();
+    await expect(editor.getByTestId('gas-component-code').filter({ hasText: /^MMercaptan$/ })).toBeVisible();
     await expect(page.getByTestId('gas-sum')).toContainText('100');
     await editor.getByRole('button', { name: 'Save' }).click();
     await expect(editor).toBeHidden({ timeout: 30_000 });
@@ -94,6 +98,7 @@ test.describe('Склад газу: потік, кейс, версії (D-NEW)',
     await setEffective(page, 'March', '2026');
     await molPct(page, 'Methane').fill('96.5');
     await molPct(page, 'Ethane').fill('3.5');
+    await molPct(page, 'Hydrogen sulphide (H2S)').fill('');
     await page.getByTestId('gas-version-editor').getByRole('button', { name: 'Save' }).click();
     await expect(winter.getByTestId('gas-version-row')).toHaveCount(2, { timeout: 30_000 });
     await expect(winter.locator('[data-from="2025-01-01"]')).toContainText('February 2026');
