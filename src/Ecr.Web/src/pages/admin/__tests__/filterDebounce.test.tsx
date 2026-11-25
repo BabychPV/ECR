@@ -6,7 +6,6 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { JSX } from 'react';
 import { AuditPage } from '@/pages/admin/AuditPage';
-import { ConsistencyIssuesPage } from '@/pages/admin/ConsistencyIssuesPage';
 import { FilterDebounceMs } from '@/shared/ui/useDebouncedFilter';
 import { testTheme } from '@/test/render';
 
@@ -149,15 +148,5 @@ describe('/admin/audit?view=structure — журнал структурних з
   );
 });
 
-describe('/admin/consistency — перелік розбіжностей', () => {
-  it(
-    '«Rule»: набір CNS-01 — один запит',
-    async () => {
-      const seen = count('/api/v1/consistency/issues', 'ruleCode');
-      show(<ConsistencyIssuesPage />, '/admin/consistency');
-
-      await typeAndCount('⟦consistency.rule⟧', 'CNS-01', seen);
-    },
-    SlowEnvTimeout,
-  );
-});
+// ✎ 24.11: «Rule» на /admin/consistency — перелік відомих правил (select), а не поле набору; нова сторінка журналу
+// починається з першої (ruleCode — у ключі запиту), див. ConsistencyIssuesPage.checksPerformed.test.tsx.

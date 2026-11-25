@@ -6,7 +6,6 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { JSX } from 'react';
 import { AuditPage } from '@/pages/admin/AuditPage';
-import { ConsistencyIssuesPage } from '@/pages/admin/ConsistencyIssuesPage';
 import { FilterBar } from '@/shared/ui/FilterBar';
 import { testTheme } from '@/test/render';
 
@@ -161,28 +160,8 @@ describe("поле, прив'язане до адреси, при запізні
     SlowEnvTimeout,
   );
 
-  it(
-    '/admin/consistency «Rule»: CNS-0123 — у полі рівно CNS-0123',
-    async () => {
-      serveEmpty();
-      show(<ConsistencyIssuesPage />, '/admin/consistency');
-
-      const input = await screen.findByRole<HTMLInputElement>(
-        'textbox',
-        { name: '⟦consistency.rule⟧' },
-        { timeout: SlowEnvTimeout },
-      );
-
-      await typeWhileUrlLags(input, 'CNS-0123');
-      expect(input.value).toBe('CNS-0123');
-
-      await settle();
-      expect(input.value).toBe('CNS-0123');
-      await urlCaughtUp('ruleCode', 'CNS-0123');
-      expect(input.value).toBe('CNS-0123');
-    },
-    SlowEnvTimeout,
-  );
+  // ✎ 24.11: «Rule» на /admin/consistency — перелік відомих правил (select), а не поле набору; нова сторінка журналу
+  // починається з першої (ruleCode — у ключі запиту), див. ConsistencyIssuesPage.checksPerformed.test.tsx.
 
   it(
     'FilterBar (пошук): documents — у полі рівно набране; «Clear filters» очищає поле',
