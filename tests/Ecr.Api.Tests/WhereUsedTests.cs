@@ -15,62 +15,17 @@ using Xunit;
 namespace Ecr.Api.Tests;
 
 /// <summary>
-/// «Де використовується» константи методики і колонки шаблону (ФВ-8.14)
-/// справжнім HTTP на реальній БД.
+/// «Де використовується» колонки шаблону (ФВ-8.14) справжнім HTTP на реальній БД. ✎ P-1124-1: «де використовується»
+/// формульної константи прибрано разом з формульним UI (дія без споживача).
 /// </summary>
 /// <remarks>
-/// ⚠ Кожен тест поруч із справжнім посиланням сіє «пастку» — схоже, але чуже
-/// (константа <c>K10</c> поруч із <c>K1</c>, id колонки у ЗНАЧЕННІ предиката
+/// ⚠ Кожен тест поруч із справжнім посиланням сіє «пастку» — схоже, але чуже (id колонки у ЗНАЧЕННІ предиката
 /// правила): перелік, що рахує за підрядком, дав би тут зайве.
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class WhereUsedTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2026, 3, 1, 9, 0, 0, DateTimeKind.Utc);
-
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-8.14")]
-    public async Task Константу_показують_лише_формули_що_посилаються_саме_на_неї()
-    {
-        var stand = await ConstantStandAsync().ConfigureAwait(true);
-        using var app = new EcrApiFactory(sql);
-        using var client = await SignedInAsync(app, "Calculation.View").ConfigureAwait(true);
-
-        var usage = await GetOkAsync(client, app, ConstantUrl(stand, "K1")).ConfigureAwait(true);
-
-        // Літералом: одна формула з CST.K1; CST.K10 і вираз без констант — ні.
-        Assert.Equal(1, usage.GetProperty("total").GetInt32());
-        var item = Assert.Single(usage.GetProperty("items").EnumerateArray());
-        Assert.Equal("methodologyFormula", item.GetProperty("kind").GetString());
-        Assert.Equal("USES_K1", item.GetProperty("label").GetString());
-        Assert.Equal($"/admin/methodologies/{stand.MethodologyId}/versions", item.GetProperty("route").GetString());
-    }
-
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Константа_без_права_перегляду_методик_403_невідома_404()
-    {
-        var stand = await ConstantStandAsync().ConfigureAwait(true);
-        using var app = new EcrApiFactory(sql);
-
-        using (var stranger = await SignedInAsync(app, "Template.View").ConfigureAwait(true))
-        {
-            var denied = await stranger.GetAsync(new Uri(ConstantUrl(stand, "K1"), UriKind.Relative)).ConfigureAwait(true);
-            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
-        }
-
-        using var client = await SignedInAsync(app, "Calculation.View").ConfigureAwait(true);
-
-        // ⛔ Невідомий код і чужа методологія — 404, а не «нуль посилань».
-        await AssertNotFoundAsync(client, ConstantUrl(stand, "NOPE"), "ECR-CALC-0404").ConfigureAwait(true);
-        await AssertNotFoundAsync(
-            client,
-            $"/api/v1/methodologies/{stand.MethodologyId + 100000}/versions/{stand.VersionId}/constants/K1/usage",
-            "ECR-CALC-0404").ConfigureAwait(true);
-    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
@@ -167,8 +122,6 @@ public sealed class WhereUsedTests(SqlServerFixture sql)
         await AssertNotFoundAsync(client, $"/api/v1/column-defs/{int.MaxValue}/usage", "ECR-TMPL-0404").ConfigureAwait(true);
     }
 
-    private sealed record ConstantStand(int MethodologyId, int VersionId);
-
     private sealed record ColumnStand(int Subject, int Neighbour, string FormulaLabel);
 
     private sealed record RuleStand(
@@ -206,26 +159,6 @@ public sealed class WhereUsedTests(SqlServerFixture sql)
         await db.SaveChangesAsync().ConfigureAwait(false);
 
         return new RuleStand(subject, first, empty, table, document.TemplateId, document.TemplateVersionId);
-    }
-
-    private async Task<ConstantStand> ConstantStandAsync()
-    {
-        await using var db = Db();
-        var unit = await db.Units.OrderBy(u => u.Id).Select(u => u.Id).FirstAsync().ConfigureAwait(false);
-        var methodology = await MethodologyAsync(db).ConfigureAwait(false);
-
-        var version = new MethodologyVersion(methodology.Id, "1.0", CalculationLevel.Configuration, createdByUserId: 1, Now);
-        db.MethodologyVersions.Add(version);
-        await db.SaveChangesAsync().ConfigureAwait(false);
-
-        db.MethodologyConstants.Add(version.AddNumericConstant(EcrCode.Create("K1"), 1m, unit));
-        db.MethodologyConstants.Add(version.AddNumericConstant(EcrCode.Create("K10"), 10m, unit));
-        db.MethodologyFormulas.Add(version.AddFormula(EcrCode.Create("USES_K1"), "@Fuel * CST.K1", FormulaResultType.Number, unit));
-        db.MethodologyFormulas.Add(version.AddFormula(EcrCode.Create("USES_K10"), "@Fuel * CST.K10", FormulaResultType.Number, unit));
-        db.MethodologyFormulas.Add(version.AddFormula(EcrCode.Create("PLAIN"), "@Fuel * 3", FormulaResultType.Number, unit));
-        await db.SaveChangesAsync().ConfigureAwait(false);
-
-        return new ConstantStand(methodology.Id, version.Id);
     }
 
     /// <summary>
@@ -294,9 +227,6 @@ public sealed class WhereUsedTests(SqlServerFixture sql)
         await db.SaveChangesAsync().ConfigureAwait(false);
         return methodology;
     }
-
-    private static string ConstantUrl(ConstantStand stand, string code)
-        => $"/api/v1/methodologies/{stand.MethodologyId}/versions/{stand.VersionId}/constants/{code}/usage";
 
     private static async Task<JsonElement> GetOkAsync(HttpClient client, EcrApiFactory app, string url)
     {
