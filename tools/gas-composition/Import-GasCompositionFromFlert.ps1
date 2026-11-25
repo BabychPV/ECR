@@ -40,7 +40,7 @@ function Invoke-Sql([string] $Server, [string] $Database, [string] $Query) {
     $file = [IO.Path]::GetTempFileName()
     try {
         [IO.File]::WriteAllText($file, "SET NOCOUNT ON;`n" + $Query, (New-Object Text.UTF8Encoding $false))
-        $out = & sqlcmd -S $Server -E -d $Database -b -I -W -h -1 -s '|' -i $file
+        $out = & sqlcmd -S $Server -E -d $Database -b -I -W -h -1 -s '|' -f 65001 -i $file
         if ($LASTEXITCODE -ne 0) { throw "sqlcmd ($Server/$Database) повернув $LASTEXITCODE`n$($out -join "`n")" }
         # ⚠ Кома: інакше масив з одного рядка PowerShell розгортає в рядок, і [0] — перший СИМВОЛ.
         return ,@($out | Where-Object { $_ -and $_.Trim() })
