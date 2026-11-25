@@ -49,6 +49,7 @@ test('missing-input month alias: year document names the month column (with mont
   await expect(page).toHaveURL(new RegExp(`periodKey=${String(arranged.anchor)}`), { timeout: 90_000 });
 
   // Проблема жовтня — у панелі жовтня: колонка жовтня й справжній вхід поза колонками.
+  await revealCalcPanels(page);
   const panel = page.locator(`[data-testid="document-calc-issues"][data-period="${String(arranged.october)}"]`);
   await expect(panel, 'панелі проблем жовтня на якорі року немає').toBeVisible({ timeout: 60_000 });
   expect(yearRead, 'сторінка «рік» не читала проблеми року (year=true)').toBe(true);
@@ -184,4 +185,17 @@ async function signIn(page: Page, user: string, password: string): Promise<void>
   await page.getByRole('textbox', { name: /Password|Пароль/i }).fill(password);
   await page.keyboard.press('Enter');
   await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 });
+}
+
+/**
+ * ✎ b14 doc-notices-compact: проблеми розрахунку над сіткою — ОДНА смуга, згорнута; панелі місяців — у її «Details →
+ * Technical details». Розгорнути обидва рівні (Details пам'ятається між відкриттями, Technical details — ні).
+ */
+async function revealCalcPanels(page: Page): Promise<void> {
+  const toggle = page.getByTestId('document-calc-strip-toggle');
+  await expect(toggle, 'смуги проблем розрахунку немає').toBeVisible({ timeout: 60_000 });
+  if ((await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click();
+  const technical = page.getByTestId('document-calc-strip-technical-toggle');
+  await expect(technical).toBeVisible();
+  if ((await technical.getAttribute('aria-expanded')) === 'false') await technical.click();
 }
