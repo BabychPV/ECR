@@ -7,6 +7,20 @@ type AxeRun = { violations: { id: string; nodes: { target: unknown[] }[] }[] };
  * `include` — CSS-селектор області перевірки (без нього — увесь документ).
  */
 export async function axeViolations(page: Page, rule: string, include?: string): Promise<string[]> {
+  /*
+   * ⛔ Спершу — кінець усіх скінченних CSS-переходів і анімацій (`document.getAnimations()`). Діалог Mantine
+   * з'являється переходом прозорості (~200 мс), а `toBeVisible` проходить уже на першому кадрі: axe посеред переходу
+   * рахує контраст із неповною непрозорістю й «бачить» порушення там, де в спокої його немає (пачка b12, run
+   * 45534979498: `#mantine-…-description` діалогу «New draft version» — лише на швидкому раннері CI).
+   * Нескінченні анімації (спінери) не чекаємо.
+   */
+  await page.evaluate(async () => {
+    const finite = document.getAnimations().filter((animation) => {
+      const end = animation.effect?.getComputedTiming().endTime;
+      return typeof end === 'number' && Number.isFinite(end);
+    });
+    await Promise.allSettled(finite.map((animation) => animation.finished));
+  });
   await page.addScriptTag({ path: 'node_modules/axe-core/axe.min.js' });
 
   return page.evaluate(

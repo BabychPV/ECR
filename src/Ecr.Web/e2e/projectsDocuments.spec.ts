@@ -232,14 +232,19 @@ test.describe('Projects 08.11', () => {
     await expect(page.locator('[data-documents-month]')).toHaveCount(0);
     await expect(page.getByRole('combobox', { name: /^Month$/ })).toHaveCount(0);
 
-    const options = await page.locator('[data-documents-year] option').allTextContents();
     const calendars = await Promise.all(
       (await ok<{ items: { id: number }[] }>(await page.request.get('/api/v1/projects?limit=500'), 'projects')).items.map(async (p) =>
         ok<{ periods: { year: number }[] }>(await page.request.get(`/api/v1/projects/${String(p.id)}/periods`), 'periods'),
       ),
     );
     const years = [...new Set(calendars.flatMap((c) => c.periods.map((x) => x.year)))].sort((a, b) => b - a).map(String);
-    expect(options).toEqual(years);
+    // ⚠ Варіанти «Year» будуються з календарів УСІХ проєктів (`useCalendarsOf`, один запит пачками по 4) — він
+    // приходить ПІСЛЯ рядків документів. Доти у варіантах лише рік з адреси. Одноразове читання одразу після рядка
+    // ловило саме цей проміжний стан (пачка b12, run 45534979498: ["2026"] замість ["2026","2025"] — у повному прогоні
+    // проєктів багато, і календарі вантажаться довше). Чекаємо стан після календарів.
+    await expect
+      .poll(async () => page.locator('[data-documents-year] option').allTextContents(), { timeout: 60_000 })
+      .toEqual(years);
 
     const cells = row.locator('[data-month]');
     await expect(cells).toHaveCount(12);
