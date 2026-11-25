@@ -47757,6 +47757,9 @@ export interface components {
             columnCode: null | string;
             /** @description Локалізований текст. */
             message: string;
+            /** @description ✎ 25.11: для `ECR-CALC-0437` — коди методологій, яким потрібна колонка (одне повідомлення на рядок і
+             *     колонку); клієнт зводить їх по колонці. `null` — для решти правил. */
+            methodologies?: null | string[];
             /** @description Рядок, якого стосується; `null` — рівень таблиці. */
             rowKey: null | string;
             /** @description Код правила з `cfg.ValidationRule`. */

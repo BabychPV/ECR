@@ -779,6 +779,7 @@ public sealed partial class PatchCellsTests
         _periods.FindPeriodBoundsAsync(700, Period, Arg.Any<CancellationToken>())
                 .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
 
+        _lastMethodology = (version, rules, requiredInput, category);
         return documentCategoryColumnId;
     }
 

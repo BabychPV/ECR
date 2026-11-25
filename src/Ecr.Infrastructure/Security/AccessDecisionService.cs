@@ -1683,7 +1683,7 @@ public sealed class AccessDecisionService(
     }
 
     /// <summary>Рішення на рядки, яких ще немає, в одному зрізі.</summary>
-    private static Dictionary<string, NewRowAccess> NewRowDecisions(
+    private Dictionary<string, NewRowAccess> NewRowDecisions(
         AccessProfile profile, SliceContext slice, IReadOnlyCollection<string> rowKeys)
     {
         var result = new Dictionary<string, NewRowAccess>(rowKeys.Count, StringComparer.Ordinal);
@@ -1778,7 +1778,7 @@ public sealed class AccessDecisionService(
     /// нового порожні). Усе інше — та сама функція, і саме тому вона одна:
     /// друга копія розійшлася б із першою на першій же зміні правил.
     /// </remarks>
-    private static EditDecision Decide(
+    private EditDecision Decide(
         AccessProfile profile,
         SliceContext slice,
         string rowKey,
@@ -1952,7 +1952,8 @@ public sealed class AccessDecisionService(
                 // (клієнт не показує позначку взагалі), і розширювати цю
                 // гілку на неї означало б закрити одну прогалину, вдаючи, що
                 // закрив дві.
-                decision = EditDecision.AllowWithConfirmation(outcome.Detail);
+                // ✎ 25.11: пояснення йде в діалог підтвердження сітки — мовою читача, а не українським літералом.
+                decision = EditDecision.AllowWithConfirmation(outcome.DetailIn(currentUser.Language));
             }
             else if (outcome.Reason != EditDenyReason.None
                      && outcome.Behavior == OutOfWindowBehavior.Warn)
