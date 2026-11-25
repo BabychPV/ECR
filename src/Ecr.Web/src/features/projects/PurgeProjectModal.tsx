@@ -1,5 +1,6 @@
 import { useEffect, useState, type JSX } from 'react';
-import { Alert, Button, Code, Group, List, Loader, Modal, Stack, Text, Textarea, TextInput } from '@mantine/core';
+import { Alert, Anchor, Button, Code, Group, List, Loader, Modal, Stack, Text, Textarea, TextInput } from '@mantine/core';
+import { Link } from 'react-router-dom';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { t } from '@/shared/i18n';
@@ -9,6 +10,12 @@ import { usePurgePreview, usePurgeProject } from './purgeProject';
 
 /** Найдовша причина — та сама межа, що на сервері (`PurgeProjectHandler.MaxReasonLength`). */
 const MaxReasonLength = 500;
+
+/**
+ * Сторінка Sources (мапи подій джерела) — літерал, як `AdminUnitsPath` у `features/mapping/UnitChangeAction.tsx`: шар
+ * features не імпортує `app/routes` (ClientLayerRulesTests).
+ */
+const AdminSourcesPath = '/admin/sources';
 
 /** Місце коду в перекладі підпису: переклад може ставити `{code}` будь-де в реченні. */
 const CodeMarker = '⁣';
@@ -94,6 +101,30 @@ export function PurgeProjectModal({
               </Alert>
             ) : null}
 
+            {/* ✎ R3 C2-b: мапи подій на ВЛАСНИХ документах — своя причина й вихід (Sources), не «читають інші проєкти». */}
+            {data.eventMaps.length > 0 && (
+              <Alert color="statusWarning" data-purge-blocker="eventMaps">
+                <Text size="sm" fw={500}>
+                  {t('projects.purge.eventMaps')}
+                </Text>
+                <List size="sm">
+                  {data.eventMaps.map((d) => (
+                    <List.Item key={d.documentId}>{d.businessKey}</List.Item>
+                  ))}
+                </List>
+                <Anchor component={Link} to={AdminSourcesPath} size="sm" data-purge-sources-link="">
+                  {t('projects.purge.eventMapsLink')}
+                </Anchor>
+              </Alert>
+            )}
+
+            {/* ✎ R3 C2-g: попередження не блокує — рішення за людиною. */}
+            {data.warnings.map((warning) => (
+              <Alert key={warning} color="statusWarning" variant="light" data-purge-warning={warning}>
+                {warning === 'hse400Tools' ? t('projects.purge.warning.hse400Tools') : warning}
+              </Alert>
+            ))}
+
             {data.dependants.length > 0 && (
               <Alert color="statusWarning" data-purge-blocker="dependants">
                 <Text size="sm" fw={500}>
@@ -144,6 +175,12 @@ export function PurgeProjectModal({
             {data.dataMonths.length > 0 && (
               <Text size="sm" c="dimmed">
                 {t('projects.purge.months', { months: data.dataMonths.map((k) => formatPeriodKey(k)).join(', ') })}
+              </Text>
+            )}
+            {/* ✎ R3 C2-f: затверджені місяці видаляються без повернення — людина бачить це до підтвердження. */}
+            {data.approvedMonths.length > 0 && (
+              <Text size="sm" fw={500} data-purge-approved-months="">
+                {t('projects.purge.approvedMonths', { months: data.approvedMonths.map((k) => formatPeriodKey(k)).join(', ') })}
               </Text>
             )}
           </>

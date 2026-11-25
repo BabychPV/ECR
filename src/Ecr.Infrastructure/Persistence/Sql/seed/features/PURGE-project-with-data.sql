@@ -23,7 +23,14 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'projects.purge.reason',                    N'en', N'Reason (goes to the security log)', 1),
     (N'projects.purge.typeCode',                  N'en', N'Type the project code {code} to confirm', 1),
     (N'projects.purge.confirm',                   N'en', N'Delete permanently', 1),
-    (N'projects.purged',                          N'en', N'Project {code} and all its data were deleted', 1)
+    (N'projects.purged',                          N'en', N'Project {code} and all its data were deleted', 1),
+    -- ✎ R3 25.11 (C2-b, C2-e, C2-f, C2-g)
+    (N'err.ECR-PRD-0409.purgeHasEventMap',        N'en', N'Project {code} cannot be deleted: its documents ({documents}) have source event maps. Remove the maps in Sources first, then delete the project.', 1),
+    (N'err.ECR-PRD-0409.purgeConcurrentChange',   N'en', N'The project changed while it was being deleted (for example, a new document was created). Nothing was deleted — open the dialog again and repeat.', 1),
+    (N'projects.purge.eventMaps',                 N'en', N'Documents of this project have source event maps — deletion is blocked. Remove the maps in Sources first:', 1),
+    (N'projects.purge.eventMapsLink',             N'en', N'Open Sources', 1),
+    (N'projects.purge.approvedMonths',            N'en', N'Approved months that will be deleted without reopening: {months}', 1),
+    (N'projects.purge.warning.hse400Tools',       N'en', N'This project is used by the HSE400 template tools (tools/hse400: golden tests, version migration). After deletion they must be pointed at another project or the project re-created.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO
@@ -76,7 +83,19 @@ SELECT v.[Key], v.Lang, v.Val
     (N'projects.purge.confirm',               N'ru', N'Удалить навсегда'),
     (N'projects.purge.confirm',               N'kz', N'Біржола жою'),
     (N'projects.purged',                      N'ru', N'Проект {code} и все его данные удалены'),
-    (N'projects.purged',                      N'kz', N'{code} жобасы және оның барлық деректері жойылды')
+    (N'projects.purged',                      N'kz', N'{code} жобасы және оның барлық деректері жойылды'),
+    (N'err.ECR-PRD-0409.purgeHasEventMap',    N'ru', N'Проект {code} нельзя удалить: у его документов ({documents}) есть карты событий источника. Сначала уберите карты в Sources, затем удалите проект.'),
+    (N'err.ECR-PRD-0409.purgeHasEventMap',    N'kz', N'{code} жобасын жою мүмкін емес: оның құжаттарында ({documents}) дереккөз оқиғаларының карталары бар. Алдымен карталарды Sources бөлімінде алып тастаңыз, содан кейін жобаны жойыңыз.'),
+    (N'err.ECR-PRD-0409.purgeConcurrentChange', N'ru', N'Проект изменился во время удаления (например, создан новый документ). Ничего не удалено — откройте диалог заново и повторите.'),
+    (N'err.ECR-PRD-0409.purgeConcurrentChange', N'kz', N'Жоба жою кезінде өзгерді (мысалы, жаңа құжат жасалды). Ештеңе жойылған жоқ — диалогты қайта ашып, қайталаңыз.'),
+    (N'projects.purge.eventMaps',             N'ru', N'У документов этого проекта есть карты событий источника — удаление заблокировано. Сначала уберите карты в Sources:'),
+    (N'projects.purge.eventMaps',             N'kz', N'Бұл жоба құжаттарында дереккөз оқиғаларының карталары бар — жою бұғатталған. Алдымен карталарды Sources бөлімінде алып тастаңыз:'),
+    (N'projects.purge.eventMapsLink',         N'ru', N'Открыть Sources'),
+    (N'projects.purge.eventMapsLink',         N'kz', N'Sources ашу'),
+    (N'projects.purge.approvedMonths',        N'ru', N'Утверждённые месяцы, которые будут удалены без возврата: {months}'),
+    (N'projects.purge.approvedMonths',        N'kz', N'Қайтарусыз жойылатын бекітілген айлар: {months}'),
+    (N'projects.purge.warning.hse400Tools',   N'ru', N'Этот проект используют инструменты шаблона HSE400 (tools/hse400: золотые тесты, перенос версии). После удаления их нужно перенастроить на другой проект или создать проект заново.'),
+    (N'projects.purge.warning.hse400Tools',   N'kz', N'Бұл жобаны HSE400 үлгісінің құралдары пайдаланады (tools/hse400: алтын тесттер, нұсқаны көшіру). Жойғаннан кейін оларды басқа жобаға бағыттау немесе жобаны қайта жасау керек.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

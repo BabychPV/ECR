@@ -31,8 +31,24 @@ public interface IProjectPurgeStore
     /// <param name="projectId">Проєкт.</param>
     /// <param name="documentIds">Документи проєкту (з <see cref="ReadFactsAsync"/> тієї самої транзакції).</param>
     /// <param name="ct">Токен скасування.</param>
-    /// <returns>Скільки комірок видалено (сума по документах) — для сліду в журналі безпеки.</returns>
-    public Task<long> PurgeAsync(int projectId, IReadOnlyList<long> documentIds, CancellationToken ct);
+    /// <returns>Скільки комірок видалено і скільки задач документів скасовано — для сліду в журналі безпеки.</returns>
+    /// <exception cref="Errors.ConcurrencyConflictException">
+    /// 409 <c>purgeConcurrentChange</c>: паралельно в проєкті з'явився документ чи інший рядок, якого немає у фактах
+    /// (FK 547), — транзакція відкочується, нічого не видалено.
+    /// </exception>
+    public Task<ProjectPurgeResult> PurgeAsync(int projectId, IReadOnlyList<long> documentIds, CancellationToken ct);
+}
+
+/// <summary>Підсумок видалення.</summary>
+/// <param name="Cells">Видалено комірок.</param>
+/// <param name="CancelledJobs">Скасовано задач (черга — одразу, виконувані — запит скасування) документів проєкту.</param>
+public sealed record ProjectPurgeResult(long Cells, int CancelledJobs);
+
+/// <summary>Попередження, що НЕ блокує видалення (рішення — за людиною).</summary>
+public static class ProjectPurgeWarnings
+{
+    /// <summary>✎ 25.11 (R3 C2-g): проєкт золотих тестів HSE400 потрібен інструментам шаблону (<c>tools/hse400</c>).</summary>
+    public const string Hse400Tools = "hse400Tools";
 }
 
 /// <summary>Документ, що буде видалений.</summary>
@@ -78,6 +94,9 @@ public sealed record ProjectPurgeCounts(
 /// <param name="DataMonths">Ключі періодів (<c>yyyyMM</c>), у яких документи проєкту мають екземпляри таблиць.</param>
 /// <param name="ArchivedPeriodKeys">Ключі періодів, дані яких перенесено в архів (<c>arc.*</c>, B69).</param>
 /// <param name="Dependants">Документи інших проєктів, що читають цей.</param>
+/// <param name="EventMaps">Документи ЦЬОГО проєкту з мапами подій джерела (<c>ext.SourceEventMap</c>) — їх прибирають у Sources.</param>
+/// <param name="ApprovedMonths">Ключі періодів, у яких є затверджені аркуші (видаляються без повернення — у журнал).</param>
+/// <param name="Warnings">Попередження без блокування (<see cref="ProjectPurgeWarnings"/>).</param>
 public sealed record ProjectPurgeFacts(
     string Code,
     ProjectStatus Status,
@@ -87,4 +106,7 @@ public sealed record ProjectPurgeFacts(
     ProjectPurgeCounts Counts,
     IReadOnlyList<int> DataMonths,
     IReadOnlyList<int> ArchivedPeriodKeys,
-    IReadOnlyList<ProjectPurgeDependant> Dependants);
+    IReadOnlyList<ProjectPurgeDependant> Dependants,
+    IReadOnlyList<ProjectPurgeDependant> EventMaps,
+    IReadOnlyList<int> ApprovedMonths,
+    IReadOnlyList<string> Warnings);

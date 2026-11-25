@@ -41556,6 +41556,8 @@ export interface components {
         };
         /** @description Попередній перегляд видалення проєкту з даними — що зникне і що заважає. */
         ProjectPurgePreviewDto: {
+            /** @description Періоди із затвердженими аркушами — видаляються без повернення (C2-f, у журнал). */
+            approvedMonths: number[];
             /** @description Заархівовані періоди (B69) — видалення заборонене. */
             archivedPeriodKeys: number[];
             /** @description Чому видалити не можна: `null` — можна; інакше ключ каталогу причини (той самий, що у відмові 409). */
@@ -41570,6 +41572,8 @@ export interface components {
             dependants: components["schemas"]["ProjectPurgeDependant"][];
             /** @description Документи з ключами й кількістю комірок. */
             documents: components["schemas"]["ProjectPurgeDocument"][];
+            /** @description Документи ЦЬОГО проєкту з мапами подій джерела — прибрати в Sources (✎ R3 C2-b). */
+            eventMaps: components["schemas"]["ProjectPurgeDependant"][];
             /**
              * Format: int32
              * @description Проєкт.
@@ -41577,6 +41581,8 @@ export interface components {
             projectId: number;
             /** @description Стан. */
             status: string;
+            /** @description Попередження без блокування (ProjectPurgeWarnings): рішення за людиною. */
+            warnings: string[];
         };
         /** @description Прийнятий у чергу перерахунок УСЬОГО проєкту (Q-151). */
         ProjectRecalculationAcceptedResponse: {

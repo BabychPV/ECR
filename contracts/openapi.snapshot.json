@@ -20994,6 +20994,14 @@
       "ProjectPurgePreviewDto": {
         "description": "Попередній перегляд видалення проєкту з даними — що зникне і що заважає.",
         "properties": {
+          "approvedMonths": {
+            "description": "Періоди із затвердженими аркушами — видаляються без повернення (C2-f, у журнал).",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          },
           "archivedPeriodKeys": {
             "description": "Заархівовані періоди (B69) — видалення заборонене.",
             "items": {
@@ -21039,6 +21047,13 @@
             },
             "type": "array"
           },
+          "eventMaps": {
+            "description": "Документи ЦЬОГО проєкту з мапами подій джерела — прибрати в Sources (✎ R3 C2-b).",
+            "items": {
+              "$ref": "#/components/schemas/ProjectPurgeDependant"
+            },
+            "type": "array"
+          },
           "projectId": {
             "description": "Проєкт.",
             "format": "int32",
@@ -21047,6 +21062,13 @@
           "status": {
             "description": "Стан.",
             "type": "string"
+          },
+          "warnings": {
+            "description": "Попередження без блокування (ProjectPurgeWarnings): рішення за людиною.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -21058,6 +21080,9 @@
           "dataMonths",
           "archivedPeriodKeys",
           "dependants",
+          "eventMaps",
+          "approvedMonths",
+          "warnings",
           "blocker"
         ],
         "type": "object"

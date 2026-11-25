@@ -25,6 +25,8 @@ const Slow = 120_000;
 interface Preview {
   readonly blocker: string | null;
   readonly dependants: { documentId: number; businessKey: string; projectCode: string; reason: string }[];
+  readonly eventMaps?: { documentId: number; businessKey: string; projectCode: string; reason: string }[];
+  readonly warnings?: string[];
 }
 
 function respond(permissions: string[], preview: Preview = { blocker: null, dependants: [] }): { posts: { url: string; body: string }[] } {
@@ -70,6 +72,9 @@ function respond(permissions: string[], preview: Preview = { blocker: null, depe
           dataMonths: [202601, 202602],
           archivedPeriodKeys: [],
           dependants: preview.dependants,
+          eventMaps: preview.eventMaps ?? [],
+          approvedMonths: [202602],
+          warnings: preview.warnings ?? [],
           blocker: preview.blocker,
         });
       }
@@ -197,6 +202,56 @@ describe('ProjectLifecycleTab: Delete project with all data (✎ 25.11)', () => 
       expect(within(dialog).getByRole('textbox', { name: /projects\.purge\.typeCode/ }).hasAttribute('disabled')).toBe(true);
       expect(within(dialog).getByRole('button', { name: '⟦projects.purge.confirm⟧' }).hasAttribute('disabled')).toBe(true);
       expect(state.posts).toEqual([]);
+      // Мапи подій — інша причина: окремого блоку тут немає.
+      expect(dialog.querySelector('[data-purge-blocker="eventMaps"]')).toBeNull();
+    },
+    Slow,
+  );
+
+  it(
+    '✎ R3 C2-b: мапи подій на власних документах — окрема причина з посиланням на Sources, не «читають інші проєкти»',
+    async () => {
+      const state = respond(Admin, {
+        blocker: 'err.ECR-PRD-0409.purgeHasEventMap',
+        dependants: [],
+        eventMaps: [{ documentId: 101, businessKey: 'HSE401-A', projectCode: 'HSE401_2026', reason: 'SourceEventMap' }],
+      });
+      show();
+      const dialog = await openDialog();
+
+      const blocker = await waitFor(() => {
+        const node = dialog.querySelector('[data-purge-blocker="eventMaps"]');
+        expect(node).not.toBeNull();
+        return node!;
+      });
+      expect(blocker.textContent).toContain('⟦projects.purge.eventMaps⟧');
+      expect(blocker.textContent).toContain('HSE401-A');
+      expect(blocker.querySelector('[data-purge-sources-link]')?.getAttribute('href')).toBe('/admin/sources');
+      expect(dialog.querySelector('[data-purge-blocker="dependants"]')).toBeNull();
+      expect(within(dialog).getByRole('button', { name: '⟦projects.purge.confirm⟧' }).hasAttribute('disabled')).toBe(true);
+      expect(state.posts).toEqual([]);
+    },
+    Slow,
+  );
+
+  it(
+    '✎ R3 C2-g/C2-f: попередження HSE400_GOLD і затверджені місяці видно, але видалення доступне',
+    async () => {
+      respond(Admin, { blocker: null, dependants: [], warnings: ['hse400Tools'] });
+      show();
+      const dialog = await openDialog();
+
+      await waitFor(() => expect(dialog.querySelector('[data-purge-warning="hse400Tools"]')).not.toBeNull());
+      expect(dialog.querySelector('[data-purge-warning="hse400Tools"]')?.textContent).toContain(
+        '⟦projects.purge.warning.hse400Tools⟧',
+      );
+      expect(dialog.querySelector('[data-purge-approved-months]')?.textContent).toContain('projects.purge.approvedMonths');
+
+      await userEvent.type(within(dialog).getByRole('textbox', { name: /projects\.purge\.reason/ }), 'gold');
+      await userEvent.type(within(dialog).getByRole('textbox', { name: /projects\.purge\.typeCode/ }), 'HSE401_2026');
+      await waitFor(() =>
+        expect(within(dialog).getByRole('button', { name: '⟦projects.purge.confirm⟧' }).hasAttribute('disabled')).toBe(false),
+      );
     },
     Slow,
   );
