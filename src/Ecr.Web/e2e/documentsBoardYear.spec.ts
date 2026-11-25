@@ -49,6 +49,8 @@ test.describe('documentsBoardYear: дошка року і стан аркуша'
       expect(onBoard, `стовпець ${column} ≠ лічильник ${counter}`).toBe(shown);
     }
 
+    // Знімок — вкладенням звіту Playwright (артефакт CI e2e-stand); з ECR_E2E_REPORT_DIR — ще й файл.
+    await test.info().attach('documentsBoardYear-board-1440', { body: await page.screenshot(), contentType: 'image/png' });
     if (ReportDir !== '') {
       mkdirSync(ReportDir, { recursive: true });
       await page.screenshot({ path: `${ReportDir}\\documentsBoardYear-board-1440.png` });
@@ -67,6 +69,7 @@ test.describe('documentsBoardYear: дошка року і стан аркуша'
     const scope = page.getByTestId('document-sheet-state-scope');
     await expect(scope, 'біля «Sheet:» немає періоду').toBeVisible({ timeout: 30_000 });
     expect((await scope.innerText()).trim(), 'підпис періоду порожній').toMatch(/^·\s*\S/);
+    await test.info().attach('documentsBoardYear-sheet-1440', { body: await page.screenshot(), contentType: 'image/png' });
     if (ReportDir !== '') await page.screenshot({ path: `${ReportDir}\\documentsBoardYear-sheet-1440.png` });
   });
 });
