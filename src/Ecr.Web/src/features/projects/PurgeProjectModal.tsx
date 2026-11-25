@@ -1,5 +1,6 @@
 import { useEffect, useState, type JSX } from 'react';
 import { Alert, Button, Code, Group, List, Loader, Modal, Stack, Text, Textarea, TextInput } from '@mantine/core';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -48,6 +49,8 @@ export function PurgeProjectModal({
 }): JSX.Element {
   const preview = usePurgePreview(projectId, opened);
   const purge = usePurgeProject(projectId, onDeleted);
+  // ФВ-14.26: спінер — лише коли видалення триває довше за поріг, а не з першого кадру.
+  const purgingBusy = usePendingLoading(purge.isPending);
   const [typed, setTyped] = useState('');
   const [reason, setReason] = useState('');
 
@@ -175,7 +178,7 @@ export function PurgeProjectModal({
         <Button
           color="statusError"
           disabled={!ready}
-          loading={purge.isPending}
+          loading={purgingBusy}
           onClick={() => purge.mutate({ code: typed, reason: reason.trim() })}
         >
           {t('projects.purge.confirm')}
