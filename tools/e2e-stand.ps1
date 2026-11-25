@@ -653,6 +653,8 @@ try {
             'Document.RowLock',
             # ✎ D-NEW: сторінка «Склад газу» — e2e UI-lane (потік, версії, видалення). Лише тестова роль стенда.
             'GasComposition.View', 'GasComposition.Edit',
+            # ✎ 25.11: видалення проєкту з даними — e2e projectPurge.spec (проєкт-жертва створюється тестом). Лише тестова роль.
+            'Project.DeleteWithData',
             'Project.Manage', 'Period.Configure', 'Period.Reopen',
             # ✎ P44: `Calculation.EditFormula` — `resizableModal.spec` заводить методологію з чернеткою й відкриває
             # вікно формули. Лише тестова роль стенда; ролі продукту не змінюються.

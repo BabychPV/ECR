@@ -2633,6 +2633,27 @@ public interface IDocumentDeletionStore
 }
 ```
 
+#### `IProjectPurgeStore`
+
+✎ 25.11 (людина: видалити АКТИВНІ проєкти через інтерфейс). Видалення проєкту будь-якого стану з усіма даними
+(`GET /api/v1/projects/{id}/deletion-preview`, `POST /api/v1/projects/{id}/purge` з `{ code, reason }`, право
+`Project.DeleteWithData` — глобальне, з вбудованих ролей лише `SystemAdministrator`). Обробник `PurgeProjectHandler`, одна
+транзакція: рядок проєкту під `UPDLOCK`, структура кожного документа виключно (`ISheetEditGate`); далі історія погодження
+(`wf.ApprovalEvent`, `calc.SubmissionSnapshot`) + `IDocumentDeletionStore.DeleteAsync` на кожен документ, прогони проєкту,
+`calc.RecalculationApproval`, `itg.ArchiveRun`, `cfg.ColumnRenameProject`, `rpt.ViewProjectScope`, наприкінці
+`IProjectStore.DeleteAsync`; `aud.SecurityEvent` `ProjectDeletedWithData` (причина, кількості, документи) і журнал змін.
+Відмови: `422 ECR-PRD-0422` — `purgeCodeMismatch`, `purgeReasonRequired`; `409 ECR-PRD-0409` — `purgeArchived` (Archived,
+архівація або дані в `arc.*`, B69), `purgeHasDependants` (документ проєкту — обране джерело зв'язки B80 за рік і за той рік
+є документи-споживачі інших проєктів; мапа подій джерела). `aud.*` не чіпається.
+
+```csharp
+public interface IProjectPurgeStore
+{
+    public Task<ProjectPurgeFacts?> ReadFactsAsync(int projectId, bool lockForDelete, CancellationToken ct);
+    public Task<long> PurgeAsync(int projectId, IReadOnlyList<long> documentIds, CancellationToken ct);
+}
+```
+
 #### `IDocumentSheetCopyStore`
 
 Копії аркушів документа (RS, рішення людини 03.11; обробник `DocumentSheetCopyHandler`, право `Document.Create` +
@@ -5008,6 +5029,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/projects/{id}/archive` | `Project.Manage` | 1 |
 | `DELETE` | `/api/v1/projects/{id}` | `Project.Manage` | 3 |
 | `POST` | `/api/v1/projects/{id}/clone` | `Project.Manage` | 3 |
+| `GET` | `/api/v1/projects/{id}/deletion-preview` | `Project.DeleteWithData` (✎ 25.11) | 8 |
+| `POST` | `/api/v1/projects/{id}/purge` | `Project.DeleteWithData` (✎ 25.11) | 8 |
 | `PUT` | `/api/v1/projects/{id}/current-period` | `Period.Configure` (✎ 2026-11-07: **застаріло** — `…/settings/current-period`) | 3 |
 | `GET` | `/api/v1/projects/{id}/settings/current-period` | `Document.View` | 3 |
 | `PUT` | `/api/v1/projects/{id}/settings/current-period` | `Period.Configure` | 3 |

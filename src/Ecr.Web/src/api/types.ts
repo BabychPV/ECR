@@ -786,3 +786,8 @@ export type EffectiveAccessView = Schemas['EffectiveAccessView'];
 export type EffectiveAccessContribution = Schemas['EffectiveAccessContribution'];
 
 export type TemplateHeaderGroupDto = Schemas['TemplateHeaderGroupDto'];
+
+/** ✎ 25.11: попередній перегляд видалення проєкту з даними (`GET /api/v1/projects/{id}/deletion-preview`). */
+export type ProjectPurgePreviewDto = Schemas['ProjectPurgePreviewDto'];
+/** ✎ 25.11: тіло `POST /api/v1/projects/{id}/purge` — набраний код і причина. */
+export type PurgeProjectRequest = Schemas['PurgeProjectRequest'];

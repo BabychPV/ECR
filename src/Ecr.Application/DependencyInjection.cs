@@ -172,6 +172,7 @@ public static class DependencyInjection
         services.AddScoped<Projects.ActivateProjectHandler>();
         services.AddScoped<Projects.ArchiveProjectHandler>();
         services.AddScoped<Projects.DeleteProjectHandler>();
+        services.AddScoped<Projects.PurgeProjectHandler>(); // ✎ 25.11: видалення проєкту з даними (Project.DeleteWithData)
         services.AddScoped<Projects.ChangeProjectTimeZoneHandler>();
 
         // Документи і комірки (модуль 1.8)

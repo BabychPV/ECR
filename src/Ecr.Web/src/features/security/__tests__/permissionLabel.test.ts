@@ -113,8 +113,10 @@ describe('Сід покриває ВЕСЬ каталог прав (U-11)', () =
   // (P-1124-3, D-NEW: зрізи звітності й конструктор звітів прибрано, звіти — у SSRS).
   // ✎ 2026-11-25: +2 — `GasComposition.View`, `GasComposition.Edit` (D-NEW, сторінка «Склад газу»; назви ru/kz/en —
   // seed/features/GAS-composition.sql). Разом 51 − 4 + 2 = 49 (зведення пачки b12).
-  it('у каталозі 49 прав — рівно стільки колонок і має матриця', () => {
-    expect(codes.size).toBe(49);
+  // ✎ 2026-11-25: 50-те — `Project.DeleteWithData` (видалення проєкту з даними; назви ru/kz/en —
+  // seed/features/PURGE-project-with-data.sql).
+  it('у каталозі 50 прав — рівно стільки колонок і має матриця', () => {
+    expect(codes.size).toBe(50);
   });
 
   it('кожне право має назву в каталозі рядків', () => {
