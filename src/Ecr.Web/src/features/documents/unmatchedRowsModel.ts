@@ -8,7 +8,9 @@ import { localized } from '@/shared/i18n/localized';
  * Селектор банера над сіткою: панель «Calculation results» веде сюди посиланням «not calculated: N rows» (✎ 10.11).
  * ⚠ Не `id` на `Alert`: Mantine сам дає тілу `<id>-body`, і це перекрило б `document-unmatched-rows-body` згортання.
  */
-export const UnmatchedRowsBannerSelector = '[data-testid="document-calc-issues"]';
+// ✎ b14 doc-notices-compact: над сіткою тепер СМУГА (`document-calc-strip`, перша в порядку документа) — фокус іде на її
+// «Details»; панель місяця лишається запасним збігом (вона всередині «Technical details»).
+export const UnmatchedRowsBannerSelector = '[data-testid="document-calc-strip"], [data-testid="document-calc-issues"]';
 
 /** Вид проблеми рядка, що його відхилило правило категорії (✎ 10.11, doc 95). */
 export const CategoryRuleRejectedKind = 'CategoryRuleRejected';
