@@ -1,4 +1,5 @@
-import { useState, type JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
+import { preloadScriptEditorWhenIdle } from '@/features/methodologyScript/preloadScriptEditor';
 import {
   Badge,
   Button,
@@ -52,6 +53,9 @@ function listedEditorTarget(methodology: MethodologyDto): MethodologyDto['versio
  * до готовності.
  */
 export function MethodologiesPage(): JSX.Element {
+  // ✎ P-1124-1 (замір 25.11): головна кнопка рядка веде в редактор скрипта — Monaco прогрівається у вільний час.
+  useEffect(() => preloadScriptEditorWhenIdle(), []);
+
   const queryClient = useQueryClient();
   const session = useSession();
   // Заведення методології з нуля: доти ідентифікатор методології не було
