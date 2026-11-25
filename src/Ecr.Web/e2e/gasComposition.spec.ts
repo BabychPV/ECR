@@ -80,6 +80,14 @@ test.describe('Склад газу: потік, кейс, версії (D-NEW)',
     const editor = page.getByTestId('gas-version-editor');
     await editor.getByRole('textbox', { name: 'Case' }).fill('370 Winter');
     await setEffective(page, 'January', '2025');
+    // Число без фокуса — читабельне (≤ 7 значущих, точне — у підказці), на фокусі — повний рядок (людина 25.11).
+    const temperature = editor.getByRole('textbox', { name: 'Temperature, °C' });
+    await temperature.fill('98.0835451945116000');
+    await molPct(page, 'Methane').focus();
+    await expect(temperature).toHaveValue('98.08355');
+    await expect(temperature).toHaveAttribute('title', '98.0835451945116');
+    await temperature.focus();
+    await expect(temperature).toHaveValue('98.0835451945116000');
     await molPct(page, 'Methane').fill('97');
     await molPct(page, 'Ethane').fill('2.5');
     // Компонент показано людською назвою з кодом поруч (рев'ю 25.11): «Hydrogen sulphide (H2S)», «Methyl mercaptan (CH3SH)».
