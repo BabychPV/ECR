@@ -198,16 +198,67 @@ public sealed class SqlDataSourceTests(SqlServerFixture sql)
         var adapter = new SqlDataSource(
             StoreWith("Server=nowhere"), Secrets(), Settings(new Dictionary<string, string>()));
 
-        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+        // ⚠ b14 (AC-3): тип «не налаштовано» — проба з'єднання показує його окремою категорією, а не «недоступне».
+        var error = await Assert.ThrowsAsync<SourceNotConfiguredException>(
             () => adapter.ReadAsync(
                 new CollectionRequest(1, 7, "STREAM-1", Midnight, Midnight.AddHours(1), 10),
                 CancellationToken.None));
 
         Assert.Equal("ECR-INT-0503", error.ErrorCode);
 
+        // Бракує запиту ЗНАЧЕНЬ, не каталогу: проба з'єднанням його не підміняє.
+        Assert.False(error.CatalogOnly);
+
         // Повідомлення називає ключ, якого бракує: інакше налаштування шукають
         // у коді, якого не буде.
         Assert.Contains("Sql:FLERT:ValueQuery", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-11.8")]
+    public async Task B14F_04_AC2_без_запиту_каталогу_відмова_лише_каталогу_а_зєднання_перевіряється_SELECT_1()
+    {
+        // ⛔ AC-1 (копія live): «Джерело FLERT не має запиту Sql:FLERT:CatalogQuery» — і проба казала «недоступне».
+        var adapter = Adapter(ValueQuery);
+
+        var missing = await Assert.ThrowsAsync<SourceNotConfiguredException>(
+            () => adapter.DiscoverAsync(1, CancellationToken.None));
+
+        Assert.True(missing.CatalogOnly);
+        Assert.Equal("err.ECR-INT-0503.queryNotConfigured", missing.Details!["messageKey"]);
+
+        // З'єднання ціле — перевірка проходить; запиту каталогу їй не треба.
+        await adapter.CheckConnectionAsync(1, CancellationToken.None);
+
+        // Недоступний сервер — та сама відмова відкриття, що й у збору (connectFailed), а не тиша.
+        var nowhere = new SqlDataSource(
+            StoreWith("Server=127.0.0.1,1;Connect Timeout=1;Encrypt=false"), Secrets(),
+            Settings(new Dictionary<string, string>()));
+
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => nowhere.CheckConnectionAsync(1, CancellationToken.None));
+        Assert.Equal("err.ECR-INT-0503.connectFailed", refused.Details!["messageKey"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-11.8")]
+    public async Task B14F_05_AC3_запит_каталогу_що_впав_на_джерелі_помилка_запиту_без_тексту_джерела()
+    {
+        var adapter = Adapter(ValueQuery, "SELECT Code FROM flert.B14F_NoSuchTable_7c1;");
+
+        var error = await Assert.ThrowsAsync<SourceQueryFailedException>(
+            () => adapter.DiscoverAsync(1, CancellationToken.None));
+
+        Assert.Equal("ECR-INT-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-INT-0422.catalogQueryFailed", error.Details!["messageKey"]);
+
+        // ⛔ S3: ні імені об'єкта, ні тексту SQL Server — лише номер і кореляція.
+        Assert.DoesNotContain("B14F_NoSuchTable", error.Message, StringComparison.Ordinal);
+        Assert.Contains("208", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -280,7 +331,7 @@ public sealed class SqlDataSourceTests(SqlServerFixture sql)
         var fromSecret = await overridden.ReadTableAsync(1, SqlDataSource.CompositionQueryKey, fallback, 10, CancellationToken.None);
         Assert.Equal("secret", fromSecret.Rows.Single()[0]);
 
-        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+        var error = await Assert.ThrowsAsync<SourceNotConfiguredException>(
             () => plain.ReadTableAsync(1, SqlDataSource.CompositionQueryKey, fallbackQuery: null, 10, CancellationToken.None));
         Assert.Equal("ECR-INT-0503", error.ErrorCode);
     }

@@ -19,7 +19,7 @@ import { testDataSource, type DataSourceTestResult } from './dataSourceApi';
  * не збій — просто чекати.
  */
 export type TestOutcome =
-  | { readonly kind: 'ok'; readonly entities: number }
+  | { readonly kind: 'ok'; readonly entities: number; readonly note: string | null }
   | { readonly kind: 'failed'; readonly reason: string | null }
   | { readonly kind: 'running'; readonly detail: string | null };
 
@@ -31,17 +31,21 @@ const FallbackFailureKey = 'integration.test.failed.other';
  *
  * ⛔ Причина відмови — ЛИШЕ з каталогу за `messageKey`
  * (`integration.test.failed.<категорія>`). Поле `error` несе категорію
- * (`auth`, `unreachable`, `tls`, `timeout`, `other`), а не текст винятку (S3
+ * (`auth`, `unreachable`, `tls`, `timeout`, `notConfigured`, `query`, `other`), а не текст винятку (S3
  * аудиту безпеки: сирий текст робив кнопку сканером мережі), і людині його
  * сирим не показуємо. Ключа немає — загальна причина «other», а не `error`.
  */
 export function outcomeOf(result: DataSourceTestResult): TestOutcome {
-  if (result.ok) return { kind: 'ok', entities: result.entities };
-
+  // ⚠ b14 source-test-flert (AC-2): успіх із ключем — з'єднання ціле, а каталогу сутностей у джерела немає
+  // (`integration.test.connectedNoCatalog`, FLERT для складу газу). «0 сутностей» читалося б як порожній каталог.
   const named = result.messageKey ?? '';
-  const key = named.length > 0 ? named : FallbackFailureKey;
+  const fallback = result.ok ? null : FallbackFailureKey;
+  const key = named.length > 0 ? named : fallback;
+  const text = key === null ? null : t(key);
 
-  return { kind: 'failed', reason: t(key) };
+  return result.ok
+    ? { kind: 'ok', entities: result.entities, note: text }
+    : { kind: 'failed', reason: text };
 }
 
 /**
@@ -166,7 +170,7 @@ function OutcomeBanner({ outcome }: { readonly outcome: TestOutcome }): JSX.Elem
     case 'ok':
       return (
         <Alert color="statusSuccess" title={t('sources.testOk')} data-test-outcome="ok">
-          {formatCount(outcome.entities, 'sources.testEntities')}
+          {outcome.note ?? formatCount(outcome.entities, 'sources.testEntities')}
         </Alert>
       );
 

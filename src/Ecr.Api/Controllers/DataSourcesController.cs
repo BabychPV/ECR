@@ -189,9 +189,11 @@ public sealed class DataSourcesController(
     /// джерела, яка вже виконується, — <c>409 ECR-JOB-0409</c>.
     ///
     /// ⛔ <c>error</c> — лише категорія (<c>auth</c>, <c>unreachable</c>,
-    /// <c>tls</c>, <c>timeout</c>, <c>other</c>, <c>adapterNotRegistered</c>),
-    /// <c>messageKey</c> — <c>integration.test.failed.{категорія}</c>. Сирий
-    /// текст винятку — лише в серверному журналі (S3: інакше кнопка — сканер мережі).
+    /// <c>tls</c>, <c>timeout</c>, <c>notConfigured</c>, <c>query</c>, <c>other</c>,
+    /// <c>adapterNotRegistered</c>), <c>messageKey</c> — <c>integration.test.failed.{категорія}</c>.
+    /// Сирий текст винятку — лише в серверному журналі (S3: інакше кнопка — сканер мережі).
+    /// Джерело без запиту каталогу (FLERT, склад газу) перевіряється самим з'єднанням:
+    /// <c>{ ok: true, entities: 0, messageKey: integration.test.connectedNoCatalog }</c>.
     /// </remarks>
     [HttpPost("{id:int}/test")]
     [ProducesResponseType<DataSourceTestResult>(StatusCodes.Status200OK)]
