@@ -1,0 +1,26 @@
+# Лист готовності: lane/integ-least-priv-login (DB-1)
+
+- [x] Гілка / lane: `lane/integ-least-priv-login`
+- [x] Пункт: DB-1 (питання DBA «чи досить db_datareader + db_datawriter + EXECUTE», runbook/TESTER-GUIDE); WORK-QUEUE `DB-3` — частина GRANT анотована (живу видачу робить DBA)
+- [x] Хеш tip: `497710549`
+- [x] База: `origin/main` 7ce0bf6cb (за вказівкою координатора)
+- [x] Лінійна: merge-комітів 0
+- [x] Мутацій у кінчику немає
+- [x] Sql: ні
+- [x] EF-міграція: ні
+- [x] Контракт: ні
+- [x] shared/ui: ні
+- [x] package*.json / lock / Directory.Packages.props: ні
+- [x] CLAUDE.md: так — окремий коміт 497710549 (новий розділ у кінці, слово людини 02.11 через координатора); .github: ні
+- [x] Нові ключі UiString: ні
+- [x] Нові коди помилок: ні
+- [x] Бюджет клієнта: не зачеплено
+- [x] Коміти: e026a5dda [TEST] каркас; d26166b78 [CODE] перелік прав + генерований скрипт + доки + SchemaValidator; 497710549 [DOCS] CLAUDE.md
+- [x] Тести: `ServiceAccountLeastPrivilegeTests` (Infrastructure, власна база `_lowpriv`, 7 тестів: старт/сід/вʼюхи, рядки + aud.RowChange, PATCH TVP + aud.CellChange + подання + rpt.v_DocumentCells, PartitionCheckJob, права рівня бази, 2 негативні); `ServiceAccountGrantsRunbookTests` (Architecture, 4: runbook ↔ перелік, TVP/послідовності, EXEC usp_/скалярні функції з коду, генерований блок у 3 доках + заборона ручних копій)
+- [x] Мутація-доказ: (1) користувач без EXECUTE на aud.CellChangeTvp → PATCH 229, нічого не записано (тест); (2) прибрати рядок fn_VersionOf з блоку QUICKSTART → сторож червоний з командою `powershell -File tools/gen-install-docs.ps1`; (3) e026a5dda під переліком runbook — червоне (fn_VersionOf, rpt.usp_Generate*)
+- [x] Таймінгові тести: н/з
+- [x] CI на lane: CI run 41432165659 — success (повний набір, lane/integ-*), Evidence 41432165555 — success; head 497710549
+- [x] Перевірено локально: build Ecr.sln ☑  Architecture 1180/1180 ☑  Infrastructure вузькі 24/24 ☑
+- [x] Ризики: імперсонація в тестах — `EXECUTE AS USER` на кожен сеанс через DiagnosticListener (`SqlImpersonation`), SqlBulkCopy без команди не перемикається (шляхи застосунку його не вживають). Скрипт для DBA: `CREATE USER … FOR LOGIN` не перевірено на живому логіні (локально лише Windows-auth); GRANT-частина — перевірена тестом.
+- [x] Скрипт прав (генерований): `docs/build/11-install-guide.md` 454–474 (п. 2.3), `docs/admin/operations-runbook.md` 2237–2257, `docs/delivery/QUICKSTART-FIRST-TEST.md` 71–91; 3 нові GRANT для оновлення: `11-install-guide.md` п. 4 (рядок 776), runbook п. 8, `docs/release-notes/db-service-account-grants.md`
+- [x] Хто зводить: координатор/інтегратор

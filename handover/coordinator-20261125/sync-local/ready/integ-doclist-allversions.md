@@ -1,0 +1,29 @@
+# Лист готовності гілки
+
+- [x] Гілка / lane: `lane/integ-doclist-allversions` (стек на `lane/integ-doclist-version` tip `2d37efd18`; ЗАМІНЯЄ її для RC, якщо та ще не в main — містить усі її коміти)
+- [x] Пункт WORK-QUEUE (ID): черга координатора (фільтр «Version» у переліку документів — усі версії з сервера)
+- [x] Хеш tip: `62b1ecea45bd91f3127a636f8362e32a59939c11`
+- [x] База: `origin/lane/integ-doclist-version` = `2d37efd18` (від origin/main `06d8092d0`)
+- [x] Лінійна: merge-комітів 0
+- [x] Мутацій у кінчику немає
+- [x] Sql: ні
+- [x] EF-міграція: ні (індексів не додавав: групування за ProjectId по VisibleDocuments, ≤ 5000 проєктів)
+- [x] Контракт openapi.snapshot.json / schema.d.ts: так — перший коміт гілки `3f03c1cae` (згенеровано після змін, OpenApiSnapshotTests зелений)
+- [x] shared/ui: ні
+- [x] package*.json / lock / Directory.Packages.props: ні
+- [x] CLAUDE.md / .github: ні
+- [x] Нові ключі UiString: ні
+- [x] Нові коди помилок: ні
+- [x] Бюджет клієнта: не мірявся (нових залежностей/чанків немає; DocumentsPage +1 useQuery)
+- [x] Тести: `DocumentTemplateVersionOptionsApiTests` (5 HTTP: усі версії + порядок + кількість; період/без періоду; невидимий проєкт; projectId; 403 без Document.View); vitest `DocumentsPage.versionColumn` (+3: варіанти з сервера, обрана поза відповіддю лишається, відмова -> версії сторінки); мок `template-versions` у `DocumentsPage.filters` і `DocumentListSummaryStrip.filter`; e2e `Documents list: Version column` (+1: варіанти = відповідь сервера)
+- [x] Мутація-доказ: у `DocumentStore.ListTemplateVersionsAsync` замінити `VisibleDocuments(...)` на `db.Documents` — червоніють 2 з 5 (`Версія_лише_невидимого_проєкту_не_називається`, `Версія_береться_за_період…`); відкочено
+- [x] Таймінгові тести: нових немає
+- [x] CI на lane: див. підсумок у звіті сесії (CI/Evidence/e2e на tip `62b1ecea4`); e2e-stand 41546506768 — success
+- [x] Перевірено локально: build ☑  Architecture (повний, 1181) ☑  Api-тести класів ☑  vitest зачепленого ☑  tsc + eslint ☑
+- [x] Ризики / відомі обмеження:
+  - Ендпоінт `GET /api/v1/documents/template-versions?projectId&periodKey` -> `{ items: [{ version, count }], withoutVersionCount }`; право `Document.View`; природний порядок (`VersionOrder`), ≤ 200 версій, ≤ 5000 проєктів у вибірці.
+  - Приймає лише `projectId` і `periodKey` (як `/documents/owners`); фільтри state/q/mine/owner варіанти НЕ звужують (фасет усіх версій). Видимість — `VisibleDocuments` (без WhereOwnerDisclosed: версія шаблону не секрет, як і в фільтрі переліку).
+  - Версія за період — спільний `ProjectVersionLabelsAsync` (єдине місце `doc.fn_VersionOf`; використовують і фільтр/сортування переліку).
+  - Клієнт: поки відповіді немає або вона відмовила — варіанти з версій завантаженої сторінки (фільтр не зникає); `withoutVersionCount` клієнт не показує.
+  - Контрактний коміт `3f03c1cae` містить і серверну реалізацію (інтерфейс без реалізації не компілюється).
+- [x] Хто зводить: координатор / інтегратор

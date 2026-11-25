@@ -1,0 +1,29 @@
+# Лист готовності гілки
+
+- [x] Гілка / lane: `lane/integ-doclist-version`
+- [x] Пункт WORK-QUEUE (ID): черга координатора #6 (сортування й фільтр за версією шаблону в переліку документів на сервері)
+- [x] Хеш tip: `2d37efd18249d2fb5d715a372fec285cf2bf6717`
+- [x] База (хеш origin/main, від якого гілка): `06d8092d0294cc49477a72b32a25cd87e5902828`
+- [x] Лінійна: merge-комітів 0
+- [x] Мутацій у кінчику немає
+- [x] Sql: ні
+- [x] EF-міграція: ні (індексів не додавав; запит іде по Id у межах групи проєктів)
+- [x] Контракт openapi.snapshot.json / schema.d.ts: так — перший коміт гілки `ff0fbb4c6` (окремий, генератор після rebase на 06d8092d; OpenApiSnapshotTests зелений)
+- [x] shared/ui: ні
+- [x] package*.json / lock / Directory.Packages.props: ні
+- [x] CLAUDE.md / .github: ні
+- [x] Нові ключі UiString: ні (повторно використано `err.ECR-REQ-0422.malformedRequest`)
+- [x] Нові коди помилок: ні (RequestInvalid ECR-REQ-0422)
+- [x] Бюджет клієнта: не міряв (змін у залежностях/чанках немає; DocumentsPage став трохи меншим — прибрано клієнтські sort/filter)
+- [x] Тести: `DocumentTemplateVersionListApiTests` (5 HTTP-тестів: порядок по сторінках asc/desc, фільтр + поєднання з projectId/q, версія за період зі шкали, чужі документи не просочуються, 422); vitest `DocumentsPage.versionColumn` (8) і `documentVersion` (параметри); оновлено сторож-вільні тести
+- [x] Мутація-доказ: у `DocumentStore.ListAsync` (`Build`) замінити `VisibleDocuments(...)` на `db.Documents.AsNoTracking().Where(d => d.Id > after)` — червоніють 2 з 5 (`Чужі_документи_не_потрапляють…`, `Фільтр_templateVersions…`); відкочено, у tip немає
+- [x] Таймінгові тести: нових немає
+- [x] CI на lane: https://github.com/BabychPV/ECR/actions/runs/41526921917 (CI), Evidence 41526921937 — success; e2e-stand 41527017203 — success (5/5, grep «Documents list: Version column»)
+- [x] Перевірено локально: build ☑ Architecture (повний проєкт; 3 сторожі виправлено й перезапущено) ☑ vitest зачепленого ☑ tsc + eslint ☑
+- [x] Ризики / відомі обмеження:
+  - API: `GET /api/v1/documents?sort=templateVersion|-templateVersion&templateVersions=2.9.0,2.10.0` (до 20 версій, до 20 символів; невалідне — 422 ECR-REQ-0422 `malformedRequest`). Конвенція `sort` з 02-contracts («мінус = спадання»).
+  - Версія береться за `periodKey` через `doc.fn_VersionOf` (сторож ProjectTemplateVersionReadGuard), без періоду — за ключ 999912 (= чинна версія). Порядок «по-людськи» (2.10 після 2.9), порт `compareVersions` клієнта (`VersionOrder`).
+  - Курсор у режимі сортування — інший формат (версія групи + Id); працює лише з тим самим `sort`, зіпсований/чужий — початок списку.
+  - Варіанти фільтра в UI — версії поточної сторінки + вже обрані (окремого ендпоінта «усі версії» немає): після вибору однієї версії інші з'являються лише після зняття фільтра.
+  - Метаданих шаблону секретними не вважається (IDocumentStore.DocumentSummary.TemplateVersion), тож звуженим читачам фільтр дозволений; видимість документів фільтр не розширює (VisibleDocuments діє першим).
+- [x] Хто зводить: координатор / інтегратор

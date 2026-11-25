@@ -1,0 +1,25 @@
+# Лист готовності: lane/integ-an101-checkpoint
+
+- [x] Гілка / lane: `lane/integ-an101-checkpoint`
+- [x] Пункт WORK-QUEUE: `AN-101` (втрата рядка при повторі ExecuteInTransactionAsync: Added ДО транзакції)
+- [x] Хеш tip: `d9bc377d6`
+- [x] База: `88b0769f1` (origin/main, Merge PR #701 rc/2026-11-03-p131)
+- [x] Лінійна: merge-комітів 0 (1 коміт поверх бази)
+- [x] Мутацій у кінчику немає
+- [x] Sql: ні
+- [x] EF-міграція: ні
+- [x] Контракт: ні
+- [x] shared/ui: ні
+- [x] package*.json / lock / Directory.Packages.props: ні
+- [x] CLAUDE.md / .github: ні
+- [x] Нові ключі UiString: ні
+- [x] Нові коди помилок: ні
+- [x] Бюджет клієнта: не зачеплено
+- [x] Змінені файли: `src/Ecr.Infrastructure/Persistence/ChangeTrackerCheckpoint.cs`, `tests/Ecr.Infrastructure.Tests/Persistence/UnitOfWorkRetryRestoreTests.cs` (+218/−5)
+- [x] Тести: `UnitOfWorkRetryRestoreTests` +4 (IDENTITY-ключ; Added + зміна між двома збереженнями; principal+dependent ApprovalRoute+ApprovalStep; ключ клієнта Dimension) — до фіксу 4/4 червоні, 5 наявних зелені
+- [x] Мутація-доказ: без кроку 4 `Restore` → 4/4 червоні; без повторного `IsTemporary = true` → 3 (IDENTITY) червоні «Cannot insert explicit value for identity column»
+- [x] Таймінгові тести: клас `UnitOfWorkRetryRestoreTests` 20/20 поспіль
+- [x] CI на lane: CI 41575160003 **success**, Evidence 41575159943 **success** (обидва на d9bc377d6, повний набір lane/integ-*)
+- [x] Перевірено локально: build Ecr.sln ☑ (0 помилок) Architecture 1185/1185 ☑ Infrastructure (UnitOfWork|ChangeTracker|SourceEventSync|CollectionSchedule) 116/116 ☑ Calculations CalculationOutputWriter 5/5 ☑ Api (CalculationOutputWriterChunkingDbTests|CollectionScheduleStateSaveTests) 5/5 ☑ Application (CollectionScheduleHandlersTests|SourceEventSync) 75/75 ☑
+- [x] Ризики: повтор тепер вставляє Added-сутності викликача наново з тими самими тимчасовими ключами (EF присвоює нові справжні); сутності, які замикання навмисно відчепило/видалило, на повторі знову Added — замикання повторить ту саму дію. Шлях UnitOfWork.SaveChangesAsync з ревізіями довідників окремим тестом не покрито (той самий механізм ExecuteInTransactionAsync)
+- [ ] Хто зводить: координатор

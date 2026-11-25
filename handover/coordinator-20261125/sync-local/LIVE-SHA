@@ -1,0 +1,7 @@
+7afb19c97c2df5e1a79f26ead0fa28ac5b553c03
+# b14 25.11 22:55 app-b14 API 22168 web 10620; попередній d75032896 (b13)
+window b13 (coordinator, human GO 25.11 «так оновлюй») 2026-11-25 16:33:21 local
+app F:\ecr-backup\land-ui\app-b13 ; build.done HEAD d7503289666ec4a532c5058adb3dc8712a1ff1ec
+ProductVersion 1.0.0+d7503289666ec4a532c5058adb3dc8712a1ff1ec
+batch lane/integ-b13 base 184bc11f6
+migrations 139 (last 20261124230554_P1124DropConsistencyRule)

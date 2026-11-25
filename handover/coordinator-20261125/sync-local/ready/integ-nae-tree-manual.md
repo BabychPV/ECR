@@ -1,0 +1,21 @@
+# Лист готовності: lane/integ-nae-tree-manual
+
+- [x] Гілка / lane: `lane/integ-nae-tree-manual`
+- [x] Задача: структура NAE без AF (людина 02.11: «загаломок що він є але якщо AF немає як створити або імпортувати?»)
+- [x] Хеш tip: `2dad6f2bc`
+- [x] База: origin/main `4bd0f24bb`
+- [x] Лінійна: merge-комітів 0; коміти: `850d1e660` (контракт), `2dad6f2bc` (реалізація + тести)
+- [x] Мутацій у кінчику немає
+- [x] Sql: так — лише сід: `seed/features/NAE-tree-manual.sql` + en-рядки в `seed/00-prelude.sql` (нові ключі повідомлень, без рядків даних)
+- [x] EF-міграція: ні
+- [x] Контракт: так — `850d1e660` (Permites має SHA): POST nae-tree/roots, POST nae-tree/seed-roots, GET nae-tree/import/template, POST nae-tree/import/{analyse,preview,apply}; typed client `src/Ecr.Web/src/features/permits/nae/naeManualApi.ts` (без UI)
+- [x] shared/ui: ні; package/lock: ні; CLAUDE.md / .github: ні
+- [x] Конфіг: `appsettings.json` — `NaeTree:RegionSourceRegistryCode` (умовчання LAND_REGION)
+- [x] Тести: sheet-builder; HTTP — корінь, імпорт (new/existing/conflict), повний відкат, шаблон, seed-roots (ідемпотентно, 422 на непорожньому дереві), права; наявні AF-імпорт тести зелені
+- [x] Мутація-доказ: виконано агентом, відкотено
+- [x] CI на lane (повний): CI 41485251814 success, Evidence 41485251784 success на `2dad6f2bc` (перевірено «Аналізом»)
+- [x] Локально: build ✓, Architecture 1180/1180 ✓; tsc клієнта — у CI (client зелений)
+- [x] Рішення: regionCode = назва регіону (en), як в AF (`R_<REGION>`); seed-roots — лише регіони з LAND_REGION, 422 якщо дерево не порожнє; Area має пріоритет над On_Offshore, розбіжність = помилка рядка; наявні рядки = «без змін/пропущено», відмінність назв = попередження `nameDiffers`; невідповідність відбитка → 422 `ECR-IMP-0422` / `err.ECR-IMP-0422.regPlanChanged`
+- [x] Ризики: імпорт лише створює (оновлення назв — не у v1)
+- [x] UI: сесія Permites (кнопки, майстер імпорту) — на `850d1e660`/`2dad6f2bc`
+- [x] Хто зводить: координатор
