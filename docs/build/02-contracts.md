@@ -1523,6 +1523,21 @@ public sealed record ExternalTable(
     bool Truncated);
 ```
 
+✎ 2026-11-25 (b14 source-test-flert, AC-2/AC-3): перевірка самого з'єднання для джерела без запиту каталогу (FLERT —
+склад газу). Проба `POST /api/v1/data-sources/{id}/test` іде каталогом, а при `SourceNotConfiguredException.CatalogOnly`
+— цим портом (відкриття + `SELECT 1`) і відповідає `{ ok: true, entities: 0, messageKey:
+"integration.test.connectedNoCatalog" }`. Категорії відмови проби доповнено `notConfigured`
+(`SourceNotConfiguredException`) і `query` (`SourceQueryFailedException`, ключ `err.ECR-INT-0422.catalogQueryFailed`);
+коди помилок ті самі (`ECR-INT-0503`, `ECR-INT-0422`), нових немає.
+
+```csharp
+// src/Ecr.Application/Ports/IExternalConnectionCheck.cs
+public interface IExternalConnectionCheck
+{
+    public Task CheckConnectionAsync(int dataSourceId, CancellationToken ct);
+}
+```
+
 ✎ 2026-11-12 (`D-476`, FLERT F3) → ✎ 2026-11-24 (D-NEW): склад газу — власник ECR. Щоденного синку й «Синхронізувати
 зараз» немає; `POST /api/v1/gas-composition/import` (`GasComposition.Edit` + `Integration.Manage`) → `202 JobAcceptedResponse`
 (злита постановка `IFlertCompositionSyncJob`, лише в порожню базу); стан останнього прогону — у відповіді

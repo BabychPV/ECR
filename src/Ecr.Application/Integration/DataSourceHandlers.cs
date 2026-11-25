@@ -1006,11 +1006,27 @@ public sealed partial class TestDataSourceConnectionHandler(
     /// <summary>Транспорт джерела не має адаптера.</summary>
     public const string FailureAdapterNotRegistered = "adapterNotRegistered";
 
+    /// <summary>
+    /// Джерело не налаштоване до кінця (немає запиту, рядок з'єднання не читається, адресу відхиляє політика): до
+    /// джерела ніхто не ходив, лагодити треба налаштування (b14 source-test-flert, AC-3).
+    /// </summary>
+    public const string FailureNotConfigured = "notConfigured";
+
+    /// <summary>З'єднання відкрилося, а налаштований запит упав на боці джерела (AC-3).</summary>
+    public const string FailureQuery = "query";
+
     /// <summary>Усі категорії відмови, які може віддати проба.</summary>
     public static readonly IReadOnlyList<string> FailureCategories =
     [
         FailureAuth, FailureUnreachable, FailureTls, FailureTimeout, FailureOther, FailureAdapterNotRegistered,
+        FailureNotConfigured, FailureQuery,
     ];
+
+    /// <summary>
+    /// Ключ успіху без каталогу: з'єднання ціле, а запиту каталогу сутностей немає (AC-2). Не відмова — джерело
+    /// на кшталт FLERT (склад газу) каталогу не має за задумом.
+    /// </summary>
+    public const string ConnectedNoCatalogKey = "integration.test.connectedNoCatalog";
 
     /// <summary>Код відмови: перевірка цього джерела вже виконується.</summary>
     public const string AlreadyRunningErrorCode = ErrorCodes.JobStateConflict;
@@ -1090,9 +1106,22 @@ public sealed partial class TestDataSourceConnectionHandler(
 
         try
         {
-            var catalog = await adapter.DiscoverAsync(source.Id, ct).ConfigureAwait(false);
+            try
+            {
+                var catalog = await adapter.DiscoverAsync(source.Id, ct).ConfigureAwait(false);
 
-            return new DataSourceTestResult(true, null, catalog.Count);
+                return new DataSourceTestResult(true, null, catalog.Count);
+            }
+            catch (SourceNotConfiguredException missing)
+                when (missing.CatalogOnly && adapter is IExternalConnectionCheck check)
+            {
+                // ⛔ AC-2: бракує лише запиту каталогу — це не відмова з'єднання. Перевіряємо саме з'єднання; його
+                // відмова класифікується нижче, як і відмова каталогу. Факт «каталогу немає» — у журнал сервера.
+                LogCatalogNotConfigured(logger, missing, source.Code);
+                await check.CheckConnectionAsync(source.Id, ct).ConfigureAwait(false);
+
+                return new DataSourceTestResult(true, null, 0, ConnectedNoCatalogKey);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -1124,6 +1153,15 @@ public sealed partial class TestDataSourceConnectionHandler(
         Message = "Перевірка з'єднання з джерелом {DataSource} не пройшла: {Category}.")]
     private static partial void LogProbeFailed(ILogger logger, Exception error, string dataSource, string category);
 
+    /// <summary>Каталогу в джерела немає — проба йде самим з'єднанням (AC-2).</summary>
+    /// <param name="logger">Журнал.</param>
+    /// <param name="error">Відмова каталогу з ключем налаштування, якого бракує.</param>
+    /// <param name="dataSource">Код джерела.</param>
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Перевірка з'єднання з джерелом {DataSource}: запиту каталогу немає, перевіряється лише з'єднання.")]
+    private static partial void LogCatalogNotConfigured(ILogger logger, Exception error, string dataSource);
+
     /// <summary>Виняток адаптера → одна з кількох категорій; текст винятку не читається.</summary>
     /// <remarks>
     /// ⚠ За ТИПОМ і кодом, а не за текстом: текст залежить від мови ОС і
@@ -1150,6 +1188,12 @@ public sealed partial class TestDataSourceConnectionHandler(
             return FailureAuth;
         }
 
+        // ⚠ AC-3: раніше за «недоступне» — код у цих винятків той самий ECR-INT-0503, розрізняє тип.
+        if (chain.Exists(e => e is SourceNotConfiguredException))
+        {
+            return FailureNotConfigured;
+        }
+
         if (chain.Exists(e => e is AuthenticationException
                               || e is HttpRequestException { HttpRequestError: HttpRequestError.SecureConnectionError }))
         {
@@ -1161,6 +1205,11 @@ public sealed partial class TestDataSourceConnectionHandler(
                               || (e is EcrException ecr && ecr.Details?.GetValueOrDefault("reason") is "timeout")))
         {
             return FailureTimeout;
+        }
+
+        if (chain.Exists(e => e is SourceQueryFailedException))
+        {
+            return FailureQuery;
         }
 
         if (chain.Exists(e => e is HttpRequestException or SocketException or DbException or IOException

@@ -1766,7 +1766,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'sources.testReason',              N'en', N'Reason', 1),
     (N'sources.testReasonHint',          N'en', N'Required: the test is written to the security log.', 1),
     (N'sources.testOk',                  N'en', N'The source answered', 1),
-    (N'sources.testFailed',              N'en', N'The source refused the connection', 1),
+    (N'sources.testFailed',              N'en', N'The connection test did not pass', 1),
     (N'sources.testRunning',             N'en', N'A test of this connection is already running', 1),
     -- ⚠ Перші ключі-множини в сіді: `formatCount` бере `<основа>.<категорія>`
     -- за `Intl.PluralRules` (для en — `one` і `other`) і підставляє `{count}`.

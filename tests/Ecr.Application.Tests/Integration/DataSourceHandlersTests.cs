@@ -523,6 +523,103 @@ public sealed class DataSourceHandlersTests
         Assert.Equal(cases.Length, _log.Entries.Count(e => e.Contains(raw, StringComparison.Ordinal)));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-21")]
+    public async Task B14F_01_AC2_джерело_без_запиту_каталогу_перевіряє_зєднання_і_каже_зєднано_без_каталогу()
+    {
+        // ⛔ b14 source-test-flert, AC-1 (копія live EcrLandB14Flert, журнал власного Api): FLERT для складу газу
+        // каталогу не має → «Джерело FLERT не має запиту Sql:FLERT:CatalogQuery» → проба казала «unreachable».
+        var source = Add("FLERT", ExternalTransport.Sql, "Server=flert;Database=FLERT");
+        var adapter = new CheckingAdapter { Throw = CatalogMissing() };
+
+        var result = await Test(adapter).HandleAsync(source.Id, Reason, default);
+
+        Assert.True(result.Ok);
+        Assert.Null(result.Error);
+        Assert.Equal(0, result.Entities);
+        Assert.Equal(TestDataSourceConnectionHandler.ConnectedNoCatalogKey, result.MessageKey);
+        Assert.Equal(1, adapter.Checks);
+
+        // Журнал безпеки — той самий факт і підсумок.
+        var recorded = Assert.Single(_events);
+        Assert.True(JsonDocument.Parse(recorded.DetailsJson!).RootElement.GetProperty("ok").GetBoolean());
+
+        // Відмова САМОГО з'єднання класифікується, як і відмова каталогу.
+        adapter.CheckThrows = new SourceAuthenticationException("ECR-INT-0502", "Login failed RAW-B14");
+        var refused = await Test(adapter).HandleAsync(source.Id, Reason, default);
+
+        Assert.False(refused.Ok);
+        Assert.Equal("auth", refused.Error);
+        Assert.DoesNotContain("RAW-B14", JsonSerializer.Serialize(refused), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-21")]
+    public async Task B14F_02_AC2_без_перевірки_зєднання_чи_коли_бракує_не_лише_каталогу_відмова_notConfigured()
+    {
+        var source = Add("FLERT", ExternalTransport.PiWebApi);
+
+        // Адаптер, що не вміє перевірити саме з'єднання, — чесне «не налаштовано», а не «недоступне».
+        _adapter.Throw = CatalogMissing();
+        var plain = await Test().HandleAsync(source.Id, Reason, default);
+        Assert.Equal(("notConfigured", "integration.test.failed.notConfigured"), (plain.Error, plain.MessageKey));
+
+        // Бракує не каталогу (рядок з'єднання) — з'єднання не перевіряється взагалі.
+        var adapter = new CheckingAdapter
+        {
+            Throw = new SourceNotConfiguredException("ECR-INT-0503", "connection string broken"),
+        };
+        var sql = Add("FLERT_SQL", ExternalTransport.Sql, "Server=flert;Database=FLERT");
+        var broken = await Test(adapter).HandleAsync(sql.Id, Reason, default);
+
+        Assert.Equal("notConfigured", broken.Error);
+        Assert.Equal(0, adapter.Checks);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-21")]
+    public async Task B14F_03_AC3_не_налаштовано_і_помилка_запиту_розрізнені_й_без_сирого_тексту()
+    {
+        var source = Add("FLERT");
+        const string raw = "Invalid object name 'dbo.Secret_10.20.30.40'";
+
+        (Exception Error, string Category)[] cases =
+        [
+            (new SourceNotConfiguredException("ECR-INT-0503", raw), "notConfigured"),
+            (new SourceQueryFailedException("ECR-INT-0422", raw), "query"),
+
+            // Код той самий (0503), тип — ні: «недоступне» лишається недоступним.
+            (new BusinessRuleException("ECR-INT-0503", raw), "unreachable"),
+        ];
+
+        foreach (var (error, category) in cases)
+        {
+            _adapter.Throw = error;
+
+            var result = await Test().HandleAsync(source.Id, Reason, default);
+
+            Assert.Equal((false, category), (result.Ok, result.Error));
+            Assert.Equal($"integration.test.failed.{category}", result.MessageKey);
+            Assert.Contains(category, TestDataSourceConnectionHandler.FailureCategories);
+            Assert.DoesNotContain(raw, JsonSerializer.Serialize(result), StringComparison.Ordinal);
+        }
+
+        Assert.Equal(cases.Length, _log.Entries.Count(e => e.Contains(raw, StringComparison.Ordinal)));
+    }
+
+    private static SourceNotConfiguredException CatalogMissing()
+        => new(
+            "ECR-INT-0503",
+            "Джерело FLERT не має запиту Sql:FLERT:CatalogQuery (або спільного Sql:CatalogQuery): збирати нічим.",
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-INT-0503.queryNotConfigured" },
+            catalogOnly: true);
+
+    private TestDataSourceConnectionHandler Test(IExternalDataSource adapter)
+        => new(_store, [adapter], _gate, _access, _audit, _user, Clock(), _log);
+
     private void Allow(params string[] permissions)
     {
         var builder = new AccessBuilder { UserId = Actor };
@@ -665,6 +762,32 @@ public sealed class DataSourceHandlersTests
             await Release.Task.WaitAsync(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
 
             return [new SourceEntityDescriptor("Unit-01", "Probe element", @"\Srv\Db\Unit-01", null, "Element")];
+        }
+
+        public Task<CollectionResult> ReadAsync(CollectionRequest request, CancellationToken ct)
+            => throw new NotSupportedException("Проба каталогу значень не читає.");
+    }
+
+    /// <summary>SQL-адаптер, що вміє перевірити саме з'єднання (b14, AC-2).</summary>
+    private sealed class CheckingAdapter : IExternalDataSource, IExternalConnectionCheck
+    {
+        public Exception? Throw { get; set; }
+
+        public Exception? CheckThrows { get; set; }
+
+        public int Checks { get; private set; }
+
+        public ExternalTransport Transport => ExternalTransport.Sql;
+
+        public Task<IReadOnlyList<SourceEntityDescriptor>> DiscoverAsync(int dataSourceId, CancellationToken ct)
+            => Throw is { } error
+                ? Task.FromException<IReadOnlyList<SourceEntityDescriptor>>(error)
+                : Task.FromResult<IReadOnlyList<SourceEntityDescriptor>>([]);
+
+        public Task CheckConnectionAsync(int dataSourceId, CancellationToken ct)
+        {
+            Checks++;
+            return CheckThrows is { } error ? Task.FromException(error) : Task.CompletedTask;
         }
 
         public Task<CollectionResult> ReadAsync(CollectionRequest request, CancellationToken ct)

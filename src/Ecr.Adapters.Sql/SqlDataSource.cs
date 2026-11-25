@@ -57,7 +57,7 @@ namespace Ecr.Adapters.Sql;
 public sealed partial class SqlDataSource(
     ICollectionStore store, ISecretProvider secrets, ISecretProvider? settings = null,
     ILogger<SqlDataSource>? logger = null)
-    : IExternalDataSource, IExternalTableSource
+    : IExternalDataSource, IExternalTableSource, IExternalConnectionCheck
 {
     private readonly ILogger log = (ILogger?)logger ?? NullLogger.Instance;
 
@@ -137,6 +137,36 @@ public sealed partial class SqlDataSource(
         var query = Query(source.Code, CatalogQueryKey);
 
         await using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
+
+        try
+        {
+            return await ReadCatalogAsync(connection, query, ct).ConfigureAwait(false);
+        }
+        catch (SqlException ex) when (!IsTransientSqlFailure(ex) && ex.Number != QueryTimeoutError)
+        {
+            // ⛔ b14 (AC-3): з'єднання ВІДКРИЛОСЯ, тож це не «недоступне», а запит каталогу (немає об'єкта, прав,
+            // синтаксис). Сирий текст джерела — лише в журнал (S3); у тексті винятку — номер і кореляція.
+            throw new SourceQueryFailedException(
+                IExternalDataSource.QueryRefusedCode,
+                $"Запит каталогу SQL-джерела {source.Code} не виконався (помилка SQL Server {ex.Number}, кореляція {LogQueryFailure(source.Code, ex)}); подробиці — в журналі сервера.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0422.catalogQueryFailed",
+                    ["dataSource"] = source.Code,
+                });
+        }
+    }
+
+    /// <summary>Номер «час очікування вичерпано» клієнта SqlClient — тайм-аут, не помилка запиту.</summary>
+    private const int QueryTimeoutError = -2;
+
+    /// <summary>Читає каталог відкритим з'єднанням.</summary>
+    /// <param name="connection">Відкрите з'єднання.</param>
+    /// <param name="query">Текст запиту каталогу.</param>
+    /// <param name="ct">Скасування.</param>
+    private static async Task<IReadOnlyList<SourceEntityDescriptor>> ReadCatalogAsync(
+        SqlConnection connection, string query, CancellationToken ct)
+    {
         await using var command = new SqlCommand(query, connection);
 
         var result = new List<SourceEntityDescriptor>();
@@ -177,6 +207,23 @@ public sealed partial class SqlDataSource(
         }
 
         return result;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Те саме відкриття, що й у збору (<see cref="OpenAsync"/>: політика адреси, каталог, секрет, повтор
+    /// транзитивних відмов, автентифікація окремо), і <c>SELECT 1</c> — запит, який не залежить від схеми
+    /// замовника. Лише читання (<c>D-44</c>).
+    /// </remarks>
+    public async Task CheckConnectionAsync(int dataSourceId, CancellationToken ct)
+    {
+        var source = await store.FindDataSourceAsync(dataSourceId, ct).ConfigureAwait(false)
+                     ?? throw Unavailable(dataSourceId);
+
+        await using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
+        await using var command = new SqlCommand("SELECT 1;", connection);
+
+        await RetryAsync(() => command.ExecuteScalarAsync(ct), IsTransientSqlFailure, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -387,7 +434,9 @@ public sealed partial class SqlDataSource(
             // ⛔ Не вигадуємо запит. Джерело без нього не «порожнє», а
             // ненаштоване, і сказати це треба ключем, який бракує: інакше
             // налаштування шукають у коді, якого не буде.
-            throw new BusinessRuleException(
+            // ⚠ b14 source-test-flert (AC-2/AC-3): тип «не налаштовано», а не просто 0503 — проба з'єднання інакше
+            // казала «недоступне»; бракує саме КАТАЛОГУ — проба перевіряє з'єднання (CheckConnectionAsync).
+            throw new SourceNotConfiguredException(
                 SourceUnavailable,
                 $"Джерело {code} не має запиту {scoped} (або спільного {key}): збирати нічим.",
                 new Dictionary<string, object?>
@@ -395,7 +444,8 @@ public sealed partial class SqlDataSource(
                     ["messageKey"] = "err.ECR-INT-0503.queryNotConfigured",
                     ["dataSource"] = code,
                     ["settingKey"] = scoped,
-                });
+                },
+                catalogOnly: string.Equals(key, CatalogQueryKey, StringComparison.Ordinal));
         }
 
         return configured;
@@ -450,7 +500,8 @@ public sealed partial class SqlDataSource(
         }
 
         // ⚠ Відмова називає джерело й вердикт, а не вміст рядка з'єднання.
-        throw new BusinessRuleException(
+        // ⚠ b14 (AC-3): «не налаштовано» — адресу відхиляє НАША політика, до джерела ніхто не ходив.
+        throw new SourceNotConfiguredException(
             SourceUnavailable,
             $"Адресу джерела {code} відхилено політикою адреси ({verdict}): збір не з'єднується.",
             new Dictionary<string, object?>
@@ -483,7 +534,8 @@ public sealed partial class SqlDataSource(
             // «ArgumentException» без натяку, що правити треба поле Endpoint.
             // ⚠ Значення ключа builder розбирає сам: `Connect Timeout=abc`, `User Instance=0` —
             // FormatException, `Max Pool Size=99999999999` — OverflowException (рев'ю an33d, P3-4).
-            throw new BusinessRuleException(
+            // ⚠ b14 (AC-3): «не налаштовано» — лагодити поле Endpoint, а не мережу.
+            throw new SourceNotConfiguredException(
                 SourceUnavailable,
                 // ⛔ SEC (TIER2): без `ex.Message` — текст виняток-парсера йде в
                 // `itg.CollectionRun.ErrorMessage` і до клієнта; подробиці — в журнал.
@@ -587,6 +639,20 @@ public sealed partial class SqlDataSource(
         Level = LogLevel.Warning,
         Message = "SqlDataSource: джерело {SourceCode} не відкрилось (помилка SQL Server {ErrorNumber}); кореляція {CorrelationId}.")]
     private static partial void LogConnectFailed(
+        ILogger logger, string sourceCode, int errorNumber, string correlationId, Exception exception);
+
+    /// <summary>Те саме для запиту, що впав на відкритому з'єднанні (b14, AC-3).</summary>
+    private string LogQueryFailure(string sourceCode, SqlException error)
+    {
+        var correlationId = SafeErrorText.NewCorrelationId();
+        LogQueryFailed(log, sourceCode, error.Number, correlationId, error);
+        return correlationId;
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "SqlDataSource: запит каталогу джерела {SourceCode} не виконався (помилка SQL Server {ErrorNumber}); кореляція {CorrelationId}.")]
+    private static partial void LogQueryFailed(
         ILogger logger, string sourceCode, int errorNumber, string correlationId, Exception exception);
 
     [LoggerMessage(

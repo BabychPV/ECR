@@ -3175,9 +3175,11 @@ export interface paths {
          *     джерела, яка вже виконується, — `409 ECR-JOB-0409`.
          *
          *     ⛔ `error` — лише категорія (`auth`, `unreachable`,
-         *     `tls`, `timeout`, `other`, `adapterNotRegistered`),
-         *     `messageKey` — `integration.test.failed.{категорія}`. Сирий
-         *     текст винятку — лише в серверному журналі (S3: інакше кнопка — сканер мережі).
+         *     `tls`, `timeout`, `notConfigured`, `query`, `other`,
+         *     `adapterNotRegistered`), `messageKey` — `integration.test.failed.{категорія}`.
+         *     Сирий текст винятку — лише в серверному журналі (S3: інакше кнопка — сканер мережі).
+         *     Джерело без запиту каталогу (FLERT, склад газу) перевіряється самим з'єднанням:
+         *     `{ ok: true, entities: 0, messageKey: integration.test.connectedNoCatalog }`.
          */
         post: {
             parameters: {

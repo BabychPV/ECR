@@ -40042,7 +40042,7 @@
     },
     "/api/v1/data-sources/{id}/test": {
       "post": {
-        "description": "⚠ `200`, а не `202`: проба читає ОДИН рівень каталогу джерела\nі вкладається у відповідь — на відміну від збору, який іде по діапазону\nі тому віддає `jobId`.\n\n⚠ Причина обов'язкова і йде в журнал безпеки; відмова джерела — це\n`{ ok: false, error, messageKey }`, а не помилка запиту. Проба цього ж\nджерела, яка вже виконується, — `409 ECR-JOB-0409`.\n\n⛔ `error` — лише категорія (`auth`, `unreachable`,\n`tls`, `timeout`, `other`, `adapterNotRegistered`),\n`messageKey` — `integration.test.failed.{категорія}`. Сирий\nтекст винятку — лише в серверному журналі (S3: інакше кнопка — сканер мережі).",
+        "description": "⚠ `200`, а не `202`: проба читає ОДИН рівень каталогу джерела\nі вкладається у відповідь — на відміну від збору, який іде по діапазону\nі тому віддає `jobId`.\n\n⚠ Причина обов'язкова і йде в журнал безпеки; відмова джерела — це\n`{ ok: false, error, messageKey }`, а не помилка запиту. Проба цього ж\nджерела, яка вже виконується, — `409 ECR-JOB-0409`.\n\n⛔ `error` — лише категорія (`auth`, `unreachable`,\n`tls`, `timeout`, `notConfigured`, `query`, `other`,\n`adapterNotRegistered`), `messageKey` — `integration.test.failed.{категорія}`.\nСирий текст винятку — лише в серверному журналі (S3: інакше кнопка — сканер мережі).\nДжерело без запиту каталогу (FLERT, склад газу) перевіряється самим з'єднанням:\n`{ ok: true, entities: 0, messageKey: integration.test.connectedNoCatalog }`.",
         "parameters": [
           {
             "in": "path",

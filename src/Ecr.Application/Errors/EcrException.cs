@@ -46,6 +46,45 @@ public class BusinessRuleException(string errorCode, string message, IReadOnlyDi
 public sealed class SourceResponseTooLargeException(string errorCode, string message, IReadOnlyDictionary<string, object?>? details = null)
     : BusinessRuleException(errorCode, message, details);
 
+/// <summary>
+/// Джерело НЕ НАЛАШТОВАНЕ до кінця: немає запиту, рядок з'єднання не читається, адресу відхиляє політика.
+/// </summary>
+/// <remarks>
+/// ⛔ Окремий тип, а не <see cref="BusinessRuleException"/> з кодом <c>ECR-INT-0503</c> (b14 source-test-flert,
+/// AC-3): проба з'єднання показувала цю відмову як «джерело недоступне або відповіло помилкою», хоча до джерела
+/// ніхто не ходив — бракувало налаштування в нас. Код і ключі лишаються ТІ САМІ (жоден <c>catch</c>, арм статусу
+/// чи текст не змінюється), розрізняє тип.
+/// </remarks>
+/// <param name="errorCode">Код помилки.</param>
+/// <param name="message">Текст без стека.</param>
+/// <param name="details">Подробиці; <c>messageKey</c> — той самий, що й досі.</param>
+/// <param name="catalogOnly">
+/// Бракує ЛИШЕ запиту каталогу сутностей: з'єднання може бути цілим (джерело FLERT для складу газу каталогу
+/// не має). Проба тоді перевіряє саме з'єднання (<c>IExternalConnectionCheck</c>).
+/// </param>
+public sealed class SourceNotConfiguredException(
+    string errorCode, string message, IReadOnlyDictionary<string, object?>? details = null, bool catalogOnly = false)
+    : BusinessRuleException(errorCode, message, details)
+{
+    /// <summary>Бракує лише запиту каталогу сутностей.</summary>
+    public bool CatalogOnly { get; } = catalogOnly;
+}
+
+/// <summary>
+/// З'єднання з джерелом відкрилося, а НАЛАШТОВАНИЙ запит упав на боці джерела (немає об'єкта, прав, синтаксис).
+/// </summary>
+/// <remarks>
+/// ⛔ Окремий тип (b14 source-test-flert, AC-3): сирий <c>SqlException</c> із виконання запиту проба зараховувала
+/// до «недоступне», і людина лагодила мережу, коли треба було лагодити запит. Сирий текст джерела — лише в журналі
+/// сервера (кореляція в повідомленні), до клієнта не йде (S3).
+/// </remarks>
+/// <param name="errorCode">Код помилки.</param>
+/// <param name="message">Текст без тексту джерела.</param>
+/// <param name="details">Подробиці; <c>messageKey</c>.</param>
+public sealed class SourceQueryFailedException(
+    string errorCode, string message, IReadOnlyDictionary<string, object?>? details = null)
+    : BusinessRuleException(errorCode, message, details);
+
 /// <summary>Відмова в доступі з причиною. HTTP 403.</summary>
 public sealed class AccessDeniedException(string errorCode, string message, IReadOnlyDictionary<string, object?>? details = null)
     : EcrException(errorCode, message, details);

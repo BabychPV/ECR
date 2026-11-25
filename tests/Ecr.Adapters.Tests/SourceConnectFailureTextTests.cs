@@ -44,7 +44,8 @@ public sealed class SourceConnectFailureTextTests
             Settings((SqlDataSource.ValueQueryKey, "SELECT 1")),
             log);
 
-        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+        // ⚠ b14 (AC-3): зіпсований рядок — «не налаштовано», а не «недоступне».
+        var error = await Assert.ThrowsAsync<SourceNotConfiguredException>(
             () => adapter.ReadAsync(
                 new CollectionRequest(1, 7, "STREAM-1", Midnight, Midnight.AddHours(1), 10), CancellationToken.None));
 
