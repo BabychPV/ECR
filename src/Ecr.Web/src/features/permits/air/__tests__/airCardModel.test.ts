@@ -7,6 +7,8 @@ import {
   columnTitle,
   Dash,
   filterSources,
+  groupingOf,
+  initialValues,
   num,
   numTitle,
   scopeLabel,
@@ -45,6 +47,28 @@ describe('airCardModel: додані колонки й правка (P1 07.11)',
     expect(changedValues(fields, { A: '1', B: '2', C: 'x', D: 'y' }, { A: '1', B: '2,5', C: '', D: ' y ' })).toEqual({ B: '2,5', C: null });
     expect(changedValues(fields, { A: '1', B: '', C: '', D: '' }, { A: '1.25', B: '', C: '', D: '' })).toEqual({ A: 1.25 });
   });
+
+  // AC-2 картки number-format-consistent. ⛔ Доказ: початкове значення поля через `num` → «75,435.96» / округлене,
+  // тест червоний.
+  it('поле правки починається з точного значення: без розділювача, без експоненти, без округлення', () => {
+    const source = { ...card().sources[0]!, quantity: '75435.9612345000', height: '0.0000008700000000' };
+    const fields: EditField[] = [
+      { code: 'QUANTITY', label: 'Q', kind: 'number', added: false },
+      { code: 'HEIGHT', label: 'H', kind: 'number', added: false },
+    ];
+    const initial = initialValues(fields, source, 'sources');
+    expect(initial).toEqual({ QUANTITY: '75435.9612345', HEIGHT: '0.00000087' });
+    // Незмінене не йде на сервер; «1e-9», розгорнуте полем, — те саме значення числом.
+    expect(changedValues(fields, initial, initial)).toEqual({});
+    expect(changedValues(fields, initial, { ...initial, HEIGHT: '0.000000001' })).toEqual({ HEIGHT: 1e-9 });
+  });
+
+  it('групування стовпця: одне правило для всіх рядків', () => {
+    const rows = ['75435.96', '9363.267'];
+    const g = groupingOf(rows, (row) => row);
+    expect(rows.map((row) => num(row, g))).toEqual(['75,435.96', '9,363.267']);
+    expect(groupingOf(['2031', '9363'], (row) => row)).toBe('never');
+  });
 });
 
 describe('airCardModel', () => {
@@ -81,14 +105,14 @@ describe('airCardModel', () => {
   it('num: реальний сервер віддає повну шкалу (16 знаків) - нулі хвоста відкидаються, значення не округлюється', () => {
     expect(num('0.5000000000000000')).toBe('0.5');
     expect(num('25.0000000000000000')).toBe('25');
-    expect(num('0.0000000000035000')).toBe('3.5E-12');
-    expect(numTitle('0.0000000000035000')).toBe('0.0000000000035');
+    expect(num('0.0000000000035000')).toBe('0.0000000000035'); // ✎ 25.11 number-format-consistent: без експоненти
+    expect(numTitle('0.0000000000035000')).toBeUndefined(); // показано повністю — підказка не потрібна
     expect(num('0.1781872000000000')).toBe('0.1781872');
     expect(numTitle('0.1781872000000000')).toBeUndefined();
     expect(num('1234.123456789')).toBe('1234.123');
     expect(num('-1.2500')).toBe('-1.25');
     expect(num('100')).toBe('100');
-    expect(num('0.0000000000000001')).toBe('1E-16');
+    expect(num('0.0000000000000001')).toBe('0.0000000000000001');
     expect(num(null)).toBe(Dash);
     expect(num('n/a')).toBe('n/a');
   });

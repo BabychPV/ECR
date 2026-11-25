@@ -2,7 +2,7 @@
 import { useLayoutEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { SegmentedControl, VisuallyHidden } from '@mantine/core';
 import { formatDate } from '@/shared/format/datetime';
-import { formatDecimalReadable, formatNumber } from '@/shared/format/number';
+import { columnGrouping, formatDecimalReadable, formatNumber, type DecimalGrouping } from '@/shared/format/number';
 import { t } from '@/shared/i18n';
 import { isEmptyCell, type PermitCellValue, type PermitColumn, type PermitRow } from '../lib/columns';
 import {
@@ -42,12 +42,12 @@ export interface PermitDefTableProps {
 
 /**
  * Число в комірці — спільним читабельним поданням (людина 25.11: «числа в пермітах не вистачає місця»): ≤ 7 значущих,
- * без хвостових нулів, крихітні — науковим записом; точне значення — у підказці комірки (`exactOf`). Раніше дріб
- * різався до 3/5 знаків, і `0.0000025` г/с показувався як `0`.
+ * без хвостових нулів, без експоненти, групування — одне на стовпець (`useColumnGrouping`); точне значення — у
+ * підказці комірки (`exactOf`). Раніше дріб різався до 3/5 знаків, і `0.0000025` г/с показувався як `0`.
  */
-function exactOf(column: PermitColumn, value: PermitCellValue): string | undefined {
+function exactOf(column: PermitColumn, value: PermitCellValue, grouping: DecimalGrouping): string | undefined {
   if (column.type !== 'number' || isEmptyCell(value)) return undefined;
-  const readable = formatDecimalReadable(value);
+  const readable = formatDecimalReadable(value, undefined, undefined, grouping);
   return readable?.rounded === true ? readable.exact : undefined;
 }
 
@@ -57,17 +57,41 @@ function fullTextOf(column: PermitColumn, value: PermitCellValue): string | unde
   return String(value);
 }
 
-function readableSum(sum: number): string {
-  return formatDecimalReadable(sum)?.text ?? formatNumber(sum);
+function readableSum(sum: number, grouping: DecimalGrouping): string {
+  return formatDecimalReadable(sum, undefined, undefined, grouping)?.text ?? formatNumber(sum);
 }
 
-function formatCell(column: PermitColumn, value: PermitCellValue): ReactNode {
+/**
+ * Групування тисяч на СТОВПЕЦЬ (картка number-format-consistent, 25.11: «75,435.96» поруч із «9363.267»): якщо хоч одне
+ * значення стовпця або його підсумок має цілу частину ≥ 10 000 — розділювач у всіх значеннях від 1 000, інакше ніде.
+ * Ключ — код стовпця або `s-<група>` для згорнутої групи.
+ */
+function useColumnGrouping(
+  items: readonly VisibleItem[],
+  rows: readonly PermitRow[],
+  totals: PermitTotals | undefined,
+): ReadonlyMap<string, DecimalGrouping> {
+  return useMemo(() => {
+    const map = new Map<string, DecimalGrouping>();
+    for (const item of items) {
+      if (item.kind === 'summary') {
+        map.set(`s-${item.group}`, columnGrouping(rows.map((row) => summaryValue(row, item.columns))));
+      } else if (item.column.type === 'number') {
+        const code = item.column.code;
+        map.set(code, columnGrouping([...rows.map((row) => row[code]), totals?.sums[code]]));
+      }
+    }
+    return map;
+  }, [items, rows, totals]);
+}
+
+function formatCell(column: PermitColumn, value: PermitCellValue, grouping: DecimalGrouping): ReactNode {
   if (isEmptyCell(value)) return null;
 
   switch (column.type) {
     case 'number':
       if (typeof value !== 'number') return String(value);
-      return formatDecimalReadable(value)?.text ?? formatNumber(value);
+      return formatDecimalReadable(value, undefined, undefined, grouping)?.text ?? formatNumber(value);
     case 'date': {
       // ⚠ `formatDate` сам читає `РРРР-ММ-ДД` як місцеву північ (календарна дата без години),
       // тому день не зсувається; зону тут задавати не можна — вона якраз зсунула б.
@@ -212,6 +236,8 @@ export function PermitDefTable({
   const tableRef = useFirstColumnWidth(items);
   const regionRef = useRef<HTMLDivElement | null>(null);
   usePinnedNumbers(tableRef, regionRef, items);
+  const groupingOf = useColumnGrouping(items, rows, totals);
+  const grouping = (key: string): DecimalGrouping => groupingOf.get(key) ?? 'never';
   const pinStart = trailingNumericStart(items);
   /** `data-pin` комірки стовпця `index` (0 — крайній правий закріплений) або `undefined`. */
   const pinOf = (index: number): number | undefined => (index >= pinStart ? items.length - 1 - index : undefined);
@@ -332,8 +358,8 @@ export function PermitDefTable({
                         {sum === null ? (
                           <span className="pm-faint pm-stick">…</span>
                         ) : (
-                          <span className="pm-stick" title={formatDecimalReadable(sum)?.exact}>
-                            {readableSum(sum)}
+                          <span className="pm-stick" title={formatDecimalReadable(sum, undefined, undefined, grouping(`s-${item.group}`))?.exact}>
+                            {readableSum(sum, grouping(`s-${item.group}`))}
                           </span>
                         )}
                       </td>
@@ -344,7 +370,7 @@ export function PermitDefTable({
                   const value = row[column.code];
                   const missing = column.required === true && column.derived !== true && isEmptyCell(value);
                   const warning = missing || warnCell === undefined ? null : warnCell(row, column);
-                  const shown = formatCell(column, value);
+                  const shown = formatCell(column, value, grouping(column.code));
                   const classes = [
                     column.type === 'number' ? 'num' : 'pm-text',
                     column.derived === true ? 'pm-derived' : '',
@@ -371,7 +397,7 @@ export function PermitDefTable({
                       data-required-empty={missing ? 'true' : undefined}
                       data-pin={pinOf(index)}
                       data-pin-edge={edgeOf(index)}
-                      title={warning ?? exactOf(column, value) ?? fullTextOf(column, value)}
+                      title={warning ?? exactOf(column, value, grouping(column.code)) ?? fullTextOf(column, value)}
                     >
                       {index === 0 ? content : <span className="pm-stick">{content}</span>}
                       {warning !== null && <VisuallyHidden>{`. ${warning}`}</VisuallyHidden>}
@@ -397,8 +423,8 @@ export function PermitDefTable({
                   return (
                     <td key={item.column.code} className="num" data-pin={pinOf(index)} data-pin-edge={edgeOf(index)}>
                       {sum === undefined ? null : (
-                        <span className="pm-stick" title={formatDecimalReadable(sum)?.exact}>
-                          {readableSum(sum)}
+                        <span className="pm-stick" title={formatDecimalReadable(sum, undefined, undefined, grouping(item.column.code))?.exact}>
+                          {readableSum(sum, grouping(item.column.code))}
                         </span>
                       )}
                     </td>
