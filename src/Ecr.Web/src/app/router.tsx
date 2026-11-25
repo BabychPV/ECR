@@ -5,6 +5,7 @@ import { AdminLayout } from './AdminLayout';
 import { LegacyProjectRedirect, LegacyProjectTabRedirect, ProjectTab } from './projectRoutes';
 import { AppLayout } from './AppLayout';
 import { HomeRoute } from './HomeRoute';
+import { RootErrorPage } from './RootErrorPage';
 import { RouteErrorPage } from './RouteErrorPage';
 import { RouteGuard } from './RouteGuard';
 import {
@@ -273,7 +274,23 @@ const devRoutes = import.meta.env.DEV
     ]
   : [];
 
-export const router = createBrowserRouter([
+/**
+ * Межа помилки на КОЖНОМУ маршруті верхнього рівня (✎ 25.11) — останній рубіж під маршрутизатором.
+ *
+ * ⚠ Ловить те, що падає ВИЩЕ за `withRenderErrorBoundary`: сам каркас `AppLayout` (його лінивий шматок
+ * `IdleSignOut` після оновлення — live 25.11), сторінку входу, службові стенди. Без неї React Router малює
+ * власний розробницький екран («Unexpected Application Error! … Hey developer 👋»).
+ *
+ * ⚠ Функцією над усім масивом, а не рядком у кожному записі: новий маршрут верхнього рівня захищений за
+ * побудовою. Наявний `errorElement` не перезаписується.
+ */
+export function withRootErrorElement(routes: RouteObject[]): RouteObject[] {
+  return routes.map((route) => ('errorElement' in route && route.errorElement !== undefined
+    ? route
+    : { ...route, errorElement: <RootErrorPage /> }) as RouteObject);
+}
+
+export const router = createBrowserRouter(withRootErrorElement([
   ...devRoutes,
   { path: '/login', element: <Chunk><LoginPage /></Chunk> },
   {
@@ -660,4 +677,4 @@ export const router = createBrowserRouter([
       { path: '*', element: <NotFoundPage />, handle: { labelKey: 'nav.notFound.title' } },
     ]),
   },
-]);
+]));

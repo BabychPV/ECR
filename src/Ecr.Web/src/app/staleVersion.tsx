@@ -99,6 +99,16 @@ function staleSaveState(): StaleSaveState {
   return saveState;
 }
 
+/**
+ * Стан застарілої збірки й збереження для екрана помилки (`RenderErrorScreen`): автоматичне перезавантаження
+ * чекає, доки збереження не скінчиться, і не стається взагалі, якщо воно не вдалося.
+ */
+export function useStaleVersionState(): { outdated: boolean; save: StaleSaveState } {
+  const outdated = useSyncExternalStore(subscribeStaleVersion, isStaleVersion, isStaleVersion);
+  const save = useSyncExternalStore(subscribeStaleVersion, staleSaveState, staleSaveState);
+  return { outdated, save };
+}
+
 function setSaveState(next: StaleSaveState): void {
   saveState = next;
   for (const listener of listeners) listener();
