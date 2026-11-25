@@ -6,6 +6,8 @@ import { normalizeDecimal } from '@/shared/format';
 import { formatMonthName } from '@/shared/format/period';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { t } from '@/shared/i18n';
+import { DecimalInput } from '@/shared/ui/DecimalInput';
+import { DecimalText } from '@/shared/ui/DecimalText';
 import { showApiError } from '@/shared/ui/notify';
 import {
   createVersion,
@@ -18,6 +20,13 @@ import {
   type GasVersion,
 } from './api';
 import { componentName } from './componentNames';
+
+/**
+ * Ширини числових колонок (людина 25.11, LIVE: «поля обрізають значення»). Без фокуса поле показує ≤ 7 значущих
+ * (`5.231989`, `4.013E-13`); на фокусі — повний рядок `decimal(20,16)` (до 21 знака), для нього й ширина.
+ */
+const MolPctWidth = 200;
+const PreviousWidth = 130;
 
 /** Порядок груп компонентів у редакторі (як у FLERT/HYSYS: інерти, вуглеводні, ароматика, сірка, інше). */
 const GroupOrder = ['inert', 'hydrocarbon', 'aromatic', 'sulphur', 'other'] as const;
@@ -246,14 +255,14 @@ function Editor({ streamId, target, components, onClose, onSaved }: Props & { re
                 ['z', t('gasComposition.editor.z'), z, setZ],
               ] as const
             ).map(([name, label, value, set], index) => (
-              <TextInput
+              <DecimalInput
                 key={name}
                 label={label}
-                inputMode="decimal"
                 value={value}
                 readOnly={readOnly}
+                data-testid={`gas-property-${name}`}
                 error={properties[index] === undefined ? t('gasComposition.editor.invalidNumber') : undefined}
-                onChange={(event) => set(event.currentTarget.value)}
+                onValueChange={set}
               />
             ))}
           </SimpleGrid>
@@ -295,11 +304,11 @@ function Editor({ streamId, target, components, onClose, onSaved }: Props & { re
             <Table.Thead>
               <Table.Tr>
                 <Table.Th scope="col">{t('gasComposition.editor.component')}</Table.Th>
-                <Table.Th scope="col" ta="end" w={150}>
+                <Table.Th scope="col" ta="end" w={MolPctWidth}>
                   {t('gasComposition.editor.value')}
                 </Table.Th>
                 {previous !== undefined && (
-                  <Table.Th scope="col" ta="end" w={170}>
+                  <Table.Th scope="col" ta="end" w={PreviousWidth}>
                     {t('gasComposition.editor.previous')}
                   </Table.Th>
                 )}
@@ -336,24 +345,19 @@ function Editor({ streamId, target, components, onClose, onSaved }: Props & { re
                         </Badge>
                       )}
                     </Table.Th>
-                    <Table.Td ta="end" w={150}>
-                      <TextInput
+                    <Table.Td ta="end" w={MolPctWidth}>
+                      <DecimalInput
                         size="xs"
-                        inputMode="decimal"
                         aria-label={`${label}, ${t('gasComposition.editor.value')}`}
                         value={text}
                         readOnly={readOnly}
                         error={invalid.has(component.code) ? t('gasComposition.editor.invalidNumber') : undefined}
-                        styles={{ input: { textAlign: 'end' } }}
-                        onChange={(event) => {
-                          const next = event.currentTarget.value;
-                          setValues((all) => ({ ...all, [component.code]: next }));
-                        }}
+                        onValueChange={(next) => setValues((all) => ({ ...all, [component.code]: next }))}
                       />
                     </Table.Td>
                     {previous !== undefined && (
-                      <Table.Td ta="end" c="dimmed" w={170}>
-                        {before ?? '—'}
+                      <Table.Td ta="end" c="dimmed" w={PreviousWidth}>
+                        <DecimalText value={before} data-testid="gas-previous-value" />
                       </Table.Td>
                     )}
                   </Table.Tr>
