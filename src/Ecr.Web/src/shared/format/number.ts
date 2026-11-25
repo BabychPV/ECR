@@ -158,9 +158,109 @@ interface StringAwareNumberFormat {
  */
 export function formatDecimal(
   value: unknown,
+  ...rest: [lang?: Language, maxFractionDigits?: number, minFractionDigits?: number]
+): string | null {
+  return formatDecimalExact(value, ...rest);
+}
+
+/** Значущих цифр у читабельному поданні за замовчуванням (людина 25.11: «6–8 значущих»). */
+export const ReadableSignificantDigits = 7;
+
+/**
+ * Нижня межа «звичайного» запису: менші за модулем ненульові значення показуються науковим записом
+ * (`4.013E-13`), а не рядком нулів.
+ */
+export const ReadableScientificBelow = '0.000001';
+
+/** Читабельне подання десяткового: що показати, точне значення і чи було округлення. */
+export interface ReadableDecimal {
+  /** Що показати в клітинці/полі без фокуса. */
+  readonly text: string;
+  /** Повне точне значення мовою інтерфейсу (підказка, зчитувач екрана). */
+  readonly exact: string;
+  /** Чи `text` коротший за точне значення (тоді точне — у підказці й на фокусі). */
+  readonly rounded: boolean;
+}
+
+/**
+ * Десяткове для ЧИТАННЯ (людина 25.11, LIVE: «поля обрізають 0.0000000000004013…», «98.0835451945116000»).
+ *
+ * - хвостові нулі зрізано (`98.0835451945116000` → `98.08355`);
+ * - не більше `significant` значущих цифр, але ЦІЛА частина не округлюється ніколи (`123456789.12` →
+ *   `123,456,789`) — значення не може змінити порядок;
+ * - тисячі групуються від п'яти цифр (`2031`, а не `2,031`: у числових стовпцях дозволів трапляються роки й коди);
+ * - ненульові |x| < 0.000001 — науковим записом із 4 значущими (`4.013E-13`): порядок величини видно, а
+ *   «< 0.000001» сховав би, що `4E-13` і `9E-7` різні на шість порядків, — для мол.% домішок це різні речі;
+ * - точне значення (`exact`) — для підказки й фокуса: поле на фокусі показує збережений рядок повністю, і
+ *   незмінене значення йде на сервер тим самим рядком (подання не торкається даних).
+ *
+ * ⛔ Усе — над РЯДКОМ (`Intl` приймає рядок, див. `formatDecimalExact`), без `Number(...)`.
+ * `null` — значення не десяткове; викликач показує його як є.
+ */
+export function formatDecimalReadable(
+  value: unknown,
+  significant: number = ReadableSignificantDigits,
+  lang?: Language,
+): ReadableDecimal | null {
+  const text =
+    typeof value === 'string'
+      ? value
+      : typeof value === 'number' && Number.isFinite(value)
+        ? expandExponent(String(value))
+        : null;
+  if (text === null) return null;
+  const canonical = normalizeDecimal(text);
+  if (canonical === null) return null;
+
+  const exact = formatDecimalExact(canonical, lang, MaxIntlFractionDigits, 0, true) ?? canonical;
+  const unsigned = canonical.startsWith('-') ? canonical.slice(1) : canonical;
+  const [integer = '0', fraction = ''] = unsigned.split('.');
+  const digits = Math.max(1, Math.trunc(significant));
+
+  if (integer === '0' && fraction.length > 0) {
+    const leadingZeros = /^0*/.exec(fraction)?.[0].length ?? 0;
+    // Менше за 0.000001: перша значуща цифра далі за 6-й знак після коми.
+    if (leadingZeros >= 6) {
+      const format = formatter(formatLocale(lang), {
+        notation: 'scientific',
+        maximumSignificantDigits: Math.min(4, digits),
+      }) as unknown as StringAwareNumberFormat;
+      const scientific = format.format(canonical);
+      return { text: scientific, exact, rounded: scientific !== exact };
+    }
+
+    const keep = Math.min(fraction.length, leadingZeros + digits, MaxIntlFractionDigits);
+    const shown = formatDecimalExact(canonical, lang, keep, 0, true) ?? exact;
+    return { text: shown, exact, rounded: keep < fraction.length };
+  }
+
+  const keep = Math.min(fraction.length, Math.max(0, digits - integer.length), MaxIntlFractionDigits);
+  const shown = formatDecimalExact(canonical, lang, keep, 0, true) ?? exact;
+  return { text: shown, exact, rounded: keep < fraction.length };
+}
+
+/**
+ * Найкоротший запис `double` (`String(2.5e-7)` = `'2.5e-7'`) — звичайним десятковим (`'0.00000025'`), без нових
+ * цифр: лише зсув коми. Значення, що приїхали числом (стовпці дозволів), інакше `normalizeDecimal` відхилив би.
+ */
+function expandExponent(text: string): string {
+  const match = /^(-?)(\d)(?:\.(\d+))?e([+-]\d+)$/.exec(text);
+  if (match === null) return text;
+  const [, sign = '', head = '', tail = '', exp = '0'] = match;
+  const digits = head + tail;
+  const point = 1 + Number(exp);
+  if (point <= 0) return `${sign}0.${'0'.repeat(-point)}${digits}`;
+  if (point >= digits.length) return `${sign}${digits}${'0'.repeat(point - digits.length)}`;
+  return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
+}
+
+/** Точне подання (див. `formatDecimal`). */
+function formatDecimalExact(
+  value: unknown,
   lang?: Language,
   maxFractionDigits: number = MaxIntlFractionDigits,
   minFractionDigits = 0,
+  groupFromFiveDigits = false,
 ): string | null {
   const text =
     typeof value === 'string'
@@ -186,6 +286,8 @@ export function formatDecimal(
   const format = formatter(formatLocale(lang), {
     minimumFractionDigits: minimum,
     maximumFractionDigits: Math.max(minimum, Math.min(fractionDigits, ceiling)),
+    // ES2023 `useGrouping: 'min2'` (типи lib ES2022 знають лише boolean): тисячі групуються від п'яти цифр.
+    ...(groupFromFiveDigits ? { useGrouping: 'min2' as unknown as boolean } : {}),
   }) as unknown as StringAwareNumberFormat;
 
   return format.format(canonical);
