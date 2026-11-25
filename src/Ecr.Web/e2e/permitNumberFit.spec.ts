@@ -121,8 +121,8 @@ test.describe('Permit numbers fit', () => {
     await page.getByRole('button', { name: 'Paste from Excel…' }).click();
     const paste = page.getByRole('dialog', { name: 'Paste rows into Emission limits' });
     const rows = [
-      ['827', SiteEn, 'Vinyl chloride, chloroethene, chloroethylene, ethylene monochloride', 'Винилхлорид, хлорэтилен', SiteRu, '0.0000176', '0', '0.0002'],
-      ['301', SiteEn, 'Nitrogen dioxide', 'Азота диоксид', SiteRu, '0.6669955', '75435.958', '0.4566289'],
+      ['827', SiteEn, 'Vinyl chloride, chloroethene, chloroethylene, ethylene monochloride', 'Винилхлорид, хлорэтилен', SiteRu, '0.0000176', '9363.267', '0.0002'],
+      ['301', SiteEn, 'Nitrogen dioxide', 'Азота диоксид', SiteRu, '0.6669955', '75435.9612345', '0.4566289'],
       ['2735', SiteEn, 'Mineral petroleum oil', 'Масло минеральное нефтяное', SiteRu, '0.00000087', '162121.138', '0.00021'],
     ];
     await paste.getByRole('textbox', { name: 'Rows' }).fill(rows.map((row) => row.join('\t')).join('\n'));
@@ -137,6 +137,7 @@ test.describe('Permit numbers fit', () => {
         const rect = cell.getBoundingClientRect();
         return {
           text: (cell.textContent ?? '').trim(),
+          title: cell.getAttribute('title'),
           clipped: cell.scrollWidth > cell.clientWidth,
           outside: rect.left < box.left - 0.5 || rect.right > box.right + 0.5,
         };
@@ -144,6 +145,13 @@ test.describe('Permit numbers fit', () => {
     });
     expect(report.length, 'числових комірок: 3 рядки × 3 стовпці').toBe(9);
     expect(report.filter((cell) => cell.clipped || cell.outside), JSON.stringify(report)).toEqual([]);
+
+    // Картка number-format-consistent (live b13: «75,435.96» поруч із «9363.267», «8.7E-7»): без експоненти; у стовпці
+    // mg/nm3 є значення ≥ 10 000 — розділювач тисяч у ВСІХ його значеннях, скорочених і ні; повне — у підказці.
+    expect(report.filter((cell) => /e/i.test(cell.text)), JSON.stringify(report)).toEqual([]);
+    const texts = report.map((cell) => cell.text);
+    expect(texts).toEqual(expect.arrayContaining(['0.00000087', '0.0000176', '9,363.267', '75,435.96', '162,121.138']));
+    expect(report.find((cell) => cell.text === '75,435.96')?.title).toBe('75,435.9612345');
     await page.screenshot({ path: test.info().outputPath('permit-number-fit-1440.png') });
   });
 });

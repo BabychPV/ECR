@@ -94,6 +94,12 @@ test.describe('Склад газу: потік, кейс, версії (D-NEW)',
     await molPct(page, 'Hydrogen sulphide (H2S)').fill('0.5');
     await expect(editor.getByText('Methyl mercaptan (CH3SH)', { exact: true })).toBeVisible();
     await expect(editor.getByTestId('gas-component-code').filter({ hasText: /^MMercaptan$/ })).toBeVisible();
+    // AC-2 картки number-format-consistent: ввід «1e-9» приймається, поле показує звичайний дріб (без «E»).
+    const mercaptan = molPct(page, 'Methyl mercaptan (CH3SH)');
+    await mercaptan.fill('1e-9');
+    await molPct(page, 'Methane').focus();
+    await expect(mercaptan).toHaveValue('0.000000001');
+    await expect(mercaptan).not.toHaveAttribute('aria-invalid', 'true');
     await expect(page.getByTestId('gas-sum')).toContainText('100');
     await editor.getByRole('button', { name: 'Save' }).click();
     await expect(editor).toBeHidden({ timeout: 30_000 });
@@ -103,6 +109,8 @@ test.describe('Склад газу: потік, кейс, версії (D-NEW)',
     // Нова версія з 2026-03 (копія попередньої): попередня тепер діє «по лютий 2026».
     await winter.getByTestId('gas-add-version').click();
     await expect(page.getByTestId('gas-copied-from')).toBeVisible();
+    // Збережене «1e-9» повернулося з сервера тим самим значенням і показане без експоненти.
+    await expect(molPct(page, 'Methyl mercaptan (CH3SH)')).toHaveValue('0.000000001');
     await setEffective(page, 'March', '2026');
     await molPct(page, 'Methane').fill('96.5');
     await molPct(page, 'Ethane').fill('3.5');
