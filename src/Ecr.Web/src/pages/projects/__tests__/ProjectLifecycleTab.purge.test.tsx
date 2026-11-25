@@ -152,6 +152,11 @@ describe('ProjectLifecycleTab: Delete project with all data (✎ 25.11)', () => 
       const code = within(dialog).getByRole('textbox', { name: /projects\.purge\.typeCode/ });
       const reason = within(dialog).getByRole('textbox', { name: /projects\.purge\.reason/ });
 
+      // ✎ Підпис — звичайний текст; моноширинний лише сам код (елемент Code у підписі), а не весь підпис.
+      const label = dialog.querySelector(`label[for="${code.id}"]`);
+      expect(label?.querySelector('[data-purge-code]')?.textContent).toBe('HSE401_2026');
+      expect(label?.closest('[style*="monospace"]')).toBeNull();
+
       // Код набрано не точно (регістр) — недоступна.
       await userEvent.type(code, 'hse401_2026');
       await userEvent.type(reason, 'тестовий проєкт');
