@@ -114,6 +114,8 @@ export interface RequiredInputCell {
   columnCode: string;
   ruleCode: string;
   message: string;
+  /** ✎ 25.11: коди методологій, яким потрібна колонка (сервер зводить по рядку й колонці). */
+  methodologies?: readonly string[] | null;
 }
 
 /** Прийняте в роботу завдання: сервер відповів 202. */
