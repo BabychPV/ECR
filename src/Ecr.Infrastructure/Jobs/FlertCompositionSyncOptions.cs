@@ -7,19 +7,31 @@ namespace Ecr.Infrastructure.Jobs;
 /// <param name="Enabled">Чи застосовувати знімок (рушій; задача імпорту завжди передає <c>true</c> — це явна дія людини).</param>
 /// <param name="DataSourceCode">Код джерела <c>ext.DataSource</c> (транспорт <c>Sql</c>) — з'єднання з FLERT.</param>
 /// <param name="MaxDeactivatePercent">Частка чинних кейсів (0–100 %), яку один прогін може вимкнути (<see cref="DeactivationLimit"/>).</param>
+/// <param name="CompositionQuery">Текст запиту знімка FLERT за замовчуванням (<see cref="CompositionQueryKey"/>); канал секретів його перекриває.</param>
 /// <remarks>
 /// ⚠ Ключі — ЛІТЕРАЛАМИ (сторож <c>ConfigurationKeysTests</c> шукає повний рядок ключа).
 /// <para>
 /// ⛔ D-NEW: ключа «увімкнено» і розкладу більше немає — FLERT читається один раз, кнопкою на сторінці «Склад газу», і лише
-/// в порожню базу. З'єднання — джерело <c>ext.DataSource</c> з кодом <see cref="DataSourceCodeKey"/>; запит
-/// <c>Sql:&lt;код&gt;:CompositionQuery</c> — у каналі секретів (<c>Secrets:Sql:…</c>), типового тексту немає.
+/// в порожню базу. З'єднання — джерело <c>ext.DataSource</c> з кодом <see cref="DataSourceCodeKey"/>; запит — несекретний
+/// <see cref="CompositionQueryKey"/> з appsettings (еталон <see cref="DefaultCompositionQuery"/>), який перекриває канал секретів
+/// <c>Secrets:Sql:&lt;код&gt;:CompositionQuery</c>, якщо там щось задано.
 /// </para>
 /// </remarks>
 public sealed record FlertCompositionSyncOptions(
     bool Enabled,
     string DataSourceCode,
-    int MaxDeactivatePercent = FlertCompositionSyncOptions.DefaultMaxDeactivatePercent)
+    int MaxDeactivatePercent = FlertCompositionSyncOptions.DefaultMaxDeactivatePercent,
+    string CompositionQuery = FlertCompositionSyncOptions.DefaultCompositionQuery)
 {
+    /// <summary>
+    /// Ключ: текст запиту знімка складу газу. Не секрет (у ньому немає ні адреси, ні облікових даних) — тому в appsettings,
+    /// а не в змінній служби; власний ключ джерела в каналі секретів, якщо заданий, має перевагу.
+    /// </summary>
+    public const string CompositionQueryKey = "Flert:Sync:CompositionQuery";
+
+    /// <summary>Дефолт запиту: процедура FLERT, на яку логіну FLERT видано лише <c>EXECUTE</c>.</summary>
+    public const string DefaultCompositionQuery = "EXEC dbo.usp_GetAllStreamDataFlattened;";
+
     /// <summary>
     /// Ключ: яку частку (0–100 %) ЧИННИХ кейсів дзеркала один прогін може вимкнути. Більше — знімок вважається
     /// неповним (частковий результат FLERT), і прогін не пише НІЧОГО (<c>Degraded</c>, <c>deactivationLimit</c>).
@@ -69,6 +81,9 @@ public sealed record FlertCompositionSyncOptions(
                 System.Globalization.CultureInfo.InvariantCulture,
                 out var percent)
                 ? Math.Clamp(percent, 0, 100)
-                : DefaultMaxDeactivatePercent);
+                : DefaultMaxDeactivatePercent,
+            CompositionQuery: configuration[CompositionQueryKey] is { Length: > 0 } query && !string.IsNullOrWhiteSpace(query)
+                ? query.Trim()
+                : DefaultCompositionQuery);
     }
 }

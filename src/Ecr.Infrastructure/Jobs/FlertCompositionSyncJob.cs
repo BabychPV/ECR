@@ -145,7 +145,8 @@ public sealed class FlertCompositionSyncJob(
 
         // ⛔ Читання ДО будь-якого запису: недоступний FLERT кидає тут, копія незмінна.
         var table = await adapter
-            .ReadTableAsync(dataSource.Id, FlertCompositionSchema.QueryKey, FlertCompositionSyncOptions.MaxRows, ct)
+            .ReadTableAsync(
+                dataSource.Id, FlertCompositionSchema.QueryKey, options.CompositionQuery, FlertCompositionSyncOptions.MaxRows, ct)
             .ConfigureAwait(false);
 
         if (table.Truncated)

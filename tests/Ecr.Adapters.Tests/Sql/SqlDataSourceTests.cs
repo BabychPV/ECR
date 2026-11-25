@@ -262,6 +262,32 @@ public sealed class SqlDataSourceTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-476")]
+    public async Task Запит_таблиці_з_appsettings_діє_доки_канал_секретів_не_перекрив()
+    {
+        // ⛔ Запит складу газу постачається в appsettings (не секрет): вікно імпорту не мусить заводити змінну служби.
+        // Але заданий у каналі секретів — свій чи спільний — має перевагу, інакше перевизначити його було б нічим.
+        const string fallback = "SELECT 'appsettings' AS Origin;";
+
+        var plain = new SqlDataSource(StoreWith(sql.ConnectionString), Secrets(), Settings(new Dictionary<string, string>()));
+        var fromFile = await plain.ReadTableAsync(1, SqlDataSource.CompositionQueryKey, fallback, 10, CancellationToken.None);
+        Assert.Equal("appsettings", fromFile.Rows.Single()[0]);
+
+        var overridden = new SqlDataSource(StoreWith(sql.ConnectionString), Secrets(), Settings(new Dictionary<string, string>
+        {
+            ["Sql:FLERT:CompositionQuery"] = "SELECT 'secret' AS Origin;",
+        }));
+        var fromSecret = await overridden.ReadTableAsync(1, SqlDataSource.CompositionQueryKey, fallback, 10, CancellationToken.None);
+        Assert.Equal("secret", fromSecret.Rows.Single()[0]);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => plain.ReadTableAsync(1, SqlDataSource.CompositionQueryKey, fallbackQuery: null, 10, CancellationToken.None));
+        Assert.Equal("ECR-INT-0503", error.ErrorCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-11.3")]
     public async Task Обрізаний_батч_повертає_хвіст_діапазону_в_наздоганяння()
     {

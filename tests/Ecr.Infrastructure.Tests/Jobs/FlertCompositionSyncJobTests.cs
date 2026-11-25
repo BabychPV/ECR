@@ -528,9 +528,13 @@ public sealed partial class FlertCompositionSyncJobTests(SqlServerFixture sql)
 
         public ExternalTransport Transport => ExternalTransport.Sql;
 
-        public Task<ExternalTable> ReadTableAsync(int dataSourceId, string queryKey, int maxRows, CancellationToken ct)
+        public string? LastFallbackQuery { get; private set; }
+
+        public Task<ExternalTable> ReadTableAsync(
+            int dataSourceId, string queryKey, string? fallbackQuery, int maxRows, CancellationToken ct)
         {
             Assert.Equal(FlertCompositionSchema.QueryKey, queryKey);
+            LastFallbackQuery = fallbackQuery;
             return Failure is null ? Task.FromResult(Table) : Task.FromException<ExternalTable>(Failure);
         }
     }
