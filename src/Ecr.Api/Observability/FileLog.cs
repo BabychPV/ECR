@@ -106,7 +106,22 @@ public static partial class FileLog
         {
             LogUnavailable(logger, status.Failure);
         }
+        else if (status.Directory is not null)
+        {
+            // ⛔ b14 source-test-flert (AC-4): рядок-маркер ЦЬОГО процесу. Теку ділять сід, setup і кілька процесів
+            // Api за день, і «свіжий файл» нічого не доводить: Windows не оновлює розмір і час запису в переліку
+            // каталогу, поки файл відкритий (живий Api виглядав «без журналу», хоча писав). Скрипт старту вікна
+            // (`tools/live/Start-LiveDetached.ps1`) шукає саме `pid=<PID>` і читає файл, а не перелік.
+            LogWriting(logger, status.Directory, Environment.ProcessId);
+        }
     }
+
+    /// <summary>Маркер процесу в рядку <see cref="LogWriting"/>; скрипт старту шукає <c>pid=&lt;PID&gt;</c>.</summary>
+    public const string PidMarker = "pid=";
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Файловий журнал пише в {Directory} (" + PidMarker + "{ProcessId}).")]
+    private static partial void LogWriting(Microsoft.Extensions.Logging.ILogger logger, string directory, int processId);
 
     /// <summary>Абсолютна тека журналу або <c>null</c>, якщо файл вимкнено.</summary>
     /// <param name="configured">Значення <c>Logging:File:Directory</c>.</param>
