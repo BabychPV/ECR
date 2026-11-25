@@ -1,6 +1,7 @@
 import { useState, type JSX } from 'react';
 import { Badge, Button, Group, Modal, Stack, Table, Text, TextInput, Title, Tooltip, VisuallyHidden } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { t } from '@/shared/i18n';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { KeyValue } from '@/shared/ui/KeyValue';
@@ -71,6 +72,7 @@ export default function StreamDetailBody({ stream, components, onChanged }: Prop
     },
     onError: showApiError,
   });
+  const renameLoading = usePendingLoading(rename.isPending);
 
   return (
     <Stack gap="md" data-testid="gas-stream-detail">
@@ -118,7 +120,7 @@ export default function StreamDetailBody({ stream, components, onChanged }: Prop
                 <Group gap="xs">
                   {!caseLocked && (
                     <Button
-                      size="compact-xs"
+                      size="xs"
                       variant="subtle"
                       onClick={() => {
                         setNewName(item.name);
@@ -129,7 +131,7 @@ export default function StreamDetailBody({ stream, components, onChanged }: Prop
                     </Button>
                   )}
                   <Button
-                    size="compact-xs"
+                    size="xs"
                     variant="light"
                     data-testid="gas-add-version"
                     onClick={() => setEditor({ kind: 'new', caseName: item.name, copyFrom: last })}
@@ -197,7 +199,7 @@ export default function StreamDetailBody({ stream, components, onChanged }: Prop
                       <Table.Td>
                         <Group gap="xs" justify="flex-end" wrap="nowrap">
                           <Button
-                            size="compact-xs"
+                            size="xs"
                             variant="subtle"
                             onClick={() =>
                               setEditor({ kind: 'edit', caseName: item.name, version, previous, readOnly })
@@ -207,7 +209,7 @@ export default function StreamDetailBody({ stream, components, onChanged }: Prop
                           </Button>
                           {!readOnly && (
                             <Button
-                              size="compact-xs"
+                              size="xs"
                               variant="subtle"
                               color="statusError"
                               onClick={() => {
@@ -274,7 +276,7 @@ export default function StreamDetailBody({ stream, components, onChanged }: Prop
             </Button>
             <Button
               disabled={newName.trim().length === 0 || rename.isPending}
-              loading={rename.isPending}
+              loading={renameLoading}
               onClick={() => {
                 if (renaming === null || rename.isPending) return;
                 rename.mutate();

@@ -50,7 +50,7 @@ public sealed class RegistryEntryAutoCodeTests
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = 9 }.Permission("Registry.EditData").Build());
 
-        _definition = new RegistryDef(EcrCode.Create("GAS_COMPOSITION"), Text("Gas composition"), isTemporal: false);
+        _definition = new RegistryDef(EcrCode.Create("FUEL_SAMPLE"), Text("Fuel samples"), isTemporal: false);
         SetId(_definition, RegistryId);
         _definition.UseCodeMode(RegistryCodeMode.Auto);
         var name = new RegistryFieldDef(RegistryId, EcrCode.Create("NAME"), Text("NAME"), CellDataType.String, 1);
