@@ -104,6 +104,21 @@ internal sealed class ScriptStand
     /// <summary>Ліміти прогону (бюджет комірок таблиць-псевдонімів); <c>null</c> — типові.</summary>
     public CalculationLimits? Limits { get; set; }
 
+    /// <summary>Межі періоду документа стенда (типово січень 2099); річний документ — увесь рік.</summary>
+    public (DateOnly Start, DateOnly End) Bounds { get; set; } = (new DateOnly(2099, 1, 1), new DateOnly(2099, 1, 31));
+
+    /// <summary>
+    /// Завантажувач знімків довідників (SGF registry-as-of); <c>null</c> — як досі, без довідників. Разом із ним — описи
+    /// довідників <see cref="RegistryDefinitions"/>, які віддає <c>FindDefinitionsAsync</c>.
+    /// </summary>
+    public IRegistrySnapshotLoader? RegistryLoader { get; set; }
+
+    /// <summary>Описи довідників для <c>IRegistryStore.FindDefinitionsAsync</c> (лише з <see cref="RegistryLoader"/>).</summary>
+    public List<RegistryDef> RegistryDefinitions { get; } = [];
+
+    /// <summary>Кеш знімків прогону, спільний для прив'язок (<c>null</c> — власний на кожну).</summary>
+    public RegistrySnapshotCache? RegistryCache { get; set; }
+
     public IReadOnlyList<StandTable> Tables => _tables;
 
     public StandTable Main => _tables[0];
@@ -215,7 +230,7 @@ internal sealed class ScriptStand
 
         var periods = Substitute.For<IPeriodStore>();
         periods.FindPeriodBoundsAsync(DocumentId, PeriodValue, Arg.Any<CancellationToken>())
-            .Returns(new PeriodBounds(new DateOnly(2099, 1, 1), new DateOnly(2099, 1, 31)));
+            .Returns(new PeriodBounds(Bounds.Start, Bounds.End));
 
         var units = Substitute.For<IUnitCatalog>();
         units.GetAsync(Arg.Any<CancellationToken>()).Returns(new UnitCatalogSnapshot(
@@ -278,6 +293,15 @@ internal sealed class ScriptStand
         bindingStore.ListOutputScalesAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns((IReadOnlyDictionary<string, byte?>)new Dictionary<string, byte?>(_outputScales, StringComparer.OrdinalIgnoreCase));
 
+        if (RegistryLoader is not null)
+        {
+            registries.FindDefinitionsAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+                .Returns(ci => (IReadOnlyList<RegistryDef>)[.. RegistryDefinitions.Where(d =>
+                    ((IReadOnlyCollection<string>)ci[0]).Contains(d.Code, StringComparer.OrdinalIgnoreCase))]);
+            bindingStore.ListLookupRegistryIdsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+                .Returns((IReadOnlyList<int>)[]);
+        }
+
         return new ScriptCalculationModule(
             new Evaluator(new FunctionRegistry()),
             _store,
@@ -293,7 +317,7 @@ internal sealed class ScriptStand
             _results,
             _run,
             registries,
-            registryLoader: null,
+            registryLoader: RegistryLoader,
             scriptStore: null,
             limits: Limits);
     }
@@ -341,7 +365,7 @@ internal sealed class ScriptStand
         string rowKey = "R1", StandTable? table = null)
     {
         var input = await InputAsync(rowKey, table);
-        var context = await Module.PrepareAsync(Methodology, DocumentId, new PeriodKey(PeriodValue), CancellationToken.None);
+        var context = await Module.PrepareAsync(Methodology, DocumentId, new PeriodKey(PeriodValue), RegistryCache, CancellationToken.None);
         return await Module.ExecuteDetailedAsync(context, input, CancellationToken.None);
     }
 
@@ -491,6 +515,7 @@ internal sealed class ScriptStand
                     string text => new CellValueData { ValueString = text },
                     StandEntry entry => new CellValueData { ValueRegistryEntryId = entry.Id },
                     bool flag => new CellValueData { ValueBool = flag },
+                    DateTime moment => new CellValueData { ValueDate = moment },
                     _ => new CellValueData { ValueNumeric = System.Convert.ToDecimal(value, CultureInfo.InvariantCulture) },
                 };
                 list.Add(new CellRecord(

@@ -58,7 +58,11 @@ public static class ScriptRegistryScopes
         var viaEntry = new HashSet<string>(script.RegistryEntries.Select(e => e.RegistryCode), StringComparer.OrdinalIgnoreCase);
         foreach (var code in script.RegistryCodes)
         {
-            result[code] = !viaEntry.Contains(code) && merged.TryGetValue(code, out var scope) ? scope : PeriodScope.All;
+            var scope = !viaEntry.Contains(code) && merged.TryGetValue(code, out var known) ? known : PeriodScope.All;
+
+            // ✎ D1 (REVIEW-sg-flaring): під `registry as of` рядок читає версію на ВЛАСНУ дату, будь-яку в межах періоду
+            // документа, а не на кінець періоду, — тож обсяг не вужчий за рік (місяць → рік; «усе» лишається «усе»).
+            result[code] = script.RegistryAsOf is null ? scope : scope.Join(PeriodScope.Year);
         }
 
         return result;
@@ -66,6 +70,11 @@ public static class ScriptRegistryScopes
 
     private static IEnumerable<AstNode> Roots(CompiledScript script)
     {
+        if (script.RegistryAsOf is { } asOf)
+        {
+            yield return asOf;
+        }
+
         foreach (var statement in script.Statements)
         {
             foreach (var root in StatementRoots(statement))

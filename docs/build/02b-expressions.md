@@ -884,6 +884,24 @@ ROUNDDOWN 5 · TEXT 3 · CHAR 3 · CONCATENATE 2 · TEXTBEFORE 2 · TEXTAFTER 2
 - Клієнтська підказка цих функцій не рахує — з тієї самої причини, що й
   `REGFIELD`: даних довідника в неї немає. Лічильник і винятки
   `ClientServerEquivalenceTests` змінюють кроки RT-20a/RT-20b.
+- ✎ **2026-11-25, `registry as of`** (рушій скриптів, DESIGN-sg-flaring §5.2a, E1–E8). Речення
+  `registry as of <вираз>;` скрипта методології дає знімок на дату РЯДКА замість кінця періоду:
+  - **E1** — парсер/біндер: `CompiledScript.RegistryAsOf` (AST виразу, порожня область: лише `row.*`, `period.*`,
+    константи, функції), `asof.Date|Month|Year` → хост `$asof`; `RegistryCodes` не змінюється, тож `cfg.RegistryUse`
+    пишеться як досі. Діагностики `duplicateRegistryAsOf`, `registryAsOfNotDate`, `registryAsOfWithoutRegistries`.
+  - **E2** — `ScriptRegistryScopes`: обсяг довідників під реченням не вужчий за `PeriodScope.Year` (місяць → рік,
+    «усе» → «усе»; D1 рецензії).
+  - **E3/E6** — `RegistrySnapshotCache.GetOrLoadSourceAsync`: одне `LoadSourceAsync` на набір довідників за прогін;
+    `DatedRegistrySnapshots` будує знімок раз на **інтервал чинності** (`RegistryValidityIntervals`: межі
+    `ValidFrom`/`ValidTo` УСІХ записів джерела, разом із транзитивними цілями `Lookup`, D3), а не на рядок чи день.
+  - **E4/E5** — `ScriptCalculationModule.RegistriesAsync` кладе джерело в `ScriptRuntime`; `ScriptRowRun` обчислює дату
+    до першого оператора, `ScriptEvaluationContext.UseRegistriesAsOf` підміняє знімок рядка; крок трейсу
+    `RegistryAsOf`. Порожня/помилкова дата чи дата поза `[period.Start, period.End]` — рядок відхилено
+    (`categoryRuleFailed`, причина `registryAsOfEmpty` / `registryAsOfOutsidePeriod`), не нуль.
+  - Дата `Date`-комірки доходить до рушія скриптів (`CalculationArgument.ValueDate`); рушій формул її не бачить.
+  - **E7** — річний документ із колонками місяців іде тим самим шляхом; живий перегляд (`ScriptPreviewRunner`) — той
+    самий `ExecuteDetailedAsync`, тож рахує так само (D2).
+  - Системний момент `RegistryAsOfUtc` прогону не змінено: повтор відтворює числа.
 
 ---
 

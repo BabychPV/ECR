@@ -251,8 +251,14 @@ internal static class CalculationSteps
     /// шаблонах. ✎ L2-3: <see cref="CalculationInputBuilder"/> заповнює його завжди, а тут
     /// його ігнорують формули <c>Legacy</c> (<c>D-161</c>); правило категорії читає id в обох режимах.
     /// </remarks>
-    internal static ExpressionValue ToValue(CalculationArgument argument, bool entryRef, bool legacyNumericText)
-        => entryRef && argument.EntryId is { } entryId
+    /// <param name="dates">
+    /// ✎ DESIGN-sg-flaring §5.2a: віддавати дату <see cref="CalculationArgument.ValueDate"/> значенням-датою — лише рушій
+    /// скриптів; рушій формул (типово <c>false</c>) бачить <c>Date</c>-комірку порожньою, як досі.
+    /// </param>
+    internal static ExpressionValue ToValue(CalculationArgument argument, bool entryRef, bool legacyNumericText, bool dates = false)
+        => dates && argument.ValueDate is { } date && argument.Value is null && argument.ValueString is null
+            ? ExpressionValue.Date(date)
+            : entryRef && argument.EntryId is { } entryId
             ? ExpressionValue.Number(entryId)
             : argument.Value is { } number
                 ? ExpressionValue.Number(number)
