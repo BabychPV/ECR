@@ -6,7 +6,6 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { JSX } from 'react';
 import { AuditPage } from '@/pages/admin/AuditPage';
-import { ConsistencyIssuesPage } from '@/pages/admin/ConsistencyIssuesPage';
 import { FilterDebounceMs } from '@/shared/ui/useDebouncedFilter';
 import { t } from '@/shared/i18n';
 import { testTheme } from '@/test/render';
@@ -41,16 +40,6 @@ const structureRow = {
   entityId: 3,
   operation: 'Update',
   changeReason: null,
-};
-
-const issueRow = {
-  id: 1,
-  ruleCode: 'CNS-01',
-  entityType: 'cfg.Template',
-  entityId: 3,
-  message: 'broken',
-  detectedAt: '2026-01-05T10:00:00Z',
-  resolvedAt: null,
 };
 
 /**
@@ -138,16 +127,6 @@ describe('скидання курсора разом із відкладеним
     SlowEnvTimeout,
   );
 
-  it(
-    '/admin/consistency: «Rule» після «More» — один запит',
-    async () => {
-      const seen = serve('/api/v1/consistency/issues', issueRow);
-      show(<ConsistencyIssuesPage />, '/admin/consistency');
-
-      const after = await pageThenType(seen, '⟦consistency.rule⟧', 'CNS');
-
-      expect(after.map((query) => [query.get('ruleCode'), query.get('cursor')])).toEqual([['CNS', null]]);
-    },
-    SlowEnvTimeout,
-  );
+  // ✎ 24.11: «Rule» на /admin/consistency — перелік відомих правил (select), а не поле набору; нова сторінка журналу
+  // починається з першої (ruleCode — у ключі запиту), див. ConsistencyIssuesPage.checksPerformed.test.tsx.
 });
