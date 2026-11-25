@@ -44,7 +44,8 @@ public sealed partial class E2eStandPermissionsCoverageTests
         ["Calculation.EditRule"] = "правила розрахунків e2e не змінює",
         ["Calculation.ManageRequiredInputs"] = "обов'язкові входи e2e не налаштовує",
         ["Uom.EditCatalog"] = "каталог одиниць e2e не редагує",
-        ["System.RunJob"] = "небезпечне (IsDangerous); e2e не запускає фонові задачі вручну",
+
+        // ✎ 24.11: System.RunJob більше не виняток — consistencyChecks.spec запускає перевірку узгодженості кнопкою «Run check now».
     };
 
     [Fact]

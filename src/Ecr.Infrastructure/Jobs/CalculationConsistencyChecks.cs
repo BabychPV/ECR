@@ -639,14 +639,15 @@ internal sealed class CalculationConsistencyChecks(EcrDbContext db, DateTime utc
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        var cells = await (
-                from c in db.CellValues.AsNoTracking()
-                join r in db.TableRows.AsNoTracking()
-                    on new { c.PeriodKeyValue, Id = c.TableRowId } equals new { r.PeriodKeyValue, r.Id }
-                where c.PeriodKeyValue == period && r.PeriodKeyValue == period
-                      && instanceIds.Contains(r.TableInstanceId) && !r.IsDeleted
-                      && neededColumns.Contains(c.ColumnDefId) && !c.IsEmpty
-                select new { c.TableRowId, c.ColumnDefId, c.ValueRegistryEntryId })
+        // ⛔ S-19 (HeavyJobCommandTests): кожен запит до партиційованої таблиці несе рівність по PeriodKey на ній самій —
+        // рядки прив'язаних екземплярів підзапитом, а не JOIN-ом (сторож бачить таблицю у FROM з власним предикатом).
+        var boundRows = db.TableRows.AsNoTracking()
+            .Where(r => r.PeriodKeyValue == period && instanceIds.Contains(r.TableInstanceId) && !r.IsDeleted)
+            .Select(r => r.Id);
+        var cells = await db.CellValues.AsNoTracking()
+            .Where(c => c.PeriodKeyValue == period && boundRows.Contains(c.TableRowId)
+                        && neededColumns.Contains(c.ColumnDefId) && !c.IsEmpty)
+            .Select(c => new { c.TableRowId, c.ColumnDefId, c.ValueRegistryEntryId })
             .OrderBy(c => c.TableRowId).ThenBy(c => c.ColumnDefId)
             .Take(MaxRowsPerDocumentPeriod)
             .ToListAsync(ct)
