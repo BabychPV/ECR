@@ -1810,7 +1810,7 @@ public sealed partial class PatchCellsHandler(
 
         var baseline = await ReadRequiredInputBaselineAsync(addresses, ownerPlan, ct).ConfigureAwait(false);
 
-        return EvaluateRequiredInputs(context, changes, applicable, baseline, origin);
+        return EvaluateRequiredInputs(context, changes, applicable, baseline, origin, currentUser.Language);
     }
 
     /// <summary>
@@ -1851,7 +1851,8 @@ public sealed partial class PatchCellsHandler(
         CellChangeLists changes,
         IReadOnlyList<ApplicableMethodology> applicable,
         IReadOnlyDictionary<CellAddress, CellValueData> baseline,
-        string? origin)
+        string? origin,
+        string? language)
     {
         // ⛔ F1-01 (аудит 9): вимога методології — вимога до ЛЮДИНИ, яка зберігає рядок.
         // Інтеграція ручних входів не заповнює й не заповнить; блок на її батчі
@@ -1893,10 +1894,24 @@ public sealed partial class PatchCellsHandler(
             }
 
             var rowKey = changes.RowKeyById.GetValueOrDefault(rowId, string.Empty);
+
+            // ✎ 25.11: вимога заповнена і тоді, коли запису комірки немає, а читання підставить дефолт (C-5, B175) —
+            // як у сітці й формулах. Явна порожнеча (запис IsEmpty чи стирання в цьому батчі) дефолту не має.
+            bool IsFilled(int columnId)
+                => ValueOf(columnId) is not null
+                   || (!(deletedByRow.TryGetValue(rowId, out var cleared) && cleared.Contains(columnId))
+                       && !(patchByRow.TryGetValue(rowId, out var written) && written.ContainsKey(columnId))
+                       && !baseline.ContainsKey(new CellAddress(context.PeriodKey, rowId, columnId))
+                       && Recalculation.ColumnDefaultValues.HasEffectiveDefault(context.Table, rowKey, columnId));
             var matchValues = neededColumnIds.ToDictionary(
                 columnId => columnId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ValueOf,
                 StringComparer.Ordinal);
+
+            // ✎ 25.11 (живий прохід, банер «2 required column(s)» із 10 рядками й повторами): вимоги рядка зводяться
+            // ПО КОЛОНЦІ — одне повідомлення на (рядок, колонку) з переліком методологій, а не на кожну методологію;
+            // повтор тієї самої методології (дві прив'язки, обидві гілки) — один код.
+            var missing = new RequiredInputCollector();
 
             foreach (var applied in applicable)
             {
@@ -1920,7 +1935,7 @@ public sealed partial class PatchCellsHandler(
                     // чому правило не збіглося; без цієї гілки його вимога не спрацьовувала ніколи.
                     foreach (var required in MissingRuleKeyInputs(applied, matchValues))
                     {
-                        messages.Add(RequiredInputMessage(context, applied, required, rowKey, humanBatch));
+                        missing.Add(applied, required, humanBatch);
                     }
 
                     continue;
@@ -1934,51 +1949,109 @@ public sealed partial class PatchCellsHandler(
                     // (читач міг не мати права їх бачити); перенос проєкту на таку версію відмовляється заздалегідь.
                     if (!required.IsMapped)
                     {
-                        messages.Add(new Validation.ValidationMessage(
-                            ValidationSeverity.Warning,
-                            "ECR-CALC-0437",
-                            "Обов'язкову колонку методології не знайдено в цій версії шаблону; перевірку пропущено.",
-                            context.Instance.TableDefId,
-                            rowKey,
-                            ColumnCode: null,
-                            BlocksSave: false));
+                        missing.Unmapped = true;
                         continue;
                     }
 
-                    if (ValueOf(required.ColumnDefId) is not null)
+                    if (IsFilled(required.ColumnDefId))
                     {
                         continue;
                     }
 
-                    messages.Add(RequiredInputMessage(context, applied, required, rowKey, humanBatch));
+                    missing.Add(applied, required, humanBatch);
                 }
             }
+
+            messages.AddRange(missing.Messages(context, rowKey, language));
         }
 
         return messages;
     }
 
-    /// <summary>Повідомлення про незаповнений обов'язковий вхід — одне на обидві гілки (правило збіглося чи ні).</summary>
-    private static Validation.ValidationMessage RequiredInputMessage(
-        RequestContext context, ApplicableMethodology applied, LocalizedRequiredInput required, string rowKey, bool humanBatch)
+    /// <summary>
+    /// ✎ 25.11: незаповнені обов'язкові входи ОДНОГО рядка, зведені по колонці (порядок — перша поява).
+    /// </summary>
+    /// <remarks>
+    /// Текст — мовою читача (<c>validation.methodology.requiredInput*</c>, <see cref="Validation.ValidationMessageTemplates"/>):
+    /// до фіксу він був українським літералом із кодом колонки за будь-якої мови інтерфейсу, а власна підказка
+    /// методології бралась лише англійською. Колонка — заголовком мовою читача, як у зрізі
+    /// (<c>GetTableSliceHandler</c>: <c>HeaderL10n.Get(language) ?? Code</c>).
+    /// </remarks>
+    private sealed class RequiredInputCollector
     {
-        var columnCode = context.Snapshot.ColumnsById.TryGetValue(required.ColumnDefId, out var column)
-            ? column.Code
-            : required.ColumnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        private readonly List<(LocalizedRequiredInput Required, List<string> Codes, bool Blocks)> columns = [];
 
-        var defaultHint =
-            $"Колонка «{columnCode}» обов'язкова для методології «{applied.MethodologyCode}».";
+        /// <summary>Вимога з колонкою поза версією шаблону (C1) — одне попередження на рядок.</summary>
+        public bool Unmapped { get; set; }
 
-        var blocks = required.Severity == RequiredInputSeverity.Block && humanBatch;
+        public void Add(ApplicableMethodology applied, LocalizedRequiredInput required, bool humanBatch)
+        {
+            var blocks = required.Severity == RequiredInputSeverity.Block && humanBatch;
+            var index = columns.FindIndex(c => c.Required.ColumnDefId == required.ColumnDefId);
+            if (index < 0)
+            {
+                columns.Add((required, [applied.MethodologyCode], blocks));
+                return;
+            }
 
-        return new Validation.ValidationMessage(
-            blocks ? ValidationSeverity.Error : ValidationSeverity.Warning,
-            "ECR-CALC-0437",
-            required.HintL10n?.Get("en") ?? defaultHint,
-            context.Instance.TableDefId,
-            rowKey,
-            columnCode,
-            BlocksSave: blocks);
+            var entry = columns[index];
+            if (!entry.Codes.Contains(applied.MethodologyCode, StringComparer.Ordinal))
+            {
+                entry.Codes.Add(applied.MethodologyCode);
+            }
+
+            // Будь-яка методологія з Block блокує колонку; підказка — першої, що її має.
+            columns[index] = (entry.Required.HintL10n is null && required.HintL10n is not null ? required : entry.Required,
+                entry.Codes, entry.Blocks || blocks);
+        }
+
+        public IEnumerable<Validation.ValidationMessage> Messages(RequestContext context, string rowKey, string? language)
+        {
+            if (Unmapped)
+            {
+                yield return new Validation.ValidationMessage(
+                    ValidationSeverity.Warning,
+                    "ECR-CALC-0437",
+                    Validation.ValidationMessageTemplates.Render(
+                        Validation.ValidationMessageTemplates.RequiredInputUnmapped, language, EmptyParams),
+                    context.Instance.TableDefId,
+                    rowKey,
+                    ColumnCode: null,
+                    BlocksSave: false,
+                    MessageKey: Validation.ValidationMessageTemplates.RequiredInputUnmapped,
+                    Params: EmptyParams);
+            }
+
+            foreach (var (required, codes, blocks) in columns)
+            {
+                var column = context.Snapshot.ColumnsById.GetValueOrDefault(required.ColumnDefId);
+                var columnCode = column?.Code
+                                 ?? required.ColumnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["column"] = column?.HeaderL10n?.Get(language ?? "en") ?? columnCode,
+                    ["methodologies"] = string.Join(", ", codes),
+                };
+                var key = codes.Count == 1
+                    ? Validation.ValidationMessageTemplates.RequiredInputOne
+                    : Validation.ValidationMessageTemplates.RequiredInputMany;
+                var hint = required.HintL10n?.Get(language ?? "en");
+
+                yield return new Validation.ValidationMessage(
+                    blocks ? ValidationSeverity.Error : ValidationSeverity.Warning,
+                    "ECR-CALC-0437",
+                    hint ?? Validation.ValidationMessageTemplates.Render(key, language, parameters),
+                    context.Instance.TableDefId,
+                    rowKey,
+                    columnCode,
+                    BlocksSave: blocks,
+                    MessageKey: hint is null ? key : null,
+                    Params: hint is null ? parameters : null,
+                    Methodologies: codes);
+            }
+        }
+
+        private static readonly IReadOnlyDictionary<string, string> EmptyParams = new Dictionary<string, string>();
     }
 
     /// <summary>
@@ -2297,7 +2370,7 @@ public sealed partial class PatchCellsHandler(
                     ["rowCount"] = affectedRows.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["cells"] = blockingRequiredInputs
                         .Where(visible)
-                        .Select(m => new { m.RowKey, m.ColumnCode, m.RuleCode, m.Message })
+                        .Select(m => new { m.RowKey, m.ColumnCode, m.RuleCode, m.Message, m.Methodologies })
                         .ToList(),
                 });
         }
@@ -3868,7 +3941,7 @@ public sealed partial class PatchCellsHandler(
             // інакше про них ніхто б не дізнався, і сенс рівнів зник би.
             Validation: messages
                 .Select(m => new ValidationMessageDto(
-                    m.Severity.ToString(), m.RuleCode, m.Message, m.RowKey, m.ColumnCode))
+                    m.Severity.ToString(), m.RuleCode, m.Message, m.RowKey, m.ColumnCode, m.Methodologies))
                 .ToList(),
 
             // ⚠ `BE-05`: передається ЯК Є, без перетворення порожнього рядка на

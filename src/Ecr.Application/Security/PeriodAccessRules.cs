@@ -66,9 +66,26 @@ public readonly record struct SourceValidity(DateOnly? ValidFrom, DateOnly? Vali
 /// <param name="Reason">Причина заборони; <see cref="EditDenyReason.None"/> — дозволено.</param>
 /// <param name="Detail">Пояснення для користувача.</param>
 /// <param name="Behavior">Що робити поза вікном (<c>ФВ-2.16</c>).</param>
+/// <param name="DetailKey">
+/// ✎ 25.11 («чому помилки українською»): ключ пояснення в каталозі (<see cref="Validation.ValidationMessageTemplates"/>);
+/// <see cref="DetailIn"/> збирає текст мовою читача. <see cref="Detail"/> лишається для журналів.
+/// </param>
+/// <param name="DetailParams">Підстановки ключа.</param>
 public readonly record struct PeriodRuleOutcome(
-    EditDenyReason Reason, string? Detail, OutOfWindowBehavior Behavior)
+    EditDenyReason Reason,
+    string? Detail,
+    OutOfWindowBehavior Behavior,
+    string? DetailKey = null,
+    IReadOnlyDictionary<string, string>? DetailParams = null)
 {
+    /// <summary>Пояснення мовою читача; без ключа — <see cref="Detail"/>.</summary>
+    /// <param name="language">Мова читача (<c>en</c>/<c>ru</c>/<c>kz</c>).</param>
+    public string? DetailIn(string? language)
+        => DetailKey is { } key
+            ? Validation.ValidationMessageTemplates.Render(
+                key, language, DetailParams ?? new Dictionary<string, string>())
+            : Detail;
+
     /// <summary>Правила не заперечують.</summary>
     public static PeriodRuleOutcome Allowed { get; }
         = new(EditDenyReason.None, null, OutOfWindowBehavior.ReadOnly);
@@ -186,17 +203,21 @@ public static class PeriodAccessRules
         {
             // Завжди лише читання: жодних умов, саме в цьому сенс.
             PeriodAccessRuleKind.AlwaysReadOnly => Deny(
-                rule, EditDenyReason.BusinessRule, "Правило доступу: лише читання."),
+                rule, EditDenyReason.BusinessRule, "Правило доступу: лише читання.",
+                Validation.ValidationMessageTemplates.AccessReadOnly),
 
             // Рядки-заголовки. Вид рядка вже звірений у `Targets`, тому сюди
             // доходять лише ті, що під правило підпадають.
             PeriodAccessRuleKind.HeaderRows => Deny(
-                rule, EditDenyReason.RowReadOnly, "Рядок-заголовок не заповнюється."),
+                rule, EditDenyReason.RowReadOnly, "Рядок-заголовок не заповнюється.",
+                Validation.ValidationMessageTemplates.AccessHeaderRow),
 
             PeriodAccessRuleKind.EditablePeriodOnly => rule.AppliesTo(facts.PeriodSequence)
                 ? PeriodRuleOutcome.Allowed
                 : Deny(rule, EditDenyReason.OutOfAccessWindow,
-                       $"Період {facts.PeriodSequence} поза вікном введення."),
+                       $"Період {facts.PeriodSequence} поза вікном введення.",
+                       Validation.ValidationMessageTemplates.AccessPeriodOutsideWindow,
+                       ("period", Num(facts.PeriodSequence))),
 
             PeriodAccessRuleKind.RelativeWindow => RelativeWindow(rule, facts),
             PeriodAccessRuleKind.SourceWindow => SourceWindow(rule, facts),
@@ -224,7 +245,9 @@ public static class PeriodAccessRules
         return distance <= offset
             ? PeriodRuleOutcome.Allowed
             : Deny(rule, EditDenyReason.OutOfAccessWindow,
-                   $"Період {facts.PeriodSequence} далі, ніж {offset} від поточного {current}.");
+                   $"Період {facts.PeriodSequence} далі, ніж {offset} від поточного {current}.",
+                   Validation.ValidationMessageTemplates.AccessPeriodTooFar,
+                   ("period", Num(facts.PeriodSequence)), ("offset", Num(offset)), ("current", Num(current)));
     }
 
     /// <summary>
@@ -275,7 +298,11 @@ public static class PeriodAccessRules
             rule,
             EditDenyReason.OutsidePermitWindow,
             $"Місяць {month:00}.{facts.PeriodYear} поза вікном дії "
-            + $"({Show(window.ValidFrom)} — {Show(window.Window.LastValidDay)}).");
+            + $"({Show(window.ValidFrom)} — {Show(window.Window.LastValidDay)}).",
+            Validation.ValidationMessageTemplates.AccessMonthOutsideValidity,
+            ("month", string.Create(CultureInfo.InvariantCulture, $"{month:00}.{facts.PeriodYear}")),
+            ("from", Show(window.ValidFrom)),
+            ("to", Show(window.Window.LastValidDay)));
     }
 
     /// <summary>Довільна умова над значеннями рядка.</summary>
@@ -298,15 +325,20 @@ public static class PeriodAccessRules
 
         // Умова описує ЗАБОРОНУ: «якщо виконується — не можна».
         return holds
-            ? Deny(rule, EditDenyReason.BusinessRule, $"Правило доступу: {expression}.")
+            ? Deny(rule, EditDenyReason.BusinessRule, $"Правило доступу: {expression}.",
+                Validation.ValidationMessageTemplates.AccessExpression, ("expression", expression))
             : PeriodRuleOutcome.Allowed;
     }
+
+    private static string Num(int value) => value.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>Межа вікна для повідомлення; <c>…</c> — межі немає.</summary>
     private static string Show(DateOnly? date)
         => date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "…";
 
     private static PeriodRuleOutcome Deny(
-        PeriodAccessRuleDef rule, EditDenyReason reason, string detail)
-        => new(reason, detail, rule.OnOutOfWindow);
+        PeriodAccessRuleDef rule, EditDenyReason reason, string detail, string detailKey,
+        params (string Name, string Value)[] parameters)
+        => new(reason, detail, rule.OnOutOfWindow, detailKey,
+            parameters.ToDictionary(p => p.Name, p => p.Value, StringComparer.Ordinal));
 }

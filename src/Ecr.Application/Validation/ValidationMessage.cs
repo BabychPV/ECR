@@ -28,6 +28,11 @@ namespace Ecr.Application.Validation;
 /// назовні НЕ віддаються (DTO несе лише текст), а повідомлення, приховане за <c>HiddenValidationIssues.CanSee</c>,
 /// до локалізації не доходить.
 /// </param>
+/// <param name="Methodologies">
+/// ✎ 25.11 (банер обов'язкових колонок): коди методологій, яким потрібна колонка <paramref name="ColumnCode"/>
+/// рядка (<c>ECR-CALC-0437</c>) — одне повідомлення на (рядок, колонку), а не на кожну методологію. Клієнт зводить
+/// їх по колонці між рядками й будує текст мовою інтерфейсу. <c>null</c> — для решти повідомлень.
+/// </param>
 public sealed record ValidationMessage(
     ValidationSeverity Severity,
     string RuleCode,
@@ -39,4 +44,5 @@ public sealed record ValidationMessage(
     int? SourceTableDefId = null,
     string? SourceColumnCode = null,
     string? MessageKey = null,
-    IReadOnlyDictionary<string, string>? Params = null);
+    IReadOnlyDictionary<string, string>? Params = null,
+    IReadOnlyList<string>? Methodologies = null);
