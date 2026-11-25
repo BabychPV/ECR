@@ -558,6 +558,7 @@ public static class DependencyInjection
         services.AddScoped<Integration.ListSourceEntitiesHandler>();
         services.AddScoped<Integration.CollectFromSourceHandler>();
         services.AddScoped<GasComposition.GasCompositionService>(); // D-NEW: сторінка «Склад газу» (власник — ECR)
+        services.AddScoped<Registries.FlaringRegistryLock>(); // DESIGN-sg-flaring §5.7 (C4): замкнені місяці довідників факелів
         services.AddScoped<Integration.GetJobStatusHandler>();
         services.AddScoped<Integration.ListJobsHandler>();
         services.AddScoped<Integration.GetJobsSummaryHandler>();

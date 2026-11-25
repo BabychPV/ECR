@@ -29,7 +29,8 @@ public sealed class UpsertRegistryEntryHandler(
     IUnitOfWork? uow = null,
     Rules.IRegistryRuleEngine? rules = null,
     IRegistryHierarchyStore? hierarchy = null,
-    Nae.NaeTreeNodePolicy? nae = null)
+    Nae.NaeTreeNodePolicy? nae = null,
+    FlaringRegistryLock? flaring = null)
 {
     // ⚠ `nae` (типи вузлів НАЕ, людина 03.11) — правила дерева НАЕ: назва en, похідні RegionCode/AreaCode, унікальність номера
     // в області. Контейнер підставляє його завжди; без нього (ручні тести) дерево НАЕ пишеться як звичайний довідник.
@@ -122,6 +123,15 @@ public sealed class UpsertRegistryEntryHandler(
 
         // ⛔ D-211: записи External-довідника — лише синком з AF. Гард → запис → правила.
         ExternalRegistryGuard.EnsureManualEditAllowed(definition);
+
+        // ✎ DESIGN-sg-flaring §5.7 (C4): довідник факелів — GasComposition.Edit і замкнені періоди вікна запису. Upsert вікна
+        // не змінює: наявний запис — зміна на всьому його вікні, новий — вставка без меж (D5: новий код дозволено).
+        async Task<IReadOnlyCollection<FlaringRegistryEdit>> FlaringEditsAsync()
+            => dto.Id is { } existingId && await registries.FindEntryAsync(existingId, ct).ConfigureAwait(false) is { } existing
+                ? [FlaringRegistryEdit.Change(existing.Window)]
+                : [FlaringRegistryEdit.Insert(null)];
+
+        await ExternalRegistryGuard.EnsureFlaringEditAllowedAsync(definition, FlaringEditsAsync, flaring, ct).ConfigureAwait(false);
 
         // ⛔ L1-13: батько з тіла запиту — живий запис ЦЬОГО довідника (ієрархія). Раніше не звірявся: запис
         // чужого довідника ставав батьком, неіснуючий id — 500 на зовнішньому ключі (оракул існування id).

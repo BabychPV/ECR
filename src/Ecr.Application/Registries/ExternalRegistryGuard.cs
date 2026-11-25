@@ -45,6 +45,44 @@ public static class ExternalRegistryGuard
            || string.Equals(registryCode, Flert.FlertCompositionSchema.CaseRegistry, StringComparison.OrdinalIgnoreCase)
            || string.Equals(registryCode, Flert.FlertCompositionSchema.CompositionRegistry, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// ✎ DESIGN-sg-flaring §5.7 (C4): запобіжник довідників факелів (<see cref="FlaringRegistryLock.RegistryCodes"/>) —
+    /// право <c>GasComposition.Edit</c> і замкнені періоди старого/нового вікна кожного зачепленого запису. Для решти
+    /// довідників — нічого (і зміни навіть не обчислюються).
+    /// </summary>
+    /// <param name="definition">Довідник, записи якого змінює запит.</param>
+    /// <param name="edits">Як дістати зміни записів (викликається лише для довідника факелів).</param>
+    /// <param name="flaring">Запобіжник із контейнера.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⛔ Виклик — у КОЖНОМУ загальному писачі записів, що кличе <see cref="EnsureManualEditAllowed"/> (upsert, пакет, CSV,
+    /// видалення, вікно чинності, перенесення, виведення/відновлення, очищення) — сторож
+    /// <c>FlaringRegistryLockGuardTests</c> (Architecture, D6). Обробник, зібраний руками без запобіжника, для довідника
+    /// факелів відмовляє (fail closed), а не пропускає.
+    /// </remarks>
+    public static async Task EnsureFlaringEditAllowedAsync(
+        RegistryDef definition,
+        Func<Task<IReadOnlyCollection<FlaringRegistryEdit>>> edits,
+        FlaringRegistryLock? flaring,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(edits);
+
+        if (!FlaringRegistryLock.Applies(definition.Code))
+        {
+            return;
+        }
+
+        if (flaring is null)
+        {
+            throw new InvalidOperationException(
+                $"Довідник «{definition.Code}» під запобіжником факелів, а обробник зібрано без FlaringRegistryLock.");
+        }
+
+        await flaring.EnsureEditAllowedAsync(definition, await edits().ConfigureAwait(false), ct).ConfigureAwait(false);
+    }
+
     /// <summary>Відмовляє, якщо записи довідника синхронізуються з AF.</summary>
     /// <param name="definition">Довідник, записи якого змінює запит.</param>
     /// <exception cref="BusinessRuleException"><c>ECR-REG-0409</c>, <see cref="MessageKey"/>.</exception>

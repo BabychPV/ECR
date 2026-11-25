@@ -184,10 +184,29 @@ public sealed class GasCompositionStore(EcrDbContext db) : IGasCompositionStore
     /// якої читає довідник (<c>cfg.RegistryUse</c>, <c>SourceKind = 1</c>). Замкнений — період <c>Closed</c> або аркуш
     /// оригіналу (<c>SheetCopyId = null</c>) у стані <c>Approved</c> того самого документа й періоду.
     /// </remarks>
-    public async Task<IReadOnlyList<GasLockedPeriod>> ListLockedPeriodsAsync(GasRegistryIds ids, CancellationToken ct)
+    public Task<IReadOnlyList<GasLockedPeriod>> ListLockedPeriodsAsync(GasRegistryIds ids, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(ids);
-        var registryIds = ids.All.ToList();
+        return LockedPeriodsAsync([.. ids.All], ct);
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<GasLockedPeriod>> ListLockedPeriodsAsync(IReadOnlyCollection<int> registryDefIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(registryDefIds);
+        return LockedPeriodsAsync([.. registryDefIds.Distinct()], ct);
+    }
+
+    /// <summary>
+    /// Замкнені періоди за довідниками. ✎ D4 (REVIEW-sg-flaring): вікно періоду — з <c>doc.Period.PeriodStart/PeriodEnd</c>,
+    /// а не з арифметики ключа (квартальний і довільний ключі не <c>yyyyMM</c>/<c>yyyy00</c>).
+    /// </summary>
+    private async Task<IReadOnlyList<GasLockedPeriod>> LockedPeriodsAsync(List<int> registryIds, CancellationToken ct)
+    {
+        if (registryIds.Count == 0)
+        {
+            return [];
+        }
 
         var used =
             from use in db.RegistryUses.AsNoTracking()
@@ -202,6 +221,8 @@ public sealed class GasCompositionStore(EcrDbContext db) : IGasCompositionStore
             {
                 result.DocumentId,
                 result.PeriodKey,
+                period.PeriodStart,
+                period.PeriodEnd,
                 Closed = period.State == PeriodState.Closed,
                 Approved = db.ApprovalStates.Any(s => s.DocumentId == result.DocumentId && s.PeriodKey == result.PeriodKey
                                                        && s.SheetCopyId == null && s.Status == DocumentStatus.Approved),
@@ -209,15 +230,20 @@ public sealed class GasCompositionStore(EcrDbContext db) : IGasCompositionStore
 
         var rows = await used
             .Where(r => r.Closed || r.Approved)
-            .Select(r => new { r.PeriodKey, r.Closed })
+            .Select(r => new { r.PeriodKey, r.PeriodStart, r.PeriodEnd, r.Closed })
             .Distinct()
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
         return [.. rows
-            .GroupBy(r => r.PeriodKey)
-            .Select(g => new GasLockedPeriod(g.Key, g.Any(r => r.Closed) ? GasLockedPeriod.Closed : GasLockedPeriod.Approved))
-            .OrderBy(p => p.PeriodKey)];
+            .GroupBy(r => (r.PeriodKey, r.PeriodStart, r.PeriodEnd))
+            .Select(g => new GasLockedPeriod(
+                g.Key.PeriodKey,
+                g.Any(r => r.Closed) ? GasLockedPeriod.Closed : GasLockedPeriod.Approved,
+                g.Key.PeriodStart,
+                g.Key.PeriodEnd))
+            .OrderBy(p => p.PeriodKey)
+            .ThenBy(p => p.Start)];
     }
 
     /// <inheritdoc />

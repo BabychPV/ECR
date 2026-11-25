@@ -42,7 +42,11 @@ public sealed record GasTimelinePlan(ValidityWindow? NewWindow, IReadOnlyList<Ga
 /// <summary>Період, що замкнув склад газу: його результат читав склад, а період закритий або аркуш затверджений.</summary>
 /// <param name="PeriodKey">Ключ періоду (<c>yyyyMM</c>; <c>yyyy00</c> — рік).</param>
 /// <param name="Reason"><c>closed</c> або <c>approved</c>.</param>
-public sealed record GasLockedPeriod(int PeriodKey, string Reason)
+/// <param name="PeriodStart">
+/// ✎ D4 (REVIEW-sg-flaring): перший день періоду з <c>doc.Period.PeriodStart</c>; <c>null</c> — рахувати з ключа (як досі).
+/// </param>
+/// <param name="PeriodEnd">✎ D4: останній день періоду з <c>doc.Period.PeriodEnd</c> (включно); <c>null</c> — з ключа.</param>
+public sealed record GasLockedPeriod(int PeriodKey, string Reason, DateOnly? PeriodStart = null, DateOnly? PeriodEnd = null)
 {
     /// <summary>Причина: період закритий.</summary>
     public const string Closed = "closed";
@@ -50,11 +54,17 @@ public sealed record GasLockedPeriod(int PeriodKey, string Reason)
     /// <summary>Причина: аркуш затверджений.</summary>
     public const string Approved = "approved";
 
-    /// <summary>Перший день періоду: місяць <c>1..12</c> — цей місяць, інакше — увесь рік (обережно).</summary>
-    public DateOnly Start => Month is { } m ? new DateOnly(PeriodKey / 100, m, 1) : new DateOnly(PeriodKey / 100, 1, 1);
+    /// <summary>
+    /// Перший день періоду: з <see cref="PeriodStart"/>, якщо він відомий (квартал, довільний період — ключ не <c>yyyyMM</c>);
+    /// інакше місяць <c>1..12</c> — цей місяць, решта — увесь рік (обережно).
+    /// </summary>
+    public DateOnly Start => PeriodStart
+        ?? (Month is { } m ? new DateOnly(PeriodKey / 100, m, 1) : new DateOnly(PeriodKey / 100, 1, 1));
 
     /// <summary>Перший день після періоду.</summary>
-    public DateOnly EndExclusive => Month is not null ? Start.AddMonths(1) : Start.AddYears(1);
+    public DateOnly EndExclusive => PeriodEnd is { } end
+        ? end.AddDays(1)
+        : Month is not null ? Start.AddMonths(1) : Start.AddYears(1);
 
     private int? Month => PeriodKey % 100 is var m and >= 1 and <= 12 ? m : null;
 
