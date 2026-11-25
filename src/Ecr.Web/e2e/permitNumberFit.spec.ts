@@ -150,8 +150,9 @@ test.describe('Permit numbers fit', () => {
     // mg/nm3 є значення ≥ 10 000 — розділювач тисяч у ВСІХ його значеннях, скорочених і ні; повне — у підказці.
     expect(report.filter((cell) => /e/i.test(cell.text)), JSON.stringify(report)).toEqual([]);
     const texts = report.map((cell) => cell.text);
-    expect(texts).toEqual(expect.arrayContaining(['0.00000087', '0.0000176', '9,363.267', '75,435.96', '162,121.138']));
+    expect(texts).toEqual(expect.arrayContaining(['0.00000087', '0.0000176', '9,363.267', '75,435.96', '162,121.1']));
     expect(report.find((cell) => cell.text === '75,435.96')?.title).toBe('75,435.9612345');
+    expect(report.find((cell) => cell.text === '162,121.1')?.title).toBe('162,121.138');
     await page.screenshot({ path: test.info().outputPath('permit-number-fit-1440.png') });
   });
 });
