@@ -79,11 +79,12 @@ public sealed record GasRowRecord(long Id, string Code, string Component, decima
 /// <summary>Компонент довідника <c>COMPONENT</c>.</summary>
 /// <param name="Id">Запис.</param>
 /// <param name="Code">Код.</param>
-/// <param name="Name">Назва.</param>
+/// <param name="Names">Назва запису за мовами, без значень, рівних коду (такі — не назва, а заглушка імпорту).</param>
 /// <param name="Formula">Хімічна формула.</param>
 /// <param name="Mw">Молярна маса, г/моль.</param>
 /// <param name="Ordinal">Порядок.</param>
-public sealed record GasComponentRecord(long Id, string Code, string Name, string? Formula, decimal? Mw, int Ordinal);
+public sealed record GasComponentRecord(
+    long Id, string Code, IReadOnlyDictionary<string, string> Names, string? Formula, decimal? Mw, int Ordinal);
 
 /// <summary>Читання складу газу для сторінки «Склад газу» (D-NEW).</summary>
 public interface IGasCompositionStore
