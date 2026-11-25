@@ -52,7 +52,7 @@ describe('DecimalInput', () => {
     const spy = vi.fn();
     render(<Harness initial="0.0000000000004013000" spy={spy} />);
     const input = screen.getByRole<HTMLInputElement>('textbox', { name: 'T, °C' });
-    expect(input.value).toBe('4.013E-13');
+    expect(input.value).toBe('0.0000000000004013');
 
     fireEvent.focus(input);
     expect(input.value).toBe('0.0000000000004013000');
@@ -60,7 +60,31 @@ describe('DecimalInput', () => {
 
     expect(spy).not.toHaveBeenCalled();
     expect(screen.getByTestId('stored').textContent).toBe('0.0000000000004013000');
-    expect(input.value).toBe('4.013E-13');
+    expect(input.value).toBe('0.0000000000004013');
+  });
+
+  // AC-2 (картка number-format-consistent). ⛔ Доказ: прибрати розгортання на blur → «1e-9» червоний; повернути
+  // науковий запис/групування в полі → «без експоненти й розділювача» червоний.
+  it('AC-2: без фокуса — без експоненти й без розділювача тисяч', () => {
+    render(<Harness initial="75435.9612345" spy={vi.fn()} />);
+    const input = screen.getByRole<HTMLInputElement>('textbox', { name: 'T, °C' });
+    expect(input.value).toBe('75435.96');
+    expect(input.title).toBe('75435.9612345');
+    cleanup();
+    render(<Harness initial="0.000000001397" spy={vi.fn()} />);
+    expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'T, °C' }).value).toBe('0.000000001397');
+  });
+
+  it('AC-2: набране «1e-9» приймається — на blur те саме значення звичайним десятковим', () => {
+    const spy = vi.fn();
+    render(<Harness initial="" spy={spy} />);
+    const input = screen.getByRole<HTMLInputElement>('textbox', { name: 'T, °C' });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '1e-9' } });
+    fireEvent.blur(input);
+    expect(spy).toHaveBeenLastCalledWith('0.000000001');
+    expect(screen.getByTestId('stored').textContent).toBe('0.000000001');
+    expect(input.value).toBe('0.000000001');
   });
 
   it('на фокусі новий текст уже в полі й виділений цілком — набране замінює його, а не зливається', () => {

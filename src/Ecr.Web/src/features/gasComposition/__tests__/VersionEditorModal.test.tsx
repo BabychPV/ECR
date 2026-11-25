@@ -154,6 +154,36 @@ describe('D-NEW: редактор версії складу газу', () => {
     expect(calls[0]).toMatchObject({ temperatureC: '21', validFrom: '2022-01-01' });
   });
 
+  // AC-2 картки number-format-consistent. ⛔ Доказ: `parse` без `expandExponentInput` і поле без розгортання на blur →
+  // «1e-9» — помилка «не число», збереження недоступне; тест червоний.
+  it('AC-2: введене «1e-9» приймається і йде на сервер тим самим значенням звичайним десятковим', async () => {
+    const calls: unknown[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+        calls.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ stream: null, queuedYears: [], failedYears: [] }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+    const exact = version(8, '2022-01-01', null, [['Methane', '100']]);
+    const onSaved = show({ kind: 'edit', caseName: 'SOR', version: exact, previous: undefined, readOnly: false });
+
+    // Без blur — розбір уже приймає експоненту (збереження Enter-ом не чекає blur).
+    fireEvent.change(input(`${Catalog['gasComposition.component.H2S']!} (H2S)`), { target: { value: '1e-9' } });
+    expect(screen.queryByText(Catalog['gasComposition.editor.invalidNumber']!)).toBeNull();
+    fireEvent.blur(input(`${Catalog['gasComposition.component.H2S']!} (H2S)`));
+    expect(input(`${Catalog['gasComposition.component.H2S']!} (H2S)`).value).toBe('0.000000001');
+    fireEvent.click(saveButton());
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect((calls[0] as { components: unknown[] }).components).toEqual([
+      { code: 'Methane', molPct: '100' },
+      { code: 'H2S', molPct: '0.000000001' },
+    ]);
+  });
+
   it('замкнена версія — лише перегляд: поля незмінні, кнопки збереження немає', () => {
     const locked = { ...version(3, '2025-01-01', null, [['Methane', '100']]), locks: [{ period: '2025-03', reason: 'approved' }] };
     show({ kind: 'edit', caseName: 'SOR', version: locked, previous: undefined, readOnly: true });

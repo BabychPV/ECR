@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Checkbox, Group, Modal, Select, SimpleGrid, Stack
 import { useMediaQuery } from '@mantine/hooks';
 import { useMutation } from '@tanstack/react-query';
 import { normalizeDecimal } from '@/shared/format';
+import { expandExponentInput } from '@/shared/format/number';
 import { formatMonthName } from '@/shared/format/period';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { t } from '@/shared/i18n';
@@ -81,11 +82,12 @@ function asText(value: string | null | undefined): string {
 /**
  * Розбір поля: порожнє — `null`; нечисло — `undefined` (помилка); інакше — нормалізований рядок `decimal` (крапка,
  * без пробілів). ⚠ Рядок, а не `Number`: незмінене значення FLERT `decimal(20,16)` має повернутися на сервер тим самим.
+ * Експонента (`1e-9`) приймається — розгортається зсувом коми в той самий десятковий (картка number-format-consistent).
  */
 function parse(text: string): string | null | undefined {
   const trimmed = text.trim();
   if (trimmed.length === 0) return null;
-  return normalizeDecimal(trimmed) ?? undefined;
+  return normalizeDecimal(expandExponentInput(trimmed)) ?? undefined;
 }
 
 /**
@@ -357,7 +359,8 @@ function Editor({ streamId, target, components, onClose, onSaved }: Props & { re
                     </Table.Td>
                     {previous !== undefined && (
                       <Table.Td ta="end" c="dimmed" w={PreviousWidth}>
-                        <DecimalText value={before} data-testid="gas-previous-value" />
+                        {/* Поруч із полями вводу — те саме правило: без розділювача тисяч. */}
+                        <DecimalText value={before} grouping="never" data-testid="gas-previous-value" />
                       </Table.Td>
                     )}
                   </Table.Tr>

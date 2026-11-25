@@ -1,7 +1,7 @@
 import { useState, type JSX } from 'react';
 import { flushSync } from 'react-dom';
 import { TextInput, type TextInputProps } from '@mantine/core';
-import { formatDecimalReadable, ReadableSignificantDigits } from '@/shared/format/number';
+import { expandExponentInput, formatDecimalReadable, ReadableSignificantDigits } from '@/shared/format/number';
 
 /** Вирівнювання і табличні цифри — одне правило для всіх числових полів. */
 const NumericInputStyles = { input: { textAlign: 'end' as const, fontVariantNumeric: 'tabular-nums' } };
@@ -22,6 +22,10 @@ export interface DecimalInputProps extends Omit<TextInputProps, 'value' | 'onCha
  * округлене.
  *
  * ⚠ Нечислове (помилка вводу) показується як є і на фокусі, і без нього — щоб помилку було видно.
+ *
+ * ✎ 25.11 (картка number-format-consistent): у полі вводу тисячі НЕ групуються ніколи (`'never'`) і експоненти немає;
+ * набране в експоненті (`1e-9`) на blur розгортається в той самий десятковий (`0.000000001`, зсув коми без `Number`) і
+ * йде викликачеві через `onValueChange` — розбір викликача бачить звичайне число.
  */
 export function DecimalInput({
   value,
@@ -36,7 +40,7 @@ export function DecimalInput({
   ...rest
 }: DecimalInputProps): JSX.Element {
   const [focused, setFocused] = useState(false);
-  const readable = formatDecimalReadable(value, significant);
+  const readable = formatDecimalReadable(value, significant, undefined, 'never');
   const shown = focused || readable === null ? value : readable.text;
   const hint = readable?.rounded === true ? readable.exact : undefined;
 
@@ -61,6 +65,8 @@ export function DecimalInput({
       }}
       onBlur={(event) => {
         setFocused(false);
+        const expanded = expandExponentInput(event.currentTarget.value);
+        if (!readOnly && expanded !== event.currentTarget.value) onValueChange(expanded);
         onBlur?.(event);
       }}
       onChange={(event) => onValueChange(event.currentTarget.value)}

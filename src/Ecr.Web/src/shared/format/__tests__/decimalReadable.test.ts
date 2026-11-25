@@ -6,8 +6,8 @@ import { formatDecimalReadable } from '../number';
  * Читабельне подання десяткового (людина 25.11, LIVE: обрізані мол.% і `98.0835451945116000` у редакторі складу газу,
  * обрізані числа в дозволах).
  *
- * ⛔ Доказ: прибрати гілку наукового запису → 3 тести червоні (`num-mutate`, 25.11); пустити через `Number` →
- * «точне значення без втрат» червоний.
+ * ⛔ Доказ: пустити через `Number` → «точне значення без втрат» червоний. Науковий запис скасовано карткою
+ * number-format-consistent (доказ — `numberFormatConsistent.test.ts`).
  */
 
 /** Нерозривні пробіли ICU → звичайний. */
@@ -51,12 +51,13 @@ describe('formatDecimalReadable', () => {
     expect(formatDecimalReadable('0.000012345678')?.text).toBe('0.00001234568');
   });
 
-  it('крихітні значення — науковим записом, точне в exact', () => {
+  // ✎ 25.11 (картка number-format-consistent): науковий запис скасовано — крихітні показуються звичайним дробом.
+  it('крихітні значення — звичайним дробом, точне в exact', () => {
     const tiny = formatDecimalReadable('0.0000000000004013000');
-    expect(tiny?.text).toBe('4.013E-13');
+    expect(tiny?.text).toBe('0.0000000000004013');
     expect(tiny?.exact).toBe('0.0000000000004013');
-    expect(tiny?.rounded).toBe(true);
-    expect(formatDecimalReadable('-0.00000098765')?.text).toBe('-9.877E-7');
+    expect(tiny?.rounded).toBe(false);
+    expect(formatDecimalReadable('-0.00000098765')?.text).toBe('-0.00000098765');
     expect(formatDecimalReadable('0')?.text).toBe('0');
   });
 
@@ -64,7 +65,7 @@ describe('formatDecimalReadable', () => {
     setLanguage('ru');
     expect(formatDecimalReadable('1234.5678901')?.text).toBe('1234,568');
     expect(norm(formatDecimalReadable('12345.678901')?.text)).toBe('12 345,68');
-    expect(formatDecimalReadable('0.0000000000004013')?.text).toBe('4,013E-13');
+    expect(formatDecimalReadable('0.0000000000004013')?.text).toBe('0,0000000000004013');
   });
 
   it('нечислове — null (викликач показує як є)', () => {
@@ -76,7 +77,7 @@ describe('formatDecimalReadable', () => {
   it('число на вході теж приймається', () => {
     expect(formatDecimalReadable(2.5)?.text).toBe('2.5');
     // Найкоротший запис double в експоненті (стовпці дозволів їдуть числами) — не губиться.
-    expect(formatDecimalReadable(2.5e-7)).toEqual({ text: '2.5E-7', exact: '0.00000025', rounded: true });
+    expect(formatDecimalReadable(2.5e-7)).toEqual({ text: '0.00000025', exact: '0.00000025', rounded: false });
     expect(formatDecimalReadable(0.0000325)?.text).toBe('0.0000325');
     expect(formatDecimalReadable(1.5e21)?.text).toBe('1,500,000,000,000,000,000,000');
   });

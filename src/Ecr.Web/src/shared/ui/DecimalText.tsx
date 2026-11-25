@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 import { Text, type TextProps } from '@mantine/core';
-import { formatDecimalReadable, ReadableSignificantDigits } from '@/shared/format/number';
+import { formatDecimalReadable, ReadableSignificantDigits, type DecimalGrouping } from '@/shared/format/number';
 import './DecimalText.css';
 
 export interface DecimalTextProps extends Omit<TextProps, 'children'> {
@@ -10,6 +10,8 @@ export interface DecimalTextProps extends Omit<TextProps, 'children'> {
   readonly empty?: string;
   /** Значущих цифр. */
   readonly significant?: number;
+  /** Групування тисяч: у стовпці — `columnGrouping(...)` стовпця, поруч із полями вводу — `'never'`. */
+  readonly grouping?: DecimalGrouping;
 }
 
 /**
@@ -20,6 +22,7 @@ export function DecimalText({
   value,
   empty = '—',
   significant = ReadableSignificantDigits,
+  grouping = 'min2',
   ...rest
 }: DecimalTextProps): JSX.Element {
   if (value === null || value === undefined || value === '') {
@@ -29,7 +32,7 @@ export function DecimalText({
       </Text>
     );
   }
-  const readable = formatDecimalReadable(value, significant);
+  const readable = formatDecimalReadable(value, significant, undefined, grouping);
   return (
     <Text
       span
