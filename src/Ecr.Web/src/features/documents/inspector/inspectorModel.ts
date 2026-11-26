@@ -161,7 +161,9 @@ export function countIssues(groups: readonly InspectorIssueGroup[]): InspectorIs
  */
 export function addressChip(rowKey: string | null, columnCode: string | null, rowLabel?: string | null): string {
   // ✎ b17 e2e: службовий ключ без номера давав «this row»; підпис рядка з сітки («Row N»/назва) — точніша адреса.
-  const row = rowKey === null ? '—' : isOpaqueRowKey(rowKey) && rowLabel ? rowLabel : rowKeyText(rowKey);
+  // Підпис сітки «row N» (середина речення в історії дозволів) — на початку чипа з великої літери: «Row N».
+  const label = rowLabel ? rowLabel.charAt(0).toLocaleUpperCase() + rowLabel.slice(1) : null;
+  const row = rowKey === null ? '—' : isOpaqueRowKey(rowKey) && label ? label : rowKeyText(rowKey);
 
   return `${row} · ${columnCode ?? '—'}`;
 }

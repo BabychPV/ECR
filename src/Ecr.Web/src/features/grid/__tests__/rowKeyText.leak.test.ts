@@ -65,6 +65,7 @@ describe('row keys in human text', () => {
     expect(addressChip('LTD-A01', 'C1')).toBe('LTD-A01 · C1');
     // Адреса інспектора: службовий ключ → підпис рядка з сітки, кодовий ключ підписом не підміняється.
     expect(addressChip(Guid, 'C1', 'Row 3')).toBe('Row 3 · C1');
+    expect(addressChip(Guid, 'C1', 'row 3')).toBe('Row 3 · C1');
     expect(addressChip('LTD-A01', 'C1', 'Row 3')).toBe('LTD-A01 · C1');
     expect(calcErrorSourceText({ tableCode: 'T', columnCode: 'C', rowKey: Guid } as never)).toBe('T · C');
   });
