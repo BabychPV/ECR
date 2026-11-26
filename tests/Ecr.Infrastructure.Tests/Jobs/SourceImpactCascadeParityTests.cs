@@ -45,7 +45,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 [Trait(TestCategories.Stage, TestCategories.Stage8)]
 [Trait(TestCategories.Category, TestCategories.Integration)]
 [Trait("Finding", "PERF-06")]
-public sealed class SourceImpactCascadeParityTests(SqlServerFixture sql) : DbJobQueueTestsBase(sql)
+public sealed partial class SourceImpactCascadeParityTests(SqlServerFixture sql) : DbJobQueueTestsBase(sql)
 {
     private const int YearKey = (SourceDependencyWorld.Year * 100) + 1;
 
@@ -143,13 +143,19 @@ public sealed class SourceImpactCascadeParityTests(SqlServerFixture sql) : DbJob
         => [.. impact.Consumers.Where(c => c.DocumentId == consumer.DocumentId && c.WillRecalculate).Select(c => c.PeriodKey).Order()];
 
     private async Task<(TestDocument Source, TestDocument Consumer, int SheetDefId, int BindingId)> ArrangeAsync(
-        bool spreadSource, bool crossMonth, bool approveFebruary)
+        bool spreadSource, bool crossMonth, bool approveFebruary,
+        DocumentSourceState state = DocumentSourceState.Any, bool closeApprovedJanuary = false)
     {
         var world = new SourceDependencyWorld(Sql);
         var (registryId, code) = await world.RegistryAsync();
         var source = await YearlySourceAsync();
         var consumer = await world.DocumentAsync([1, 2, 3], code);
-        var bindingId = await world.BindingAsync(source.TemplateId, registryId);
+        var bindingId = await world.BindingAsync(source.TemplateId, registryId, state);
+        await using (var policyDb = Sql.CreateContext())
+        {
+            await policyDb.DocumentSourceBindings.Where(b => b.Id == bindingId)
+                .ExecuteUpdateAsync(b => b.SetProperty(x => x.Policy, DocumentSourcePolicy.Warn));
+        }
 
         await using var db = Sql.CreateContext();
         if (spreadSource)
@@ -164,17 +170,40 @@ public sealed class SourceImpactCascadeParityTests(SqlServerFixture sql) : DbJob
 
         if (crossMonth)
         {
-            // Споживач: колонка 3 = колонка 2 попереднього місяця (обчислена — читає довідник).
-            await db.ColumnDefs.Where(c => c.Id == consumer.ColumnDefIds[1])
-                .ExecuteUpdateAsync(s => s.SetProperty(c => c.DataType, CellDataType.Formula));
-            var formula = new FormulaDef(consumer.TableDefId, FormulaScope.Column, "1", ExpressionDialect.Template);
-            formula.AssignColumn(consumer.ColumnDefIds[2]);
-            db.FormulaDefs.Add(formula);
-            await db.SaveChangesAsync();
-            db.FormulaDependencies.Add(FormulaDependency.ForFormula(formula.Id, 0, consumer.TableDefId, "R1", consumer.ColumnDefIds[1], null, -1, 0));
+            await CrossMonthAsync(db, consumer);
         }
 
-        // Таблиця складу HSE400 на аркуші джерела (зв'язка читає її) з екземпляром року.
+        await StreamAsync(db, source);
+        if (approveFebruary)
+        {
+            await world.SetSheetAsync(consumer, 2, DocumentStatus.Approved);
+        }
+
+        if (closeApprovedJanuary)
+        {
+            await world.SetSheetAsync(consumer, 1, DocumentStatus.Approved);
+            await world.CloseAsync(consumer, 1);
+        }
+
+        return (source, consumer, source.SheetDefId, bindingId);
+    }
+
+    /// <summary>Споживач: колонка 3 = колонка 2 попереднього місяця (обчислена — читає довідник), <c>[Period:-1]</c>.</summary>
+    private static async Task CrossMonthAsync(EcrDbContext db, TestDocument consumer)
+    {
+        await db.ColumnDefs.Where(c => c.Id == consumer.ColumnDefIds[1])
+            .ExecuteUpdateAsync(s => s.SetProperty(c => c.DataType, CellDataType.Formula));
+        var formula = new FormulaDef(consumer.TableDefId, FormulaScope.Column, "1", ExpressionDialect.Template);
+        formula.AssignColumn(consumer.ColumnDefIds[2]);
+        db.FormulaDefs.Add(formula);
+        await db.SaveChangesAsync();
+        db.FormulaDependencies.Add(FormulaDependency.ForFormula(formula.Id, 0, consumer.TableDefId, "R1", consumer.ColumnDefIds[1], null, -1, 0));
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>Таблиця складу HSE400 на аркуші джерела (зв'язка читає її) з екземпляром року.</summary>
+    private async Task StreamAsync(EcrDbContext db, TestDocument source)
+    {
         var stream = new TableDef(
             source.SheetDefId, EcrCode.Create("FG_Internal"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "FG_Internal" }), 50,
@@ -185,22 +214,22 @@ public sealed class SourceImpactCascadeParityTests(SqlServerFixture sql) : DbJob
             .ReserveIdsAsync("doc.TableInstanceSeq", 1, CancellationToken.None);
         db.TableInstances.Add(new TableInstance(new PeriodKey(YearKey), instanceId, source.DocumentId, stream.Id, Now));
         await db.SaveChangesAsync();
-
-        if (approveFebruary)
-        {
-            await world.SetSheetAsync(consumer, 2, DocumentStatus.Approved);
-        }
-
-        return (source, consumer, source.SheetDefId, bindingId);
     }
 
-    private async Task<SourceImpact> AssessAsync(TestDocument source, int sheetDefId, int[]? months)
+    private Task<SourceImpact> AssessAsync(TestDocument source, int sheetDefId, int[]? months)
+        => AssessAsync(source, sheetDefId, SourceApprovalChange.Edited, months, withPlan: true);
+
+    /// <summary>Оцінка: з планом (GET, 6 аргументів) чи лише факти політики (транзакція Approve/Reopen, 5 аргументів).</summary>
+    private async Task<SourceImpact> AssessAsync(
+        TestDocument source, int sheetDefId, SourceApprovalChange change, int[]? months, bool withPlan,
+        ISourceCascadePlanner? planner = null)
     {
         await using var host = NewHost();
         var assessor = new SourceImpactAssessor(
-            host.Db, SourceDependencyWorld.Graph(host.Db), NewJob(host.Db), Trigger(host.Db, Scheduler(host)));
-        return await assessor.AssessAsync(
-            source.DocumentId, sheetDefId, YearKey, SourceApprovalChange.Edited, months, CancellationToken.None);
+            host.Db, SourceDependencyWorld.Graph(host.Db), planner ?? NewJob(host.Db), Trigger(host.Db, Scheduler(host)));
+        return withPlan
+            ? await assessor.AssessAsync(source.DocumentId, sheetDefId, YearKey, change, months, CancellationToken.None)
+            : await assessor.AssessAsync(source.DocumentId, sheetDefId, YearKey, change, CancellationToken.None);
     }
 
     /// <summary>Справжній ланцюг правки джерела до задачі каскаду споживача; повертає її <c>cascadePeriods</c>.</summary>
