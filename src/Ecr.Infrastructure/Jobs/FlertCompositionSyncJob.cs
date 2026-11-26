@@ -417,7 +417,7 @@ public sealed class FlertCompositionSyncJob(
 
     /// <summary>Коди довідників факелів до кодів складу: типові — типові, тестові (з суфіксом) — з тим самим суфіксом.</summary>
     /// <param name="codes">Коди довідників складу.</param>
-    internal static FlaringRegistryCodes FlaringCodes(FlertRegistryCodes codes)
+    public static FlaringRegistryCodes FlaringCodes(FlertRegistryCodes codes)
     {
         if (codes == FlertRegistryCodes.Default)
         {
