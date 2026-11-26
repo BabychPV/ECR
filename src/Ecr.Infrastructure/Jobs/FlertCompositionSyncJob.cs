@@ -324,6 +324,12 @@ public sealed class FlertCompositionSyncJob(
                     await uow.SaveChangesAsync(tx).ConfigureAwait(false);
                     counts.Add("compositions", rowResult);
 
+                    // ✎ SGF-flaring (DESIGN-sg-flaring §5.7): довідники факелів — разом зі складом, коли потоки й кейси вже є.
+                    // Лише створення відсутніх; наявні веде адміністратор. Закріплення без потоку/кейсу — зауваження, не відмова.
+                    var flaring = await services.GetRequiredService<FlaringRegistryProvisioner>()
+                        .EnsureAsync(FlaringCodes(codes), set.Stream.Id, set.Case.Id, tx).ConfigureAwait(false);
+                    issues.AddRange(flaring.Warnings.Select(w => new FlertMappingIssue(FlertIssueSeverity.Warning, "flaringRegistry", w, w)));
+
                     // 4. Вимкнення відсутніх і ввімкнення повернутих. «Присутнє» — усе, що є у ЗНІМКУ FLERT, зокрема
                     // відхилене writer'ом і склад відхилених кейсів: його стан лишається попереднім, а не вимикається.
                     var present = mirror.Streams.Select(s => s.Code)
@@ -407,6 +413,22 @@ public sealed class FlertCompositionSyncJob(
         }
 
         return (updates.Count(u => u.IsActive == false), updates.Count(u => u.IsActive == true));
+    }
+
+    /// <summary>Коди довідників факелів до кодів складу: типові — типові, тестові (з суфіксом) — з тим самим суфіксом.</summary>
+    /// <param name="codes">Коди довідників складу.</param>
+    internal static FlaringRegistryCodes FlaringCodes(FlertRegistryCodes codes)
+    {
+        if (codes == FlertRegistryCodes.Default)
+        {
+            return FlaringRegistryCodes.Default;
+        }
+
+        var tag = codes.Stream.StartsWith(FlertRegistryCodes.Default.Stream, StringComparison.Ordinal)
+            ? codes.Stream[FlertRegistryCodes.Default.Stream.Length..]
+            : "_" + codes.Stream;
+        var d = FlaringRegistryCodes.Default;
+        return new FlaringRegistryCodes(d.Location + tag, d.Split + tag, d.Pin + tag);
     }
 
     private static RegistryEntryWrite StreamWrite(FlertStreamEntry s)

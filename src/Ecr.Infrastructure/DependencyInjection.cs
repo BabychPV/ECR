@@ -539,6 +539,7 @@ public static class DependencyInjection
 
         // D-476 / D-NEW: разовий імпорт складу газу FLERT → STREAM/STREAM_CASE/GAS_COMPOSITION (власник — ECR).
         services.AddScoped<Jobs.FlertRegistryProvisioner>();
+        services.AddScoped<Jobs.FlaringRegistryProvisioner>(); // SGF-flaring §5.7: FLARE_LOCATION, LP_SOUR_SPLIT, TOX_GAS_STREAM
         services.AddScoped<Jobs.FlertCompositionSyncJob>();
         services.AddScoped<IGasCompositionProvisioning, Jobs.GasCompositionProvisioning>();
         services.AddScoped<IGasCompositionStore, GasCompositionStore>();
