@@ -203,11 +203,90 @@ public sealed class GetCellChangesHandler(
         }
 
         IReadOnlySet<int>? visibleSet;
-        (filter, visibleSet) = await WithVisibleLineageAsync(filter, readable, ct).ConfigureAwait(false);
+        IReadOnlyDictionary<int, IReadOnlyList<int>>? lineages;
+        (filter, visibleSet, lineages) = await WithVisibleLineageAsync3(filter, readable, ct).ConfigureAwait(false);
 
         var columns = await audit.ReadChangedColumnsAsync(filter, ct).ConfigureAwait(false);
+        var shown = visibleSet is null ? columns : [.. columns.Where(c => visibleSet.Contains(c.ColumnDefId))];
 
-        return visibleSet is null ? columns : [.. columns.Where(c => visibleSet.Contains(c.ColumnDefId))];
+        // ✎ AC-14: після переносу проєкту зміни до переносу лежать на Id старої версії шаблону — та сама колонка
+        // двічі. Родовід уже порахований для меж читання (без другого запиту): один пункт на логічну колонку.
+        return CollapseByLineage(shown, LineageGroups(lineages), lineages?.Keys.ToHashSet());
+    }
+
+    /// <summary>
+    /// ✎ AC-14: одна колонка на родовід — серед колонок групи лишається колонка ПОТОЧНОЇ версії документа (<paramref name="current"/>),
+    /// а як зміни є лише на старих Id — найбільший Id: її підпис актуальний, а фільтр за її Id
+    /// <see cref="WithVisibleLineageAsync"/> розгортає на всю групу.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Групи беруться ЛИШЕ з родоводів видимих колонок (див. <see cref="WithVisibleLineageAsync"/>): прихована колонка
+    /// з переліком не зливається і не виказує себе. Без родоводу (<c>null</c>) перелік не змінюється.
+    /// </remarks>
+    internal static IReadOnlyList<CellChangeColumnView> CollapseByLineage(
+        IReadOnlyList<CellChangeColumnView> columns, IReadOnlyDictionary<int, int>? groupOf, IReadOnlySet<int>? current)
+    {
+        if (groupOf is null || columns.Count == 0)
+        {
+            return columns;
+        }
+
+        var currentOf = current is null
+            ? new Dictionary<int, int>()
+            : current.Where(groupOf.ContainsKey).GroupBy(c => groupOf[c]).ToDictionary(g => g.Key, g => g.Min());
+
+        return
+        [
+            .. columns
+                .GroupBy(c => groupOf.TryGetValue(c.ColumnDefId, out var g) ? g : -c.ColumnDefId - 1)
+                .Select(g =>
+                {
+                    // Пункт несе Id колонки ПОТОЧНОЇ версії (її читає межа читання й розгортає родовід), навіть коли зміни
+                    // є лише на старих Id; підпис — з найновішого рядка групи.
+                    var label = g.OrderByDescending(c => current?.Contains(c.ColumnDefId) == true).ThenByDescending(c => c.ColumnDefId).First();
+                    return currentOf.TryGetValue(g.Key, out var now) && now != label.ColumnDefId ? label with { ColumnDefId = now } : label;
+                })
+                .OrderBy(c => c.ColumnDefId),
+        ];
+    }
+
+    /// <summary>
+    /// Id колонки → ключ групи (найменший Id серед пов'язаних родоводами). Родоводи, що перетинаються (ланцюг
+    /// перейменувань), зливаються.
+    /// </summary>
+    internal static IReadOnlyDictionary<int, int>? LineageGroups(IReadOnlyDictionary<int, IReadOnlyList<int>>? lineages)
+    {
+        if (lineages is null)
+        {
+            return null;
+        }
+
+        var parent = new Dictionary<int, int>();
+        int Find(int x)
+        {
+            parent.TryAdd(x, x);
+            while (parent[x] != x)
+            {
+                parent[x] = parent[parent[x]];
+                x = parent[x];
+            }
+
+            return x;
+        }
+
+        foreach (var (key, members) in lineages)
+        {
+            foreach (var member in members.Append(key))
+            {
+                var (a, b) = (Find(key), Find(member));
+                if (a != b)
+                {
+                    parent[Math.Max(a, b)] = Math.Min(a, b);
+                }
+            }
+        }
+
+        return parent.Keys.ToDictionary(k => k, Find);
     }
 
     /// <summary>
@@ -251,34 +330,58 @@ public sealed class GetCellChangesHandler(
     private async Task<(CellChangeFilter Filter, IReadOnlySet<int>? Visible)> WithVisibleLineageAsync(
         CellChangeFilter filter, DocumentReadScope? readable, CancellationToken ct)
     {
+        var (widened, visible, _) = await WithVisibleLineageAsync3(filter, readable, ct).ConfigureAwait(false);
+        return (widened, visible);
+    }
+
+    /// <summary>
+    /// Як <see cref="WithVisibleLineageAsync"/>, плюс родоводи видимих колонок (для згортання переліку, ✎ AC-14).
+    /// Фільтр за ОДНІЄЮ колонкою документа (без рядка) теж розгортається на її родовід: пункт «Column» — це логічна
+    /// колонка, а зміни до переносу проєкту лежать на Id старої версії.
+    /// </summary>
+    private async Task<(CellChangeFilter Filter, IReadOnlySet<int>? Visible, IReadOnlyDictionary<int, IReadOnlyList<int>>? Lineages)>
+        WithVisibleLineageAsync3(CellChangeFilter filter, DocumentReadScope? readable, CancellationToken ct)
+    {
         if (readable is null)
         {
             // Наскрізний журнал без документа (Security.ViewAudit, Q-177): меж читання немає, адреси комірки теж.
-            return (filter, null);
+            return (filter, null, null);
         }
 
         if (columns is null)
         {
             var plain = readable.VisibleColumnIds();
-            return (filter with { VisibleColumnIds = plain }, plain.ToHashSet());
+            return (filter with { VisibleColumnIds = plain }, plain.ToHashSet(), null);
         }
 
         if (filter.IsSingleCell)
         {
             var cell = filter.ColumnDefId!.Value;
             var lineage = (await columns.LineageAsync([cell], filter.DocumentId, ct).ConfigureAwait(false)).GetValueOrDefault(cell) ?? [cell];
-            return (filter with { VisibleColumnIds = lineage, ColumnLineage = lineage }, lineage.ToHashSet());
+            return (filter with { VisibleColumnIds = lineage, ColumnLineage = lineage }, lineage.ToHashSet(), null);
         }
 
         var visible = readable.VisibleColumnIds();
         if (visible.Count == 0)
         {
-            return (filter with { VisibleColumnIds = visible }, new HashSet<int>());
+            return (filter with { VisibleColumnIds = visible }, new HashSet<int>(), null);
         }
 
         var lineages = await columns.LineageAsync(visible, filter.DocumentId, ct).ConfigureAwait(false);
         IReadOnlyList<int> widened = [.. visible.Concat(lineages.Values.SelectMany(v => v)).Distinct().Order()];
-        return (filter with { VisibleColumnIds = widened }, widened.ToHashSet());
+        var result = filter with { VisibleColumnIds = widened };
+
+        // ✎ AC-14: «Column» = логічна колонка. Група — з родоводів ВИДИМИХ колонок, тож прихованих вона не додає.
+        if (filter.ColumnDefId is { } picked && LineageGroups(lineages) is { } groups && groups.TryGetValue(picked, out var group))
+        {
+            IReadOnlyList<int> members = [.. groups.Where(p => p.Value == group).Select(p => p.Key).Order()];
+            if (members.Count > 1)
+            {
+                result = result with { ColumnLineage = members };
+            }
+        }
+
+        return (result, widened.ToHashSet(), lineages);
     }
 
     /// <summary>
