@@ -286,6 +286,18 @@ export function cellChangesQuery(filter: CellChangeFilter): string {
 }
 
 /**
+ * ✎ AC-8: рядок запиту `GET /audit/cells/columns` — колонки документа, змінені у вікні (варіанти фільтра «Column»).
+ * Вікно — ті самі межі доби в поясі браузера, що й у переліку (`windowStart`/`windowEnd`).
+ */
+export function cellChangeColumnsQuery(from: string, to: string, documentId: number): string {
+  const params = new URLSearchParams();
+  params.set('from', windowStart(from));
+  params.set('to', windowEnd(to));
+  params.set('documentId', String(documentId));
+  return params.toString();
+}
+
+/**
  * Рядок запиту CSV-експорту журналу комірок: ті самі фільтри й порядок, що в переліку, БЕЗ `limit` і `cursor` —
  * експорт віддає всю видачу фільтра (до стелі сервера), а не сторінку.
  */

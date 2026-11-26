@@ -8,7 +8,7 @@ import type { components } from '@/api/schema';
 import { can, useSession } from '@/shared/session/useSession';
 import { disambiguateNames, pickedLabel, type FilterOption } from '@/features/audit/filterOptions';
 
-/** Автор для фільтра «By user» (`GET /api/v1/audit/authors`, ✎ P-1124-4): номер і ім'я, без логіна й SID. */
+/** Автор для фільтра «By user» (`GET /api/v1/audit/authors`, ✎ P-1124-4): номер, ім'я; логін — лише для однакових імен (AC-7). */
 type AuditAuthor = components['schemas']['AuditAuthorView'];
 
 /** Рядок журналу з автором — спільна форма журналу комірок і структури. */
@@ -128,7 +128,13 @@ export function useAuthorOptions(
     }
 
     // audit-filters-live D4: однакові імена (тимчасові акаунти вікон) розрізняються логіном, без нього — номером.
-    const logins = new Map<number, string>((users.data?.items ?? []).map((user) => [user.id, user.userName]));
+    // ✎ AC-7: логін для однакових імен віддає сам `GET /audit/authors` (за `Security.ViewAudit`); перелік користувачів
+    // (`Security.ManageUsers`) — доповнює.
+    const logins = new Map<number, string>();
+    for (const author of Array.isArray(authors.data) ? authors.data : []) {
+      if (typeof author.login === 'string' && author.login.length > 0) logins.set(author.userId, author.login);
+    }
+    for (const user of users.data?.items ?? []) logins.set(user.id, user.userName);
 
     return [
       ...disambiguateNames(

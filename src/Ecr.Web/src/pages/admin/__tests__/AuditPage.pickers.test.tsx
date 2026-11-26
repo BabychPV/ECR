@@ -48,6 +48,9 @@ function row(columnDefId: number, columnCode: string, table: string): Record<str
 
 const requests: URL[] = [];
 
+/** ✎ AC-8: відповідь `GET /audit/cells/columns`; `null` — як до сервера (ендпоінта немає, `json(null)`). */
+let changedColumns: unknown = null;
+
 function serve(): void {
   requests.length = 0;
   vi.stubGlobal(
@@ -55,6 +58,7 @@ function serve(): void {
     vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input), 'http://x');
       requests.push(url);
+      if (url.pathname === '/api/v1/audit/cells/columns') return json(changedColumns);
       if (url.pathname === '/api/v1/me') {
         return json({ userId: 1, userName: 'a', language: 'en', permissions: ['Security.ViewAudit'] });
       }
@@ -102,6 +106,7 @@ const cellRequests = (): URL[] => requests.filter((url) => url.pathname === '/ap
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  changedColumns = null;
 });
 
 describe('AuditPage: вибір документа, колонки й автора за підписом', () => {
@@ -145,6 +150,53 @@ describe('AuditPage: вибір документа, колонки й автор
       expect(await screen.findByRole('option', { name: 'Fuel / Gas / October (M10)' })).toBeTruthy();
       await user.click(await screen.findByRole('option', { name: 'Fuel / Oil / October (M10)' }));
       await waitFor(() => expect(location).toContain('columnDefId=73810'));
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'AC-8: «Column» — колонки документа з сервера, і ті, яких немає на завантажених сторінках',
+    async () => {
+      // Мутація (локально): не передати `useChangedColumns` у `columnOptions` в `AuditPage` — «Fuel / Steam / …» немає.
+      changedColumns = [
+        {
+          columnDefId: 73999,
+          columnCode: 'M11',
+          columnHeaderL10n: { values: { en: 'November' } },
+          sheetCode: 'S1',
+          sheetNameL10n: { values: { en: 'Fuel' } },
+          tableCode: 'Steam',
+          tableNameL10n: { values: { en: 'Steam' } },
+        },
+      ];
+      serve();
+      renderAt('&documentId=96');
+      const user = userEvent.setup();
+
+      await waitFor(() =>
+        expect(requests.some((url) => url.pathname === '/api/v1/audit/cells/columns' && url.searchParams.get('documentId') === '96')).toBe(true),
+      );
+      const asked = requests.find((url) => url.pathname === '/api/v1/audit/cells/columns');
+      expect(asked?.searchParams.has('from')).toBe(true);
+      expect(asked?.searchParams.has('to')).toBe(true);
+
+      await user.click(await screen.findByRole('textbox', { name: '⟦audit.columnDefId⟧' }));
+      expect(await screen.findByRole('option', { name: 'Fuel / Steam / November (M11)' })).toBeTruthy();
+      // Колонки зі сторінок журналу лишаються варіантами.
+      expect(screen.getByRole('option', { name: 'Fuel / Gas / October (M10)' })).toBeTruthy();
+      await user.click(screen.getByRole('option', { name: 'Fuel / Steam / November (M11)' }));
+      await waitFor(() => expect(location).toContain('columnDefId=73999'));
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'AC-8: без документа перелік колонок не питається',
+    async () => {
+      serve();
+      renderAt('');
+      await waitFor(() => expect(cellRequests().length).toBeGreaterThan(0));
+      expect(requests.some((url) => url.pathname === '/api/v1/audit/cells/columns')).toBe(false);
     },
     SlowEnvTimeout,
   );

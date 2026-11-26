@@ -10,7 +10,7 @@ import {
 } from '@mantine/core';
 import type { CellChangePage } from '@/api/types';
 import { useAuthorOptions } from '@/features/audit/authorOptions';
-import { columnOptions, useDocumentOptions, type FilterOption } from '@/features/audit/filterOptions';
+import { columnOptions, useChangedColumns, useDocumentOptions, type FilterOption } from '@/features/audit/filterOptions';
 import { CellChangesTable, originLabel } from '@/features/audit/CellChangesTable';
 import { AuditExportButton } from '@/features/audit/AuditExportButton';
 import { useAuditSort } from '@/features/audit/auditSort';
@@ -213,7 +213,9 @@ export function AuditPage(): JSX.Element {
   });
   const authorOptions = useAuthorOptions(cellPage?.items, author, picked.author);
   const documentOptions = useDocumentOptions(appliedDocumentSearch, cellPage?.items, documentId, picked.document);
-  const columnChoices = columnOptions(cellPage?.items, documentId, columnDefId, picked.column);
+  // ✎ AC-8: колонки документа, змінені у вікні, — з сервера, а не лише з завантажених сторінок журналу.
+  const changedColumns = useChangedColumns(fromDate, toDate, documentId, !other);
+  const columnChoices = columnOptions(cellPage?.items, documentId, columnDefId, picked.column, changedColumns);
 
   return (
     <>

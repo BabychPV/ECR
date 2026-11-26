@@ -57,6 +57,30 @@ describe('P-1124-4: автори журналу за правом аудиту',
     expect(urls).toEqual(['/api/v1/audit/authors']);
   });
 
+  it('AC-7: однакові імена розрізняються логіном з /audit/authors, а не «#id»; унікальне ім’я — без дужок', async () => {
+    // Мутація (локально): не брати `login` з `/audit/authors` у `useAuthorOptions` — червоне («Twin (#5)»).
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify([
+            { userId: 5, displayName: 'Twin', login: 'tmp-b12-a' },
+            { userId: 6, displayName: 'Twin', login: 'tmp-b12-b' },
+            { userId: 7, displayName: 'Olena', login: null },
+          ]),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+
+    const { result } = renderHook(() => useAuthorOptions([], null), { wrapper });
+
+    await waitFor(() => expect(result.current).toHaveLength(3));
+    expect(result.current.find((option) => option.value === '5')?.label).toBe('Twin (tmp-b12-a)');
+    expect(result.current.find((option) => option.value === '6')?.label).toBe('Twin (tmp-b12-b)');
+    expect(result.current.find((option) => option.value === '7')?.label).toBe('Olena');
+  });
+
   it('«Система» й анонімний вхід із рядків журналу — теж варіанти фільтра', async () => {
     vi.stubGlobal(
       'fetch',

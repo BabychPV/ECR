@@ -2,7 +2,9 @@ import { useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { CellChangePage, DocumentPage } from '@/api/types';
+import type { components } from '@/api/schema';
 import { localized } from '@/shared/i18n/localized';
+import { cellChangeColumnsQuery } from '@/features/audit/api';
 
 /*
  * audit-filters-live D2/D3/D4: фільтри «Document», «Column» і «By user» журналу змін — ВИБОРОМ за тим, що людина бачить
@@ -87,8 +89,39 @@ export function useDocumentOptions(
   }, [seen, found.data, selected, picked]);
 }
 
+/** ✎ AC-8: колонка, змінена в документі у вікні, з сервера (`GET /audit/cells/columns`). */
+export type ChangedColumn = components['schemas']['CellChangeColumnView'];
+
+/** Поля підпису колонки — спільні для рядка журналу й колонки з `GET /audit/cells/columns`. */
+type ColumnLabelSource = Pick<
+  CellChange,
+  'columnDefId' | 'columnCode' | 'columnHeaderL10n' | 'sheetCode' | 'sheetNameL10n' | 'tableCode' | 'tableNameL10n'
+>;
+
+/**
+ * ✎ AC-8: колонки ОБРАНОГО документа, змінені у вікні, — з сервера, а не лише з завантажених сторінок журналу (колонка,
+ * зміни якої лежать на десятій сторінці, у переліку була відсутня). Межі читання застосовує сервер.
+ */
+export function useChangedColumns(
+  from: string,
+  to: string,
+  documentId: number | null,
+  enabled = true,
+): readonly ChangedColumn[] | undefined {
+  const query = documentId === null ? '' : cellChangeColumnsQuery(from, to, documentId);
+  const found = useQuery({
+    queryKey: ['audit-cell-columns', query],
+    queryFn: () => apiFetch<ChangedColumn[]>(`/api/v1/audit/cells/columns?${query}`),
+    enabled: enabled && documentId !== null,
+    staleTime: 60_000,
+    retry: false,
+  });
+
+  return documentId === null || !Array.isArray(found.data) ? undefined : found.data;
+}
+
 /** Підпис колонки: аркуш / таблиця / заголовок (код) — код колонки (`M10`) повторюється в кожній таблиці. */
-export function columnOptionLabel(change: CellChange): string {
+export function columnOptionLabel(change: ColumnLabelSource): string {
   const header = localized(change.columnHeaderL10n);
   const code = change.columnCode ?? '';
   const column = header.length > 0 ? (code.length > 0 ? `${header} (${code})` : header) : code;
@@ -99,7 +132,8 @@ export function columnOptionLabel(change: CellChange): string {
 }
 
 /**
- * Варіанти «Column»: колонки ОБРАНОГО документа, що є в журналі вікна (рядки журналу несуть підпис колонки), і обрана.
+ * Варіанти «Column»: колонки ОБРАНОГО документа, змінені у вікні (✎ AC-8: з сервера — `changed`; плюс рядки вже
+ * завантажених сторінок, поки перелік їде), і обрана.
  * ⚠ Колонка без змін у вікні дала б «No changes» — у переліку її й немає; рядки інших документів не беруться.
  */
 export function columnOptions(
@@ -107,8 +141,13 @@ export function columnOptions(
   documentId: number | null,
   selected: number | null,
   picked: FilterOption | null = null,
+  changed: readonly ChangedColumn[] | undefined = undefined,
 ): FilterOption[] {
   const names = new Map<number, string>();
+
+  for (const column of documentId === null ? [] : (changed ?? [])) {
+    names.set(column.columnDefId, columnOptionLabel(column));
+  }
 
   for (const item of items ?? []) {
     if (documentId !== null && item.documentId === documentId && !names.has(item.columnDefId)) {
@@ -124,8 +163,8 @@ export function columnOptions(
 }
 
 /**
- * D4: однакові імена в «By user» розрізняються логіном у дужках (коли логін відомий з переліку користувачів), інакше —
- * номером `#id`. Унікальні імена — як були.
+ * D4: однакові імена в «By user» розрізняються логіном у дужках (✎ AC-7: логін віддає `GET /audit/authors` саме для
+ * однакових імен; ще — перелік користувачів за `Security.ManageUsers`), інакше — номером `#id`. Унікальні імена — як були.
  */
 export function disambiguateNames(
   options: readonly FilterOption[],

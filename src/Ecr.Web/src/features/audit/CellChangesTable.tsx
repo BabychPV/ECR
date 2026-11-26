@@ -75,11 +75,18 @@ const OpaqueRowKey = /^[0-9a-f]{24,}$/i;
  * ✎ audit-filters-followup AC-12: рядок комірки для людини. Джерело мітки — `cfg.RowDef.LabelL10n` фіксованого рядка
  * шаблону (`rowLabelL10n` рядка журналу); у динамічного (доданого людиною) рядка мітки немає ніде, а його ключ —
  * GUID. Тоді «Row» + початок ключа (повний — у підказці), а не 32 символи. Короткі коди («LTD-A02») — як були.
+ * ✎ AC-13: для такого рядка — його номер на екрані «Row N» (`rowOrdinal`, `doc.TableRow.Ordinal`); номера немає (рядок
+ * видалено, період в архіві) — як раніше, «Row» + початок ключа.
  */
-export function rowText(change: Pick<CellChange, 'rowKey' | 'rowLabelL10n'>): string {
+export function rowText(change: Pick<CellChange, 'rowKey' | 'rowLabelL10n' | 'rowOrdinal'>): string {
   const label = localized(change.rowLabelL10n);
   if (label.length > 0) return label;
-  if (OpaqueRowKey.test(change.rowKey)) return `${t('grid.rowLabelHeader')} ${change.rowKey.slice(0, 8)}…`;
+  if (OpaqueRowKey.test(change.rowKey)) {
+    const ordinal = change.rowOrdinal;
+    return typeof ordinal === 'number'
+      ? `${t('grid.rowLabelHeader')} ${String(ordinal)}`
+      : `${t('grid.rowLabelHeader')} ${change.rowKey.slice(0, 8)}…`;
+  }
 
   return change.rowKey;
 }

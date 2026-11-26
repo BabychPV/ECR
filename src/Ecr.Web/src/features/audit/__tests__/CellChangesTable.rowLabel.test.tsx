@@ -39,6 +39,15 @@ describe('rowText', () => {
     expect(rowText(change('LTD-A02'))).toBe('LTD-A02');
     expect(rowText(change(Guid))).toBe('⟦grid.rowLabelHeader⟧ f9f64b62…');
   });
+
+  it('AC-13: рядок, доданий людиною, з номером на екрані — «Row N»; мітка шаблону важливіша за номер', () => {
+    // Мутація (локально): прибрати гілку `rowOrdinal` у `rowText` — червоне (знову «Row f9f64b62…»).
+    expect(rowText({ ...change(Guid), rowOrdinal: 7 })).toBe('⟦grid.rowLabelHeader⟧ 7');
+    expect(rowText({ ...change(Guid, 'Boiler 1'), rowOrdinal: 7 })).toBe('Boiler 1');
+    // Читабельний ключ динамічного рядка лишається ключем — номер його не замінює.
+    expect(rowText({ ...change('LTD-A02'), rowOrdinal: 3 })).toBe('LTD-A02');
+    expect(rowText({ ...change(Guid), rowOrdinal: null })).toBe('⟦grid.rowLabelHeader⟧ f9f64b62…');
+  });
 });
 
 describe('CellChangesTable: рядок комірки', () => {
