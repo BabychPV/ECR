@@ -12,7 +12,8 @@ import type {
   ReopenDocumentRequest,
   SheetWorkflowRequest,
 } from '@/api/types';
-import { allSheetsApproved, locksDataActions, type DocumentLock } from '@/features/documents/documentLock';
+import { locksDataActions, type DocumentLock } from '@/features/documents/documentLock';
+import { recalcBlockOf } from './recalcAvailability';
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { refreshSheetWorkflow } from './refreshSheetWorkflow';
 import { useStatusStale } from './statusStale';
@@ -1455,12 +1456,20 @@ export function useSheetActions({
   // (`RecalculateDocumentHandler`: «нічого рахувати» — лише коли затверджено оригінал і кожну копію). Тож вимкнена кнопка —
   // лише над затвердженим аркушем. Річна розкладка не дивиться на стан якоря (січня): рік рахує відкриті місяці, а на
   // «нічого рахувати» сервер відповідає поясненням (`recalc.nothingToRecalculate`), не відмовою.
-  const ownApproved = !yearLayout && state === 'Approved';
-  const recalcBlockedReason = ownApproved
-    ? t('workflow.recalculateSheetApproved', { sheet: sheetName ?? String(sheetDefId) })
-    : !yearLayout && allSheetsApproved(summary?.sheetStates)
-      ? t('workflow.recalculateAllApproved', { period: formatPeriodKey(periodKey) || String(periodKey) })
-      : null;
+  // ✎ Q3 координатора: рішення — одна функція (`recalcAvailability.ts`); поле сервера «можна перерахувати» (контракт L3)
+  // береться, щойно картка його віддає.
+  const recalcBlock = recalcBlockOf({
+    yearLayout,
+    state,
+    sheetStates: summary?.sheetStates,
+    serverCanRecalculate: (summary as { canRecalculate?: boolean | null } | undefined)?.canRecalculate,
+  });
+  const recalcBlockedReason =
+    recalcBlock === 'sheetApproved'
+      ? t('workflow.recalculateSheetApproved', { sheet: sheetName ?? String(sheetDefId) })
+      : recalcBlock === 'allApproved'
+        ? t('workflow.recalculateAllApproved', { period: formatPeriodKey(periodKey) || String(periodKey) })
+        : null;
   const recalcBusy = recalculate.isPending || recalcRunning || settled.settling;
 
   /*
@@ -1737,7 +1746,7 @@ export function useSheetActions({
           run: () => {
             if (confirmedPeriod === null || submitBlockedReason !== null) return;
             // ✎ DOCUX L9 (Q6): порожні обов'язкові комірки — запиту немає, фокус на першу, пояснення в рядку повідомлень.
-            if (guardSubmitNeedsInput()) return;
+            if (guardSubmitNeedsInput(yearLayout ? confirmedPeriod : null)) return;
             askedAt.current = { ...here, periodKey: confirmedPeriod };
             setAskedPeriod(confirmedPeriod);
             setAsking('submit');

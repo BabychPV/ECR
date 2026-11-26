@@ -102,7 +102,8 @@ describe('DocumentPage: «З дозволу» і «Оновити з дозво�
       expect(await screen.findByTestId('from-permit-badge', {}, { timeout: SlowEnvTimeout })).toBeDefined();
       await userEvent.setup().click(screen.getByRole('button', { name: '⟦permits.sheetBinding.doc.refresh⟧' }));
 
-      expect(await screen.findByTestId('permit-refresh-result')).toBeDefined();
+      // ✎ DOCUX L7: на сторінці підсумок — у рядку повідомлень (повний — у Status).
+      expect(await screen.findByTestId('notice-permit-refresh')).toBeDefined();
       expect(permitRequests()).toEqual([`POST /api/v1/documents/1/permit-bindings/PB1_T0/refresh?periodKey=${String(Period)}`]);
     },
     SlowEnvTimeout,

@@ -5,7 +5,8 @@ import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { clearCellNavigation, currentCellNavigation } from '@/features/grid/cellNavigation';
-import { publishNeedsInput, resetNeedsInput, useNeedsInputEmphasis } from '@/features/grid/needsInputStore';
+import { needsInputSummary, publishNeedsInput, publishUnmountedTables, resetNeedsInput, useNeedsInputEmphasis } from '@/features/grid/needsInputStore';
+import { guardSubmitNeedsInput } from '../submitGuide';
 import { NoticeLine } from '@/features/documents/notices/NoticeLine';
 import { resetNotices } from '@/features/documents/notices/noticeStore';
 import { SheetActions } from '../SheetActions';
@@ -106,3 +107,48 @@ describe('SheetActions: Submit веде до порожніх обов’язк�
     expect(await screen.findByRole('dialog')).toBeTruthy();
   });
 });
+
+describe('Submit guidance: річна розкладка й незмонтовані таблиці (доручення координатора)', () => {
+  function yearCells(): void {
+    const cell = (rowKey: string, columnCode: string, columnIndex: number, ownerPeriodKey: number | null) => ({
+      rowKey,
+      columnCode,
+      level: 'block' as const,
+      source: 'template' as const,
+      methodologies: [],
+      rowIndex: 0,
+      columnIndex,
+      ownerPeriodKey,
+    });
+    publishNeedsInput({
+      tableInstanceId: 9,
+      tableDefId: 90,
+      periodKey: 202601,
+      order: 9,
+      labelOffset: 0,
+      cells: [cell('r1', 'NAME', 0, null), cell('r1', 'M04', 4, 202604), cell('r1', 'M05', 5, 202605)],
+    });
+  }
+
+  it('«Submit: квітень» рахує лише квітень і колонки без місяця; травень не заважає; без фільтра — усе', () => {
+    yearCells();
+    expect(needsInputSummary(202604).count).toBe(2);
+    expect(needsInputSummary(202606).count).toBe(1);
+    expect(needsInputSummary().count).toBe(3);
+
+    expect(guardSubmitNeedsInput(202604)).toBe(true);
+    expect(currentCellNavigation()).toMatchObject({ rowKey: 'r1', columnCode: 'NAME' });
+  });
+
+  it('таблиці, ще не відкриті прокруткою, — названо в рядку «Cannot submit…», а не мовчки', async () => {
+    show();
+    act(() => {
+      needs(1);
+      publishUnmountedTables(3);
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /workflow\.submitPeriod/ }));
+    const line = await screen.findByTestId('notice-cannot-submit');
+    expect(line.textContent).toContain('grid.needsInput.otherTables (count=3)');
+  });
+});
+

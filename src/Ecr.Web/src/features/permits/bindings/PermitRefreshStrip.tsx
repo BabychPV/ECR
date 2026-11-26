@@ -1,5 +1,6 @@
+import { NoticeSlot } from '@/features/documents/notices/NoticeSlot';
 import { useState, type JSX } from 'react';
-import { Badge, Button, Group, Text } from '@mantine/core';
+import { Badge, Button, Group, Popover, Stack, Text, UnstyledButton, VisuallyHidden } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { DocumentTableDto } from '@/api/types';
 import { DisabledReason } from '@/features/common/DisabledReason';
@@ -64,31 +65,70 @@ export function PermitRefreshStrip({ documentId, periodKey, tables, readOnly }: 
   );
   if (bound.length === 0) return null;
 
+  // ✎ DOCUX L8 (№11): «з дозволу» — ЧИП у рядку стану, а не рядок на кожну таблицю над сіткою: одна таблиця — чип і
+  // «Refresh from permit» поруч; кілька — чип зі спливаючим переліком (рядок на таблицю, своя кнопка).
+  const row = ({ code, table, tableName }: (typeof bound)[number]): JSX.Element => (
+    <Group key={code} gap="xs" wrap="nowrap" align="center">
+      <VisuallyHidden>{t('permits.sheetBinding.doc.tableLine', { name: tableName })}</VisuallyHidden>
+      {bound.length > 1 && (
+        <Text size="sm" style={{ flex: 1 }} aria-hidden="true">
+          {tableName}
+        </Text>
+      )}
+      {/* ⛔ U-6 (аудит 2026-11): `DisabledReason` — кнопка у фокусі, причина в `aria-describedby`, клік гаситься. */}
+      <DisabledReason reason={readOnly ? t('permits.sheetBinding.doc.readOnly') : null}>
+        <Button
+          size="xs"
+          variant="subtle"
+          title={t('permits.sheetBinding.doc.tableLine', { name: tableName })}
+          loading={refreshLoading && refresh.variables?.code === code}
+          onClick={() => refresh.mutate({ code, tableName, sheetDefId: table.sheetDefId })}
+        >
+          {t('permits.sheetBinding.doc.refresh')}
+        </Button>
+      </DisabledReason>
+    </Group>
+  );
+  const chip = (
+    <Badge variant="light" data-testid="from-permit-badge">
+      {bound.length > 1 ? `${t('permits.sheetBinding.doc.fromPermit')} (${String(bound.length)})` : t('permits.sheetBinding.doc.fromPermit')}
+    </Badge>
+  );
+
   return (
-    <section aria-label={t('permits.sheetBinding.doc.region')} data-testid="permit-refresh-strip">
-      {bound.map(({ code, table, tableName }) => (
-        <Group key={code} gap="sm" mb="xs" wrap="nowrap" align="center">
-          <Badge variant="light" data-testid="from-permit-badge">
-            {t('permits.sheetBinding.doc.fromPermit')}
-          </Badge>
-          <Text size="sm" style={{ flex: 1 }}>
-            {t('permits.sheetBinding.doc.tableLine', { name: tableName })}
-          </Text>
-          {/* ⛔ U-6 (аудит 2026-11): `DisabledReason` — кнопка у фокусі, причина в `aria-describedby`, клік гаситься. */}
-          <DisabledReason reason={readOnly ? t('permits.sheetBinding.doc.readOnly') : null}>
-            <Button
-              size="xs"
-              variant="default"
-              loading={refreshLoading && refresh.variables?.code === code}
-              onClick={() => refresh.mutate({ code, tableName, sheetDefId: table.sheetDefId })}
-            >
-              {t('permits.sheetBinding.doc.refresh')}
-            </Button>
-          </DisabledReason>
+    <section aria-label={t('permits.sheetBinding.doc.region')} data-testid="permit-refresh-strip" className="ecr-permit-chip">
+      {bound.length === 1 ? (
+        <Group gap="xs" wrap="nowrap" align="center">
+          {chip}
+          {bound.map(row)}
         </Group>
-      ))}
+      ) : (
+        <Popover position="bottom-start" withArrow shadow="md" width={360}>
+          <Popover.Target>
+            <UnstyledButton aria-label={t('permits.sheetBinding.doc.region')} data-testid="from-permit-menu">
+              {chip}
+            </UnstyledButton>
+          </Popover.Target>
+          <Popover.Dropdown>
+            <Stack gap="xs">{bound.map(row)}</Stack>
+          </Popover.Dropdown>
+        </Popover>
+      )}
 
       {outcome === null ? null : (
+        // ✎ DOCUX L7 (пріоритет 8): підсумок оновлення — у рядку повідомлень; подробиці — у Status.
+        <NoticeSlot
+          id="permit-refresh-result"
+          priority={8}
+          tone={outcome.summary.warnings.length > 0 || outcome.summary.keptKeys.length > 0 ? 'warning' : 'info'}
+          text={
+            outcome.summary.unchanged
+              ? t('permits.sheetBinding.doc.unchanged', { name: outcome.tableName })
+              : t('permits.sheetBinding.doc.result', { name: outcome.tableName, added: outcome.summary.added, updated: outcome.summary.updated })
+          }
+          onDismiss={() => setOutcome(null)}
+          testId="notice-permit-refresh"
+        >
         <Banner
           tone={outcome.summary.warnings.length > 0 || outcome.summary.keptKeys.length > 0 ? 'warning' : 'success'}
           testId="permit-refresh-result"
@@ -115,6 +155,7 @@ export function PermitRefreshStrip({ documentId, periodKey, tables, readOnly }: 
             </>
           }
         />
+        </NoticeSlot>
       )}
     </section>
   );

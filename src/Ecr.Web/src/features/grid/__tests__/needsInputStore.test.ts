@@ -55,7 +55,7 @@ describe('needsInputStore: обхід порожніх обов’язкових
   it('без курсора — перша комірка першої таблиці; зведення лічить усі таблиці', () => {
     publishTwoTables();
 
-    expect(needsInputSummary()).toEqual({ count: 3, blocking: 2 });
+    expect(needsInputSummary()).toEqual({ count: 3, blocking: 2, unmountedTables: 0 });
     expect(stepNeedsInput(1)).toBe(true);
     expect(target()).toBe('11/a1/C1');
   });

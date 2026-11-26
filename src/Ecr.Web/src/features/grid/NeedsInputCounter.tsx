@@ -4,7 +4,7 @@ import { t } from '@/shared/i18n';
 import { showDone } from '@/shared/ui/notify';
 import { requestCellNavigation } from './cellNavigation';
 import { needsInputHint, type NeedsInputCell } from './needsInput';
-import { stepNeedsInput } from './needsInputStore';
+import { stepNeedsInput, useNeedsInputSummary } from './needsInputStore';
 
 /** Скільки пунктів переліку в спливаючому вікні (решта — «…», до них веде F8). */
 const ListLimit = 50;
@@ -36,6 +36,7 @@ export function NeedsInputCounter({
   columnHeader,
   rowLabel,
 }: NeedsInputCounterProps): JSX.Element | null {
+  const { unmountedTables } = useNeedsInputSummary();
   if (cells.length === 0) return null;
 
   const blocking = cells.some((cell) => cell.level === 'block');
@@ -73,6 +74,12 @@ export function NeedsInputCounter({
             ))}
           </List>
           {cells.length > ListLimit && <Text size="sm">…</Text>}
+          {/* ✎ DOCUX L9: таблиці, ще не відкриті прокруткою, — названо прямо, а не мовчки «усе». */}
+          {unmountedTables > 0 && (
+            <Text size="xs" c="dimmed" mt="xs" data-needs-input-unmounted={unmountedTables}>
+              {t('grid.needsInput.otherTables', { count: unmountedTables })}
+            </Text>
+          )}
         </Popover.Dropdown>
       </Popover>
       <ActionIcon

@@ -1,3 +1,4 @@
+import { publishUnmountedTables } from './needsInputStore';
 import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 import { Box, Button, Group, Skeleton, Stack, Text } from '@mantine/core';
 import type { DocumentTableDto } from '@/api/types';
@@ -197,6 +198,12 @@ export function SheetTables({
    * комітом — і кожна йшла по свій зріз.
    */
   const [mounted, setMounted] = useState<ReadonlySet<number>>(() => new Set<number>());
+  // ✎ DOCUX L9: скільки таблиць аркуша ще не змонтовано — «Cannot submit…» каже про них прямо (їх перевіряє сервер).
+  const unmounted = tables.filter((table) => !mounted.has(table.tableInstanceId)).length;
+  useEffect(() => {
+    publishUnmountedTables(unmounted);
+  }, [unmounted]);
+  useEffect(() => () => publishUnmountedTables(0), []);
 
   useEffect(() => {
     const present = new Set(tables.map((table) => table.tableInstanceId));

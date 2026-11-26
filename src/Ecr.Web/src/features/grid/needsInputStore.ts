@@ -58,6 +58,7 @@ export function clearNeedsInput(tableInstanceId: number, periodKey: number): voi
 export function resetNeedsInput(): void {
   tables.clear();
   emphasized = false;
+  unmountedTables = 0;
   notify();
 }
 
@@ -83,7 +84,7 @@ function sameCells(a: NeedsInputTable, b: NeedsInputTable): boolean {
 
   return a.cells.every((cell, index) => {
     const other = b.cells[index];
-    return other !== undefined && cell.rowKey === other.rowKey && cell.columnCode === other.columnCode && cell.level === other.level;
+    return other !== undefined && cell.rowKey === other.rowKey && cell.columnCode === other.columnCode && cell.level === other.level && (cell.ownerPeriodKey ?? null) === (other.ownerPeriodKey ?? null);
   });
 }
 
@@ -99,16 +100,29 @@ export function allNeedsInput(): { readonly table: NeedsInputTable; readonly cel
 export interface NeedsInputSummary {
   readonly count: number;
   readonly blocking: number;
+  /** Скільки таблиць аркуша ще не змонтовано (їхніх порожніх комірок клієнт не знає — перевіряє сервер). */
+  readonly unmountedTables: number;
 }
 
-let cachedVersion = -1;
-let cachedSummary: NeedsInputSummary = { count: 0, blocking: 0 };
+/**
+ * ✎ DOCUX L9: річна розкладка — подається МІСЯЦЬ: рахуються комірки його колонки і колонок без місяця (спільних для
+ * року); `null` — без фільтра (звичайний документ).
+ */
+function inMonth(entry: { readonly cell: NeedsInputCell }, month: number | null): boolean {
+  const owner = entry.cell.ownerPeriodKey ?? null;
+  return month === null || owner === null || owner === month;
+}
 
-function summary(): NeedsInputSummary {
-  if (cachedVersion !== version) {
-    const all = allNeedsInput();
-    cachedSummary = { count: all.length, blocking: all.filter((entry) => entry.cell.level === 'block').length };
-    cachedVersion = version;
+let unmountedTables = 0;
+let cachedKey = '';
+let cachedSummary: NeedsInputSummary = { count: 0, blocking: 0, unmountedTables: 0 };
+
+function summaryFor(month: number | null): NeedsInputSummary {
+  const key = `${String(version)}:${String(month)}`;
+  if (cachedKey !== key) {
+    const all = allNeedsInput().filter((entry) => inMonth(entry, month));
+    cachedSummary = { count: all.length, blocking: all.filter((entry) => entry.cell.level === 'block').length, unmountedTables };
+    cachedKey = key;
   }
 
   return cachedSummary;
@@ -122,13 +136,21 @@ function subscribe(listener: () => void): () => void {
 }
 
 /** Скільки порожніх обов'язкових комірок на аркуші (змонтовані сітки), з підпискою. */
-export function useNeedsInputSummary(): NeedsInputSummary {
-  return useSyncExternalStore(subscribe, summary, summary);
+export function useNeedsInputSummary(month: number | null = null): NeedsInputSummary {
+  const read = (): NeedsInputSummary => summaryFor(month);
+  return useSyncExternalStore(subscribe, read, read);
+}
+
+/** ✎ DOCUX L9: скільки таблиць аркуша ще не змонтовано (лінива прокрутка) — `SheetTables`. */
+export function publishUnmountedTables(count: number): void {
+  if (unmountedTables === count) return;
+  unmountedTables = count;
+  notify();
 }
 
 /** Поточне зведення без підписки (обробник кліку «Submit»). */
-export function needsInputSummary(): NeedsInputSummary {
-  return summary();
+export function needsInputSummary(month: number | null = null): NeedsInputSummary {
+  return summaryFor(month);
 }
 
 /**
@@ -188,8 +210,8 @@ export function stepNeedsInput(
 }
 
 /** Перша порожня обов'язкова комірка аркуша (Submit веде сюди); `false` — таких немає. */
-export function goToFirstNeedsInput(): boolean {
-  const first = allNeedsInput()[0];
+export function goToFirstNeedsInput(month: number | null = null): boolean {
+  const first = allNeedsInput().find((entry) => inMonth(entry, month));
   if (first === undefined) return false;
 
   requestCellNavigation({
