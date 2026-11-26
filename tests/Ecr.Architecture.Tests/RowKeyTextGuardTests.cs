@@ -98,6 +98,22 @@ public sealed partial class RowKeyTextGuardTests
                 $"{path}: підстановки з ключем рядка мають проходити RowKeyText.Humanize.");
         }
 
+        // Виробники, що знають документ/аркуш, називають рядок номером і підписом (а не лише запасною позначкою).
+        string[] namers =
+        [
+            Path.Combine("Ecr.Application", "Documents", "RowLocks", "RowLockHandlers.cs"),
+            Path.Combine("Ecr.Application", "Documents", "PatchCellsHandler.RowNames.cs"),
+            Path.Combine("Ecr.Application", "Documents", "PatchCellsHandler.FormulaOverride.cs"),
+            Path.Combine("Ecr.Application", "Documents", "PatchCellStylesHandler.cs"),
+        ];
+        foreach (var path in namers)
+        {
+            var text = File.ReadAllText(Path.Combine(src, path));
+            Assert.True(
+                text.Contains("RowDisplayNames.", StringComparison.Ordinal) || text.Contains("NameRows(", StringComparison.Ordinal),
+                $"{path}: відмова з ключем рядка має називати рядок через RowDisplayNames.");
+        }
+
         // Рендер повідомлення Check (вихідний текст у момент запуску).
         foreach (var lang in new[] { "en", "ru", "kz" })
         {

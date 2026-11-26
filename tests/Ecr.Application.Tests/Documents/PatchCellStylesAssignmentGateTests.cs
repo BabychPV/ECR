@@ -242,6 +242,33 @@ public sealed class PatchCellStylesAssignmentGateTests
         }
     }
 
+    /// <summary>
+    /// integ-row-label-messages: відмова форми оформлення (CELL-4224) для рядка, доданого людиною, називає його номером у
+    /// зрізі; рядка немає — «(added by a user)». ⛔ Мутація: прибрати <c>NameRowsOfRefusalAsync</c> — «(added by a user)».
+    /// </summary>
+    [Theory]
+    [InlineData("bbc95dc2bdb84fa0bce2d80e0defc582", "The same cell is listed twice: row 2, column Volume.")]
+    [InlineData("adc95dc2bdb84fa0bce2d80e0defc581", "The same cell is listed twice: row (added by a user), column Volume.")]
+    public async Task Дубль_комірки_оформлення_називає_рядок_номером_а_відсутній_запасною_позначкою(string key, string expected)
+    {
+        _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(new Dictionary<string, long> { ["R1"] = 1, ["bbc95dc2bdb84fa0bce2d80e0defc582"] = 2 });
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
+            Document,
+            new TableInstanceRef(TableInstance, Document, TableDef, 2, Period),
+            new PatchCellStylesRequest(
+                Period, [new CellStyleChange(key, "Volume", "#FFFF00"), new CellStyleChange(key, "Volume", "#00FF00")], false),
+            CancellationToken.None));
+
+        Assert.Equal("err.ECR-CELL-4224.duplicateCell", ex.Details!["messageKey"]);
+        Assert.Equal(key, ex.Details["rowKey"]);
+        var text = Ecr.Application.Localization.UiStringResolver.Format(
+            "The same cell is listed twice: row {rowKey}, column {columnCode}.",
+            Ecr.Application.Localization.RowKeyText.Humanize(Ecr.Application.Localization.UiStringResolver.Parameters(ex.Details), "en"));
+        Assert.Equal(expected, text);
+    }
+
     private static AccessProfile Profile() => new()
     {
         CacheKey = "p",
