@@ -27,8 +27,9 @@ namespace Ecr.Infrastructure.Jobs;
 /// петлі «перерахунок → формули → перерахунок» немає.
 /// </para>
 /// <para>
-/// ⚠ Межа (D-577): документ річної розкладки рахується по МІСЯЦЯХ правки (місячна колонка — свій місяць, не-місячна —
-/// якір). Правка загальних даних якоря, що змінює й інші місяці, лишає їх застарілими до «Перерахувати» — чип це покаже.
+/// ✎ Річна розкладка (рішення координатора): правка місячної колонки — свій місяць; правка НЕ-місячної колонки якоря
+/// (загальні дані року) — ще й місяці року, що її читають (<see cref="WithReaderMonthsAsync"/>), тож нічого не лишається
+/// застарілим мовчки.
 /// </para>
 /// <para>
 /// ⚠ Аварійний вимикач — <c>Calculations:AutoRecalcAfterEdit:Enabled</c> (типово <c>true</c>). Збій постановки не валить
@@ -43,7 +44,10 @@ public sealed partial class EditAutoRecalculation(
     // ⛔ perf («perf max», FormulaJobFixedCostTests): у DI — singleton-кеш прив'язаних таблиць і знімки версій у пам'яті:
     // задача формул документа БЕЗ методологій не звертається до бази взагалі. Без них (ручна збірка в тестах) — запит.
     BoundTablesCache? boundTables = null,
-    IMetadataCache? metadata = null)
+    IMetadataCache? metadata = null,
+    // ✎ D-577 (річна розкладка): правка загальних (не-місячних) даних якоря будить місяці-читачі. Без реєстру — лише
+    // періоди правки, як доти.
+    ITemplateLayoutRegistry? layouts = null)
 {
     /// <summary>Ключ аварійного вимикача.</summary>
     public const string EnabledKey = "Calculations:AutoRecalcAfterEdit:Enabled";
@@ -64,8 +68,20 @@ public sealed partial class EditAutoRecalculation(
     /// <param name="templateVersionIds">Версії шаблонів екземплярів у цих періодах; <c>null</c> — невідомо (запит).</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Скільки періодів поставлено.</returns>
-    public async Task<int> OnEditedAsync(
+    public Task<int> OnEditedAsync(
         long documentId, IReadOnlyCollection<int> periodKeys, IReadOnlySet<int>? templateVersionIds, CancellationToken ct)
+        => OnEditedAsync(documentId, periodKeys, templateVersionIds, changedColumns: null, ct);
+
+    /// <summary>Те саме з колонками, які змінив прохід формул за періодом (річна розкладка — місяці-читачі якоря).</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKeys">Періоди правки.</param>
+    /// <param name="templateVersionIds">Версії шаблонів екземплярів у цих періодах; <c>null</c> — невідомо (запит).</param>
+    /// <param name="changedColumns">Змінені колонки за періодом (насіння й похідні); <c>null</c> — невідомо (без розширення).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Скільки періодів поставлено.</returns>
+    public async Task<int> OnEditedAsync(
+        long documentId, IReadOnlyCollection<int> periodKeys, IReadOnlySet<int>? templateVersionIds,
+        IReadOnlyDictionary<int, IReadOnlySet<int>>? changedColumns, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(periodKeys);
         if (documentId == 0 || periodKeys.Count == 0 || configuration?.GetValue(EnabledKey, true) == false)
@@ -86,7 +102,13 @@ public sealed partial class EditAutoRecalculation(
                     any |= snapshot.Sheets.SelectMany(sheet => sheet.Tables).Any(t => bound.Contains(t.Id));
                 }
 
-                return any ? await EnqueueAsync(documentId, keys, ct).ConfigureAwait(false) : 0;
+                return any
+                    ? await EnqueueAsync(
+                            documentId,
+                            await WithReaderMonthsAsync(documentId, keys, templateVersionIds, changedColumns, ct).ConfigureAwait(false),
+                            ct)
+                        .ConfigureAwait(false)
+                    : 0;
             }
 
             var withMethodologies = await db.TableInstances
@@ -107,13 +129,136 @@ public sealed partial class EditAutoRecalculation(
                 return 0;
             }
 
-            return await EnqueueAsync(documentId, keys, ct).ConfigureAwait(false);
+            return await EnqueueAsync(
+                    documentId,
+                    await WithReaderMonthsAsync(documentId, keys, templateVersionIds, changedColumns, ct).ConfigureAwait(false),
+                    ct)
+                .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogEnqueueFailed(_logger, documentId, ex);
             return 0;
         }
+    }
+
+    /// <summary>
+    /// ✎ D-577 (рішення координатора, річна розкладка): правка НЕ-місячної колонки якоря (загальні дані року, D-540) змінює
+    /// входи кожного місяця року, що її читає, — такі місяці теж ставляться, інакше вони мовчки лишались застарілими.
+    /// </summary>
+    /// <remarks>
+    /// Читач — за полями, які читає скрипт методологій документа (<c>calc.MethodologyReadField</c>, D-568): поле з кодом зміненої
+    /// не-місячної колонки — читає; версія без запису, з маркером «читає будь-що» (<c>*</c>) чи формульна — консервативно
+    /// читає. Місяці — ті, де в документа є екземпляри таблиць у році; закриті, не відкриті й затверджені відсіє сама
+    /// постановка (<see cref="ICalculationTrigger.RequestAfterEditAsync"/>). Звернення до бази — лише коли правка справді
+    /// зачепила не-місячну колонку версії річної розкладки (рідко), не на кожну правку.
+    /// </remarks>
+    internal async Task<List<int>> WithReaderMonthsAsync(
+        long documentId, List<int> keys, IReadOnlySet<int>? templateVersionIds,
+        IReadOnlyDictionary<int, IReadOnlySet<int>>? changedColumns, CancellationToken ct)
+    {
+        if (layouts is not { HasAny: true } || metadata is null || changedColumns is null
+            || templateVersionIds is not { Count: > 0 } || !templateVersionIds.Any(layouts.IsYearVersion))
+        {
+            return keys;
+        }
+
+        // Змінені НЕ-місячні колонки (коди) за роком.
+        var yearly = new Dictionary<int, HashSet<string>>();
+        foreach (var versionId in templateVersionIds.Where(layouts.IsYearVersion))
+        {
+            var columns = (await metadata.GetAsync(versionId, ct).ConfigureAwait(false)).ColumnsById;
+            foreach (var key in keys)
+            {
+                foreach (var columnId in changedColumns.GetValueOrDefault(key) ?? new HashSet<int>())
+                {
+                    if (!columns.TryGetValue(columnId, out var column) || column.IsMonthColumn)
+                    {
+                        continue;
+                    }
+
+                    if (!yearly.TryGetValue(key / 100, out var codes))
+                    {
+                        yearly[key / 100] = codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    }
+
+                    codes.Add(column.Code);
+                }
+            }
+        }
+
+        if (yearly.Count == 0)
+        {
+            return keys;
+        }
+
+        var result = keys.ToHashSet();
+        foreach (var (year, codes) in yearly)
+        {
+            if (!await AnyReaderAsync(documentId, year, codes, ct).ConfigureAwait(false))
+            {
+                continue;
+            }
+
+            var from = year * 100;
+            var to = (year + 1) * 100;
+            foreach (var month in await db.TableInstances
+                         .AsNoTracking()
+                         .Where(i => i.DocumentId == documentId && i.PeriodKeyValue > from && i.PeriodKeyValue < to)
+                         .Select(i => i.PeriodKeyValue)
+                         .Distinct()
+                         .OrderBy(k => k)
+                         .Take(100)
+                         .ToListAsync(ct)
+                         .ConfigureAwait(false))
+            {
+                result.Add(month);
+            }
+        }
+
+        return [.. result.Order()];
+    }
+
+    /// <summary>Чи читає скрипт хоч однієї опублікованої версії методологій документа хоч одну з колонок (консервативно).</summary>
+    private async Task<bool> AnyReaderAsync(long documentId, int year, HashSet<string> codes, CancellationToken ct)
+    {
+        var from = year * 100;
+        var to = (year + 1) * 100;
+        var versions = await db.MethodologyVersions
+            .AsNoTracking()
+            .Where(v => v.Status == Domain.Enums.TemplateVersionStatus.Published
+                        && db.CalculationBindings.Any(b => b.IsActive && b.MethodologyId == v.MethodologyId
+                            && db.TableInstances.Any(i => i.DocumentId == documentId && i.TableDefId == b.TableDefId
+                                                          && i.PeriodKeyValue > from && i.PeriodKeyValue < to)))
+            .Select(v => new { v.Id, v.Engine })
+            .OrderBy(v => v.Id)
+            .Take(500)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (versions.Count == 0)
+        {
+            return false;
+        }
+
+        if (versions.Any(v => v.Engine != Domain.Enums.MethodologyEngine.Script))
+        {
+            return true;
+        }
+
+        var ids = versions.Select(v => v.Id).ToList();
+        var fields = await db.MethodologyReadFields
+            .AsNoTracking()
+            .Where(f => ids.Contains(f.MethodologyVersionId))
+            .Select(f => new { f.MethodologyVersionId, f.FieldCode })
+            .OrderBy(f => f.MethodologyVersionId)
+            .Take(20_000)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var byVersion = fields.ToLookup(f => f.MethodologyVersionId);
+
+        return ids.Exists(id => !byVersion[id].Any()
+                                || byVersion[id].Any(f => f.FieldCode == Domain.Entities.Calculations.MethodologyReadField.AllFields
+                                                          || codes.Contains(f.FieldCode)));
     }
 
     private async Task<int> EnqueueAsync(long documentId, List<int> keys, CancellationToken ct)

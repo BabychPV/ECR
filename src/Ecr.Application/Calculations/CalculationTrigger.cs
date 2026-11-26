@@ -80,7 +80,7 @@ public sealed class CalculationTrigger(
     /// документа-джерела (B179 L2b): масова вставка чи імпорт — одна задача на документ і період; правки під час прогону —
     /// ще ОДНА задача позаду нього. Задача системна (без автора) — під стелею важких перерахунків як «стеля − 1» і в черзі
     /// людей не обганяє ручне «Перерахувати» (D-564c). Закритий, не відкритий, архівований, затверджений — не ставиться
-    /// (<see cref="WritableAsync"/>), подані перераховуються з позначкою (B83). Quartz (без затримки) — одразу, злиттям.
+    /// (<see cref="WritableAsync"/>), подані перераховуються з позначкою (B83). Quartz (live) — те саме вікно в пам'яті (<c>QuartzJobScheduler.EnqueueCoalescedDelayedAsync</c>) і злиття на ціль.
     /// </remarks>
     public async Task<string?> RequestAfterEditAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
     {

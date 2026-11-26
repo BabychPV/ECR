@@ -77,6 +77,73 @@ public sealed class EditAutoRecalculationDbTests(SqlServerFixture sql) : DbJobQu
         Assert.Equal(0, await db.JobProgresses.CountAsync(p => p.Lane == JobLanes.Recalc));
     }
 
+    /// <summary>
+    /// ✎ D-577 (рішення координатора): річна розкладка — правка НЕ-місячної колонки якоря (загальні дані року) ставить і
+    /// місяці-читачі (скрипт методології читає поле — <c>calc.MethodologyReadField</c>); якщо скрипт поле не читає — лише
+    /// період правки (без зайвих прогонів).
+    /// </summary>
+    /// <remarks>
+    /// Мутація (локально): у <c>EditAutoRecalculation.WithReaderMonthsAsync</c> одразу повертати <c>keys</c> — червоний
+    /// перший крок (ставиться лише якір).
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Q2_правка_загальних_даних_якоря_будить_місяці_читачі(bool scriptReadsColumn)
+    {
+        var builder = new TestDocumentBuilder(Sql.ConnectionString);
+        var doc = await builder.BuildAsync(periodKey: 202601);
+        await builder.AddPeriodInstanceAsync(doc, new PeriodKey(202602));
+        await builder.AddPeriodInstanceAsync(doc, new PeriodKey(202603));
+        var yearlyColumn = doc.ColumnDefIds[0];
+
+        string columnCode;
+        await using (var db = builder.CreateContext())
+        {
+            columnCode = (await db.ColumnDefs.AsNoTracking().FirstAsync(c => c.Id == yearlyColumn)).Code;
+            var methodology = new Methodology(
+                EcrCode.Create($"EY_{Guid.NewGuid():N}"[..20]), new LocalizedText(new Dictionary<string, string> { ["en"] = "m" }));
+            db.Methodologies.Add(methodology);
+            await db.SaveChangesAsync();
+            var version = new MethodologyVersion(
+                methodology.Id, "1.0", CalculationLevel.Configuration, 1, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                MethodologyEngine.Script);
+            version.Publish(2, "q2 anchor", new DateOnly(2026, 1, 1), testsPassed: true, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+            db.MethodologyVersions.Add(version);
+            db.CalculationBindings.Add(new CalculationBinding(doc.TableDefId, doc.ColumnDefIds[^1], methodology.Id, "E_CO2", "{}"));
+            await db.SaveChangesAsync();
+            db.MethodologyReadFields.Add(new MethodologyReadField(version.Id, MethodologyReadField.RecordedMarker, otherMonths: false));
+            db.MethodologyReadFields.Add(new MethodologyReadField(version.Id, scriptReadsColumn ? columnCode : "SomethingElse", otherMonths: false));
+            await db.SaveChangesAsync();
+        }
+
+        var column = new ColumnDef(doc.TableDefId, EcrCode.Create(columnCode),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "y" }), 1, CellDataType.Decimal);
+        typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(column, yearlyColumn);
+        var metadata = Substitute.For<IMetadataCache>();
+        metadata.GetAsync(doc.TemplateVersionId, Arg.Any<CancellationToken>()).Returns(new TemplateVersionSnapshot(
+            doc.TemplateVersionId, 0, [], new Dictionary<int, ColumnDef> { [yearlyColumn] = column },
+            new Dictionary<(int, string), RowDef>()));
+        var layouts = Substitute.For<ITemplateLayoutRegistry>();
+        layouts.HasAny.Returns(true);
+        layouts.IsYearVersion(doc.TemplateVersionId).Returns(true);
+
+        var trigger = Substitute.For<ICalculationTrigger>();
+        trigger.RequestAfterEditAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>()).Returns("job");
+
+        await using (var db = builder.CreateContext())
+        {
+            var edit = new EditAutoRecalculation(db, trigger, metadata: metadata, layouts: layouts);
+            var enqueued = await edit.OnEditedAsync(
+                doc.DocumentId, [202601], new HashSet<int> { doc.TemplateVersionId },
+                new Dictionary<int, IReadOnlySet<int>> { [202601] = new HashSet<int> { yearlyColumn } }, CancellationToken.None);
+            Assert.Equal(scriptReadsColumn ? 3 : 1, enqueued);
+        }
+
+        await trigger.Received(1).RequestAfterEditAsync(doc.DocumentId, new PeriodKey(202601), Arg.Any<CancellationToken>());
+        await trigger.Received(scriptReadsColumn ? 1 : 0).RequestAfterEditAsync(doc.DocumentId, new PeriodKey(202603), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task Q2_документ_без_методологій_нічого_не_ставить_а_з_методологією_ставить_період_правки()
     {

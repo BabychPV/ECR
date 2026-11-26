@@ -391,7 +391,9 @@ public sealed partial class FormulaRecalculationJob(
         {
             int[] editedPeriods = [.. writtenPeriods.Union(seedPeriods).Order()];
             await editRecalculation
-                .OnEditedAsync(documentId, editedPeriods, shared.TemplateVersionsOf(documentId, editedPeriods), ct)
+                .OnEditedAsync(
+                    documentId, editedPeriods, shared.TemplateVersionsOf(documentId, editedPeriods),
+                    changedColumnsByPeriod.ToDictionary(p => p.Key, p => (IReadOnlySet<int>)p.Value), ct)
                 .ConfigureAwait(false);
         }
     }

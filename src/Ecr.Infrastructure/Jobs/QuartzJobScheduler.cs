@@ -167,6 +167,7 @@ public sealed partial class QuartzJobScheduler(
     /// <param name="payload">Завдання.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <param name="createdByUserId">Хто поставив задачу; <c>null</c> — системна (Q-156).</param>
+    /// <param name="delay">✎ D-577: відкладений старт (вікно злиття); нуль — одразу.</param>
     /// <returns>Ідентифікатор задачі.</returns>
     /// <remarks>
     /// ⚠ Виділено тому, що постановок стало дві — звичайна і з витісненням
@@ -175,7 +176,8 @@ public sealed partial class QuartzJobScheduler(
     /// клієнт отримав би <c>404</c> на задачу, яку щойно прийняли.
     /// </remarks>
     private async Task<string> EnqueueCoreAsync<TJob>(
-        IScheduler instance, string jobId, object? payload, CancellationToken ct, int? createdByUserId = null)
+        IScheduler instance, string jobId, object? payload, CancellationToken ct, int? createdByUserId = null,
+        TimeSpan delay = default)
         where TJob : IBackgroundJob
     {
         var correlationId = NewCorrelationId();
@@ -225,10 +227,17 @@ public sealed partial class QuartzJobScheduler(
             .StoreDurably()
             .Build();
 
-        var trigger = TriggerBuilder.Create()
-            .WithIdentity($"{jobId}-trigger")
-            .StartNow()
-            .Build();
+        // ✎ D-577 (Q2): відкладена постановка (вікно злиття) — старт через <paramref name="delay"/> за годинником застосунку;
+        // без годинника (ручна збірка в тестах) — одразу, як доти.
+        var trigger = delay > TimeSpan.Zero && clock is not null
+            ? TriggerBuilder.Create()
+                .WithIdentity($"{jobId}-trigger")
+                .StartAt(new DateTimeOffset(clock.UtcNow + delay, TimeSpan.Zero))
+                .Build()
+            : TriggerBuilder.Create()
+                .WithIdentity($"{jobId}-trigger")
+                .StartNow()
+                .Build();
 
         // ⚠ Запис прогресу створюється ДО постановки, а не при старті задачі.
         // Клієнт отримує 202 з jobId і одразу починає опитувати стан; без
@@ -387,6 +396,30 @@ public sealed partial class QuartzJobScheduler(
             .ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ D-577 (Q2, live — Quartz): відкладення в пам'яті — задача стартує не раніше <paramref name="delay"/> після ПЕРШОЇ
+    /// постановки; наступні постановки на ту саму ціль, поки вона чекає, повертають її (злиття, <see cref="CoalesceAsync{TJob}"/>),
+    /// тож масова вставка чи імпорт дає одну задачу, а вікно не подовжується. Постановка під час виконання — одна
+    /// перепостановка після завершення (як без відкладення). Доти Quartz ставив одразу (типова реалізація порту).
+    /// </remarks>
+    public async Task<string> EnqueueCoalescedDelayedAsync<TJob>(
+        string targetKey, object? payload, TimeSpan delay, CancellationToken ct, int? createdByUserId = null)
+        where TJob : IBackgroundJob
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
+
+        if (JobPayloadMerge.ArrayPathOf(typeof(TJob).FullName) is not null || delay <= TimeSpan.Zero)
+        {
+            return await EnqueueCoalescedAsync<TJob>(targetKey, payload, ct, createdByUserId).ConfigureAwait(false);
+        }
+
+        var instance = await Scheduler(typeof(TJob).Name).GetScheduler(ct).ConfigureAwait(false);
+        return await CoalesceAsync<TJob>(
+                instance, TargetPrefixOf<TJob>(targetKey), payload, createdByUserId, finishedJobId: null, ct, delay)
+            .ConfigureAwait(false);
+    }
+
     /// <summary>Злиття з об'єднанням масиву payload (O1, <see cref="JobPayloadMerge"/>).</summary>
     /// <remarks>
     /// ⚠ Масив дописується в задачу, що ЧЕКАЄ (ще не взяла payload у
@@ -483,7 +516,7 @@ public sealed partial class QuartzJobScheduler(
     /// <summary>Злиття на ціль; <paramref name="finishedJobId"/> — задача, що щойно завершилась (не рахується).</summary>
     private async Task<string> CoalesceAsync<TJob>(
         IScheduler instance, string prefix, object? payload, int? createdByUserId, string? finishedJobId,
-        CancellationToken ct)
+        CancellationToken ct, TimeSpan delay = default)
         where TJob : IBackgroundJob
     {
         // ✎ PERF-06b (D-572, live Quartz): перерахунок документа зливає місяці правки джерела (sourceMonths) об'єднанням —
@@ -539,7 +572,7 @@ public sealed partial class QuartzJobScheduler(
 
             try
             {
-                return await EnqueueCoreAsync<TJob>(instance, created, payload, ct, createdByUserId).ConfigureAwait(false);
+                return await EnqueueCoreAsync<TJob>(instance, created, payload, ct, createdByUserId, delay).ConfigureAwait(false);
             }
             catch
             {
