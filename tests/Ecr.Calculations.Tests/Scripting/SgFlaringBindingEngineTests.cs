@@ -340,6 +340,7 @@ public sealed class SgFlaringBindingEngineTests
         var (output, values) = await stand.RunAsync(row);
 
         Assert.Equal(h2s, ScriptStand.Value(output, "Sour_H2S"));
+        Assert.Equal(h2s == 6 ? 996m : 997m, ScriptStand.Value(output, SgFlaringBinding.FcidOutput));   // огляд H4: ключ EFID|FCID
         Assert.Equal(((decimal)coef).ToString(System.Globalization.CultureInfo.InvariantCulture), values.Single(v => v.Name == "Coef").Text);
     }
 
@@ -460,7 +461,7 @@ public sealed class SgFlaringBindingEngineTests
         {
             Def(Stream, "STREAM", false, ("LEGACY_ID", CellDataType.Int, null), ("IS_ONSHORE", CellDataType.Bool, null));
             Def(Case, "STREAM_CASE", true, ("STREAM", CellDataType.Lookup, Stream), ("CASE_NAME", CellDataType.String, null),
-                ("T_C", CellDataType.Decimal, null), ("NO_COMPOSITION", CellDataType.Bool, null));
+                ("T_C", CellDataType.Decimal, null), ("NO_COMPOSITION", CellDataType.Bool, null), ("LEGACY_COMPOSITION_ID", CellDataType.Int, null));
             Key(Case, "STREAM", "CASE_NAME");
             Def(Component, "COMPONENT", false);
             Def(Composition, "GAS_COMPOSITION", false, ("CASE", CellDataType.Lookup, Case), ("COMPONENT", CellDataType.Lookup, Component),
@@ -491,8 +492,8 @@ public sealed class SgFlaringBindingEngineTests
             CaseWith(s26, "KE01", boundary, null, null, components, ("H2S", 20m), ("Methane", 70m));
             CaseWith(s26, "No composition", null, null, 30m, components, ("H2S", 1m)).NoComposition();
             CaseWith(s26, "Empty", null, null, 30m, components);
-            CaseWith(s19, "370 Summer", null, null, 30m, components, ("H2S", 6m));
-            CaseWith(s19, "370 Winter", null, null, 30m, components, ("H2S", 5m));
+            CaseWith(s19, "370 Summer", null, null, 30m, components, ("H2S", 6m)).Fcid(996);
+            CaseWith(s19, "370 Winter", null, null, 30m, components, ("H2S", 5m)).Fcid(997);
             CaseWith(s574, "481A SOR", null, null, null, components, ("H2S", 41m), ("Methane", 50m));
             CaseWith(s575, "417 SOR", null, null, null, components, ("H2S", 17m), ("Methane", 70m));
             CaseWith(s575, "417 EOR", null, null, null, components, ("H2S", 18m));
@@ -545,6 +546,8 @@ public sealed class SgFlaringBindingEngineTests
         private sealed class CaseBuilder(Registries owner, long id)
         {
             public void NoComposition() => owner._values.Add(new(id, owner._fields[(Case, "NO_COMPOSITION")], null, null, null, true, null, null, null));
+
+            public void Fcid(int value) => owner._values.Add(new(id, owner._fields[(Case, "LEGACY_COMPOSITION_ID")], value, null, null, null, null, null, null));
         }
 
         private void Def(int id, string code, bool temporal, params (string Code, CellDataType Type, int? Target)[] fields)

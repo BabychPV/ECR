@@ -17,6 +17,10 @@
     Known differences are classified, not failed (DESIGN §6): X1 (cross-month INT event: same per-EFID values, other month),
     L6 (TOX Train 1 -> 481A instead of 481B), H3/L1 (TOX EOR composition), L7 (TOX SG days legacy skipped for missing HSE400).
 
+    CONT key = EFID|FCID on both sides: the ECR side takes FCID from the bridge output SGF_FCID (LEGACY_COMPOSITION_ID of the
+    case the row resolved). Exit codes: 0 parity, 2 unexplained differences, 3 duplicate keys (refused, nothing overwritten).
+    Pure logic: SgFlaringParity.Lib.ps1, self-test: SgFlaringParity.Tests.ps1 (Pester).
+
 .PARAMETER LegacyConnection
     Connection string of the legacy DB copy (read-only). Example: "Server=.;Database=EcrLegacyProd;Integrated Security=true;TrustServerCertificate=True"
 .PARAMETER EcrConnection
@@ -77,6 +81,9 @@ WHERE [$dateColumn] >= @from AND [$dateColumn] < @to AND v.Val IS NOT NULL $filt
     return (Invoke-Select $conn $sql @{ '@from' = $From; '@to' = $To }).Rows
 }
 
+$here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+. (Join-Path $here 'SgFlaringParity.Lib.ps1')
+
 $null = New-Item -ItemType Directory -Force -Path $OutDir
 $legacy = Open-ReadOnly $LegacyConnection
 $ecr = Open-ReadOnly $EcrConnection
@@ -86,44 +93,37 @@ try {
     $legacyRows += Get-LegacyRows $legacy 'CalcResult_FlaringsContinuous_SG' 'CONT' "CAST(EFID AS nvarchar(100)) + '|' + CAST(FCID AS nvarchar(20))" 'DateTime' ''
     $legacyRows += Get-LegacyRows $legacy 'CalcResult_FlaringThermaloxidizerDaily' 'TOX' $ToxKeySql 'Date' 'AND IsSour = 1'
 
+    # review H4: window [From, To) without the off-by-one; yearly periods (YYYY00) only when the whole year is inside; only declared
+    # outputs (Kind = 0) plus the bridge's SGF_FCID (CONT key); the substance stays in the column (no collapse).
+    $window = Get-SgPeriodWindow -From $From -To $To
     $codes = ($Methodologies | ForEach-Object { "'" + ($_ -replace "'", "''") + "'" }) -join ','
-    $ecrRows = (Invoke-Select $ecr @"
+    $raw = (Invoke-Select $ecr @"
 SELECT CASE WHEN m.Code LIKE 'TOX%' THEN 'TOX' WHEN m.Code LIKE '%CONT%' THEN 'CONT' ELSE 'INT' END AS Kind,
-       CASE WHEN m.Code LIKE 'TOX%' THEN r.SourceRowKey ELSE COALESCE(l.SourceEventId, r.SourceRowKey) END AS [Key],
-       r.OutputCode AS [Column], CAST(r.Value AS float) AS [Value], r.PeriodKey, m.Code AS Methodology
+       CONCAT(r.TableInstanceId, ':', r.SourceRowKey) AS RowKey, l.SourceEventId AS EventId, r.SourceRowKey,
+       r.OutputCode AS [Column], CAST(r.Value AS float) AS [Value], r.SubstanceEntryId
 FROM calc.CalculationResult r
 JOIN calc.CalculationRun run ON run.Id = r.CalculationRunId AND run.Status = N'Current'
 JOIN calc.MethodologyVersion mv ON mv.Id = r.MethodologyVersionId
 JOIN calc.Methodology m ON m.Id = mv.MethodologyId
 LEFT JOIN ext.SourceEventLink l ON l.TableInstanceId = r.TableInstanceId AND l.RowKey = r.SourceRowKey
-WHERE m.Code IN ($codes) AND r.PeriodKey >= @fromKey AND r.PeriodKey < @toKey
-"@ @{ '@fromKey' = [int]$From.ToString('yyyyMM') ; '@toKey' = [int]$To.ToString('yyyyMM') + 1 }).Rows
-
-    $ecrByKey = @{}
-    foreach ($r in $ecrRows) { $ecrByKey["$($r.Kind)|$($r.Key)|$($r.Column)"] = $r }
-    $out = New-Object System.Collections.Generic.List[object]
-    $seen = @{}
-    foreach ($l in $legacyRows) {
-        $k = "$($l.Kind)|$($l.Key)|$($l.Column)"
-        $seen[$k] = $true
-        $e = $ecrByKey[$k]
-        $status = if ($null -eq $e) { 'missingInEcr' } else {
-            $a = [double]$l.Value; $b = [double]$e.Value
-            $den = [Math]::Max([Math]::Abs($a), [Math]::Abs($b))
-            if ($den -eq 0 -or [Math]::Abs($a - $b) / $den -le $RelTolerance) { 'equal' } else { 'different' }
-        }
-        $known = ''
-        if ($status -ne 'equal' -and $l.Kind -eq 'TOX' -and $l.Key -match '\|Train 1\|' -and $l.Key -match '\|481') { $known = 'L6' }
-        if ($status -ne 'equal' -and $l.Kind -eq 'TOX' -and $l.Key -match '\|EOR\|') { $known = 'H3/L1' }
-        $out.Add([pscustomobject]@{ Kind = $l.Kind; Key = $l.Key; Column = $l.Column; Legacy = $l.Value; Ecr = $(if ($e) { $e.Value } else { $null }); Status = $status; Known = $known; Month = $l.Month })
+WHERE m.Code IN ($codes) AND r.Kind = 0 AND $($window.Sql)
+"@ @{}).Rows
+    # TOX key is the TOX_DAILY row key itself (not instance-qualified).
+    $ecrInput = foreach ($r in $raw) {
+        [pscustomobject]@{ Kind = $r.Kind; RowKey = $(if ($r.Kind -eq 'TOX') { $r.SourceRowKey } else { $r.RowKey })
+            EventId = $(if ($r.EventId -is [DBNull]) { $null } else { $r.EventId }); Column = $r.Column; Value = $r.Value
+            SubstanceEntryId = $(if ($r.SubstanceEntryId -is [DBNull]) { $null } else { $r.SubstanceEntryId }) }
     }
-    foreach ($r in $ecrRows) {
-        $k = "$($r.Kind)|$($r.Key)|$($r.Column)"
-        if (-not $seen.ContainsKey($k)) {
-            $out.Add([pscustomobject]@{ Kind = $r.Kind; Key = $r.Key; Column = $r.Column; Legacy = $null; Ecr = $r.Value; Status = 'missingInLegacy'; Known = $(if ($r.Kind -eq 'TOX') { 'L7?' } else { '' }); Month = '' })
-        }
+    $ecrRows = @(ConvertTo-SgEcrRows -Rows @($ecrInput))
+
+    $duplicates = @(Find-SgDuplicates -Rows @($legacyRows) -Side 'legacy') + @(Find-SgDuplicates -Rows $ecrRows -Side 'ECR')
+    if ($duplicates.Count -gt 0) {
+        $duplicates | Select-Object -First 50 | ForEach-Object { Write-Host $_ }
+        Write-Host "Duplicate keys: $($duplicates.Count) - parity refused (keys must be unique; nothing overwritten)."
+        exit 3
     }
 
+    $out = @(Compare-SgParity -Legacy @($legacyRows) -Ecr $ecrRows -RelTolerance $RelTolerance)
     $csv = Join-Path $OutDir 'sgf-parity.csv'
     $out | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $csv
     $summary = $out | Group-Object Kind, Status, Known | Sort-Object Name | ForEach-Object { "| $($_.Name -replace ', ', ' | ') | $($_.Count) |" }

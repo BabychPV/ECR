@@ -281,6 +281,12 @@ public static partial class SgFlaringBinding
                 + " — not a FLERT component column, case property or legacy zero; refusing to bind it to 0.");
         }
 
+        // ✎ огляд H4: ключ паритету постійних факелів у старій системі — EFID|FCID (склад кейсу); вихід SGF_FCID дає його й ECR.
+        if (consumer is SgFlaringConsumer.ContOnshore or SgFlaringConsumer.ContOffshore)
+        {
+            Line(s, $"output {FcidOutput} : one = REGFIELD(gas_case, \"{FlertCompositionSchema.CaseLegacyCompositionId}\");");
+        }
+
         return s.Append('\n').ToString();
     }
 
@@ -336,6 +342,9 @@ public static partial class SgFlaringBinding
     /// проходити; той самий допуск — у генераторі й у провізії.
     /// </summary>
     public const string SplitSumTolerance = "0.000001";
+
+    /// <summary>Вихід постійних факелів: Id складу FLERT розв'язаного кейсу (ключ паритету EFID|FCID, огляд H4).</summary>
+    public const string FcidOutput = "SGF_FCID";
 
     private static bool TrySplit(string name, List<string> prefixes, out string prefix, out string x)
     {
