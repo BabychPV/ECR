@@ -967,6 +967,21 @@ public interface IProjectVersionTimeline
 ```
 
 ```csharp
+// src/Ecr.Application/Ports/IYearEditWindowFacts.cs (✎ b14 document-move, D-579)
+
+namespace Ecr.Application.Ports;
+
+/// <summary>
+/// Стан «вікна редагування = рік проєкту + зміщення» (cfg.Template.YearEditWindow) для річних даних документа — одне
+/// рішення для правки (AccessDecisionService) і перерахунку якоря (RecalculationJob, RecalculateDocumentHandler).
+/// null — шаблон без вікна, проєкт не місячний або не активний (діє агрегат місяців).
+/// </summary>
+public interface IYearEditWindowFacts
+{
+    Task<Domain.Enums.PeriodState?> StateAsync(long documentId, int year, CancellationToken ct);
+}
+```
+```csharp
 // src/Ecr.Application/Ports/IProjectTemplateStore.cs (✎ B74 P3, D-576)
 
 namespace Ecr.Application.Ports;

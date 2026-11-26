@@ -2735,10 +2735,10 @@ public sealed class AccessDecisionService(
                     // шляху Land); рішення — спільний YearEditWindowFacts.Decide (те саме бере перерахунок).
                     // ⚠ Та сама вибірка, що YearEditWindowFacts.StateAsync (шаблон без TemplateId — через версію якоря).
                     YearEditWindow = db.Templates.Any(t => t.YearEditWindow
-                        && (t.Id == d.TemplateId
-                            || (d.TemplateId == null
-                                && db.TemplateVersions.Any(v => v.Id == EcrDbContext.VersionOf(d.ProjectId, anchorKey)
-                                                                && v.TemplateId == t.Id)))),
+                        && db.TemplateVersions.Any(v => v.TemplateId == t.Id
+                            && v.Id == (d.TemplateId == null
+                                ? EcrDbContext.VersionOf(d.ProjectId, anchorKey)
+                                : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, anchorKey)))),
 
                     // Приймальна 08.11 (i): місяці року, відкриті лише для ЦЬОГО документа, — тим самим запитом.
                     Reopened = db.DocumentPeriodReopens

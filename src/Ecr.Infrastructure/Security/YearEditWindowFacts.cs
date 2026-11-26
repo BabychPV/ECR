@@ -42,10 +42,10 @@ public sealed class YearEditWindowFacts(EcrDbContext db, IClock clock) : IYearEd
                     p.YearGraceOffsetDays,
                     p.TimeZoneId,
                     Window = db.Templates.Any(t => t.YearEditWindow
-                        && (t.Id == d.TemplateId
-                            || (d.TemplateId == null
-                                && db.TemplateVersions.Any(v => v.Id == EcrDbContext.VersionOf(d.ProjectId, anchorKey)
-                                                                && v.TemplateId == t.Id)))),
+                        && db.TemplateVersions.Any(v => v.TemplateId == t.Id
+                            && v.Id == (d.TemplateId == null
+                                ? EcrDbContext.VersionOf(d.ProjectId, anchorKey)
+                                : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, anchorKey)))),
                 })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
