@@ -1,12 +1,12 @@
 import type { DocumentSummary } from '@/api/types';
-import { documentState } from './documentSheets';
+import { documentYearState } from './documentSheets';
 
 /** Стовпець подання «Board» (`UI-40`). */
-export type BoardColumnId = 'Draft' | 'Submitted' | 'Rework' | 'Approved' | 'NoApproval' | 'NoState';
+export type BoardColumnId = 'Draft' | 'PartlySubmitted' | 'Submitted' | 'Rework' | 'Approved' | 'NoApproval' | 'NoState';
 
 export interface BoardColumn<T> {
   readonly id: BoardColumnId;
-  /** Стани документа (найгірший стан видимих аркушів), що падають у стовпець. */
+  /** Стани документа за рік (`documentYearState`), що падають у стовпець. */
   readonly states: readonly string[];
   /** Стовпець «чекає уваги»: лічильник кольором лише тут і лише коли не нуль (KIT §1 п.3). */
   readonly attention: boolean;
@@ -14,46 +14,52 @@ export interface BoardColumn<T> {
 }
 
 /**
- * Стовпці дошки — дзеркало макета (`screens-work.js`, `COLS`): Draft · Waiting for approval ·
- * Returned or rejected · Approved.
+ * Стовпці дошки — ті самі стани, що й лічильники над нею (`DocumentListSummaryStrip`, за рік):
+ * Draft · Partly submitted · Waiting for approval · Returned or rejected · Approved.
  *
- * ⚠ `Returned` у переліку станів лишається, хоч `documentState` його не рахує окремо: стан, якого
- * правило не знає, повертається як є (`documentSheets.ts`), і сервер, що почне його віддавати,
- * потрапить у «Returned or rejected», а не в «без стану».
+ * ✎ b14 documents-board-yearly (людина 25.11: «4 Draft · 1 Partly submitted» над дошкою, а всі 5 карток — у «No state
+ * for this period»): «частково подано» — власний стовпець, як і власне число на смузі; доти воно ховалося в чернетках.
+ *
+ * ⚠ `Returned` у переліку станів лишається: стан, якого правило не знає, повертається як є, і сервер, що почне його
+ * віддавати, потрапить у «Returned or rejected», а не в «без стану».
  */
 const Columns: readonly Omit<BoardColumn<never>, 'items'>[] = [
-  // ✎ UAT-recalc-ux: частково поданий документ — ще в роботі, тож у стовпці чернеток (дошка тримає 4 стовпці макета).
-  { id: 'Draft', states: ['Draft', 'PartlySubmitted'], attention: false },
+  { id: 'Draft', states: ['Draft'], attention: false },
+  { id: 'PartlySubmitted', states: ['PartlySubmitted'], attention: false },
   { id: 'Submitted', states: ['Submitted'], attention: false },
   { id: 'Rework', states: ['Returned', 'Rejected'], attention: true },
   { id: 'Approved', states: ['Approved'], attention: false },
 ];
 
+type BoardSource = Pick<DocumentSummary, 'sheetStates' | 'workflowMode' | 'periodStates' | 'projectId'>;
+
 /**
  * Розкладає документи сторінки по стовпцях дошки, зберігаючи порядок переліку.
  *
- * ⛔ Стан — ЛИШЕ з відповіді сервера (`documentState` — найгірший стан ВИДИМИХ аркушів, P1
- * «приховані аркуші»): дошка не вигадує стану й не рахує аркушів понад те, що прийшло.
+ * ⛔ Стан — ЛИШЕ з відповіді сервера: `documentYearState` зводить стани періодів (`periodStates`, видимі аркуші, P1)
+ * тим самим правилом, яким сервер рахує лічильники за рік — тож стовпець і число над ним кажуть одне.
  *
- * ⚠ П'ятий стовпець «без стану» — не з макета, а з `D-93`: без обраного періоду станів немає
- * зовсім, а невідомий стан нікуди не належить. Сховати такі документи означало б сказати «їх
- * немає»; тому стовпець з'являється, лише коли в ньому щось є.
+ * @param startedOf розпочаті періоди проєкту (календар); `undefined` — календар ще в дорозі.
+ *
+ * ⚠ Стовпець «без стану» лишається лише для стану, якого правило не знає (або рядка без станів зовсім): сховати такі
+ * документи означало б сказати «їх немає»; тому він з'являється, лише коли в ньому щось є.
  */
-export function boardColumns<T extends Pick<DocumentSummary, 'sheetStates' | 'workflowMode'>>(
+export function boardColumns<T extends BoardSource>(
   documents: readonly T[],
+  startedOf: (projectId: number) => ReadonlySet<number> | undefined = () => undefined,
 ): BoardColumn<T>[] {
+  const stateOf = new Map(documents.map((document) => [document, documentYearState(document, startedOf(document.projectId))]));
   const columns: BoardColumn<T>[] = Columns.map((column) => ({
     ...column,
     items: documents.filter((document) => {
-      const state = documentState(document);
+      const state = stateOf.get(document) ?? null;
 
       return state !== null && column.states.includes(state);
     }),
   }));
 
-  // ✎ B147 (B75): «без погодження» — не чернетка й не «без стану»: власний стовпець, лише коли в ньому щось є
-  // (як «без стану»; у макеті його немає, бо там немає й документів без погодження).
-  const noApproval = documents.filter((document) => documentState(document) === 'NoApproval');
+  // ✎ B147 (B75): «без погодження» — не чернетка й не «без стану»: власний стовпець, лише коли в ньому щось є.
+  const noApproval = documents.filter((document) => stateOf.get(document) === 'NoApproval');
   if (noApproval.length > 0) columns.push({ id: 'NoApproval', states: ['NoApproval'], attention: false, items: noApproval });
 
   const placed = new Set(columns.flatMap((column) => column.items));

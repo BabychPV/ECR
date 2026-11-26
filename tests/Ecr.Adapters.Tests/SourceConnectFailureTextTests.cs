@@ -44,7 +44,8 @@ public sealed class SourceConnectFailureTextTests
             Settings((SqlDataSource.ValueQueryKey, "SELECT 1")),
             log);
 
-        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+        // ⚠ b14 (AC-3): зіпсований рядок — «не налаштовано», а не «недоступне».
+        var error = await Assert.ThrowsAsync<SourceNotConfiguredException>(
             () => adapter.ReadAsync(
                 new CollectionRequest(1, 7, "STREAM-1", Midnight, Midnight.AddHours(1), 10), CancellationToken.None));
 
@@ -100,9 +101,12 @@ public sealed class SourceConnectFailureTextTests
             () => adapter.ReadAsync(
                 new CollectionRequest(1, 7, "STREAM-1", Midnight, Midnight.AddHours(1), 10), CancellationToken.None));
 
-        var driverText = Assert.IsType<SqlException>(Assert.Single(log.Entries).Exception).Message;
+        // ✎ P-1126-SRCCRED (R-02): у журнал — безпечний запис (тип, номер, скрабований текст), не сирий SqlException.
+        var logged = Assert.Single(log.Entries).Text;
+        Assert.Contains("SqlException [18456]", logged, StringComparison.Ordinal);
+        Assert.DoesNotContain("Secret123", logged, StringComparison.Ordinal);
         Assert.Contains("18456", error.Message, StringComparison.Ordinal);
-        AssertSafe(error.Message, driverText);
+        AssertSafe(error.Message, "Login failed");
         Assert.DoesNotContain("ecr_no_such_login", error.Message, StringComparison.Ordinal);
         AssertLoggedWithCorrelation(log, error.Message);
     }
@@ -128,8 +132,15 @@ public sealed class SourceConnectFailureTextTests
     private static void AssertLoggedWithCorrelation<T>(CapturingLogger<T> log, string message)
     {
         var entry = Assert.Single(log.Entries);
-        Assert.NotNull(entry.Exception);
-        var correlation = entry.Text[(entry.Text.LastIndexOf("кореляція ", StringComparison.Ordinal) + "кореляція ".Length)..].TrimEnd('.');
+
+        // ✎ P-1126-SRCCRED (R-02): сирого винятку в журналі немає — лише SafeLogException у тексті запису.
+        Assert.Null(entry.Exception);
+        var tail = entry.Text[(entry.Text.LastIndexOf("кореляція ", StringComparison.Ordinal) + "кореляція ".Length)..];
+        var correlation = tail[..tail.IndexOf(':', StringComparison.Ordinal)];
+        foreach (var secret in Secrets.Where(s => s != "pi01.internal" && s != "sqlq-db01"))
+        {
+            Assert.DoesNotContain(secret, entry.Text, StringComparison.Ordinal);
+        }
         Assert.Contains(correlation, message, StringComparison.Ordinal);
     }
 

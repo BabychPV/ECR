@@ -181,6 +181,36 @@ public sealed class GetCellChangesHandler(
     }
 
     /// <summary>
+    /// ✎ AC-8: колонки документа, які змінювали у вікні, — варіанти фільтра «Column» незалежно від завантажених сторінок
+    /// журналу. Ті самі право, вікно, грант на документ і межі читання (S6, R-11, V-4), що й у <see cref="HandleAsync"/>.
+    /// </summary>
+    /// <param name="from">Початок вікна в UTC, включно.</param>
+    /// <param name="to">Кінець вікна в UTC, виключно.</param>
+    /// <param name="documentId">Документ; без нього — порожньо (наскрізного переліку колонок немає).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Прихована колонка (своя заборона, таблиці чи аркуша) у переліку відсутня — підпис забороненої таблиці був би
+    /// оракулом «там щось змінювали». Відсів — у SQL (<see cref="CellChangeFilter.VisibleColumnIds"/>) і другим рубежем тут.
+    /// </remarks>
+    public async Task<IReadOnlyList<CellChangeColumnView>> ChangedColumnsAsync(
+        DateTime from, DateTime to, long? documentId, CancellationToken ct)
+    {
+        var filter = new CellChangeFilter(from, to, documentId);
+        var (readable, empty) = await AuthorizeAsync(filter, page: null, ct).ConfigureAwait(false);
+        if (empty || readable is null)
+        {
+            return [];
+        }
+
+        IReadOnlySet<int>? visibleSet;
+        (filter, visibleSet) = await WithVisibleLineageAsync(filter, readable, ct).ConfigureAwait(false);
+
+        var columns = await audit.ReadChangedColumnsAsync(filter, ct).ConfigureAwait(false);
+
+        return visibleSet is null ? columns : [.. columns.Where(c => visibleSet.Contains(c.ColumnDefId))];
+    }
+
+    /// <summary>
     /// Пошуковий рядок: обрізані пробіли, порожній — це не фільтр (очищене поле), довший за межу — обрізається.
     /// </summary>
     /// <remarks>

@@ -51,8 +51,10 @@ public static class PermissionScopes
         "Calculation.ManageRequiredInputs",
         "Calculation.ManageSourceBinding", // B80 N1: зв'язки документа-джерела — системне налаштування
         "Calculation.RecalculateApprovedDependents", // B80 N5 (D-554): явний перерахунок і ЗАТВЕРДЖЕНИХ залежних — лише адміністратор
-        "Report.EditDefinition",
+        "Project.DeleteWithData", // ✎ 25.11: видалення проєкту з усіма даними — роль з областю не стирає проєкт цілком
         "Report.ViewCampaign",
+        "GasComposition.View", // D-NEW: склад газу — довідкові дані розрахунків усієї системи
+        "GasComposition.Edit",
     };
 
     /// <summary>Чи право без проєкту.</summary>

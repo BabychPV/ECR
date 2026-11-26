@@ -56,7 +56,7 @@ function serve(replies: Replies): void {
         definitionCalls += 1;
         return replies.definition?.() ?? json(definition);
       }
-      if (url.includes('/api/v1/registries/STREAM_CASE/rows')) {
+      if (url.includes('/api/v1/registries/FLARE_CASE/rows')) {
         return replies.rows?.() ?? json({ items: storedRows, nextCursor: null, totalCount: storedRows.length });
       }
       if (url.includes('/rows')) return json({ items: [], nextCursor: null, totalCount: 0 });
@@ -72,7 +72,7 @@ function show(): void {
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <MemoryRouter initialEntries={['/admin/registries/STREAM_CASE/entries']}>
+        <MemoryRouter initialEntries={['/admin/registries/FLARE_CASE/entries']}>
           <Routes>
             <Route path="/admin/registries/:code/entries" element={<RegistryDataPage />} />
           </Routes>

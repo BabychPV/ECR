@@ -2,7 +2,6 @@
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Entities.Integration;
 using Ecr.Domain.Entities.Notifications;
-using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Documents;
@@ -238,19 +237,12 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     /// <summary>✎ C-1: поточний стан помилок формул.</summary>
     public DbSet<FormulaError> FormulaErrors => Set<FormulaError>();
 
-    // rpt
-    public DbSet<ReportDef> ReportDefs => Set<ReportDef>();
-    public DbSet<ReportVersion> ReportVersions => Set<ReportVersion>();
-    public DbSet<ReportSnapshot> ReportSnapshots => Set<ReportSnapshot>();
-    public DbSet<ReportRow> ReportRows => Set<ReportRow>();
-
     // ext
     public DbSet<DataSource> DataSources => Set<DataSource>();
     public DbSet<SourceEntity> SourceEntities => Set<SourceEntity>();
     public DbSet<EntityFieldMap> EntityFieldMaps => Set<EntityFieldMap>();
     public DbSet<CollectionSchedule> CollectionSchedules => Set<CollectionSchedule>();
     public DbSet<RawDataPoint> RawDataPoints => Set<RawDataPoint>();
-    public DbSet<ConsistencyRule> ConsistencyRules => Set<ConsistencyRule>();
     public DbSet<LegacySheetMapping> LegacySheetMappings => Set<LegacySheetMapping>();
     public DbSet<LegacyTableMapping> LegacyTableMappings => Set<LegacyTableMapping>();
     public DbSet<LegacyRowMapping> LegacyRowMappings => Set<LegacyRowMapping>();

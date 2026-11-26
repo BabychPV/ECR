@@ -1,3 +1,4 @@
+import { columnGrouping, formatDecimalReadable, plainDecimal, type DecimalGrouping } from '@/shared/format/number';
 import { t } from '@/shared/i18n';
 import type { AirAddedColumn, AirLimitsPermit, AirScopeFields, AirSource, AirSubstance } from './airTypes';
 
@@ -13,16 +14,26 @@ export function cell(value: string | null | undefined): string {
 }
 
 /**
- * Десяткове число з сервера для показу. Реальний сервер віддає рядок із повною шкалою колонки
- * (`0.5000000000000000`, `0.0000000000035000`): нулі в хвості дробу не несуть значення і засмічують таблицю. Відкидаємо лише
- * їх (і крапку, якщо дріб порожній) — ЗНАЧЕННЯ не змінюється й не округлюється (`3.5e-12` лишається `0.0000000000035`).
- * Не десятковий текст показується як є.
+ * Десяткове число з сервера для показу — спільним читабельним поданням (`formatDecimalReadable`, людина 25.11: «числа в
+ * пермітах не вистачає місця»): без хвостових нулів шкали (`0.5000000000000000` → `0.5`), ≤ 7 значущих, мовою інтерфейсу,
+ * без експоненти (`0.0000000000035`). Групування тисяч — одне на стовпець (`grouping`, з `columnGrouping` значень
+ * стовпця; картка number-format-consistent). Точне значення — `numTitle` (підказка комірки). Не десятковий текст
+ * показується як є.
  */
-export function num(value: string | null | undefined): string {
+export function num(value: string | null | undefined, grouping: DecimalGrouping = 'min2'): string {
   const text = cell(value);
-  if (!/^-?\d+\.\d+$/.test(text)) return text;
+  return formatDecimalReadable(text, undefined, undefined, grouping)?.text ?? text;
+}
 
-  return text.replace(/0+$/, '').replace(/\.$/, '');
+/** Точне значення для підказки комірки, коли `num` його скоротив; інакше `undefined`. */
+export function numTitle(value: string | null | undefined, grouping: DecimalGrouping = 'min2'): string | undefined {
+  const readable = formatDecimalReadable(value, undefined, undefined, grouping);
+  return readable?.rounded === true ? readable.exact : undefined;
+}
+
+/** Групування тисяч стовпця таблиці: значення стовпця з усіх рядків (`columnGrouping`). */
+export function groupingOf<T>(rows: readonly T[], pick: (row: T) => unknown): DecimalGrouping {
+  return columnGrouping(rows.map(pick));
 }
 
 /**
@@ -165,10 +176,10 @@ export function addedRaw(values: AddedValues, code: string): string {
 }
 
 /** Значення доданої колонки для таблиці: число без хвостових нулів, порожнє — прочерк. */
-export function addedText(values: AddedValues, column: AirAddedColumn): string {
+export function addedText(values: AddedValues, column: AirAddedColumn, grouping: DecimalGrouping = 'min2'): string {
   const raw = addedRaw(values, column.code);
 
-  return isNumericColumn(column) ? num(raw) : cell(raw);
+  return isNumericColumn(column) ? num(raw, grouping) : cell(raw);
 }
 
 /** Вид поля форми редагування. */
@@ -257,7 +268,11 @@ function builtInRaw<T>(builtIns: readonly BuiltIn<T>[], row: T, code: string): s
   return value === null || value === undefined ? '' : String(value as string | number);
 }
 
-/** Початкові значення форми (текстом): десяткові — без хвостових нулів, щоб поле не показувало `0.5000000000000000`. */
+/**
+ * Початкові значення форми (текстом): десяткові — точним рядком без хвостових нулів і без експоненти
+ * (`0.5000000000000000` → `0.5`, `8.7e-7` → `0.00000087`). ✎ 25.11 (картка number-format-consistent): НЕ читабельне
+ * подання — воно округлювало й групувало (`75,435.96`), і на фокусі поле показувало не збережене значення.
+ */
 export function initialValues(
   fields: readonly EditField[],
   row: AirSource | AirSubstance,
@@ -270,7 +285,7 @@ export function initialValues(
       : kind === 'sources'
         ? builtInRaw(SourceBuiltIns, row as AirSource, field.code)
         : builtInRaw(SubstanceBuiltIns, row as AirSubstance, field.code);
-    values[field.code] = field.kind === 'number' ? (raw === '' ? '' : num(raw)) : raw;
+    values[field.code] = field.kind === 'number' ? (raw === '' ? '' : (plainDecimal(raw) ?? raw)) : raw;
   }
 
   return values;

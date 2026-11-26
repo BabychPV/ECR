@@ -329,6 +329,55 @@ public sealed class RegistrySnapshotCache(DateTime? registryAsOfUtc)
         return AwaitAsync(key, entry);
     }
 
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Lazy<Task<Registries.DatedRegistrySnapshots>>> _sources =
+        new(StringComparer.Ordinal);
+
+    /// <summary>Скільки різних джерел знімків «на дату рядка» завантажено (AC-8: одне на набір довідників за прогін).</summary>
+    public int SourceCount => _sources.Count;
+
+    /// <summary>
+    /// ✎ DESIGN-sg-flaring §5.2a (E3): джерело знімків на БУДЬ-ЯКУ дату для <c>registry as of</c> — одне читання БД на набір
+    /// довідників за прогін (спільне для всіх документів), далі знімок будується в пам'яті раз на інтервал чинності
+    /// (<see cref="Registries.DatedRegistrySnapshots"/>).
+    /// </summary>
+    /// <param name="registryDefIds">Довідники, які читають формули.</param>
+    /// <param name="loader">Завантажувач гілки, яка питає.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<Registries.DatedRegistrySnapshots> GetOrLoadSourceAsync(
+        IReadOnlyCollection<int> registryDefIds,
+        IRegistrySnapshotLoader loader,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(registryDefIds);
+        ArgumentNullException.ThrowIfNull(loader);
+
+        var ids = registryDefIds.Distinct().Order().ToList();
+        var key = string.Join(',', ids) + "|"
+                  + (RegistryAsOfUtc?.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-");
+
+        var entry = _sources.GetOrAdd(
+            key,
+            _ => new Lazy<Task<Registries.DatedRegistrySnapshots>>(
+                async () => new Registries.DatedRegistrySnapshots(
+                    await loader.LoadSourceAsync(ids, RegistryAsOfUtc, ct).ConfigureAwait(false))));
+
+        return AwaitSourceAsync(key, entry);
+    }
+
+    private async Task<Registries.DatedRegistrySnapshots> AwaitSourceAsync(
+        string key, Lazy<Task<Registries.DatedRegistrySnapshots>> entry)
+    {
+        try
+        {
+            return await entry.Value.ConfigureAwait(false);
+        }
+        catch
+        {
+            _sources.TryRemove(new KeyValuePair<string, Lazy<Task<Registries.DatedRegistrySnapshots>>>(key, entry));
+            throw;
+        }
+    }
+
     private async Task<Ecr.Expressions.Evaluation.IRegistrySnapshot> AwaitAsync(
         string key, Lazy<Task<Ecr.Expressions.Evaluation.IRegistrySnapshot>> entry)
     {
@@ -444,12 +493,18 @@ public sealed record CalculationInput(
 /// лишається побітно таким, як до кроку, бо чинна система id запису в формулу не
 /// передавала, і <c>Legacy</c> мусить відтворювати саме її числа.
 /// </param>
+/// <param name="ValueDate">
+/// ✎ DESIGN-sg-flaring §5.2a: дата з <c>Date</c>-комірки (час події <c>$start</c> — у поясі проєкту, так її пише
+/// <c>SourceEventRowBuilder</c>). Бачить її лише рушій скриптів (<c>row.X</c> → значення-дата, <c>registry as of</c>);
+/// рушій формул її не читає, і в <c>calc.CalculationInput</c> вона не пишеться.
+/// </param>
 public sealed record CalculationArgument(
     string ArgumentCode,
     decimal? Value,
     string? ValueString,
     int? UnitId,
-    long? EntryId = null);
+    long? EntryId = null,
+    DateTime? ValueDate = null);
 
 /// <summary>
 /// Результат розрахунку одного рядка: <b>усі</b> виходи методології плюс трейс.

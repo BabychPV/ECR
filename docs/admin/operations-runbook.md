@@ -141,7 +141,6 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Security:RateLimit:RecalculatePermitPerMinute` | 6 | запитів `POST /api/v1/documents/{id}/recalculate` на користувача й документ за хвилину (спільно для власників права `Calculation.Recalculate` і читачів); понад межу — `429` (`ECR-REQ-0429`, `Retry-After`). Лічильник у пам'яті процесу: перезапуск скидає, на кількох вузлах межа діє на кожному окремо. Запити, відхилені `4xx` (`403`/`404`/`422`), межу не витрачають; `5xx` і скасований клієнтом запит — витрачають (робота могла вже статися; ent7 P3-1). Мінімум — 1 |
 | `Security:RateLimit:RecalculateUserPermitPerMinute` | 30 | запитів `POST /api/v1/documents/{id}/recalculate` на КОРИСТУВАЧА (усі документи разом) за хвилину; діє поруч із межею на пару «користувач + документ» (ent7 P3-2). Мінімум — 1 |
 | `Security:RateLimit:SmtpTestPermitPerMinute` / `SmtpTestSystemPermitPerHour` | 5 / 30 | проб поштового транспорту (`POST /api/v1/notifications/smtp/test` і `POST /api/v1/notifications/channels/{id}/test`): на користувача за хвилину і на всю систему за годину; понад межу — `429` (`ECR-REQ-0429`, `Retry-After`). Системна межа списується за проби, ПРИЙНЯТІ межею користувача й перевіркою права `System.ManageNotifications`; запити, відхилені цими двома перевірками (`429`, `403`), її не витрачають, а квота рахує лише проби, що пройшли валідацію й пошук каналу: запити, що завершилися будь-яким статусом `4xx` пізніше (`422`, `404` та ін., зокрема винятком), токен повертають, `5xx` — ні (рев'ю ent6 S6). Межа діє і для проби каналу Teams. Рахуються проби, а не листи: проба каналу шле до 20 адресатів РАЗОМ (явні адреси, потім ролі; D-263, ent6 S3); канал зберігає не більше 50 явних адрес. Квоти живуть у пам'яті кожного процесу: перезапуск скидає, а на кількох вузлах межа діє на кожному окремо. Мінімум для обох — 1 (`notifications-runbook.md` п. 2.5) |
-| `Security:RateLimit:VerifyPermitPerMinute` | 100 | запитів `POST /api/v1/reports/snapshots/{id}/verify` («Перевірити зріз») на КОРИСТУВАЧА за хвилину; фіксоване вікно 1 хв; понад межу — `429` (`ECR-REQ-0429`, ключ `err.ECR-REQ-0429.tooManyVerifications`) із заголовком `Retry-After` (L1-05/P1-08). Лічильник у пам'яті процесу: перезапуск скидає, на кількох вузлах межа діє на кожному окремо. Мінімум — 1 |
 | `Security:RateLimit:ValidatePermitPerMinute` | 100 | запитів `POST /api/v1/documents/{id}/validate` («Перевірити документ») на КОРИСТУВАЧА за хвилину; фіксоване вікно 1 хв; понад межу — `429` (`ECR-REQ-0429`, ключ `err.ECR-REQ-0429.tooManyValidations`) із заголовком `Retry-After`. Лічильник у пам'яті процесу, на кількох вузлах рахується окремо. `POST /api/v1/expressions/validate` цією межею не обмежується. Мінімум — 1 |
 | `Security:RateLimit:DiscussionPostPermitPerMinute` | 20 | повідомлень `POST /api/v1/documents/{id}/tables/{tableCode}/messages` (запис у чат таблиці) на КОРИСТУВАЧА за хвилину; фіксоване вікно 1 хв; понад межу — `429` (`ECR-REQ-0429`, ключ `err.ECR-REQ-0429.tooManyChatMessages`) із `Retry-After`; повтор із тим самим `clientMessageId` теж рахується (S-6). Кандидати згадок (`GET …/mention-candidates`) власної межі не мають — ділять кошик `SearchPermit`/`SearchWindowSeconds` (30 за 10 с) із пошуком і кандидатами передач. Лічильник у пам'яті процесу: перезапуск скидає, на кількох вузлах межа діє на кожному окремо. Мінімум — 1 |
 | `Security:RateLimit:ExportPermitPerMinute` | 6 | постановок важкої задачі вивантаження в чергу на КОРИСТУВАЧА за хвилину: експорт документа `POST /api/v1/documents/{id}/export`, експорт огляду року `POST /api/v1/documents/{id}/calculation-results/year/export` і побудова зрізу `POST /api/v1/reports/{code}/build` — ОДИН кошик на всі три; фіксоване вікно 1 хв; понад межу — `429` (`ECR-REQ-0429`, ключ `err.ECR-REQ-0429.tooManyExports`) із `Retry-After` (PT-6). Межа не зводить однакові запити в один і не обмежує довжину черги (6/хв × 60 хв = 360 задач на годину від одного користувача). Лічильник у пам'яті процесу: перезапуск скидає, на кількох вузлах межа діє на кожному окремо. Мінімум — 1 |
@@ -200,7 +199,7 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Collection:MaxEventPages` | 10 | `D-464`: скільки сторінок по 2 000 подій дочитувати за одне читання шаблону (за шматок, якщо `EventQueryChunk = Month`); від 1. Понад стелю — подія журналу покриття `coverageEvents.eventsTruncatedCap` (стеля і як її підняти), пізніші події не синхронізуються, видалення зниклих вимкнено — підніміть ключ або ввімкніть `Month`. Вікно синку — від найранішого відкритого періоду, у якому документ мапінгу має таблицю; вікно понад 400 діб — попередження в журналі сервера (закрийте забутий період). Поданий/затверджений аркуш — одна зведена подія на період; після повернення / відкликання / перевідкриття аркуша й відкриття періоду синк подій ставиться одразу. Масове видалення понад ліміт підтверджується у вкладці «Події з PI» («Підтвердити видалення», журнал змін) |
 | `PiSqlClient:CommandTimeoutSeconds` | 60 | `D-462`: тайм-аут однієї команди ODBC (кожної спроби з трьох), с; від 1. З'єднання ODBC одне на задачу збору. `SecondaryEndpoint` джерела вмикається сам при відмові з'єднання з основною адресою (не при відмові облікових даних) — у журналі сервера попередження «до кінця прогону джерело обслуговує ЗАПАСНА адреса» |
 | `Sql:CatalogQuery` / `Sql:ValueQuery` | немає (вбудовані) | те саме для SQL-джерела |
-| `Sql:<код джерела>:CompositionQuery` | немає | `D-476`: запит знімка складу газу FLERT для `FlertCompositionSyncJob` (п. 4.3) — еталон `EXEC dbo.usp_GetAllStreamDataFlattened;`; канал секретів, тобто змінна `ECR_Secrets__Sql__FLERT__CompositionQuery`. Типового тексту немає |
+| `Sql:<код джерела>:CompositionQuery` | немає (діє `Flert:Sync:CompositionQuery`) | `D-476`: перекриття запиту знімка складу газу FLERT для разового імпорту (п. 4.3) змінною `ECR_Secrets__Sql__FLERT__CompositionQuery`. Без неї діє несекретний `Flert:Sync:CompositionQuery` з appsettings (`EXEC dbo.usp_GetAllStreamDataFlattened;`) |
 | `Integration:AfTimeZoneId` | (порожньо = UTC) | ✎ 2026-09-30, D-212 PR-7: пояс, у якому AF віддає дати дії записів довідника без поясу (Windows або IANA, напр. `Asia/Atyrau`). Діє лише для синку темпорального довідника з атрибутами дат у політиці. Невідомий пояс зупиняє старт з ім'ям ключа. ⚠ Пояс серверів AF замовника — відкрите питання PI-адміністратору |
 | `PiWebApi:AllowedHosts` | `[]` (порожньо) | ✎ 2026-10-01: перелік хостів PI Web API, до яких дозволено підключати джерела. Елемент — точне ім'я хоста або `*.domain` (лише піддомени; сам `domain` не збігається); без урахування регістра. **Порожньо = без обмеження, окрім блок-листа** (loopback, link-local і хмарний metadata 169.254.x, unspecified, multicast — діє завжди, для всіх режимів автентифікації; перевіряється по кожній розв'язаній A/AAAA-адресі, у момент підключення — отже DNS rebinding не обійде). Приватні IP-літерали (`10.x`, `172.16–31.x`, `192.168.x`, `fc00::/7`) заборонені лише для джерел з Negotiate (потрібне ім'я хоста для Kerberos SPN). Адресу Negotiate-джерела можна змінити лише з явним `confirmEndpointChange: true` у запиті (в інтерфейсі — діалог підтвердження). Відповідь PI понад 50 МБ відхиляється. Масив задається так: у `appsettings.Production.json` — `"PiWebApi": { "AllowedHosts": [ "<хост PI Web API>", "*.<домен замовника>" ] }`, або змінними служби `ECR_PiWebApi__AllowedHosts__0`, `ECR_PiWebApi__AllowedHosts__1`, … ⚠ Інсталятор і `deploy-ecr.ps1` цього ключа не пишуть — задає адміністратор замовника вручну; імена хостів PI — дані замовника, у продукті їх немає (дефолт порожній; сторож `PiWebApiAllowedHostsDefaultTests`). Для вашого середовища кандидати allowlist: `ncatdevv08`, `ncatuatv12`, `ncatappv0154`; задає адміністратор замовника через `appsettings.Production.json` / `ECR_PiWebApi__AllowedHosts__0`. ⚠ Negotiate-джерело без списку: Warning у журнал і картка `sources` Degraded (`health.sources.negotiateNoAllowlist`, п. 3.1) — заповніть список. Після зміни — перезапуск `EcrApi` |
 | `Bootstrap:Password` | немає | запасний пароль `bootstrap`. Основний шлях — файл `bootstrap.secret` |
@@ -388,6 +387,7 @@ IF @@ROWCOUNT = 0
 | `Cache:MetadataSlidingMinutes` | ні | `240` | Ціле число, не менше 1. |
 | `Cache:SchemaName` | ні | `dbo` | Значення на старті не перевіряється. |
 | `Cache:TableName` | ні | `Cache` | Значення на старті не перевіряється. |
+| `Calculations:FormulaEngineAuthoring:Enabled` | ні | `false` | `true` або `false`. |
 | `Calculations:FullYearWarnSeconds` | ні | `600` | Ціле число, не менше 1. |
 | `Calculations:MaxInputCellsPerBinding` | ні | `300000` | Ціле число, не менше 1. |
 | `Calculations:MaxParallelism` | ні | `4` | Ціле число, не менше 1. |
@@ -423,10 +423,9 @@ IF @@ROWCOUNT = 0
 | `Documents:StaleMapWarm:IntervalSeconds` | ні | `60` | Ціле число, не менше 10. |
 | `Documents:StaleMapWarm:RingIntervalSeconds` | ні | `600` | Ціле число, не менше 60. |
 | `Documents:VersionMigration:FromMonthEnabled` | ні | `false` | `true` або `false`. |
+| `Flert:Sync:CompositionQuery` | ні | `EXEC dbo.usp_GetAllStreamDataFlattened;` | Значення на старті не перевіряється. |
 | `Flert:Sync:DataSourceCode` | ні | `FLERT` | Значення на старті не перевіряється. |
-| `Flert:Sync:Enabled` | ні | `false` | `true` або `false`. |
 | `Flert:Sync:MaxDeactivatePercent` | ні | `10` | Ціле число, не менше 0. |
-| `Flert:Sync:RecalculateDependents` | ні | `false` | `true` або `false`. |
 | `Health:RawDataPointWarnRows` | ні | `20000000` | Ціле число, не менше 0. |
 | `Health:WarmupOnStart` | ні | `true` | `true` або `false`. |
 | `Integration:AfTimeZoneId` | ні | — | Формат перевіряється на старті (див. текст відмови служби). |
@@ -498,7 +497,6 @@ IF @@ROWCOUNT = 0
 | `Security:RateLimit:SmtpTestSystemPermitPerHour` | ні | `30` | Ціле число, не менше 1. |
 | `Security:RateLimit:TrustForwardedFor` | ні | `false` | `true` або `false`. |
 | `Security:RateLimit:ValidatePermitPerMinute` | ні | `100` | Ціле число, не менше 1. |
-| `Security:RateLimit:VerifyPermitPerMinute` | ні | `100` | Ціле число, не менше 1. |
 | `Security:RateLimit:WindowsLoginPermitPerMinute` | ні | `600` | Ціле число, не менше 1. PERF-07 |
 | `Smtp:AllowedPorts` | ні | `[]` | Формат перевіряється на старті (див. текст відмови служби). |
 | `Startup:WarmEditPath` | ні | `true` | `true` або `false`. |
@@ -664,11 +662,10 @@ Server Agent ідуть за локальним часом сервера SQL. �
 
 | Коли | Задачі |
 |---|---|
-| щоночі 02:15 | `PartitionCheckJob`, `ConsistencyCheckJob`, `OrphanScanJob`, `ReportRetentionJob`, `ReportSnapshotFormatJob`, `SubmissionSnapshotRetentionJob` (AN-134, за замовчуванням лише dry-run), `SupersededResultsSweepJob` (Q-17 / `D-560`, увімкнено й видаляє за замовчуванням, п. 4.2) |
+| щоночі 02:15 | `PartitionCheckJob`, `ConsistencyCheckJob`, `OrphanScanJob`, `ReportRetentionJob` (P1-08: прогони перевірки документа; ✎ P-1124-3 — зрізи звітності прибрано), `SubmissionSnapshotRetentionJob` (AN-134, за замовчуванням лише dry-run), `SupersededResultsSweepJob` (Q-17 / `D-560`, увімкнено й видаляє за замовчуванням, п. 4.2) |
 | кожні 10 хв, хх:02/12/… | `PeriodStateJob` (також один раз на старті) |
 | щогодини, хх:05 | `NotificationJob`, `RowWindowRefetchJob` (повторне підтягування вікон рядків за пізніми даними PI) |
 | щоночі 00:30 | ✎ PSS-15 (`D-562`): нічний перерахунок (типово увімкнений; вимикає `Jobs:NightlyRecalculation:Enabled=false`) — поточний рік і попередній у пільговому строку, лише змінені документи; до вікна прибирання 01:00–05:00 і до перевірок 02:15 (нижче) |
-| щоночі 02:00 | `FlertCompositionSyncJob` — синк складу газу FLERT у дзеркало ECR (`D-476`, п. 4.3); типово вимкнено `Flert:Sync:Enabled=false` — прогін лише пише «вимкнено» |
 | за cron розкладу сутності | збір даних (`ext.CollectionSchedule`, по одному розкладу на сутність джерела; формат і залежності — `admin-guide.md` §5.1–5.2) |
 | щохвилини / щогодини | прибирання покинутих задач і прогонів збору (`AbandonedWorkSweeper`) / видалення завершених записів `itg.JobProgress` (ретенція: 30 діб; успішні перерахунки формул — через добу, PERF-15, щоб «Мої задачі» не перебирала рутину) — цикл `RecurringScheduleService`, не Quartz |
 
@@ -942,25 +939,35 @@ calc.CalculationStep WHERE …` — кроки до `D-565` лежать у `Tra
 `tools/land-test-doc` і `tools/land/postcheck` для таких методологій пишуть «not evaluable», а не 0. Користувач бачить те
 саме в панелі «Calculation problems» документа (пояснення або кнопка «show step»).
 
-### 4.3. Синк складу газу FLERT (`FlertCompositionSyncJob`, `D-476`)
+### 4.3. Склад газу: власник ECR, разовий імпорт із FLERT (`FlertCompositionSyncJob`, `D-476`, D-NEW 24.11)
 
-Склад газу (потоки, кейси, мол.% компонентів) веде **FLERT**; ECR тримає копію лише для читання — довідники
-`STREAM` → `STREAM_CASE` → `GAS_COMPOSITION` (джерело `External`: ручна правка відхиляється) і `COMPONENT` (master — ECR:
-M, nC, nS вносить адміністратор). Задача щодня о 02:00 часу сервера (розклад у коді, як у решти нічних задач) читає
-FLERT одним запитом і застосовує різницю. Перший увімкнений прогін сам заводить ці чотири довідники (і правило
-`SUM_100` — «Σ мол.% = 100 ± 0.5», попередження), якщо їх немає; наявні не редагує.
+Склад газу (потоки, кейси, версії мол.% компонентів) з 24.11 веде **ECR** — сторінка **Configure → Gas composition**
+(`/admin/gas-composition`, права `GasComposition.View` / `GasComposition.Edit`). Дані лежать у довідниках
+`STREAM` → `STREAM_CASE` (версії з датою дії, з 1-го числа місяця, без перетинів) → `GAS_COMPOSITION` і `COMPONENT`
+(M, nC, nS вносить адміністратор). Загальні редактори довідників ці три довідники не змінюють
+(`err.ECR-REG-0409.managedByGasComposition`): шкала версій, замкнені періоди (результат закритого періоду чи затвердженого
+аркуша, що читав склад) і перевірка Σ = 100 ± 0.5 живуть лише на сторінці. Щоденного синку FLERT **немає**; кожна зміна —
+подія `GasCompositionChanged` у журналі безпеки і перерахунок залежних документів відкритих періодів (затверджені аркуші
+пропускаються).
 
-**Увімкнення** (після того, як DBA FLERT видав права — нижче):
-1. Інтеграція → Джерела: джерело з кодом `FLERT` (або іншим — тоді `Flert:Sync:DataSourceCode`), транспорт `Sql`,
-   адреса — рядок з'єднання з базою FLERT під логіном лише для читання (`Server=<сервер FLERT>;Database=FLERT;User ID=ecr_flert_reader;Encrypt=True`),
-   секрет — ім'я секрету з паролем (`ECR_Secrets__<ім'я>`). Linked server і синоніми НЕ потрібні (`D-268`).
-2. Текст запиту — змінна служби `ECR_Secrets__Sql__FLERT__CompositionQuery` = `EXEC dbo.usp_GetAllStreamDataFlattened;`
-   (форма результату — 70+ колонок `usp_GetAllStreamDataFlattened`: поточні й історичні версії, усі компоненти).
-   Типового тексту немає: без нього прогін падає з `err.ECR-INT-0503.queryNotConfigured`.
-3. `ECR_Flert__Sync__Enabled=true`, перезапуск `EcrApi`.
+**Разовий імпорт із FLERT** — кнопка «Import from FLERT» на сторінці (права `GasComposition.Edit` і `Integration.Manage`),
+видима, лише поки в ECR немає жодного потоку: у непорожню базу імпорт відмовляє (`reason=alreadyImported`, FLERT навіть
+не читається), тож правки ECR він не перетирає. Перед кнопкою (після того, як DBA FLERT видав права — нижче):
+1. Джерело з кодом `FLERT` (або іншим — тоді `Flert:Sync:DataSourceCode`), транспорт `Sql`. Крок вікна
+   `tools/gas-composition/Import-GasCompositionFromFlert.ps1 -Apply` заводить його сам, якщо його немає (через
+   `POST /api/v1/data-sources` від імені оператора, з записом у журнал структурних змін): адреса
+   `Server=<сервер FLERT>;Integrated Security=True;TrustServerCertificate=True;Application Intent=ReadOnly`, каталог `FLERT`,
+   вхід — обліковий запис служби ECR (коли ECR і FLERT на одному сервері; новий SQL-логін не потрібен). Сухий прогін
+   скрипта лише друкує, що заведе; наявне джерело скрипт не змінює (вимкнене чи не-`Sql` — вихід 4). Інакше — вручну в
+   «Інтеграція → Джерела», зокрема під логіном лише для читання (`Server=<сервер FLERT>;Database=FLERT;User ID=ecr_flert_reader;Encrypt=True`,
+   секрет з паролем — `ECR_Secrets__<ім'я>`). Linked server і синоніми НЕ потрібні (`D-268`).
+2. Текст запиту — несекретний `Flert:Sync:CompositionQuery` в `appsettings.json`, типово `EXEC dbo.usp_GetAllStreamDataFlattened;`
+   (форма результату — 70+ колонок `usp_GetAllStreamDataFlattened`: поточні й історичні версії, усі компоненти). Змінна
+   служби `ECR_Secrets__Sql__FLERT__CompositionQuery`, якщо задана, його перекриває.
 
 **Права в базі FLERT** (DBA замовника; ECR у FLERT не пише нічого — запит виконується в транзакції, яку адаптер завжди
-відкочує):
+відкочує). Нижче — для логіна лише для читання; при вході обліковим записом служби той самий `GRANT EXECUTE` видається
+користувачу FLERT, зіставленому з цим обліковим записом (`CREATE USER [<домен>\<обліковий запис служби>] FROM LOGIN …`):
 
 ```sql
 USE [FLERT];
@@ -969,26 +976,26 @@ GRANT EXECUTE ON OBJECT::[dbo].[usp_GetAllStreamDataFlattened] TO [ecr_flert_rea
 ```
 
 Цього досить: процедура і її шість таблиць (`FlaringStream`, `FlaringStreamType`, `FlaringStreamGasComposition` і три
-`…_History`) належать `dbo`, тож ланцюжок власності дає читання без `SELECT` на таблиці. Лише якщо замість процедури
-налаштовано власний `SELECT` по таблицях — тоді `GRANT SELECT` на ці шість таблиць (і більше нічого).
+`…_History`) належать `dbo`, тож ланцюжок власності дає читання без `SELECT` на таблиці. Після імпорту логін можна
+вимкнути — FLERT більше не читається.
 
-**Результат** — `itg.MaintenanceRun` з кодом `flert-composition-sync`, `DetailsJson`: `added`/`updated`/`unchanged`/
-`deactivated`/`reactivated` по довідниках, `issues` (перші 50):
+**Результат** — `itg.MaintenanceRun` з кодом `flert-composition-sync` (останній прогін видно на сторінці), `DetailsJson`:
+`added`/`updated`/`unchanged` по довідниках, `issues` (перші 50):
 
-| Статус | Коли | Копія |
+| Статус | Коли | ECR |
 |---|---|---|
-| `Succeeded` | знімок застосовано; повтор того самого знімка — нуль змін і без нової ревізії довідників | оновлена |
-| `Succeeded`, `reason=disabled` | `Flert:Sync:Enabled=false` | без змін |
-| `Degraded`, `reason=emptyResult` | запит повернув 0 рядків — ознака збою, а не «FLERT порожній» | **без змін, нічого не видалено** |
-| `Degraded`, `reason=deactivationLimit` | знімок вимкнув би більше чинних кейсів, ніж `Flert:Sync:MaxDeactivatePercent` (типово 10 %) від чинних, і більше 5 (до 5 вимикається завжди) — ознака часткового результату FLERT; у `issues` — скільки вимкнулося б і скільки дозволено. Якщо FLERT справді прибрав стільки кейсів — тимчасово підніміть ключ (до 100) і перезапустіть `EcrApi` | **без змін: ні вимкнень, ні змін, ні нових записів** |
-| `Degraded` | частину рядків відхилено (зауваження `writerRejected`), відсутній компонент у `COMPONENT` (`componentMissing`), довідник дзеркала не `External` (`registrySource`) | решта оновлена |
+| `Succeeded` | знімок імпортовано (усі Id FLERT, вікна, значення повної точності) | заповнено |
+| `Degraded`, `reason=alreadyImported` | у ECR уже є потоки | **без змін, FLERT не читався** |
+| `Degraded`, `reason=emptyResult` | запит повернув 0 рядків — ознака збою, а не «FLERT порожній» | **без змін** |
+| `Degraded` | частину рядків відхилено (`writerRejected`) або компонента немає в `COMPONENT` (`componentMissing`) | решта імпортована |
 | `Failed` | FLERT недоступний / облікові дані (`ECR-INT-0503` / `0502`, як у збору), змінилася схема (`mappingErrors`: зникла колонка; нова колонка — лише попередження), знімок понад 100 000 рядків (`truncated`), наявний довідник із такою назвою несумісний (`registryIncompatible`) | **без змін** |
 
-Записи, яких більше немає у FLERT, **вимикаються** (не видаляються); повернення у FLERT вмикає їх знову. Кейс зі
-складом Σ = 0 («No composition») записується з позначкою `NO_COMPOSITION` і зауваженням `noComposition` — розрахунок
-на ньому дасть проблему, а не нульові викиди. Пари дублів `CO`/`Carbon_Monoxide`, `H2`/`Hydrogen`, `O2`/`Oxygen` — береться
-коротка назва; обидві заповнені різними значеннями — зауваження `aliasConflict`. Мітки FLERT — UTC; вікно дії версії
-кейсу — вікно складу (`GasComposition_ValidFrom/To`).
+Кейс зі складом Σ = 0 («No composition») записується з позначкою `NO_COMPOSITION` і зауваженням `noComposition` —
+розрахунок на ньому дасть проблему, а не нульові викиди. Пари дублів `CO`/`Carbon_Monoxide`, `H2`/`Hydrogen`, `O2`/`Oxygen` —
+у склад іде коротка назва; якщо довга заповнена ІНШИМ значенням, воно зберігається на версії в полі `FLERT_ALIASES`
+(імпорт без втрат). Мітки FLERT — UTC; вікно дії версії кейсу — вікно складу (`GasComposition_ValidFrom/To`). Колишнє
+дзеркало `External` (стенди до 24.11) перший імпорт або перший потік переводять у власність ECR (`Local`, рядок
+`aud.StructureChange` `AdoptGasComposition`).
 ### 4.4. Черга перерахунку: стеля важких перерахунків, черга людей, місця воркера Api (✎ 2026-11-21, `D-564`)
 
 **Що змінилось для оператора.**

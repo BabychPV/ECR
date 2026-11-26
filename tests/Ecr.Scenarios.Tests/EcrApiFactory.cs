@@ -87,6 +87,10 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
         // Правило 1 він не обходить (сценарій і далі ходить лише через HTTP).
         // Наздоганяння нічних задач вимкнено з тієї ж причини, що й cron (`NightlyCatchUp`, як у EcrApiFactory).
         builder.UseSetting("Jobs:NightlyCatchUp:Enabled", "false");
+        // ✎ P-1124-1: у продукті формульний авторинг вимкнено (Calculations:FormulaEngineAuthoring:Enabled=false);
+        // сценарії розрахунку будують методологію формулами як найкоротшу заготовку рантайму — для них увімкнено, як
+        // і в Ecr.Api.Tests/EcrApiFactory. Виведення — картка integ-ms-formulas-api-retire.
+        builder.UseSetting("Calculations:FormulaEngineAuthoring:Enabled", "true");
         builder.ConfigureTestServices(RecurringTriggerVeto.Register);
     }
 

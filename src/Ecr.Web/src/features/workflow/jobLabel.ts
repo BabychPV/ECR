@@ -4,7 +4,7 @@ import { t } from '@/shared/i18n';
  * Людська назва типу фонової задачі — ЛИШЕ для показу (аудит-пас 8, lane6,
  * п.8).
  *
- * ⛔ Тости (`workflow.recalcQueued`, `snapshots.queued`, `sources.queued`) і
+ * ⛔ Тости (`workflow.recalcQueued`, `sources.queued`) і
  * перелік `/admin/jobs` показували СИРІ .NET-імена буквально:
  * `IRecalculationJob-a1b2…` (`jobId`, `QuartzJobScheduler.EnqueueAsync` —
  * `$"{typeof(TJob).Name}-{Guid.NewGuid():N}"`) і
@@ -26,7 +26,6 @@ const KindKeys: Record<string, string> = {
   IExcelImportJob: 'jobs.kind.excelImport',
   IMigrateDocumentVersionJob: 'jobs.kind.migrateDocumentVersion',
   IMaterializeCollectedDataJob: 'jobs.kind.materializeCollectedData',
-  IReportSnapshotJob: 'jobs.kind.reportSnapshot',
   ICollectionJob: 'jobs.kind.collection',
   ISourceEventSyncJob: 'jobs.kind.sourceEventSync',
   IRowWindowFetchJob: 'jobs.kind.rowWindowFetch',
@@ -54,7 +53,6 @@ const KindKeys: Record<string, string> = {
   PeriodStateJob: 'jobs.kind.periodState',
   RegistrySyncJob: 'jobs.kind.registrySync',
   ReportRetentionJob: 'jobs.kind.reportRetention',
-  ReportSnapshotFormatJob: 'jobs.kind.reportSnapshotFormat',
   RowWindowRefetchJob: 'jobs.kind.rowWindowRefetch',
   SubmissionSnapshotRetentionJob: 'jobs.kind.submissionSnapshotRetention',
   // Q-17: нічне прибирання витіснених результатів розрахунку.

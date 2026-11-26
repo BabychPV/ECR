@@ -38,14 +38,12 @@ import { testTheme } from '@/test/render';
  * запитів, і падіння читалося б як дефект дати.
  */
 vi.mock('@/features/methodologies/MethodologyContentPanels', () => ({
-  MethodologyConstantsPanel: () => null,
-  MethodologyOutputsPanel: () => null,
-  MethodologyRulesPanel: () => null,
-  MethodologyRequiredInputsPanel: () => null,
-  MethodologyTestsPanel: () => null,
   MethodologyBindingsPanel: () => null,
   MethodologyModesForm: () => null,
 }));
+// ✎ 24.11: методологічні панелі стоять на сторінці завжди; заглушка мережі віддає `null` на їхні адреси — вимкнені й вони.
+vi.mock('@/features/methodologies/MethodologyPublicationsPanel', () => ({ MethodologyPublicationsPanel: () => null }));
+vi.mock('@/features/methodologies/TraceStepsPanel', () => ({ MethodologyTraceStepsPanel: () => null }));
 
 const Session = {
   denies: [],
@@ -74,6 +72,7 @@ const PublishedDraftVersion = {
   traceLevel: 'Off',
   createdByUserId: 1,
   level: 'Configuration',
+  engine: 'Script',
 };
 
 /** Чернетка: дати чинності ще НЕМАЄ — це не «безстроково», це «нема чого». */
@@ -229,6 +228,8 @@ describe('MethodologiesPage: дата чинності в бейджі верс�
         traceLevel: 'Off',
         effectiveFrom: EffectiveFrom,
         effectiveTo: null,
+        // ✎ P-1124-1: перелік показує лише версії-скрипти (формульні — лише в базі, рішення людини 24.11).
+        engine: 'Script',
       },
     ],
   };

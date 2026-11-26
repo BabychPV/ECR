@@ -177,6 +177,7 @@ public static class DependencyInjection
         services.AddScoped<IDocumentStore, DocumentStore>();
         services.AddScoped<IProjectTemplateStore, ProjectTemplateStore>();   // B74 P3 (D-576)
         services.AddScoped<IDocumentDeletionStore, DocumentDeletionStore>();
+        services.AddScoped<IProjectPurgeStore, ProjectPurgeStore>(); // ✎ 25.11: видалення проєкту з даними
         services.AddScoped<IDocumentSheetCopyStore, DocumentSheetCopyStore>();
         services.AddScoped<IDocumentKeyStore, DocumentKeyStore>();
         services.AddScoped<IEditAssignmentStore, EditAssignmentStore>();
@@ -533,13 +534,14 @@ public static class DependencyInjection
         services.AddScoped<Jobs.ConsistencyCheckJob>();
         services.AddScoped<Jobs.PartitionCheckJob>();
         services.AddScoped<Jobs.ReportRetentionJob>();
-        services.AddScoped<Jobs.ReportSnapshotFormatJob>();
         services.AddScoped<Jobs.SubmissionSnapshotRetentionJob>();
         services.AddScoped<Jobs.SupersededResultsSweepJob>();
 
-        // D-476: синк складу газу FLERT → дзеркало STREAM/STREAM_CASE/GAS_COMPOSITION (щодня о 02:00).
+        // D-476 / D-NEW: разовий імпорт складу газу FLERT → STREAM/STREAM_CASE/GAS_COMPOSITION (власник — ECR).
         services.AddScoped<Jobs.FlertRegistryProvisioner>();
         services.AddScoped<Jobs.FlertCompositionSyncJob>();
+        services.AddScoped<IGasCompositionProvisioning, Jobs.GasCompositionProvisioning>();
+        services.AddScoped<IGasCompositionStore, GasCompositionStore>();
         services.AddScoped<Jobs.NotificationJob>();
 
         // ⚠ Розсилка черги — окремий компонент, бо відправників двоє: зведення
@@ -568,6 +570,10 @@ public static class DependencyInjection
         services.AddSingleton<Notifications.SmtpPasswordProtector>();
         services.AddSingleton<ISmtpPasswordProtector>(sp => sp.GetRequiredService<Notifications.SmtpPasswordProtector>());
         services.AddScoped<ISmtpSettingsStore, Notifications.SmtpSettingsStore>();
+
+        // P-1126-SRCCRED: пароль джерела під DataProtection (власне призначення); адаптери бачать лише порт.
+        services.AddSingleton<IDataSourceCredentialResolver, Integration.DataSourceCredentialResolver>();
+        services.AddScoped<IDataSourceCredentialRejections, Integration.DataSourceCredentialRejections>();
 
         // D-471: вихід після бездіяльності — значення в `sys_ecr.SystemSetting`, межа з коротким кешем.
         services.AddScoped<ISessionSettingsStore, Security.SessionSettingsStore>();
@@ -605,10 +611,9 @@ public static class DependencyInjection
             .ConfigurePrimaryHttpMessageHandler(Notifications.TeamsWebhookSender.CreateHandler); // S9: без редиректів
 
         // ⚠ Задачі, які use-case називає МАРКЕРОМ, реєструються ще й за ним:
-        // `EnqueueAsync<IReportSnapshotJob>` кладе в JobDataMap повне імʼя
+        // `EnqueueAsync<ICollectionJob>` кладе в JobDataMap повне імʼя
         // саме маркера, і без цієї реєстрації адаптер Quartz не знайшов би
         // виконавця — черга приймала б завдання і не робила нічого.
-        services.AddScoped<IReportSnapshotJob, Jobs.ReportSnapshotJob>();
         services.AddScoped<ICollectionJob, Jobs.CollectionJob>();
 
         // HSE301 A5b: синк подій джерела в рядки таблиць. Ставить його `CollectionJob` (сутність із
@@ -617,7 +622,7 @@ public static class DependencyInjection
 
         // D-464: стеля сторінок (`Collection:MaxEventPages`) і нарізка читання подій (`PiSqlClient:EventQueryChunk`).
         services.AddSingleton(Jobs.SourceEventSyncOptions.From(configuration));
-        services.AddScoped<IFlertCompositionSyncJob, Jobs.FlertCompositionSyncJob>(); // D-476 F3: «Синхронізувати зараз»
+        services.AddScoped<IFlertCompositionSyncJob, Jobs.FlertCompositionSyncJob>(); // D-NEW: «Імпортувати з FLERT» (разово)
         services.AddScoped<IFlertSyncStatusReader, Jobs.FlertSyncStatusReader>();
         services.AddScoped<IRegistryImpactRecalculationJob, Jobs.RegistryImpactRecalculationJob>(); // RT-25: батьківська задача перерахунку зачеплених
 
@@ -657,8 +662,6 @@ public static class DependencyInjection
         services.AddScoped<Ecr.Application.Integration.RawData.ISourceEventViewStore, SourceEventViewStore>(); // D-465
         services.AddScoped<IStyleCatalog, StyleCatalog>();
         services.AddScoped<IConditionalFormatStore, ConditionalFormatStore>();
-        services.AddScoped<IReportDefinitionStore, ReportDefinitionStore>();
-        services.AddScoped<IReportSnapshotBuilder, Reporting.ReportSnapshotBuilder>();
         services.AddSingleton<IReportViewStatus, Reporting.ReportViewStatus>();
         services.AddScoped<IReportViewGenerator, Reporting.ReportViewGenerator>();
 

@@ -165,6 +165,7 @@ internal sealed class CalculationRejectionReasons(
         }
 
         var tablesOf = new Dictionary<int, TableDef?>();
+        var snapshotsOf = new Dictionary<int, TemplateVersionSnapshot>();
         var cells = new Dictionary<CellAddress, CellValueData>();
         foreach (var group in resolved.GroupBy(r => r.Instance.TableInstanceId))
         {
@@ -172,6 +173,7 @@ internal sealed class CalculationRejectionReasons(
             var snapshot = await metadata.GetAsync(first.Instance.TemplateVersionId, ct).ConfigureAwait(false);
             var groupTable = snapshot.Sheets.SelectMany(s => s.Tables).FirstOrDefault(t => t.Id == first.Issue.TableDefId);
             tablesOf[first.Issue.TableDefId] = groupTable;
+            snapshotsOf[first.Issue.TableDefId] = snapshot;
             if (groupTable is null)
             {
                 continue;
@@ -291,6 +293,7 @@ internal sealed class CalculationRejectionReasons(
             }
 
             var (columns, byCode) = shape;
+            var tableSnapshot = snapshotsOf.GetValueOrDefault(table.Id);
             string TextOf(ColumnDef column)
                 => cells.TryGetValue(new CellAddress(period, rowId, column.Id), out var value)
                     ? MethodologyRuleMatcher.Text(value)?.Trim() ?? string.Empty
@@ -381,7 +384,12 @@ internal sealed class CalculationRejectionReasons(
             {
                 foreach (var argument in argumentList)
                 {
-                    if (!byCode.TryGetValue(argument, out var column))
+                    // ✎ missing-input month alias (doc 96, Land 1.0.20.0): аргумент річної розкладки — псевдонім місячного
+                    // входу (`cfg.MonthInputAlias`) або основа колонки `<X>_M<mm>` (скрипт, §13.2) — це колонка місяця
+                    // періоду, а не «вхід поза колонками»: людина має побачити, ЯКУ комірку заповнити.
+                    var column = byCode.GetValueOrDefault(argument)
+                        ?? MonthColumnOf(tableSnapshot, table.Id, argument, month, byCode);
+                    if (column is null)
                     {
                         // Аргумент, якого серед колонок таблиці немає (не та таблиця, довідник, похідний) — вхід.
                         if (nonColumnInputs)
@@ -428,6 +436,44 @@ internal sealed class CalculationRejectionReasons(
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Колонка місяця <paramref name="month"/> для аргументу, якого серед кодів колонок немає: спершу псевдонім місячного
+    /// входу версії (<c>cfg.MonthInputAlias</c>, як <c>CalculationInputBuilder</c>), потім колонка <c>&lt;аргумент&gt;_M&lt;mm&gt;</c>
+    /// з прив'язкою до того ж місяця (як <c>ScriptRuntime</c>, §13.2); інакше <c>null</c> — справжній вхід поза колонками.
+    /// </summary>
+    private static ColumnDef? MonthColumnOf(
+        TemplateVersionSnapshot? snapshot,
+        int tableDefId,
+        string argument,
+        int month,
+        Dictionary<string, ColumnDef> byCode)
+    {
+        if (month is < 1 or > 12)
+        {
+            return null;
+        }
+
+        if (snapshot is not null)
+        {
+            foreach (var alias in snapshot.MonthInputAliasesFor(tableDefId, month))
+            {
+                if (string.Equals(alias.Alias, argument, StringComparison.OrdinalIgnoreCase)
+                    && byCode.Values.FirstOrDefault(c => c.Id == alias.ColumnDefId) is { } aliased)
+                {
+                    return aliased;
+                }
+            }
+        }
+
+        return byCode.TryGetValue(
+                   argument + "_M" + month.ToString("00", System.Globalization.CultureInfo.InvariantCulture),
+                   out var suffixed)
+               && suffixed is { IsMonthColumn: true }
+               && suffixed.MonthNumber == month
+            ? suffixed
+            : null;
     }
 
     private static readonly string[] MonthNames =

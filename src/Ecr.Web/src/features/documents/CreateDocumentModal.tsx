@@ -111,22 +111,6 @@ export function CreateDocumentModal({
   });
 
   /*
-   * ✎ Pass2 п. 4 (людський прохід 07.11, P3): той самий проєкт двічі давав два документи без жодного слова, хоча
-   * перелік каже «один документ на об'єкт». Дублі ДОЗВОЛЕНІ задумом (документ унікальний за `(ProjectId,
-   * BusinessKey)`, ключ видає сервер — `docs/tz/01-context.md` «Документ», `02a-db-schema.md` `UQ_Document`), тож
-   * сервер не відмовляє, а майстер ПОПЕРЕДЖАЄ: документи проєкту — наявним переліком (`listDocuments`).
-   * ⚠ Ключ під `['documents', …]`: створення інвалідує його разом із переліком.
-   */
-  const existing = useQuery({
-    queryKey: ['documents', 'create-existing', projectId],
-    queryFn: () => listDocuments({ periodKey: null, projectId: Number(projectId) }),
-    enabled: opened && projectId !== null,
-  });
-
-  const existingDocs = existing.data?.items ?? [];
-  const firstExisting = existingDocs[0] ?? null;
-
-  /*
    * ✎ B74 P4: шаблони ОБРАНОГО проєкту — лише вони пропонуються в кроці Template (шаблон поза проєктом сервер
    * однаково відхилить: `422 err.ECR-DOC-0422.templateNotInProject`).
    */
@@ -138,6 +122,13 @@ export function CreateDocumentModal({
 
   const templateRows = projectTemplates.data ?? [];
 
+  /*
+   * ⚠ Відмову читаємо ТУТ, у рендері компонента, а не лише в `render` кроку: React Query перемальовує компонент лише
+   * за властивостями, які той прочитав (tracked props), а `render` кроку викликає `Wizard` пізніше. Доти (до B74)
+   * відмову «проявляли» сторонні перерисовки запиту документів проєкту; без нього банер відмови не з'являвся.
+   */
+  const templatesError = projectTemplates.error;
+
   // Єдиний шаблон проєкту — обраний одразу (крок однаково видно); вибір людини — лише з шаблонів цього проєкту.
   const templateId =
     pickedTemplateId !== null && templateRows.some((row) => String(row.templateId) === pickedTemplateId)
@@ -145,6 +136,30 @@ export function CreateDocumentModal({
       : templateRows.length === 1 && templateRows[0] !== undefined
         ? String(templateRows[0].templateId)
         : null;
+
+  const templateRow = templateRows.find((row) => String(row.templateId) === templateId) ?? null;
+
+  /*
+   * ✎ Pass2 п. 4 (людський прохід 07.11, P3): повторне створення давало другий документ без жодного слова — майстер
+   * ПОПЕРЕДЖАЄ, показуючи наявний документ (`listDocuments`).
+   * ✎ B74 (людина 24.11, live: «чому я бачу це і для чого?»): проєкт «рік · об'єкт» тримає документи КІЛЬКОХ
+   * шаблонів (D-576), тож «у проєкту вже є документ» на кроці Project був шумом — документ іншого шаблону нічого не
+   * каже про новий. Попередження — лише про документ ОБРАНОГО шаблону цього проєкту: перелік питається, коли
+   * `documentCount` шаблону проєкту > 0, і фільтрується кодом шаблону (`templateCode`, B109).
+   * ⚠ «Один документ на проєкт» — прапорець ШАБЛОНУ (B151, `409 ECR-DOC-4092 documentExistsForTemplate`,
+   * `ProjectTemplateDto.singleDocumentPerProject`): прапорцевий шаблон із документом блокує Next (`singleBlocked` нижче),
+   * шаблон без прапорця сервер дозволяє вдруге — Next доступний, текст лише не запрошує «створити ще один».
+   * ⚠ Ключ під `['documents', …]`: створення інвалідує його разом із переліком.
+   */
+  const templateCode = templateRow?.templateCode ?? null;
+  const existing = useQuery({
+    queryKey: ['documents', 'create-existing', projectId, templateCode],
+    queryFn: () => listDocuments({ periodKey: null, projectId: Number(projectId), templateCode }),
+    enabled: opened && projectId !== null && templateRow !== null && templateRow.documentCount > 0,
+  });
+
+  const existingDocs = templateRow !== null && templateRow.documentCount > 0 ? (existing.data?.items ?? []) : [];
+  const firstExisting = existingDocs[0] ?? null;
 
   const template = useQuery({
     queryKey: ['projects', Number(projectId), 'document-template', templateId],
@@ -155,6 +170,8 @@ export function CreateDocumentModal({
     enabled: opened && projectId !== null && templateId !== null,
   });
 
+  // ⚠ Те саме для відмови складу шаблону: прочитана тут — відстежується (див. `templatesError`).
+  const templateError = template.error;
   const versionId = template.data?.templateVersionId ?? null;
   const available = template.data?.sheets ?? [];
   const sheets = pickedSheets ?? available.map((sheet) => sheet.id);
@@ -244,13 +261,35 @@ export function CreateDocumentModal({
     );
   };
 
-  const existingBanner =
-    firstExisting === null ? null : (
+  /*
+   * ✎ B74 (24.11): шаблон «один документ на проєкт» (B151, `singleDocumentPerProject`) з документом у цьому проєкті —
+   * Next вимкнено, а дія кроку — «Open <ключ>»: сервер другий документ однаково відхилив би `409 ECR-DOC-4092`.
+   * Рахунок — `documentCount` шаблону проєкту (рахує й невидимі людині документи, як і сервер); невидимий документ —
+   * окремий текст без ключа (номер чужого документа не розкривається, як і в деталях 4092).
+   */
+  const singleBlocked = templateRow !== null && templateRow.singleDocumentPerProject && templateRow.documentCount > 0;
+
+  const hiddenSingleBanner =
+    singleBlocked && firstExisting === null && existing.isSuccess ? (
       <Banner
         tone="warning"
         testId="create-existing-documents"
         title={t('documents.createExistsTitle')}
-        text={t('documents.createExistsText', { key: firstExisting.businessKey })}
+        text={t('documents.createExistsSingleHidden')}
+      />
+    ) : null;
+
+  const existingBanner =
+    firstExisting === null ? hiddenSingleBanner : (
+      <Banner
+        tone="warning"
+        testId="create-existing-documents"
+        title={t('documents.createExistsTitle')}
+        text={
+          singleBlocked
+            ? t('documents.createExistsSingleText', { key: firstExisting.businessKey })
+            : t('documents.createExistsText', { key: firstExisting.businessKey })
+        }
         actions={[
           {
             label: t('documents.createExistsOpen', { key: firstExisting.businessKey }),
@@ -304,8 +343,6 @@ export function CreateDocumentModal({
             }}
           />
 
-          {existingBanner}
-
           <LocalizedInput
             label={t('documents.name')}
             description={t('documents.nameHint')}
@@ -320,11 +357,12 @@ export function CreateDocumentModal({
       id: 'template',
       label: t('documents.template'),
       hint: t('documents.createTemplateStep'),
-      canNext: () => templateId !== null && versionId !== null,
+      // ✎ B74: прапорцевий шаблон із документом — далі шляху немає, лише «Open <ключ>» у банері кроку.
+      canNext: () => templateId !== null && versionId !== null && !singleBlocked,
       render: () => (
         <Stack gap="xs">
-          {projectTemplates.error !== null && (
-            <ErrorAlert error={projectTemplates.error} onRetry={() => void projectTemplates.refetch()} />
+          {templatesError !== null && (
+            <ErrorAlert error={templatesError} onRetry={() => void projectTemplates.refetch()} />
           )}
 
           <Select
@@ -350,8 +388,8 @@ export function CreateDocumentModal({
 
           {/* ⚠ Відмова окремим банером: без нього «немає права», архівний шаблон (`ECR-TMPL-0409`) чи шаблон
               поза проєктом (`ECR-DOC-0422`) виглядали б як шаблон без аркушів. */}
-          {template.error !== null && (
-            <ErrorAlert error={template.error} onRetry={() => void template.refetch()} />
+          {templateError !== null && (
+            <ErrorAlert error={templateError} onRetry={() => void template.refetch()} />
           )}
 
           {template.data !== undefined && (
@@ -365,6 +403,9 @@ export function CreateDocumentModal({
               ]}
             />
           )}
+
+          {/* ✎ B74: «документ уже є» — лише про ОБРАНИЙ шаблон, тож і місце йому тут, а не на кроці Project. */}
+          {existingBanner}
         </Stack>
       ),
     },
@@ -451,7 +492,7 @@ export function CreateDocumentModal({
           ]}
         />
       )}
-      // ✎ Pass2 п. 4: підсумок перед створенням теж каже, що документ проєкту вже є (це буде ще один).
+      // ✎ Pass2 п. 4 / ✎ B74: підсумок перед створенням теж каже, що документ ОБРАНОГО шаблону в проєкті вже є.
       reviewText={
         firstExisting === null
           ? t('documents.createReviewText')

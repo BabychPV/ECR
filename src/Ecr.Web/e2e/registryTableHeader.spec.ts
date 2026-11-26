@@ -283,7 +283,20 @@ test.describe('Registry table header', () => {
     expect(problems, 'прибирання').toEqual([]);
   });
 
-  for (const width of [1440, 500]) {
+  // ✎ 25.11 (number-display): на 1440 усі стовпці лімітів вміщаються без прокрутки (AC), тож перевірка
+  // «шапка під горизонтальною прокруткою» ганяється на вужчих вікнах, де прокрутка є.
+  test('Registry table header: no horizontal scroll at 1440 px, header aligned', async ({ browser }) => {
+    const { page, context } = await openTable(browser, 1440, 'light');
+    await expect(page.locator('.pm-t thead tr.pm-grp'), 'має бути рядок груп').toHaveCount(1);
+    const overflow = await page.locator('.pm-tw').evaluate((el) => el.scrollWidth - el.clientWidth);
+    expect(overflow, 'на 1440 таблиця вміщається без горизонтальної прокрутки (AC number-display)').toBeLessThanOrEqual(1);
+    await scrollTo(page, 'start');
+    expect(await headerIssues(page, '1440 px, start')).toEqual([]);
+    await shot(page, '1440-start');
+    await context.close();
+  });
+
+  for (const width of [1024, 500]) {
     test(`Registry table header: every body column has its own visible header cell - ${String(width)} px`, async ({ browser }) => {
       const { page, context } = await openTable(browser, width, 'light');
       await expect(page.locator('.pm-t thead tr.pm-grp'), 'має бути рядок груп').toHaveCount(1);

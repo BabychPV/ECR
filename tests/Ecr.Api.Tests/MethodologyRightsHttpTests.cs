@@ -91,7 +91,6 @@ public sealed class MethodologyRightsHttpTests(SqlServerFixture sql)
         new("GET versions", HttpMethod.Get, "/api/v1/methodologies/{m}/versions", null, "Calculation.View"),
         new("GET formulas", HttpMethod.Get, "/api/v1/methodologies/{m}/versions/{v}/formulas", null, "Calculation.View"),
         new("GET constants", HttpMethod.Get, "/api/v1/methodologies/{m}/versions/{v}/constants", null, "Calculation.View"),
-        new("GET constant usage", HttpMethod.Get, "/api/v1/methodologies/{m}/versions/{v}/constants/k1/usage", null, "Calculation.View"),
         new("GET rules", HttpMethod.Get, "/api/v1/methodologies/{m}/versions/{v}/rules", null, "Calculation.View"),
         new("GET category-rule", HttpMethod.Get, "/api/v1/methodologies/{m}/versions/{v}/category-rule", null, "Calculation.View"),
         new("GET required-inputs", HttpMethod.Get, "/api/v1/methodologies/{m}/versions/{v}/required-inputs", null, "Calculation.View"),

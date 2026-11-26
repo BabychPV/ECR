@@ -126,6 +126,53 @@ public sealed class CalculationIssueStore(EcrDbContext db, IClock clock) : ICalc
         return await query.ExecuteDeleteAsync(ct).ConfigureAwait(false);
     }
 
+    /// <summary>Скільки ключів в одному <c>IN</c> (стеля параметрів SQL Server — 2100).</summary>
+    private const int CarryOverChunkSize = 1_000;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Спершу ключі проблем (читання без замків під RCSI, seek <c>IX_CalculationIssue_Run</c>), далі UPDATE лише за
+    /// ключами: ціль UPDATE під RCSI читається замками, і предикат прогону з <c>EXISTS</c> по екземплярах міг би пройти й
+    /// чужі рядки під замком перемикання іншого документа (той самий клас 1205, що й у <c>SwitchCurrentRunAsync</c>).
+    /// </remarks>
+    public async Task<int> CarryOverAsync(
+        long calculationRunId, IReadOnlyCollection<long> supersededRunIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(supersededRunIds);
+        var runIds = supersededRunIds.Where(id => id != calculationRunId).Distinct().ToList();
+        if (runIds.Count == 0)
+        {
+            return 0;
+        }
+
+        var carried = new List<long>();
+        foreach (var chunk in runIds.Chunk(CarryOverChunkSize))
+        {
+            carried.AddRange(await db.CalculationIssues
+                .AsNoTracking()
+                .Where(i => chunk.Contains(i.CalculationRunId)
+                            && db.TableInstances.Any(t => t.DocumentId == i.DocumentId
+                                                          && t.TableDefId == i.TableDefId
+                                                          && t.PeriodKeyValue == i.PeriodKey
+                                                          && (t.SheetCopyId == i.SheetCopyId
+                                                              || (t.SheetCopyId == null && i.SheetCopyId == null))))
+                .Select(i => i.Id)
+                .ToListAsync(ct)
+                .ConfigureAwait(false));
+        }
+
+        var total = 0;
+        foreach (var chunk in carried.Chunk(CarryOverChunkSize))
+        {
+            total += await db.CalculationIssues
+                .Where(i => chunk.Contains(i.Id))
+                .ExecuteUpdateAsync(s => s.SetProperty(i => i.CalculationRunId, calculationRunId), ct)
+                .ConfigureAwait(false);
+        }
+
+        return total;
+    }
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<CalculationIssueRow>> ListAsync(
         long documentId, int periodKey, long? sheetCopyId, CancellationToken ct)

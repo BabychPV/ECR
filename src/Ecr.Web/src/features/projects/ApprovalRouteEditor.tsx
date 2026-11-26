@@ -23,8 +23,11 @@ export function ApprovalRouteEditor({
   projectId,
   openerLabel,
   describedBy,
+  onSaved,
 }: {
   projectId: number;
+  /** ✎ 24.11: після збереження (вкладка Templates перечитує маршрути шаблонів — джерело «From the project»). */
+  onSaved?: () => void;
   /** ✎ UAT project-settings: повна назва кнопки-відкривача; без неї — «Approval route». */
   openerLabel?: string;
   /** Id опису дії поруч із кнопкою (`aria-describedby`). */
@@ -63,6 +66,7 @@ export function ApprovalRouteEditor({
       }),
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: ['approval-route', projectId] });
+      onSaved?.();
       setOpened(false);
       showDone(
         result.steps === 0 ? t('workflow.routeCleared') : t('workflow.routeSaved', { count: result.steps }),

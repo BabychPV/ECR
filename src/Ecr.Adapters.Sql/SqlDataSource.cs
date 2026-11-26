@@ -54,10 +54,13 @@ namespace Ecr.Adapters.Sql;
 /// <param name="secrets">Значення секрету за іменем (ФВ-6.11).</param>
 /// <param name="settings">Канал налаштувань: тексти запитів.</param>
 /// <param name="logger">Журнал: повний виняток відмови з'єднання (у текст помилки він не йде).</param>
+/// <param name="credentials">Облікові дані UserPassword (P-1126-SRCCRED): розшифрування в момент з'єднання.</param>
+/// <param name="rejections">Мітка відмови автентифікації збереженим паролем (R-03).</param>
 public sealed partial class SqlDataSource(
     ICollectionStore store, ISecretProvider secrets, ISecretProvider? settings = null,
-    ILogger<SqlDataSource>? logger = null)
-    : IExternalDataSource, IExternalTableSource
+    ILogger<SqlDataSource>? logger = null,
+    IDataSourceCredentialResolver? credentials = null, IDataSourceCredentialRejections? rejections = null)
+    : IExternalDataSource, IExternalTableSource, IExternalConnectionCheck, IExternalConnectionProbe
 {
     private readonly ILogger log = (ILogger?)logger ?? NullLogger.Instance;
 
@@ -137,6 +140,36 @@ public sealed partial class SqlDataSource(
         var query = Query(source.Code, CatalogQueryKey);
 
         await using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
+
+        try
+        {
+            return await ReadCatalogAsync(connection, query, ct).ConfigureAwait(false);
+        }
+        catch (SqlException ex) when (!IsTransientSqlFailure(ex) && ex.Number != QueryTimeoutError)
+        {
+            // ⛔ b14 (AC-3): з'єднання ВІДКРИЛОСЯ, тож це не «недоступне», а запит каталогу (немає об'єкта, прав,
+            // синтаксис). Сирий текст джерела — лише в журнал (S3); у тексті винятку — номер і кореляція.
+            throw new SourceQueryFailedException(
+                IExternalDataSource.QueryRefusedCode,
+                $"Запит каталогу SQL-джерела {source.Code} не виконався (помилка SQL Server {ex.Number}, кореляція {LogQueryFailure(source.Code, ex)}); подробиці — в журналі сервера.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0422.catalogQueryFailed",
+                    ["dataSource"] = source.Code,
+                });
+        }
+    }
+
+    /// <summary>Номер «час очікування вичерпано» клієнта SqlClient — тайм-аут, не помилка запиту.</summary>
+    private const int QueryTimeoutError = -2;
+
+    /// <summary>Читає каталог відкритим з'єднанням.</summary>
+    /// <param name="connection">Відкрите з'єднання.</param>
+    /// <param name="query">Текст запиту каталогу.</param>
+    /// <param name="ct">Скасування.</param>
+    private static async Task<IReadOnlyList<SourceEntityDescriptor>> ReadCatalogAsync(
+        SqlConnection connection, string query, CancellationToken ct)
+    {
         await using var command = new SqlCommand(query, connection);
 
         var result = new List<SourceEntityDescriptor>();
@@ -177,6 +210,23 @@ public sealed partial class SqlDataSource(
         }
 
         return result;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Те саме відкриття, що й у збору (<see cref="OpenAsync"/>: політика адреси, каталог, секрет, повтор
+    /// транзитивних відмов, автентифікація окремо), і <c>SELECT 1</c> — запит, який не залежить від схеми
+    /// замовника. Лише читання (<c>D-44</c>).
+    /// </remarks>
+    public async Task CheckConnectionAsync(int dataSourceId, CancellationToken ct)
+    {
+        var source = await store.FindDataSourceAsync(dataSourceId, ct).ConfigureAwait(false)
+                     ?? throw Unavailable(dataSourceId);
+
+        await using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
+        await using var command = new SqlCommand("SELECT 1;", connection);
+
+        await RetryAsync(() => command.ExecuteScalarAsync(ct), IsTransientSqlFailure, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -306,7 +356,8 @@ public sealed partial class SqlDataSource(
     /// замовника (як у <see cref="DiscoverAsync"/>).
     /// </para>
     /// </remarks>
-    public async Task<ExternalTable> ReadTableAsync(int dataSourceId, string queryKey, int maxRows, CancellationToken ct)
+    public async Task<ExternalTable> ReadTableAsync(
+        int dataSourceId, string queryKey, string? fallbackQuery, int maxRows, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(queryKey);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxRows);
@@ -318,7 +369,7 @@ public sealed partial class SqlDataSource(
         var source = await store.FindDataSourceAsync(dataSourceId, ct).ConfigureAwait(false)
                      ?? throw Unavailable(dataSourceId);
 
-        var query = Query(source.Code, queryKey);
+        var query = Query(source.Code, queryKey, fallbackQuery);
 
         await using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
         await using var transaction = (SqlTransaction)await connection
@@ -361,29 +412,34 @@ public sealed partial class SqlDataSource(
         return new ExternalTable(columns, rows, truncated);
     }
 
-    /// <summary>Текст запиту: спершу власний запит джерела, далі спільний.</summary>
+    /// <summary>Текст запиту: спершу власний запит джерела, далі спільний, далі несекретний запасний викликача.</summary>
     /// <param name="code">Код джерела — щоб FLERT і сусідня SQL-база не ділили один запит.</param>
     /// <param name="key">Ключ запиту.</param>
+    /// <param name="fallback">Текст із appsettings викликача (<c>Flert:Sync:CompositionQuery</c>); <c>null</c> — немає.</param>
     /// <remarks>
     /// ⚠ Канал налаштувань тут той самий <see cref="ISecretProvider"/>, що й у
     /// <c>PiSqlClientDataSource</c>. Запит не секрет, і читати його через порт
     /// секретів — не краса; але друга дорога до конфігурації в сусідньому
     /// адаптері коштувала б дорожче за цю незграбність.
     /// </remarks>
-    private string Query(string code, string key)
+    private string Query(string code, string key, string? fallback = null)
     {
         var scoped = key.Insert("Sql:".Length, $"{code}:");
 
         var configured = settings?.Find(scoped) is { Length: > 0 } own
             ? own
-            : settings?.Find(key);
+            : settings?.Find(key) is { Length: > 0 } shared
+                ? shared
+                : fallback;
 
         if (string.IsNullOrWhiteSpace(configured))
         {
             // ⛔ Не вигадуємо запит. Джерело без нього не «порожнє», а
             // ненаштоване, і сказати це треба ключем, який бракує: інакше
             // налаштування шукають у коді, якого не буде.
-            throw new BusinessRuleException(
+            // ⚠ b14 source-test-flert (AC-2/AC-3): тип «не налаштовано», а не просто 0503 — проба з'єднання інакше
+            // казала «недоступне»; бракує саме КАТАЛОГУ — проба перевіряє з'єднання (CheckConnectionAsync).
+            throw new SourceNotConfiguredException(
                 SourceUnavailable,
                 $"Джерело {code} не має запиту {scoped} (або спільного {key}): збирати нічим.",
                 new Dictionary<string, object?>
@@ -391,7 +447,8 @@ public sealed partial class SqlDataSource(
                     ["messageKey"] = "err.ECR-INT-0503.queryNotConfigured",
                     ["dataSource"] = code,
                     ["settingKey"] = scoped,
-                });
+                },
+                catalogOnly: string.Equals(key, CatalogQueryKey, StringComparison.Ordinal));
         }
 
         return configured;
@@ -446,7 +503,8 @@ public sealed partial class SqlDataSource(
         }
 
         // ⚠ Відмова називає джерело й вердикт, а не вміст рядка з'єднання.
-        throw new BusinessRuleException(
+        // ⚠ b14 (AC-3): «не налаштовано» — адресу відхиляє НАША політика, до джерела ніхто не ходив.
+        throw new SourceNotConfiguredException(
             SourceUnavailable,
             $"Адресу джерела {code} відхилено політикою адреси ({verdict}): збір не з'єднується.",
             new Dictionary<string, object?>
@@ -463,8 +521,67 @@ public sealed partial class SqlDataSource(
     /// </remarks>
     /// <param name="source">Джерело з <c>ext.DataSource</c>.</param>
     /// <param name="ct">Скасування.</param>
-    private async Task<SqlConnection> OpenAsync(
-        Domain.Entities.External.DataSource source, CancellationToken ct)
+    private Task<SqlConnection> OpenAsync(Domain.Entities.External.DataSource source, CancellationToken ct)
+    {
+        // ⛔ R-03: джерело вже відмовило збереженим паролем — до сервера не йдемо, доки пароль не замінено.
+        if (source.CredentialsBlocked)
+        {
+            throw new CredentialsRejectedException(source.Code);
+        }
+
+        return OpenWithAsync(
+            source,
+            () => source.AuthMode == SourceAuthMode.UserPassword
+                ? (credentials ?? throw new CredentialsUnreadableException(source.Code)).Resolve(source)
+                : null,
+            stored: true,
+            ct);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>⛔ З тіла форми (§13.1): секрет середовища не підставляється, мітка відмови не ставиться.</remarks>
+    public async Task ProbeAsync(
+        Domain.Entities.External.DataSource spec, ResolvedCredentials? credentials, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+
+        await using var connection = await OpenWithAsync(spec, () => credentials, stored: false, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Рядок з'єднання SqlClient з обліковими даними — ЄДИНА точка підстановки (P-1126-SRCCRED, R-06, R-07, AC-3).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ UserPassword: <c>UserID</c>/<c>Password</c> builder-ом (синоніми <c>UID</c>/<c>PWD</c> він зводить сам),
+    /// <c>IntegratedSecurity=false</c>, <c>PersistSecurityInfo=false</c>. Windows — як до змін: секрет середовища в
+    /// <c>Password</c>, якщо заданий.
+    /// </remarks>
+    /// <param name="builder">Розібраний рядок з'єднання (після політики адреси й каталогу).</param>
+    /// <param name="credentials">Облікові дані; <c>null</c> — Windows.</param>
+    /// <param name="envSecret">Секрет середовища (лише Windows).</param>
+    public static string BuildConnectionString(
+        SqlConnectionStringBuilder builder, ResolvedCredentials? credentials, string? envSecret)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        if (credentials is not null)
+        {
+            builder.IntegratedSecurity = false;
+            builder.PersistSecurityInfo = false;
+            builder.UserID = credentials.UserName;
+            builder.Password = credentials.Password.Reveal();
+        }
+        else if (envSecret is { Length: > 0 })
+        {
+            builder.Password = envSecret;
+        }
+
+        return builder.ConnectionString;
+    }
+
+    private async Task<SqlConnection> OpenWithAsync(
+        Domain.Entities.External.DataSource source, Func<ResolvedCredentials?> credentialsOf, bool stored,
+        CancellationToken ct)
     {
         SqlConnectionStringBuilder builder;
 
@@ -479,7 +596,8 @@ public sealed partial class SqlDataSource(
             // «ArgumentException» без натяку, що правити треба поле Endpoint.
             // ⚠ Значення ключа builder розбирає сам: `Connect Timeout=abc`, `User Instance=0` —
             // FormatException, `Max Pool Size=99999999999` — OverflowException (рев'ю an33d, P3-4).
-            throw new BusinessRuleException(
+            // ⚠ b14 (AC-3): «не налаштовано» — лагодити поле Endpoint, а не мережу.
+            throw new SourceNotConfiguredException(
                 SourceUnavailable,
                 // ⛔ SEC (TIER2): без `ex.Message` — текст виняток-парсера йде в
                 // `itg.CollectionRun.ErrorMessage` і до клієнта; подробиці — в журнал.
@@ -501,12 +619,14 @@ public sealed partial class SqlDataSource(
             builder.InitialCatalog = source.Catalog;
         }
 
-        if (secrets.Find(source.SecretName) is { Length: > 0 } secret)
-        {
-            builder.Password = secret;
-        }
+        // ⛔ R-24: розшифрування — ПІСЛЯ політики адреси. R-05: UserPassword ігнорує секрет середовища.
+        var resolved = credentialsOf();
+        var envSecret = stored && resolved is null && source.AuthMode == SourceAuthMode.Windows
+            ? secrets.Find(source.SecretName)
+            : null;
+        string?[] known = [resolved?.Password.Reveal(), resolved?.UserName, envSecret];
 
-        var connection = new SqlConnection(builder.ConnectionString);
+        var connection = new SqlConnection(BuildConnectionString(builder, resolved, envSecret));
 
         // Прапорець, а не `catch`: будь-який шлях виходу, що не повернув
         // з'єднання, мусить його закрити — зокрема скасування токена.
@@ -522,30 +642,9 @@ public sealed partial class SqlDataSource(
         }
         catch (SqlException ex)
         {
-            // ⛔ Відмова в автентифікації відділяється від недоступності
-            // (`H-20`). Без цього неправильний пароль службового запису
-            // виглядав би як тимчасово недоступна база — тобто збір ішов би в
-            // наздоганяння і рапортував успіх.
-            if (IsAuthenticationFailure(ex))
-            {
-                throw new SourceAuthenticationException(
-                    AuthenticationRefused,
-                    $"SQL-джерело {source.Code} не приймає облікові дані (помилка SQL Server {ex.Number}, кореляція {LogConnectFailure(source.Code, ex)}); подробиці — в журналі сервера.",
-                    new Dictionary<string, object?>
-                    {
-                        ["messageKey"] = "err.ECR-INT-0502.credentialsRefused",
-                        ["dataSource"] = source.Code,
-                    });
-            }
-
-            throw new BusinessRuleException(
-                SourceUnavailable,
-                $"SQL-джерело {source.Code} не з'єднується (помилка SQL Server {ex.Number}, кореляція {LogConnectFailure(source.Code, ex)}); подробиці — в журналі сервера.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-INT-0503.connectFailed",
-                    ["dataSource"] = source.Code,
-                });
+            throw await FailOpenAsync(
+                source, stored, resolved is not null, [.. ex.Errors.Cast<SqlError>().Select(e => e.Number)], ex.Number, ex, known)
+                .ConfigureAwait(false);
         }
         finally
         {
@@ -556,40 +655,104 @@ public sealed partial class SqlDataSource(
         }
     }
 
-    /// <summary>«Login failed for user» і «not associated with a trusted connection».</summary>
+    /// <summary>
+    /// Виняток, яким завершується невдале відкриття (шов для тестів: <see cref="SqlException"/> ззовні збірки не
+    /// створити). Відмова входу збереженим паролем ставить мітку (R-03, L2, L10).
+    /// </summary>
+    internal async Task<Exception> FailOpenAsync(
+        Domain.Entities.External.DataSource source, bool stored, bool userPassword, IReadOnlyList<int> numbers,
+        int number, Exception raw, string?[] known)
+    {
+        // ⛔ Відмова в автентифікації відділяється від недоступності (`H-20`): без цього неправильний пароль виглядав
+        // би як тимчасово недоступна база — збір ішов би в наздоганяння і рапортував успіх.
+        if (numbers.Any(IsAuthenticationNumber))
+        {
+            if (stored && userPassword)
+            {
+                await SourceCredentialRejection.ReportAsync(rejections, source, log).ConfigureAwait(false);
+            }
+
+            return new SourceAuthenticationException(
+                AuthenticationRefused,
+                $"SQL-джерело {source.Code} не приймає облікові дані (помилка SQL Server {number}, кореляція {LogConnectFailure(source.Code, raw, number, known)}); подробиці — в журналі сервера.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0502.credentialsRefused",
+                    ["dataSource"] = source.Code,
+                });
+        }
+
+        return new BusinessRuleException(
+            SourceUnavailable,
+            $"SQL-джерело {source.Code} не з'єднується (помилка SQL Server {number}, кореляція {LogConnectFailure(source.Code, raw, number, known)}); подробиці — в журналі сервера.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-INT-0503.connectFailed",
+                ["dataSource"] = source.Code,
+            });
+    }
+
+    /// <summary>
+    /// Відмови входу: «Login failed» (18456), «not associated with a trusted connection» (18452), обліковий запис
+    /// вимкнено (18470), заблоковано (18486), пароль протерміновано (18487), треба змінити (18488) — H2.
+    /// </summary>
     /// <remarks>
     /// ⚠ Номер помилки, а не текст: текст залежить від мови сервера, і пошук
-    /// підрядка розсипався б на першій же машині з іншою локаллю.
+    /// підрядка розсипався б на першій же машині з іншою локаллю. ⛔ Усі шість — не транзитивні: повтор лише
+    /// наближав би блокування облікового запису.
     /// </remarks>
-    private static readonly int[] AuthenticationErrors = [18456, 18452];
+    private static readonly int[] AuthenticationErrors = [18456, 18452, 18470, 18486, 18487, 18488];
+
+    /// <summary>Чи номер помилки SQL Server — відмова входу.</summary>
+    /// <param name="number">Номер помилки.</param>
+    internal static bool IsAuthenticationNumber(int number) => Array.IndexOf(AuthenticationErrors, number) >= 0;
 
     /// <summary>Пише повний виняток у журнал сервера і повертає кореляцію для тексту помилки.</summary>
-    private string LogConnectFailure(string sourceCode, SqlException error)
+    /// <remarks>⛔ R-02: у журнал — <see cref="SafeLogException"/>, а не сам виняток (текст драйвера, <c>Errors[]</c>).</remarks>
+    private string LogConnectFailure(string sourceCode, Exception error, int number, string?[] secrets)
     {
         var correlationId = SafeErrorText.NewCorrelationId();
-        LogConnectFailed(log, sourceCode, error.Number, correlationId, error);
+        LogConnectFailed(
+            log, sourceCode, number, correlationId,
+            SafeLogException.Of(error, number.ToString(System.Globalization.CultureInfo.InvariantCulture), secrets));
         return correlationId;
     }
 
-    /// <summary>Те саме для зіпсованого рядка з'єднання.</summary>
+    /// <summary>Те саме для зіпсованого рядка з'єднання (облікових даних тут ще немає; скрабер прибирає пари).</summary>
     private string LogConnectionStringBroken(string sourceCode, Exception error)
     {
         var correlationId = SafeErrorText.NewCorrelationId();
-        LogConnectionStringUnreadable(log, sourceCode, correlationId, error);
+        LogConnectionStringUnreadable(log, sourceCode, correlationId, SafeLogException.Of(error, null));
         return correlationId;
     }
 
     [LoggerMessage(
         Level = LogLevel.Warning,
-        Message = "SqlDataSource: джерело {SourceCode} не відкрилось (помилка SQL Server {ErrorNumber}); кореляція {CorrelationId}.")]
+        Message = "SqlDataSource: джерело {SourceCode} не відкрилось (помилка SQL Server {ErrorNumber}); кореляція {CorrelationId}: {Error}.")]
     private static partial void LogConnectFailed(
-        ILogger logger, string sourceCode, int errorNumber, string correlationId, Exception exception);
+        ILogger logger, string sourceCode, int errorNumber, string correlationId, SafeLogException error);
+
+    /// <summary>Те саме для запиту, що впав на відкритому з'єднанні (b14, AC-3).</summary>
+    private string LogQueryFailure(string sourceCode, SqlException error)
+    {
+        var correlationId = SafeErrorText.NewCorrelationId();
+        LogQueryFailed(
+            log, sourceCode, error.Number, correlationId,
+            SafeLogException.Of(error, error.Number.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        return correlationId;
+    }
 
     [LoggerMessage(
         Level = LogLevel.Warning,
-        Message = "SqlDataSource: рядок з'єднання джерела {SourceCode} не читається; кореляція {CorrelationId}.")]
+        Message = "SqlDataSource: запит каталогу джерела {SourceCode} не виконався (помилка SQL Server {ErrorNumber}); кореляція {CorrelationId}: {Error}.")]
+    private static partial void LogQueryFailed(
+        ILogger logger, string sourceCode, int errorNumber, string correlationId, SafeLogException error);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "SqlDataSource: рядок з'єднання джерела {SourceCode} не читається; кореляція {CorrelationId}: {Error}.")]
     private static partial void LogConnectionStringUnreadable(
-        ILogger logger, string sourceCode, string correlationId, Exception exception);
+        ILogger logger, string sourceCode, string correlationId, SafeLogException error);
 
     /// <summary>Чи це відмова саме в автентифікації.</summary>
     /// <param name="error">Виняток клієнта.</param>
@@ -597,7 +760,7 @@ public sealed partial class SqlDataSource(
     {
         foreach (SqlError item in error.Errors)
         {
-            if (Array.IndexOf(AuthenticationErrors, item.Number) >= 0)
+            if (IsAuthenticationNumber(item.Number))
             {
                 return true;
             }

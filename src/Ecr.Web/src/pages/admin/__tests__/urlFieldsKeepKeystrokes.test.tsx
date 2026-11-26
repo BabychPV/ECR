@@ -162,24 +162,28 @@ describe("поле, прив'язане до адреси, при запізні
   );
 
   it(
-    '/admin/consistency «Rule»: CNS-0123 — у полі рівно CNS-0123',
+    '/admin/consistency «Rule»: обране правило лишається в полі, адреса наздоганяє',
     async () => {
       serveEmpty();
       show(<ConsistencyIssuesPage />, '/admin/consistency');
 
-      const input = await screen.findByRole<HTMLInputElement>(
-        'textbox',
-        { name: '⟦consistency.rule⟧' },
-        { timeout: SlowEnvTimeout },
-      );
+      // ✎ 24.11: «Rule» — перелік відомих правил (select): посимвольного набору, клавіші якого могла б з'їсти запізніла
+      // адреса, більше НЕМАЄ — вибір один і атомарний. Що лишається стерегти: вибір не губиться й не підміняється
+      // запізнілим відлунням — після запізнення адреси в полі саме обране правило, а в адресі — його код.
+      // ⚠ Відмінність від полів набору: `FilterBar.SelectField` керований адресою, тож на час запізнення (тут 40 мс)
+      // поле показує попереднє значення; втрати даних це не дає (той самий компонент у всіх фільтрах-переліках).
+      const user = userEvent.setup({ delay: LagMs / 2 });
+      const input = await screen.findByLabelText<HTMLInputElement>('⟦consistency.rule⟧', undefined, {
+        timeout: SlowEnvTimeout,
+      });
 
-      await typeWhileUrlLags(input, 'CNS-0123');
-      expect(input.value).toBe('CNS-0123');
+      await user.click(input);
+      await user.click(await screen.findByRole('option', { name: '⟦consistency.rule.BROKEN_FK⟧' }));
 
       await settle();
-      expect(input.value).toBe('CNS-0123');
-      await urlCaughtUp('ruleCode', 'CNS-0123');
-      expect(input.value).toBe('CNS-0123');
+      expect(input.value).toBe('⟦consistency.rule.BROKEN_FK⟧');
+      await urlCaughtUp('ruleCode', 'BROKEN_FK');
+      expect(input.value).toBe('⟦consistency.rule.BROKEN_FK⟧');
     },
     SlowEnvTimeout,
   );

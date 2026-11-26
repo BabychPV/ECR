@@ -143,9 +143,11 @@ describe('DocumentGrid: Warning/Info успішного патчу видно', 
     expect(notices.getAttribute('data-patch-notices')).toBe('Warning');
     expect(within(notices).getByText(WARNING)).toBeTruthy();
     expect(within(notices).getByText(INFO)).toBeTruthy();
-    // 0437 має власний блок «обов'язкові вхідні» — не дублюється тут.
+    // 0437 має власний блок «обов'язкові вхідні» — не дублюється тут (✎ 25.11: згорнута кнопка в рядку інструментів).
     expect(within(notices).queryByText(REQUIRED)).toBeNull();
-    expect(screen.getAllByText(REQUIRED)).toHaveLength(1);
+    // ⚠ Комірку C1 у тесті щойно заповнено ('abc'), тож вимогу вже виконано — поточні дані її знімають
+    // (`liveRequiredInputs`), а не показують другим блоком.
+    expect(screen.queryByText(REQUIRED)).toBeNull();
 
     // Закрити можна; більше нічого не з'являється без нового патчу.
     await user.click(within(notices).getByRole('button'));

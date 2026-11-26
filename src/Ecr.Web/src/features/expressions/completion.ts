@@ -183,17 +183,15 @@ export function completionAt(
   }
 
   // Ланка посилання `[…]`: усередині неї пишуть код, а не вираз.
-  if (dialect !== 'Report') {
-    const bracket = bracketAt(text, before.length);
+  const bracket = bracketAt(text, before.length);
 
-    if (bracket !== null) {
-      return {
-        kind: 'cell',
-        replaceFrom: bracket.replaceFrom,
-        typed: bracket.typed,
-        bracket,
-      };
-    }
+  if (bracket !== null) {
+    return {
+      kind: 'cell',
+      replaceFrom: bracket.replaceFrom,
+      typed: bracket.typed,
+      bracket,
+    };
   }
 
   const allows = (dialects: readonly ExpressionDialect[]): boolean =>

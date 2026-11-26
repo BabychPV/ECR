@@ -14,9 +14,18 @@ const ColumnSearchDebounceMs = 300;
 /** Скільки колонок просимо в сервера на один запит. */
 const ColumnSearchLimit = 50;
 
-/** Підпис колонки у виборі: «Назва (КОД) · АРКУШ/ТАБЛИЦЯ». */
-function columnDefLabel(column: ColumnDefSearchResultDto): string {
-  return `${localized(column.headerL10n) || column.code} (${column.code}) · ${column.sheetCode}/${column.tableCode}`;
+/**
+ * Підпис колонки у виборі: «Назва (КОД) · АРКУШ/ТАБЛИЦЯ».
+ *
+ * ✎ 24.11 (UI-прохід редактора скрипта): код у дужках — лише коли назва від нього відрізняється. Колонка без
+ * перекладу заголовка (або з заголовком, що дорівнює коду) давала «Agent (Agent) · …» — той самий текст двічі.
+ */
+export function columnDefLabel(column: ColumnDefSearchResultDto): string {
+  const header = localized(column.headerL10n).trim();
+  // ⚠ Порівняння ТОЧНЕ: «Emission (EMISSION)» лишається — регістр коду важливий для скрипта (`row.EMISSION`).
+  const name = header === '' || header === column.code ? column.code : `${header} (${column.code})`;
+
+  return `${name} · ${column.sheetCode}/${column.tableCode}`;
 }
 
 /**

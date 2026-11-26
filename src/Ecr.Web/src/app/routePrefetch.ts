@@ -138,16 +138,16 @@ export const PipelinePage = lazy(PipelinePageLoader);
 const JobsPageLoader = async () => ({ default: (await import('@/pages/admin/JobsPage')).JobsPage });
 export const JobsPage = lazy(JobsPageLoader);
 
-const SnapshotsPageLoader = async () => ({
-  default: (await import('@/pages/admin/SnapshotsPage')).SnapshotsPage,
-});
-export const SnapshotsPage = lazy(SnapshotsPageLoader);
-
 const AuditPageLoader = async () => ({ default: (await import('@/pages/admin/AuditPage')).AuditPage });
 export const AuditPage = lazy(AuditPageLoader);
 
 const UnitsPageLoader = async () => ({ default: (await import('@/pages/admin/UnitsPage')).UnitsPage });
 export const UnitsPage = lazy(UnitsPageLoader);
+
+const GasCompositionPageLoader = async () => ({
+  default: (await import('@/pages/admin/GasCompositionPage')).GasCompositionPage,
+});
+export const GasCompositionPage = lazy(GasCompositionPageLoader);
 
 const ConsistencyIssuesPageLoader = async () => ({
   default: (await import('@/pages/admin/ConsistencyIssuesPage')).ConsistencyIssuesPage,
@@ -207,9 +207,9 @@ const routeChunkLoaders: Partial<Record<string, () => Promise<unknown>>> = {
   [routes.adminPiData.id]: PiDataPageLoader,
   [routes.adminPipeline.id]: PipelinePageLoader,
   [routes.adminJobs.id]: JobsPageLoader,
-  [routes.adminSnapshots.id]: SnapshotsPageLoader,
   [routes.adminAudit.id]: AuditPageLoader,
   [routes.adminUnits.id]: UnitsPageLoader,
+  [routes.adminGasComposition.id]: GasCompositionPageLoader,
   [routes.adminConsistency.id]: ConsistencyIssuesPageLoader,
   [routes.adminUiStrings.id]: UiStringsPageLoader,
   [routes.adminHealth.id]: HealthPageLoader,

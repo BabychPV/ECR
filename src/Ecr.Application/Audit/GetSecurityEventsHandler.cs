@@ -77,6 +77,40 @@ public sealed class GetSecurityEventsHandler(
         return await audit.ReadSecurityEventsAsync(filter, page, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// ✎ P-1124-4: різні типи подій у вікні — варіанти фільтра «Event type». Ті самі право й перевірки вікна, що в
+    /// переліку: поле було вільним текстом із ТОЧНИМ збігом коду (<c>AccessDenied</c>), і набране людиною
+    /// «Access denied» чи «access» давало порожній журнал.
+    /// </summary>
+    /// <param name="from">Початок вікна в UTC, включно.</param>
+    /// <param name="to">Кінець вікна в UTC, виключно.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<IReadOnlyList<string>> EventTypesAsync(DateTime from, DateTime to, CancellationToken ct)
+    {
+        await ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
+        AuditWindow.Require(from, to, MaxWindow, page: null);
+
+        return await audit.ReadSecurityEventTypesAsync(from, to, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ P-1124-4: автори для фільтра «By user» УСІХ журналів аудиту — за <c>Security.ViewAudit</c>. До цього перелік
+    /// брався з <c>GET /users</c> (лише <c>Security.ManageUsers</c>, якого вбудовані ролі не мають), і в аудитора
+    /// фільтр стояв порожнім «Anyone» без жодного варіанта.
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<IReadOnlyList<AuditAuthorView>> AuthorsAsync(CancellationToken ct)
+    {
+        await ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
+        return await audit.ReadAuditAuthorsAsync(ct).ConfigureAwait(false);
+    }
+
     /// <summary>Кількість подій за фільтром (стеля експорту); ті самі право й перевірки вікна.</summary>
     /// <param name="filter">Вікно й звуження журналу.</param>
     /// <param name="ct">Токен скасування.</param>

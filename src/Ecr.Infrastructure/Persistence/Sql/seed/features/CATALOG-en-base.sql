@@ -242,47 +242,23 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'err.ECR-CALC-0422.simulatePeriodInvalid', N'en', N'Period key {periodKey} is not a month: expected YYYYMM, for example 202609.', 1),
     -- D-52a: опис звіту керує побудовою зрізу, тож колонка, якої джерело не
     -- має, відмовляє вже при створенні версії опису.
-    (N'err.ECR-RPT-0422.unknownColumn',      N'en', N'Row source "{rowSource}" has no column "{columnCode}".', 1),
-    (N'err.ECR-RPT-0422.columnKindMismatch', N'en', N'Column "{columnCode}" is "{expectedKind}" in the row source, not "{kind}".', 1),
-    (N'err.ECR-RPT-0422.rulesSchema',        N'en', N'Rules schema {schema} is not supported: the current one is {currentSchema}.', 1),
-    (N'err.ECR-RPT-0422.rule',               N'en', N'Rule {ruleNo} ({part}) is invalid: {reason}.', 1),
     -- R6: параметри звіту (`@Name`). Оголошення перевіряється при створенні
     -- версії, значення — при побудові зрізу; обидві відмови адресують параметр
     -- його іменем, бо іншого способу знайти його в описі немає.
-    (N'err.ECR-RPT-0422.parameter',          N'en', N'Report parameter "{code}" is not declared correctly: {reason}.', 1),
-    (N'err.ECR-RPT-0422.parameterUnknown',   N'en', N'The report version declares no parameter "{code}".', 1),
-    (N'err.ECR-RPT-0422.parameterRequired',  N'en', N'Report parameter "{code}" is required: it has neither a value nor a default.', 1),
-    (N'err.ECR-RPT-0422.parameterType',      N'en', N'Report parameter "{code}" ({part}) expects a value of type {expectedType}.', 1),
     -- R8: макет зрізу (одна група й підсумки). Перевіряється при створенні
     -- версії тим самим кодом, яким його застосує видача, тож підсумок над
     -- колонкою, якої в описі немає, не доживає до екрана.
-    (N'err.ECR-RPT-0422.layout',             N'en', N'The report layout ({part}) is invalid: {reason}.', 1),
     -- R9: підписи колонок мовами каталогу. Порожня назва не є «назви немає»:
     -- вона доїхала б до заголовка книги порожньою коміркою, тобто колонка
     -- держформи лишилася б без підпису. Відсутність виражається відсутністю ключа.
-    (N'err.ECR-RPT-0422.columnName',         N'en', N'Column "{columnCode}" has an invalid name for language "{language}" ({part}).', 1),
-    (N'err.ECR-RPT-0404.snapshot',           N'en', N'Snapshot {snapshotId} does not exist.', 1),
     -- R7: книга зрізу будується в пам'яті цілком, тому стеля рядків — відмова,
     -- а не мовчазне обрізання: книга з «майже всіма» рядками виглядає повною.
-    (N'err.ECR-RPT-0422.exportTooLarge',     N'en', N'Snapshot {snapshotId} has more than {limit} rows: a workbook that large is not built. Use the rows endpoint or the rpt.v_* view.', 1),
     -- Борг локалізації (contracts/localization-debt.md, ReportDefHandlers.cs):
     -- заведення й публікація опису звіту та його версій.
-    (N'err.ECR-RPT-0422.noColumns',          N'en', N'A report version needs at least one column: there would be nothing to show in the snapshot.', 1),
-    (N'err.ECR-RPT-0422.columnKind',         N'en', N'Column kind "{kind}" is unknown: the snapshot row stores only {allowedKinds}.', 1),
-    (N'err.ECR-RPT-0422.duplicateColumn',    N'en', N'Column "{code}" is described twice: the column code is part of the snapshot row''s key.', 1),
-    (N'err.ECR-RPT-0422.rowSource',          N'en', N'Row source "{rowSource}" is not supported by the snapshot builder: today there is one — "{supportedSource}" (the current run''s results).', 1),
-    (N'err.ECR-RPT-0422.nameRequired',       N'en', N'Give the report a name in at least one language: it is addressed by that name in the list.', 1),
-    (N'err.ECR-RPT-0422.version',            N'en', N'The report version number must be from 1 to {maxLength} characters.', 1),
-    (N'err.ECR-RPT-4091.code',               N'en', N'A report with code "{code}" is already described.', 1),
-    (N'err.ECR-RPT-4091.version',            N'en', N'Version "{version}" already exists in this report definition: the version number must be unique.', 1),
-    (N'err.ECR-RPT-0404.def',                N'en', N'Report definition {reportDefId} does not exist.', 1),
-    (N'err.ECR-RPT-0404.version',            N'en', N'Report version {reportVersionId} does not exist.', 1),
-    (N'err.ECR-RPT-0404.versionWrongDef',    N'en', N'Version {reportVersionId} belongs to definition {versionDefId}, not {reportDefId}.', 1),
     -- Борг локалізації (B-14, Reporting): побудова зрізу за КОДОМ звіту —
     -- окремий факт від `.def`/`.version` вище (id-based): тут одне повідомлення
     -- покриває і «коду немає», і «код є, чинної версії немає», бо
     -- `FindCurrentVersionAsync` не розрізняє їх на цьому рівні.
-    (N'err.ECR-RPT-0404.code',               N'en', N'Report "{code}" does not exist or has no current version.', 1),
     -- ⛔ `Q-341`, перший зріз: відмови збереження комірки (`PatchCellsHandler`)
     -- — найгарячіший шлях продукту, бо через нього йде КОЖНЕ збереження в
     -- сітці. Ключі мають суфікс (`err.<код>.<що саме>`), а не форму рівно
@@ -439,7 +415,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'err.ECR-INT-0404.dataSource',                      N'en', N'Data source {id} does not exist.', 1),
     (N'err.ECR-REQ-0422.dataSourceInvalid',               N'en', N'A data source needs a name in at least one language, a known transport, an address of up to 400 characters and a parallelism ceiling between 1 and 32.', 1),
     (N'err.ECR-REQ-0422.dataSourceCodeTaken',             N'en', N'A data source with code "{code}" already exists.', 1),
-    (N'err.ECR-REQ-0422.dataSourceEndpointCarriesSecret', N'en', N'The address of a data source must not carry credentials: sources connect under the service account.', 1),
+    (N'err.ECR-REQ-0422.dataSourceEndpointCarriesSecret', N'en', N'The address of a data source must not carry credentials. Enter the user name and password in the Authentication fields instead (PI SQL Client and Sql).', 1),
     (N'err.ECR-REQ-0422.dataSourceTestReason',            N'en', N'A reason of up to 400 characters is required to test the connection: the attempt is recorded in the security journal.', 1),
     (N'err.ECR-JOB-0409.dataSourceInUse',                 N'en', N'This data source still carries {sourceEntities} collection entities and {collectionSchedules} schedules: disable it instead of deleting it.', 1),
     (N'err.ECR-JOB-0409.dataSourceTestRunning',           N'en', N'A connection test for data source "{code}" is already running: wait for it to finish.', 1),
@@ -909,9 +885,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'err.ECR-REG-0422.naeImportRejected',   N'en', N'NAE load rejected at {code}: {reason}.', 1),
     (N'registryAudit.naeAfImport',            N'en', N'NAE nodes created: {count}.', 1),
     (N'err.ECR-INT-0422.materializationRequiresAggregation', N'en', N'Mapping of field "{sourceField}" names row "{targetRowKey}", but does not say how to fold period points: the system does not know whether the value is instantaneous or cumulative.', 1),
-    (N'err.ECR-RPT-0409.versionNotDraft',           N'en', N'Report version {version} is {status}: there is nothing to publish.', 1),
-    (N'err.ECR-RPT-0409.snapshotSubmittedContent',  N'en', N'Snapshot {snapshotId} was submitted: its content is not rebuilt, a new snapshot is needed.', 1),
-    (N'err.ECR-RPT-0409.snapshotSubmittedStatus',   N'en', N'Snapshot {snapshotId} was submitted: its status does not change, a new snapshot is needed.', 1),
     (N'err.ECR-USR-0422.receivesAlertsRequiresEmail', N'en', N'User "{userName}" has no email: there is nowhere to turn alerts on.', 1),
     (N'err.ECR-PRD-4224.countOutOfRange',    N'en', N'The period count {count} is outside 1..{max}.', 1),
     (N'err.ECR-PRD-4224.countNotDivisor',    N'en', N'The period count {count} does not divide the year evenly: 12 must be divisible by it, or part of the year would have no period.', 1),
@@ -1049,10 +1022,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'err.ECR-JOB-0409',   N'en', N'Conflicting state', 1),
 
     -- Звіти.
-    (N'err.ECR-RPT-0404',   N'en', N'Report not found', 1),
-    (N'err.ECR-RPT-0409',   N'en', N'Already published: a new version is needed', 1),
-    (N'err.ECR-RPT-4091',   N'en', N'The report code is taken', 1),
-    (N'err.ECR-RPT-0422',   N'en', N'Invalid report definition', 1),
 
     -- ⚠ Системні. Подробиця для 500 стала й беззмістовна НАВМИСНО (ФВ-6.11),
     -- тому й заголовок тут загальний — але саме тут сирий код найгірший:
@@ -1243,7 +1212,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'grid.recalculated',               N'en', N'Recalculated {time}', 1),
     (N'grid.recalcFailed',               N'en', N'Recalculation failed', 1),
     (N'grid.requiredInputBlockedTitle',  N'en', N'Cannot save: {count} required column(s) missing', 1),
-    (N'grid.requiredInputWarningTitle',  N'en', N'{count} required column(s) missing (does not block saving)', 1),
     (N'grid.columnRequiredHint',         N'en', N'This column is required.', 1),
     (N'grid.confirmTitle',               N'en', N'Confirm this change', 1),
     (N'grid.confirmCancel',              N'en', N'Cancel', 1),
@@ -1440,13 +1408,11 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'methodologies.reasonHint',        N'en', N'Recorded in the change log: it explains why past numbers were recalculated.', 1),
     (N'methodologies.effectiveFrom',     N'en', N'Effective from', 1),
     (N'methodologies.effectiveFromHint', N'en', N'Periods from this date on are calculated by this version; earlier ones keep the previous.', 1),
-    (N'methodologies.versionsTitle',     N'en', N'Versions and formulas', 1),
+    (N'methodologies.versionsTitle',     N'en', N'Versions', 1),
     (N'methodologies.version',           N'en', N'Version', 1),
     (N'methodologies.status',            N'en', N'Status', 1),
     (N'methodologies.modes',             N'en', N'Modes', 1),
     (N'methodologies.openVersion',       N'en', N'Open', 1),
-    (N'methodologies.noVersions',        N'en', N'This methodology has no versions', 1),
-    (N'methodologies.noVersionsHint',    N'en', N'A version is what actually calculates. Create a draft to start.', 1),
     (N'methodologies.newVersion',        N'en', N'New version', 1),
     (N'methodologies.newVersionTitle',   N'en', N'New draft version', 1),
     (N'methodologies.createVersion',     N'en', N'Create draft', 1),
@@ -1491,28 +1457,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'methodologies.readOnly',          N'en', N'Read only', 1),
     (N'methodologies.readOnlyHint',      N'en', N'This version is published, so its content is fixed. To change it, create a new version copied from this one.', 1),
     (N'methodologies.formulas',          N'en', N'Formulas', 1),
-    (N'methodologies.formulaTitle',      N'en', N'Formula', 1),
-    (N'methodologies.formulaCode',       N'en', N'Code', 1),
-    (N'methodologies.formulaCodeHint',   N'en', N'What expressions refer to as !Code. It cannot be renamed: other formulas point at it.', 1),
-    (N'methodologies.expression',        N'en', N'Expression', 1),
-    (N'methodologies.resultType',        N'en', N'Result type', 1),
-    (N'methodologies.resultTypeHint',    N'en', N'Declared, not guessed: a formula may return a word, and that word must not land in a numeric column.', 1),
-    (N'methodologies.resultNumber',      N'en', N'Number', 1),
-    (N'methodologies.resultText',        N'en', N'Text', 1),
-    (N'methodologies.outputUnit',        N'en', N'Result unit', 1),
-    (N'methodologies.outputUnitHint',    N'en', N'Publishing checks dimensions against it; a text result has none.', 1),
-    (N'methodologies.noUnit',            N'en', N'Dimensionless', 1),
-    (N'methodologies.evaluationOrder',   N'en', N'Order', 1),
-    (N'methodologies.addFormula',        N'en', N'Add formula', 1),
     (N'methodologies.editFormula',       N'en', N'Edit', 1),
-    (N'methodologies.deleteFormula',     N'en', N'Remove', 1),
-    (N'methodologies.deleteFormulaConfirmTitle', N'en', N'Remove formula', 1),
-    (N'methodologies.deleteFormulaConfirmText', N'en', N'Remove formula {code} from this draft? This cannot be undone.', 1),
-    (N'methodologies.saveFormula',       N'en', N'Save formula', 1),
-    (N'methodologies.formulaSaved',      N'en', N'The formula has been saved.', 1),
-    (N'methodologies.formulaDeleted',    N'en', N'The formula has been removed.', 1),
-    (N'methodologies.noFormulas',        N'en', N'This version has no formulas', 1),
-    (N'methodologies.noFormulasHint',    N'en', N'Add one, or copy the version from an existing one.', 1),
     (N'methodologies.newMethodology', N'en', N'New methodology', 1),
     (N'methodologies.newMethodologyTitle', N'en', N'New methodology', 1),
     (N'methodologies.create', N'en', N'Create methodology', 1),
@@ -1538,62 +1483,11 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'methodologies.before', N'en', N'Before', 1),
     (N'methodologies.after', N'en', N'After', 1),
     (N'methodologies.constants', N'en', N'Constants', 1),
-    (N'methodologies.addConstant', N'en', N'Add constant', 1),
-    (N'methodologies.constantSaved', N'en', N'The constant has been saved.', 1),
-    (N'methodologies.constantKind', N'en', N'Kind', 1),
-    (N'methodologies.constantKindHint', N'en', N'A constant is not always a number: about ninety non-numeric ones are used in expressions as comparison operands.', 1),
-    (N'methodologies.constantText', N'en', N'Text', 1),
-    (N'methodologies.constantUnitHint', N'en', N'Mandatory for a number: the dimension check at publication rests on it.', 1),
     (N'methodologies.validFrom', N'en', N'Valid from', 1),
-    (N'methodologies.validTo', N'en', N'Valid to', 1),
-    (N'methodologies.validToHint', N'en', N'The first day it is NO LONGER valid: a coefficient valid for the whole of 2024 has 2025-01-01 here.', 1),
     (N'methodologies.category', N'en', N'Category', 1),
     (N'methodologies.categoryHint', N'en', N'Narrows where the constant applies: default, offshore, a plant name. Empty means it is shared.', 1),
-    (N'methodologies.sourceRef', N'en', N'Source of the value', 1),
-    (N'methodologies.sourceRefHint', N'en', N'An order, a plant certificate, a measurement: an emission factor without a source can be neither defended nor updated.', 1),
-    (N'methodologies.unresolved', N'en', N'not a number', 1),
-    (N'methodologies.categoryLabel', N'en', N'Category label', 1),
-    (N'methodologies.noConstants', N'en', N'This version has no constants', 1),
-    (N'methodologies.noConstantsHint', N'en', N'A formula without its coefficients computes over emptiness, and publishing does not stop that.', 1),
-    (N'methodologies.rules', N'en', N'Row selection rules', 1),
-    (N'methodologies.addRule', N'en', N'Add rule', 1),
-    (N'methodologies.ruleSaved', N'en', N'The rule has been saved.', 1),
     (N'methodologies.matchJson', N'en', N'Predicate', 1),
-    (N'methodologies.matchJsonHint', N'en', N'A structured predicate, not an expression. An empty object matches the whole table - which is why such a rule must have the lowest priority.', 1),
-    (N'methodologies.priority', N'en', N'Priority', 1),
-    (N'methodologies.priorityHint', N'en', N'The lower the number, the higher the priority. The first match wins.', 1),
-    (N'methodologies.catchAllNotLowestTitle', N'en', N'This catch-all rule is not at the lowest priority', 1),
-    (N'methodologies.catchAllNotLowestWarning', N'en', N'An empty predicate matches every row. Give it the highest priority number here, or any rule with a lower number will never be reached.', 1),
-    (N'methodologies.shadowedByCatchAllTitle', N'en', N'This rule can never match', 1),
-    (N'methodologies.shadowedByCatchAllWarning', N'en', N'Rule {code} already matches every row at a higher priority. Rows never reach this rule.', 1),
     (N'methodologies.active', N'en', N'Active', 1),
-    (N'methodologies.noRules', N'en', N'This version has no selection rules', 1),
-    (N'methodologies.noRulesHint', N'en', N'Without a rule the methodology touches no document row, and recalculation succeeds having computed nothing.', 1),
-    -- Панель покриття правил (ФВ-13.9): які рядки реальних даних бере на себе
-    -- кожне правило. ⚠ Перелік обрізає сервер, тож банер каже це прямо:
-    -- прогалина може лежати поза показаними сполученнями.
-    (N'methodologies.ruleCoverage', N'en', N'Rule coverage', 1),
-    (N'methodologies.ruleCoverageHint', N'en', N'Which rows of real data each rule claims.', 1),
-    (N'methodologies.ruleCoverageTable', N'en', N'Table', 1),
-    (N'methodologies.ruleCoverageAllTables', N'en', N'All tables', 1),
-    (N'methodologies.ruleCoverageTableOption', N'en', N'Table {id}', 1),
-    (N'methodologies.ruleCoveragePeriodFrom', N'en', N'Period from', 1),
-    (N'methodologies.ruleCoveragePeriodTo', N'en', N'Period to', 1),
-    (N'methodologies.ruleCoveragePeriodHint', N'en', N'Period key as YYYYMM, for example 202601.', 1),
-    (N'methodologies.ruleCoverageValues', N'en', N'Values', 1),
-    (N'methodologies.ruleCoverageState', N'en', N'State', 1),
-    (N'methodologies.ruleCoverageRules', N'en', N'Rules', 1),
-    (N'methodologies.ruleCoverageRows', N'en', N'Rows', 1),
-    (N'methodologies.ruleCoverageDocuments', N'en', N'Documents', 1),
-    (N'methodologies.ruleCoverageCovered', N'en', N'Covered', 1),
-    (N'methodologies.ruleCoverageGap', N'en', N'No rule', 1),
-    (N'methodologies.ruleCoverageConflict', N'en', N'Two rules, same priority', 1),
-    (N'methodologies.ruleCoverageShadowed', N'en', N'shadowed by priority', 1),
-    (N'methodologies.ruleCoverageNoCell', N'en', N'no cell', 1),
-    (N'methodologies.ruleCoverageTruncatedTitle', N'en', N'Not everything is shown', 1),
-    (N'methodologies.ruleCoverageTruncatedHint', N'en', N'The server stopped at {shown} combinations; a gap may be outside them.', 1),
-    (N'methodologies.noRuleCoverage', N'en', N'No rows match this window', 1),
-    (N'methodologies.noRuleCoverageHint', N'en', N'Widen the period window or pick another table.', 1),
     (N'methodologies.requiredInputs', N'en', N'Required input columns', 1),
     (N'methodologies.addRequiredInput', N'en', N'Add required input', 1),
     (N'methodologies.requiredInputSaved', N'en', N'The required input has been saved.', 1),
@@ -1612,29 +1506,9 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     -- для колонки, яку методологія вже не пише.
     (N'methodologies.requiredInputUnattached',     N'en', N'unattached', 1),
     (N'methodologies.requiredInputUnattachedHint', N'en', N'This column has no active binding for this methodology right now: the requirement still blocks or warns on save, but nothing writes a result into it. Reactivate the binding, or remove this requirement.', 1),
-    (N'methodologies.addOutput', N'en', N'Add output', 1),
-    (N'methodologies.outputSaved', N'en', N'The output has been saved.', 1),
-    (N'methodologies.outputCodeHint', N'en', N'The address the binding points at; it matches the code of the formula that produces it.', 1),
-    (N'methodologies.outputUnitRequiredHint', N'en', N'Mandatory: the dimension check at publication rests on it.', 1),
-    (N'methodologies.ordinal', N'en', N'Order', 1),
-    (N'methodologies.noOutputs', N'en', N'This version declares no outputs', 1),
-    (N'methodologies.noOutputsHint', N'en', N'Without an output the module computes every formula and writes nothing: the write loop goes over outputs.', 1),
-    -- Покриття «виходи → колонки» (BE-25): куди пише кожен оголошений вихід і
-    -- які прив'язки чекають на вихід, якого ця версія не оголошує.
-    (N'methodologies.outputCoverage', N'en', N'Output coverage', 1),
-    (N'methodologies.outputCoverageHint', N'en', N'Where each declared output of this version writes, and which columns wait for an output this version does not declare.', 1),
-    (N'methodologies.outputCoverageBindings', N'en', N'Bindings', 1),
-    (N'methodologies.outputCoverageNowhere', N'en', N'Writes nowhere', 1),
-    (N'methodologies.noOutputCoverage', N'en', N'No coverage to show', 1),
-    (N'methodologies.noOutputCoverageHint', N'en', N'This version has no declared outputs and no bindings are waiting on it.', 1),
-    (N'methodologies.outputCoverageWaiting', N'en', N'Waiting bindings', 1),
-    (N'methodologies.outputCoverageWaitingHint', N'en', N'These bindings are active but point at an output this version does not declare; they will stay empty.', 1),
     (N'methodologies.tests', N'en', N'Golden set', 1),
     (N'methodologies.addTest', N'en', N'Add test', 1),
     (N'methodologies.testSaved', N'en', N'The test has been saved.', 1),
-    (N'methodologies.inputJson', N'en', N'Input', 1),
-    (N'methodologies.inputJsonHint', N'en', N'The run input as CalculationInput: a real document, table instance and period - the module takes the period length from doc.Period.', 1),
-    (N'methodologies.expectedJson', N'en', N'Expected outputs', 1),
     (N'methodologies.expectedJsonHint', N'en', N'Output code to number. An empty object means nothing is expected to be produced.', 1),
     (N'methodologies.tolerance', N'en', N'Tolerance', 1),
     (N'methodologies.toleranceHint', N'en', N'Zero means exact equality; a tolerance keeps the test from turning red when the order of terms changes.', 1),
@@ -1771,7 +1645,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'jobs.kind.excelExport',               N'en', N'Excel export', 1),
     (N'jobs.kind.excelImport',               N'en', N'Excel import', 1),
     (N'jobs.kind.materializeCollectedData',  N'en', N'Materializing collected data', 1),
-    (N'jobs.kind.reportSnapshot',            N'en', N'Report snapshot build', 1),
     (N'jobs.kind.collection',                N'en', N'Data collection', 1),
     (N'health.title',                    N'en', N'Health', 1),
     (N'health.database',                 N'en', N'Database', 1),
@@ -1893,7 +1766,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'sources.testReason',              N'en', N'Reason', 1),
     (N'sources.testReasonHint',          N'en', N'Required: the test is written to the security log.', 1),
     (N'sources.testOk',                  N'en', N'The source answered', 1),
-    (N'sources.testFailed',              N'en', N'The source refused the connection', 1),
+    (N'sources.testFailed',              N'en', N'The connection test did not pass', 1),
     (N'sources.testRunning',             N'en', N'A test of this connection is already running', 1),
     -- ⚠ Перші ключі-множини в сіді: `formatCount` бере `<основа>.<категорія>`
     -- за `Intl.PluralRules` (для en — `one` і `other`) і підставляє `{count}`.
@@ -2029,7 +1902,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     -- відмови, а не текст винятку (інакше кнопка — сканер внутрішньої мережі);
     -- сирий текст лише в серверному журналі. Нова адреса джерела, під яке
     -- середовище дає секрет, вимагає ввести секрет повторно.
-    (N'integration.test.failed.auth',        N'en', N'The source refused the credentials of the service account.', 1),
+    (N'integration.test.failed.auth',        N'en', N'The source refused the credentials (the service account, or the user name and password of the connection).', 1),
     (N'integration.test.failed.unreachable', N'en', N'The source could not be reached, or it answered with an error.', 1),
     (N'integration.test.failed.tls',         N'en', N'A secure (TLS) connection to the source could not be established.', 1),
     (N'integration.test.failed.timeout',     N'en', N'The source did not answer in time.', 1),
@@ -2539,8 +2412,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'approvalRoutes.templateHint', N'en', N'Who approves the sheets of this template in every project, unless a project sets its own exception.', 1),
     (N'approvalRoutes.defaultTitle', N'en', N'Default approval route', 1),
     (N'approvalRoutes.defaultHint', N'en', N'Applies where neither the template nor the project has its own route.', 1),
-    (N'approvalRoutes.projectTemplatesTitle', N'en', N'Templates: approval', 1),
-    (N'approvalRoutes.projectTemplatesHint', N'en', N'The route in effect for each template of this project. An exception set here applies to this project only.', 1),
     (N'approvalRoutes.source.own', N'en', N'Own route', 1),
     (N'approvalRoutes.source.template', N'en', N'From the template', 1),
     (N'approvalRoutes.source.project', N'en', N'From the project', 1),
@@ -2571,10 +2442,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'approvalRoutes.restartSheetLine', N'en', N'{project} · {document} · sheet {sheet} · {period}', 1),
     (N'approvalRoutes.restartSheetCopyLine', N'en', N'{project} · {document} · sheet {sheet} (copy) · {period}', 1),
     (N'approvalRoutes.restartVerb', N'en', N'Save and restart', 1),
-    (N'approvalRoutes.noTemplates', N'en', N'This project has no templates.', 1),
-    (N'approvalRoutes.colTemplate', N'en', N'Template', 1),
-    (N'approvalRoutes.colSource', N'en', N'Route source', 1),
-    (N'approvalRoutes.colSteps', N'en', N'Steps', 1),
     (N'approvalRoutes.colActions', N'en', N'Actions', 1),
     (N'approvalRoutes.editException', N'en', N'Edit exception', 1),
     (N'approvalRoutes.editExceptionFor', N'en', N'Edit exception for template {template}', 1),
@@ -2724,7 +2591,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'nav.consistency',                 N'en', N'Consistency issues', 1),
     (N'consistency.title',               N'en', N'Consistency issues', 1),
     (N'consistency.rule',                N'en', N'Rule', 1),
-    (N'consistency.ruleHint',            N'en', N'Leave empty for every rule.', 1),
+    (N'consistency.ruleHint',            N'en', N'All rules', 1),
     (N'consistency.openOnly',            N'en', N'Unresolved only', 1),
     (N'consistency.when',                N'en', N'Detected at', 1),
     (N'consistency.severity',            N'en', N'Severity', 1),
@@ -2783,47 +2650,14 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'campaign.projectCode',            N'en', N'Project code', 1),
     (N'campaign.projectName',            N'en', N'Project', 1),
     (N'campaign.documents',              N'en', N'Documents', 1),
-    (N'campaign.snapshots',              N'en', N'Snapshots', 1),
-    (N'nav.snapshots',                   N'en', N'Report snapshots', 1),
-    (N'snapshots.title',                 N'en', N'Report snapshots', 1),
-    (N'snapshots.build',                 N'en', N'Build snapshot', 1),
-    (N'snapshots.buildHint',             N'en', N'A snapshot is immutable: building again creates a new one instead of overwriting.', 1),
-    (N'snapshots.queued',                N'en', N'Build queued as job {job}.', 1),
     -- ⛔ UI-аудит, lane 6: побудова успішно завершується майже одразу, але
     -- список не оновлювався — ці два рядки супроводжують нове стеження за
     -- задачею (`jobFollow.ts`), не саму постановку в чергу.
-    (N'snapshots.built',                 N'en', N'Snapshot built.', 1),
-    (N'snapshots.buildFailed',           N'en', N'Snapshot build failed.', 1),
-    (N'snapshots.code',                  N'en', N'Report code', 1),
-    (N'snapshots.codeHint',              N'en', N'The report definition to build from; definitions are data, not code.', 1),
-    (N'snapshots.builtAt',               N'en', N'Built at', 1),
-    (N'snapshots.rows',                  N'en', N'Rows', 1),
-    (N'snapshots.status',                N'en', N'Status', 1),
-    (N'snapshots.hash',                  N'en', N'Content hash', 1),
-    (N'snapshots.current',               N'en', N'current', 1),
     -- Формат чисел зрізу: `current` не позначається. ⚠ Ключі беруться з мапи в
     -- `SnapshotFormatBadge.tsx` через `t(look.label)` — `EndpointCoverageTests`
     -- їх не бачить; сторож — ФВ-14.9 у `test:a11y` на `/admin/snapshots`.
-    (N'snapshots.formatLegacy',          N'en', N'Earlier format', 1),
-    (N'snapshots.formatLegacyHint',      N'en', N'Built before numbers were extended to 16 decimal places. Kept exactly as it was submitted to the regulator.', 1),
-    (N'snapshots.formatUnknown',         N'en', N'Format unknown', 1),
-    (N'snapshots.formatUnknownHint',     N'en', N'The number format of this snapshot has not been determined yet.', 1),
-    (N'snapshots.empty',                 N'en', N'No snapshots built yet', 1),
-    (N'snapshots.emptyHint',             N'en', N'SSRS reads snapshots, not live data: until one is built, the regulator sees nothing.', 1),
-    (N'snapshots.pickReport',            N'en', N'Pick a report', 1),
-    (N'snapshots.noPublished',           N'en', N'No report definition has a published version yet: a snapshot can only be built from one.', 1),
     -- BE-17: перевірка незмінності зрізу — сума перераховується за збереженими рядками.
-    (N'snapshots.verify',                N'en', N'Verify', 1),
-    (N'snapshots.verifyMatch',           N'en', N'unchanged', 1),
-    (N'snapshots.verifyMismatch',        N'en', N'content changed', 1),
-    (N'snapshots.verifyStored',          N'en', N'Stored: {hash}', 1),
-    (N'snapshots.verifyActual',          N'en', N'Actual: {hash}', 1),
-    (N'snapshots.verifyLegacy',          N'en', N'Matched by the earlier checksum format: this snapshot was built before the format changed.', 1),
     -- D-52a: перегляд рядків зрізу в застосунку (другий споживач `rpt.*`).
-    (N'snapshots.viewRows',              N'en', N'View rows', 1),
-    (N'snapshots.rowsTitle',             N'en', N'Snapshot rows', 1),
-    (N'snapshots.rowsMore',              N'en', N'Show more', 1),
-    (N'snapshots.rowsEmpty',             N'en', N'This snapshot has no rows.', 1),
 
     -- R8: макет зрізу — групи й підсумки. ⚠ Підпис функції підсумку береться
     -- з каталогу, а не з коду сервера (`sum`/`count`/…): число без предмета —
@@ -2831,57 +2665,16 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     -- ⛔ Ключі однорівневі (`rowsFnSum`, не `rowsFn.sum`): сторож
     -- `Кожен_рядок_якого_просить_клієнт_є_в_каталозі` регуляркою двокрапкових
     -- ключів не бачить, тож дволанковий ключ проїхав би повз перевірку.
-    (N'snapshots.rowsGroup',             N'en', N'Group by {column}', 1),
-    (N'snapshots.rowsTotalGroup',        N'en', N'Group total', 1),
-    (N'snapshots.rowsTotalAll',          N'en', N'Snapshot total', 1),
-    (N'snapshots.rowsFnSum',             N'en', N'Sum', 1),
-    (N'snapshots.rowsFnCount',           N'en', N'Count', 1),
-    (N'snapshots.rowsFnAvg',             N'en', N'Average', 1),
-    (N'snapshots.rowsFnMin',             N'en', N'Minimum', 1),
-    (N'snapshots.rowsFnMax',             N'en', N'Maximum', 1),
-    (N'snapshots.rowsFnOther',           N'en', N'Total', 1),
 
     -- R7: вивантаження зрізу в книгу. ⚠ Межа Excel названа ПОРУЧ із дією:
     -- числа в книзі мають 15 значущих цифр, і той, хто звіряє до останнього
     -- знаку, мусить дізнатися про це ДО вивантаження, а не після.
     -- R6: параметри звіту `@Name`. Оголошені в `RulesJson` версії (схема 2),
     -- значення задаються при побудові зрізу.
-    (N'snapshots.parameters',            N'en', N'Report parameters', 1),
-    (N'snapshots.parameterRequired',     N'en', N'Required', 1),
-    (N'snapshots.parametersBlocked',     N'en', N'Fill in every required parameter — the server refuses a build without them.', 1),
-    (N'snapshots.parametersUnknown',     N'en', N'The parameters of this report could not be read, so a build would go out blind. Retry, and build once they are known.', 1),
 
-    (N'snapshots.export',                N'en', N'Download .xlsx', 1),
-    (N'snapshots.exportHint',            N'en', N'Numbers in the workbook are rounded to 15 significant digits; use "View rows" to reconcile without loss.', 1),
 
     -- Описи звітів (ФВ-10.4, W7). ⛔ Не конструктор звітів: вигляд лишається
     -- в SSRS (ФВ-10.6), тут лише рядок даних, за яким будується зріз.
-    (N'reportDefs.title',                N'en', N'Report definitions', 1),
-    (N'reportDefs.manage',               N'en', N'Report definitions', 1),
-    (N'reportDefs.empty',                N'en', N'No report is described yet: a snapshot has nothing to be built from.', 1),
-    (N'reportDefs.code',                 N'en', N'Report code', 1),
-    (N'reportDefs.codeHint',             N'en', N'The address of the report; a snapshot is built by this code and it cannot be renamed later.', 1),
-    (N'reportDefs.regulatory',           N'en', N'regulatory', 1),
-    (N'reportDefs.regulatoryHint',       N'en', N'Decides which statuses the rpt.v_* view lets through — not how important the report is.', 1),
-    (N'reportDefs.inactive',             N'en', N'withdrawn', 1),
-    (N'reportDefs.version',              N'en', N'Version', 1),
-    (N'reportDefs.versionHint',          N'en', N'Unique within the report; up to 20 characters.', 1),
-    (N'reportDefs.versions',             N'en', N'Versions', 1),
-    (N'reportDefs.noVersions',           N'en', N'no versions', 1),
-    (N'reportDefs.columns',              N'en', N'Snapshot columns', 1),
-    (N'reportDefs.columnsHint',          N'en', N'The column code is the key of a snapshot row — it is what the report looks values up by.', 1),
-    (N'reportDefs.columnCode',           N'en', N'Column code', 1),
-    (N'reportDefs.columnKind',           N'en', N'Value type', 1),
-    (N'reportDefs.addColumn',            N'en', N'Add column', 1),
-    (N'reportDefs.removeColumn',         N'en', N'Remove column', 1),
-    (N'reportDefs.add',                  N'en', N'Add report definition', 1),
-    (N'reportDefs.added',                N'en', N'The report definition has been created as a draft version.', 1),
-    (N'reportDefs.newVersion',           N'en', N'Add version', 1),
-    (N'reportDefs.versionAdded',         N'en', N'The draft version has been created.', 1),
-    (N'reportDefs.forReport',            N'en', N'Report', 1),
-    (N'reportDefs.forReportHint',        N'en', N'A published version cannot be edited: change it by adding a new version.', 1),
-    (N'reportDefs.publish',              N'en', N'Publish', 1),
-    (N'reportDefs.published',            N'en', N'The version has been published; snapshots will be built from it.', 1),
 
     -- Редактор рядків інтерфейсу.
     (N'nav.uiStrings',                   N'en', N'Interface texts', 1),
@@ -3420,7 +3213,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'expr.ref.reversedRange',                N'en', N'Range "{from}:{to}" is written in reverse order.', 1),
     (N'expr.ref.rangeTableUnavailable',        N'en', N'The range cannot be expanded: its table is not available.', 1),
     -- Діалект Report (`02b` §8a): правило звіту бачить лише свій рядок і параметри.
-    (N'expr.referenceForbiddenInReport',       N'en', N'The reference "{construct}" is not allowed in the report dialect: a report rule sees only the columns of its own row ("[Code]") and the report parameters ("@Name").', 1),
     -- RT-07 (FEATURE-REGISTRY-TABLES §5.5, перевірка 18): `ROW.` лише в області агрегата/правила, `THIS` — лише в правилі довідника.
     (N'expr.rowReferenceOutsideScope',         N'en', N'"{construct}" refers to a registry row and is allowed only inside a registry aggregate (REGSUM, REGAVG, REGMIN, REGMAX, REGCOUNT), REGONE or a registry rule.', 1),
     (N'expr.thisOutsideRule',                  N'en', N'"THIS" is allowed only in a registry rule, where it stands for the entry being checked.', 1),
@@ -3437,14 +3229,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'expr.predicate.nested', N'en', N'A nested predicate is not allowed.', 1),
     (N'expr.predicate.sameRowOnly', N'en', N'A predicate may reference only columns of the same row.', 1),
     (N'expr.predicate.ternary', N'en', N'The ternary operator is not allowed in a predicate.', 1),
-    (N'expr.report.resultType', N'en', N'A result of type {expected} was expected, but the expression gives {actual}.', 1),
-    (N'expr.report.ownRowColumnsOnly', N'en', N'A report rule sees only the columns of its own row: [Code].', 1),
-    (N'expr.report.columnMissing', N'en', N'The report row has no column "{column}".', 1),
-    (N'expr.report.parameterMissing', N'en', N'The report has no parameter "@{name}".', 1),
-    (N'expr.report.scope', N'en', N'A report rule sees only the columns of its own row and the report parameters.', 1),
-    (N'expr.report.unknownColumnType', N'en', N'Unknown type "{type}" of column "{name}".', 1),
-    (N'expr.report.unknownParameterType', N'en', N'Unknown type "{type}" of parameter "{name}".', 1),
-    (N'expr.report.unknownResultType', N'en', N'Unknown expected result type "{type}".', 1),
     (N'expr.type.notNeedsBoolean', N'en', N'Negation applies only to a Boolean value.', 1),
     (N'expr.type.signNeedsNumber', N'en', N'A unary sign applies only to a number.', 1),
     (N'expr.type.datesNotAdded', N'en', N'Dates cannot be added; the difference of two dates is a number of days.', 1),
@@ -3511,8 +3295,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'jobs.documentPrefix',                      N'en', N'Document {id} ({index} of {count}): {message}', 1),
     (N'jobs.phaseMethodologies',                  N'en', N'Methodologies: {message}', 1),
     (N'jobs.batchProgress',                       N'en', N'Batch {ordinal} of {total}', 1),
-    (N'jobs.snapshotReading',                     N'en', N'Reading data', 1),
-    (N'jobs.snapshotBuilt',                       N'en', N'Snapshot {snapshotId} built', 1),
     (N'jobs.archiveRange',                        N'en', N'Archiving {from}…{to}', 1),
     (N'jobs.archiveRunMissing',                   N'en', N'Run not recorded', 1),
     (N'jobs.archiveResult',                       N'en', N'{status}: moved {rowsMoved}, last period {lastPeriod}', 1),
@@ -3545,7 +3327,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'jobs.partitionUnavailable',                  N'en', N'Partitioning unavailable', 1),
     (N'jobs.partitionAhead',                        N'en', N'Partitions ahead: {ahead}', 1),
     (N'jobs.partitionShortage',                     N'en', N'PARTITION SHORTAGE: {ahead}', 1),
-    (N'jobs.retentionCleared',                      N'en', N'Cleared snapshots: {snapshots}, rows: {rows}', 1),
     (N'jobs.retryScheduled',                        N'en', N'Attempt {attempt}/{max} in {delaySeconds}s after error: {error}', 1),
 
     -- ══ Підписи станів для `shared/ui/StatusBadge.tsx` (UI-04, директива №15 §2) ══
@@ -3635,9 +3416,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
 
     -- `SnapshotStatus` (Enums.cs, D-65). Словник окремий від `status.sheet.*`:
     -- `Rejected` у зрізі немає, а `Submitted` — кінцевий іммутабельний стан.
-    (N'status.snapshot.Draft',             N'en', N'Draft', 1),
-    (N'status.snapshot.Approved',          N'en', N'Approved', 1),
-    (N'status.snapshot.Submitted',         N'en', N'Submitted', 1),
 
     -- `NotificationDeliveryStatus` (BE-33). Словник окремий від `status.job.*`:
     -- там падіння ЗАДАЧІ, тут — недоставлене сповіщення про неї. `Suppressed`
@@ -3782,9 +3560,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'permission.Calculation.ManageRequiredInputs', N'en', N'Manage required input columns', 1),
 
     (N'permission.Report.ViewRegulatory',    N'en', N'View regulatory reports', 1),
-    (N'permission.Report.BuildSnapshot',     N'en', N'Build a report snapshot', 1),
-    (N'permission.Report.Export',            N'en', N'Export reports', 1),
-    (N'permission.Report.EditDefinition',    N'en', N'Author regulatory report definitions', 1),
     (N'permission.Report.ViewCampaign',      N'en', N'View the campaign overview of all projects', 1),
 
     (N'permission.Integration.View',         N'en', N'View collection sources', 1),
@@ -3957,8 +3732,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'publish.problem.libraryHasRules', N'en', N'Methodology {code} is a library but has {count} active rules: a library does not calculate for any document.', 1),
     (N'publish.problem.ambiguousReference', N'en', N'Formula {formula}: reference !{name} is found in {count} imports ({candidates}).', 1),
     (N'methodologies.columnNotFound', N'en', N'No column matches. Search by column code or by part of its header.', 1),
-    (N'methodologies.constantDialogTitle', N'en', N'Constant', 1),
-    (N'methodologies.constantUnit', N'en', N'Unit', 1),
     (N'documents.calculationResultsStale', N'en', N'These results are out of date', 1),
     (N'documents.calculationResultsStaleHint', N'en', N'The inputs changed after the last recalculation, so these numbers no longer match the data. Recalculate the sheet before submitting it.', 1),
     (N'methodologies.publications', N'en', N'Publication log', 1),
@@ -4101,7 +3874,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     -- заблоковане. Зверніться до відповідального за проєкт.»
     (N'err.ECR-SUB-4221.hiddenIssues',         N'en', N'There are issues outside your visibility — submission is blocked. Contact the project owner.', 1),
     -- Рішення людини 2026-09-29: вміст регуляторного зрізу — окреме право (секція `SEC:RPT` вище).
-    (N'permission.Report.ViewSnapshot',        N'en', N'View the contents of regulatory report snapshots', 1),
     -- D-207 п.2: вибір проєкту в гранті — усі проєкти (код і назва), `GET /security/projects`.
     (N'grants.projectsCatalogHint',            N'en', N'All projects are listed by code and name. A grant opens the project to the role; it does not show you its data. Sheets, tables and columns are picked in the template version they belong to.', 1),
     -- Гранти ролі: збереження відмовлене 409 (If-Match застарів) — чернетку лишено, набір перечитано.

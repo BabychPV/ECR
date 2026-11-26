@@ -16,7 +16,7 @@ import { mockServer, storedRows } from './fixtures';
  * ⛔ Мутаційний доказ: ігнорувати `temporal` у EntryDrawer (завжди true) → перший тест червоний.
  */
 function show(isTemporal: boolean): void {
-  const registry = { id: 1, code: 'STREAM_CASE', nameL10n: { values: { en: 'x' } }, isTemporal } as unknown as RegistryDefDto;
+  const registry = { id: 1, code: 'FLARE_CASE', nameL10n: { values: { en: 'x' } }, isTemporal } as unknown as RegistryDefDto;
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -60,7 +60,7 @@ describe('EntryDrawer: чинність лише для темпоральног
             headers: { 'Content-Type': 'application/json' },
           });
         }
-        if (url.pathname.endsWith('/registries/STREAM_CASE/rows') && url.searchParams.has('asOfUtc')) {
+        if (url.pathname.endsWith('/registries/FLARE_CASE/rows') && url.searchParams.has('asOfUtc')) {
           queries.push(url.search);
           const others = Array.from({ length: 50 }, (_, i) => ({ ...storedRows[1]!, id: 100 + i, code: `X${String(i)}` }));
           const items = url.searchParams.getAll('id').includes('4411') ? [storedRows[0]] : others;

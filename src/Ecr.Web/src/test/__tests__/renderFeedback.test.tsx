@@ -318,8 +318,7 @@ beforeAll(async () => {
   await Promise.all([
     import('@/features/methodologies/MethodologyContentPanels'),
     import('@/features/methodologies/MethodologyPublicationsPanel'),
-    import('@/features/methodologies/RuleCoveragePanel'),
-    import('@/features/methodologies/MethodologyCoveragePanel'),
+    import('@/features/methodologies/TraceStepsPanel'),
     // Ліниві чанки каркаса і шапки сторінки (`PageHeader` → `lazy(import('./PageHeaderActions'))`,
     // `LazyHint` → `Hint`): входять у КОЖЕН маршрут нижче, тож їх холодна трансформація
     // не має потрапляти у вікно виміру на жодному з них.

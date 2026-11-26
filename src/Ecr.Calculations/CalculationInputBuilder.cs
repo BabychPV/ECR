@@ -122,7 +122,11 @@ public sealed class CalculationInputBuilder(
                         // `GenericCalculationModule.ToValue` за режимом: у `Legacy` формули
                         // лишаються побітно такими, як до RT-23a (D-161), а ПРАВИЛО
                         // категорії бачить id в обох режимах (розширення D-161).
-                        c.Value.ValueRegistryEntryId))
+                        c.Value.ValueRegistryEntryId,
+
+                        // ✎ DESIGN-sg-flaring §5.2a: дата `Date`-комірки (час події) — для `registry as of` і `row.X`
+                        // скрипта; рушій формул її не читає.
+                        c.Value.ValueDate))
                     .ToList()
                 : [];
 

@@ -151,35 +151,31 @@ public sealed class LandT7bVolumeModelTests
         Assert.Equal(["Concentration", "Volume"], bridged);
         Assert.False(bridges.GetProperty("unresolved").TryGetProperty("T7b_00", out _));
 
-        // ✎ P-1123-4: ECW_EC_tons рахує формула таблиці - методологію від таблиці відв'язано (calc немає).
-        Assert.False(T7b(model).TryGetProperty("calc", out _));
+        // ✎ P-1124-2: ECW_EC_tons — знову вихід методології ECW_C09_02_01 (одна дорога розрахунку, без формули таблиці P-1123-4).
+        var calc = T7b(model).GetProperty("calc");
+        Assert.Equal(["ECW_C09_02_01"], calc.GetProperty("methodologies").EnumerateArray().Select(x => x.GetString()!));
+        Assert.Equal(["ECW_EC_tons"], calc.GetProperty("outputs").EnumerateArray().Select(x => x.GetString()!));
     }
 
     /// <summary>
-    /// ✎ P-1123-4 (людина 23.11): T7b_00.ECW_EC_tons - формула таблиці з ТІЄЮ САМОЮ семантикою, що й методологія
-    /// ECW_C09_02_01: (C * V) / 1e6; лише рядки зі статусом RUNNING (фільтр D-425: S3_9 без результату); бракує C або V -
-    /// результату немає (не нуль). Мутаційний доказ: прибрати умову статусу або перевірку NULL у DECIDED_TABLE_FORMULAS
-    /// (gen_ecr_model.py) і перегенерувати модель - тест червоний.
+    /// ✎ P-1124-2 (людина 24.11: «без втрат … лише наш новий редактор скриптів»; одна дорога розрахунку): T7b_00.ECW_EC_tons —
+    /// вихід методології (Calculated, без виразу), а генератор моделі більше не має «вирішених формул таблиці» для води.
+    /// Мутаційний доказ: повернути запис T7b_00 у DECIDED_TABLE_FORMULAS (gen_ecr_model.py) і перегенерувати модель — тест червоний;
+    /// у моделі лишити dataType Formula — червоний.
     /// </summary>
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
-    public void ECW_EC_tons_формула_таблиці_з_умовою_Running_і_без_результату_при_порожніх_аргументах()
+    public void ECW_EC_tons_вихід_методології_а_не_формула_таблиці()
     {
         using var model = Load("land-template.model.json");
         var column = T7b(model).GetProperty("columns").EnumerateArray()
             .Single(c => c.GetProperty("code").GetString() == "ECW_EC_tons");
 
-        Assert.Equal("Formula", column.GetProperty("dataType").GetString());
-        Assert.Equal(
-            "IF(REGFIELD([Land_Status], 'NAME') = 'Running' AND NOT ([Concentration] = NULL OR [Volume] = NULL),"
-            + " [Concentration], NULL) * [Volume] / 1000000",
-            column.GetProperty("expression").GetString());
+        Assert.Equal("Calculated", column.GetProperty("dataType").GetString());
+        Assert.False(column.TryGetProperty("expression", out _));
 
-        var statusEntries = model.RootElement.GetProperty("registries").EnumerateArray()
-            .Single(r => r.GetProperty("code").GetString() == "LAND_GENERIC_EQUIPSTATUS")
-            .GetProperty("entries").EnumerateArray().ToList();
-        var running = Assert.Single(statusEntries, e => e.GetProperty("code").GetString() == "RUNNING");
-        Assert.Equal("Running", running.GetProperty("name").GetString());
+        var generator = File.ReadAllText(Path.Combine(SourceTree.Root, "tools", "land", "model-gen", "gen_ecr_model.py"));
+        Assert.Contains("DECIDED_TABLE_FORMULAS = {}", generator, StringComparison.Ordinal);
     }
 
     /// <summary>Джерела «([Period].Sequence = 1 ? [T].[R].[C] : … : [T].[R].[C])» за місяцями: (таблиця, рядок, колонка).</summary>

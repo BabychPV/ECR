@@ -21,7 +21,6 @@ import { MappingPreviewPage } from '@/pages/admin/MappingPreviewPage';
 import { PiDataPage } from '@/pages/admin/PiDataPage';
 import { PipelinePage } from '@/pages/admin/PipelinePage';
 import { JobsPage } from '@/pages/admin/JobsPage';
-import { SnapshotsPage } from '@/pages/admin/SnapshotsPage';
 import { NotificationsPage } from '@/pages/admin/NotificationsPage';
 import { CampaignOverviewPage } from '@/pages/admin/CampaignOverviewPage';
 
@@ -39,15 +38,16 @@ const Pages: [string, () => JSX.Element][] = [
   // ✎ Projects (макет 08.11): перелік і три вкладки проєкту замість «Periods» і «Project settings».
   ['/projects', ProjectsPage],
   ['/projects/1/periods', () => <PeriodsPage projectId={1} />],
-  ['/projects/1/settings', () => <ProjectSettingsPage projectId={1} />],
+  // ✎ 24.11: колишня Settings — вкладки Templates (одна таблиця шаблонів з погодженням) і General.
+  ['/projects/1/templates', () => <ProjectSettingsPage projectId={1} view="templates" />],
   ['/projects/1/lifecycle', () => <ProjectLifecycleTab projectId={1} />],
+  ['/projects/1/general', () => <ProjectSettingsPage projectId={1} view="general" />],
   ['/admin/sources', SourcesPage],
   ['/admin/mapping', MappingPreviewPage],
 
   // ⚠ Редактор конвеєра (`ФВ-14.3`, область 9) — сюди ж: частина найлегша.
   ['/admin/pipeline', PipelinePage],
   ['/admin/jobs', JobsPage],
-  ['/admin/snapshots', SnapshotsPage],
 
   // ⚠ Новий маршрут (`BE-33`) додано саме сюди: ця частина найлегша, і жодного
   // з трьох найповільніших маршрутів у ній немає.

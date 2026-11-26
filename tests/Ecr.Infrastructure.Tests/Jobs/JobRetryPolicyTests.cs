@@ -74,26 +74,6 @@ public sealed class JobRetryPolicyTests
     }
 
     /// <summary>
-    /// R7-Y8 / Y8-01: відмова побудови над поданим зрізом (ФВ-9.17) — вердикт про стан,
-    /// а не збій дороги: без повторів і з кодом <c>ECR-RPT-0409</c>, не <c>ECR-SYS-0500</c>.
-    /// </summary>
-    /// <remarks>
-    /// Мутація: повернути <c>FrozenRefusal</c> тип <see cref="InvalidOperationException"/> —
-    /// червоні всі три перевірки (три повтори по 30+60+120 с, потім «Internal error»).
-    /// </remarks>
-    [Fact]
-    [Trait("Requirement", "ФВ-9.17")]
-    public void Відмова_побудови_над_поданим_зрізом_не_повторюється_і_має_код_RPT_0409()
-    {
-        Exception refusal = Ecr.Infrastructure.Reporting.ReportSnapshotBuilder.FrozenRefusal(
-            frozenId: 42, projectId: 7, periodKey: new Ecr.Domain.ValueObjects.PeriodKey(202_609));
-
-        Assert.False(JobRetryPolicy.IsWorthRetrying(refusal));
-        Assert.False(JobRetryPolicy.ShouldRetry(0, refusal));
-        Assert.Equal(ErrorCodes.ReportImmutable, JobRetryPolicy.ErrorCodeOf(refusal));
-    }
-
-    /// <summary>
     /// RCN-2: детермінована відмова переносу версії (<c>ECR-DOC-0409</c>, подані аркуші / архів) не
     /// повторюється: задача одразу <c>Failed</c> з кодом, а не «виконується» 210 с із порожнім кодом.
     /// Інші конфлікти версій і транзієнтні збої повторюються, як і раніше.

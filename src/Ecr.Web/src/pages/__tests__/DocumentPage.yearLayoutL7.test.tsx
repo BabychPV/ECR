@@ -406,7 +406,9 @@ describe('DocumentPage «рік» L7a: відкриття місяця для д
  * Мутації (локально): гілка `yearLayout` у DocumentPage → завжди `periodReopen.banner` — тест 1 червоний (немає
  * переліку, є банер якоря); банер року без `periods.map` (лише перший) — тест 1 червоний.
  */
-describe('DocumentPage «рік» L7c: банер відкритих місяців року', () => {
+// ✎ b14 doc-notices-compact: банер-список замінено чипом у шапці (`ReopenedMonthsChip`); правило «кожен місяць, не лише
+// якір» лишається — тепер у описі чипа.
+describe('DocumentPage «рік» L7c: відкриті місяці року — чип у шапці', () => {
   it(
     'рік: усі відкриті місяці року з картки, банера якоря немає',
     async () => {
@@ -418,9 +420,12 @@ describe('DocumentPage «рік» L7c: банер відкритих місяц�
         ],
       });
 
-      const banner = await screen.findByTestId('document-year-reopened', {}, { timeout: SlowEnvTimeout });
-      const months = [...banner.querySelectorAll('[data-year-reopened-month]')].map((el) => el.getAttribute('data-year-reopened-month'));
-      expect(months).toEqual(['209903', '209907']);
+      // ✎ b14 doc-notices-compact: замість банера-списку — чип у шапці; два несуміжні місяці — два діапазони, перелік — в описі.
+      const chip = await screen.findByTestId('document-reopened-chip', {}, { timeout: SlowEnvTimeout });
+      expect(chip.getAttribute('data-reopened-ranges')).toBe('2');
+      const list = document.getElementById(chip.getAttribute('aria-describedby') ?? '');
+      expect(list?.querySelectorAll('li')).toHaveLength(2);
+      expect(screen.queryByTestId('document-year-reopened')).toBeNull();
       expect(screen.queryByTestId('document-period-reopened')).toBeNull();
     },
     SlowEnvTimeout,
@@ -432,7 +437,7 @@ describe('DocumentPage «рік» L7c: банер відкритих місяц�
       show(`/documents/1?periodKey=${String(Anchor)}`, { layout: 'YearWithMonthColumns', state: 'Closed', reopened: [] });
 
       await screen.findByText(/document\.lock\.periodClosed/, {}, { timeout: SlowEnvTimeout });
-      expect(screen.queryByTestId('document-year-reopened')).toBeNull();
+      expect(screen.queryByTestId('document-reopened-chip')).toBeNull();
       expect(screen.queryByTestId('document-period-reopened')).toBeNull();
     },
     SlowEnvTimeout,
@@ -444,7 +449,7 @@ describe('DocumentPage «рік» L7c: банер відкритих місяц�
       show(`/documents/1?periodKey=${String(Anchor)}`, { layout: 'PerMonthCopies', state: 'Closed', anchorActive: true });
 
       expect(await screen.findByTestId('document-period-reopened', {}, { timeout: SlowEnvTimeout })).toBeTruthy();
-      expect(screen.queryByTestId('document-year-reopened')).toBeNull();
+      expect(screen.queryByTestId('document-reopened-chip')).toBeNull();
     },
     SlowEnvTimeout,
   );

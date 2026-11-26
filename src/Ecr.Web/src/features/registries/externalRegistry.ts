@@ -11,12 +11,13 @@ export function isExternalRegistry(registry: Pick<RegistryDefDto, 'sourceKind'> 
 }
 
 /**
- * Коди довідників-дзеркал складу газу FLERT (D-476; сервер — `ExternalRegistryGuard.IsFlertMirror`). До першого
- * увімкненого синку їх немає зовсім: сторінка даних показує нейтральний стан, а не червоне «не знайдено» і «New entry».
+ * Коди довідників складу газу (D-NEW; сервер — `ExternalRegistryGuard.IsGasCompositionRegistry`): їх пише лише сторінка
+ * «Склад газу» (шкала версій, замкнені періоди, Σ). Загальний редактор показує їх лише для читання, з посиланням туди; до імпорту
+ * з FLERT чи першого потоку їх немає зовсім — нейтральний стан, а не червоне «не знайдено» і «New entry».
  */
-export const FlertMirrorRegistryCodes: readonly string[] = ['STREAM', 'STREAM_CASE', 'GAS_COMPOSITION'];
+export const GasCompositionRegistryCodes: readonly string[] = ['STREAM', 'STREAM_CASE', 'GAS_COMPOSITION'];
 
-/** Чи код — довідник-дзеркало FLERT (без огляду на регістр, як на сервері). */
-export function isFlertMirrorCode(code: string): boolean {
-  return FlertMirrorRegistryCodes.includes(code.toUpperCase());
+/** Чи код — довідник складу газу (без огляду на регістр, як на сервері). */
+export function isGasCompositionRegistryCode(code: string): boolean {
+  return GasCompositionRegistryCodes.includes(code.toUpperCase());
 }

@@ -63,6 +63,18 @@ describe('collectionRunErrorText', () => {
     );
   });
 
+  it('з логіном і паролем відмова відкриття без повтору (P-1126-SRCCRED, H2) резолвиться, а не лишається JSON', () => {
+    const raw = JSON.stringify({
+      k: 'jobs.collectionRunReason',
+      p: { code: 'ECR-INT-0503' },
+      i: { k: 'err.ECR-INT-0503.connectFailedNoRetry', p: { dataSource: 'PI-SQL' } },
+    });
+
+    expect(collectionRunErrorText(raw)).toBe(
+      '⟦jobs.collectionRunReason (code=ECR-INT-0503, message=⟦err.ECR-INT-0503.connectFailedNoRetry (dataSource=PI-SQL)⟧)⟧',
+    );
+  });
+
   it('подія `SourceDataRefused` — два рівні вкладення, кожен через каталог', () => {
     const raw = JSON.stringify({
       k: 'coverageEvents.sourceDataRefused',

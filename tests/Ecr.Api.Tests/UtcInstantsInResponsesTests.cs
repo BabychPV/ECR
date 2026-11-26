@@ -2,7 +2,6 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Ecr.Domain.Entities.Integration;
-using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
@@ -38,7 +37,7 @@ namespace Ecr.Api.Tests;
 ///
 /// ⛔ Мутаційний доказ: прибрати <c>UtcDateTimeColumns.Apply(modelBuilder)</c> з
 /// <c>EcrDbContext.OnModelCreating</c> — і червоніють документи, версії,
-/// History, задачі, зрізи й картка шаблону (лишаються зеленими лише
+/// History, задачі й картка шаблону (лишаються зеленими лише
 /// користувачі — їх латає <c>UserStore</c> окремо).
 /// </remarks>
 [Collection("SqlServer")]
@@ -63,7 +62,7 @@ public sealed partial class UtcInstantsInResponsesTests(SqlServerFixture sql)
         // Сторож контракту: якщо колись схема перестане позначати моменти
         // `date-time`, перевіряти стане нічого — і тест мусить сказати це прямо.
         Assert.Contains("modifiedAt", instantFields);
-        Assert.Contains("builtAt", instantFields);
+        Assert.Contains("createdAt", instantFields);
 
         using var app = new EcrApiFactory(sql);
 
@@ -86,7 +85,6 @@ public sealed partial class UtcInstantsInResponsesTests(SqlServerFixture sql)
             ($"/api/v1/documents/{d}/workflow/history?periodKey={p}", ["at"]),
             ("/api/v1/jobs?mine=true", ["createdAt", "updatedAt"]),
             ($"/api/v1/jobs/{Uri.EscapeDataString(jobId)}", ["createdAt"]),
-            ($"/api/v1/reports/snapshots?projectId={document.ProjectId}", ["builtAt"]),
             ($"/api/v1/templates/{document.TemplateId}", ["createdAt"]),
             ("/api/v1/users?limit=200", []),
         };
@@ -233,10 +231,6 @@ public sealed partial class UtcInstantsInResponsesTests(SqlServerFixture sql)
         db.ApprovalEvents.Add(new ApprovalEvent(
             document.DocumentId, document.SheetDefId, document.PeriodKey.Value,
             DocumentStatus.Draft, DocumentStatus.Submitted, ApprovalAction.Submit, userId, now));
-
-        var version = await db.ReportVersions.AsNoTracking().OrderBy(v => v.Id).FirstAsync().ConfigureAwait(false);
-        db.ReportSnapshots.Add(new ReportSnapshot(
-            version.Id, document.ProjectId, document.PeriodKey.Value, SnapshotStatus.Draft, now, userId));
 
         var jobId = $"{_tag}#{Guid.NewGuid():N}"[..40];
         var job = new JobProgress(jobId, _tag, now, userId);

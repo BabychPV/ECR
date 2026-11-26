@@ -1,10 +1,10 @@
 // src/Ecr.Application/Ports/IFlertSyncStatusReader.cs
 namespace Ecr.Application.Ports;
 
-/// <summary>Задача синку складу газу FLERT → дзеркало ECR (<c>D-476</c>): маркер для постановки «Синхронізувати зараз».</summary>
+/// <summary>Задача разового імпорту складу газу FLERT → ECR (<c>D-476</c>, D-NEW): маркер для постановки «Імпортувати з FLERT».</summary>
 public interface IFlertCompositionSyncJob : IBackgroundJob;
 
-/// <summary>Стан синку FLERT для сторінки довідника (<c>D-476</c>, крок F3): останній прогін і чи синк увімкнено.</summary>
+/// <summary>Стан імпорту FLERT для сторінки «Склад газу» (<c>D-476</c>, D-NEW): останній прогін.</summary>
 public interface IFlertSyncStatusReader
 {
     /// <summary>Читає стан; прогонів ще не було — <see cref="FlertSyncStatusDto.LastRun"/> = <c>null</c>.</summary>
@@ -12,11 +12,9 @@ public interface IFlertSyncStatusReader
     public Task<FlertSyncStatusDto> ReadAsync(CancellationToken ct);
 }
 
-/// <summary>Стан синку FLERT.</summary>
-/// <param name="Enabled">Синк увімкнено (<c>Flert:Sync:Enabled</c>); вимкнений прогін лише пише «вимкнено».</param>
-/// <param name="RegistryCodes">Коди довідників-дзеркала (<c>STREAM</c>, <c>STREAM_CASE</c>, <c>GAS_COMPOSITION</c>) — де показувати стан.</param>
+/// <summary>Стан імпорту FLERT.</summary>
 /// <param name="LastRun">Останній прогін; <c>null</c> — не було жодного.</param>
-public sealed record FlertSyncStatusDto(bool Enabled, IReadOnlyList<string> RegistryCodes, FlertSyncRunDto? LastRun);
+public sealed record FlertSyncStatusDto(FlertSyncRunDto? LastRun);
 
 /// <summary>Один прогін синку FLERT (<c>itg.MaintenanceRun</c> <c>flert-composition-sync</c>).</summary>
 /// <param name="StartedAt">Початок, UTC.</param>

@@ -2,8 +2,8 @@
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'consistency.description', N'ru', N'Каждую ночь ECR сверяет числа, которые должны совпадать между документами, таблицами и справочниками. Каждая находка называет нарушенное правило и затронутую запись.'),
-    (N'consistency.description', N'kz', N'ECR әр түнде құжаттар, кестелер мен анықтамалықтар арасында сәйкес болуға тиіс сандарды салыстырады. Әр табылған жағдай бұзылған ережені және қозғалған жазбаны атайды.'),
+    (N'consistency.description', N'ru', N'Каждую ночь и по запросу ECR проверяет целостность данных и результаты расчётов по правилам, перечисленным ниже. Каждая находка называет своё правило и ведёт к затронутой записи.'),
+    (N'consistency.description', N'kz', N'ECR әр түнде және сұраныс бойынша деректердің тұтастығын және есептеу нәтижелерін төменде аталған ережелер бойынша тексереді. Әр табылған жағдай өз ережесін атайды және қозғалған жазбаға апарады.'),
     (N'consistency.statsLabel', N'ru', N'Неразрешённые находки по важности'),
     (N'consistency.statsLabel', N'kz', N'Маңыздылығы бойынша шешілмеген жағдайлар'),
     (N'consistency.statErrors', N'ru', N'ошибок'),
@@ -22,7 +22,7 @@ GO
 INSERT INTO #UiEn ([Key], Lang, Val, Scope)
 SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
-    (N'consistency.description', N'en', N'Every night ECR compares numbers that must agree with each other across documents, tables and registries. Each finding names the rule that failed and the record it affects.', 1),
+    (N'consistency.description', N'en', N'Every night and on demand, ECR checks data integrity and calculation results against the rules listed below. Each finding names its rule and links to the affected record.', 1),
     (N'consistency.statsLabel', N'en', N'Unresolved findings by severity', 1),
     (N'consistency.statErrors', N'en', N'errors', 1),
     (N'consistency.statWarnings', N'en', N'warnings', 1),

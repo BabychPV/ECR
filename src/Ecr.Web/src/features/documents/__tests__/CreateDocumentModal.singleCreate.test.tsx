@@ -97,11 +97,13 @@ function mockServer(): void {
       }
 
       // ✎ B74 P4: єдиний шаблон проєкту — майстер обирає його сам.
+      // ✎ B74 (24.11): `documentCount: 1` — перелік документів шаблону майстер питає лише тоді (попередження «уже є»),
+      // а саме його перечитування після створення тримає майстер відкритим у кроці 2 нижче.
       if (path.endsWith('/api/v1/projects/1/templates')) {
         return json([
           {
             projectTemplateId: 1, templateId: 4, templateCode: 'GEN-UPSTREAM', templateNameL10n: { values: {} },
-            currentTemplateVersionId: 5, version: '2.3.0', layout: 'PerMonthCopies', isPrimary: true, documentCount: 0,
+            currentTemplateVersionId: 5, version: '2.3.0', layout: 'PerMonthCopies', isPrimary: true, documentCount: 1,
           },
         ]);
       }

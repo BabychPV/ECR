@@ -457,8 +457,7 @@ public sealed class FormulaRecalculationDocumentLockTests(SqlServerFixture sql)
             new UnitOfWork(db),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
-            clock,
-            Substitute.For<IAuditWriter>());
+            clock);
 
     private async Task<decimal?> LiveOutputAsync(TestDocument doc)
     {

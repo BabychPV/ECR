@@ -42,19 +42,6 @@ public sealed partial class DuplicateRequestHttpTests : IAsyncLifetime
             await db.JobProgresses.Where(j => j.JobId == jobId).ExecuteDeleteAsync().ConfigureAwait(false);
         }
 
-        // Зрізи звіту посилаються на проєкт — тому звіти раніше за документи.
-        foreach (var reportDefId in _created.ReportDefIds)
-        {
-            await db.Database.ExecuteSqlInterpolatedAsync($"""
-                DECLARE @d int = {reportDefId};
-                DELETE rr FROM rpt.ReportRow AS rr JOIN rpt.ReportSnapshot AS s ON s.Id = rr.SnapshotId
-                  JOIN rpt.ReportVersion AS v ON v.Id = s.ReportVersionId WHERE v.ReportDefId = @d;
-                DELETE s FROM rpt.ReportSnapshot AS s JOIN rpt.ReportVersion AS v ON v.Id = s.ReportVersionId WHERE v.ReportDefId = @d;
-                DELETE FROM rpt.ReportVersion WHERE ReportDefId = @d;
-                DELETE FROM rpt.ReportDef WHERE Id = @d;
-                """).ConfigureAwait(false);
-        }
-
         foreach (var document in _created.Documents)
         {
             await DeleteDocumentChainAsync(db, document).ConfigureAwait(false);
@@ -243,8 +230,6 @@ public sealed partial class DuplicateRequestHttpTests : IAsyncLifetime
         public List<int> RegistryIds { get; } = [];
 
         public List<string> PermitTypeCodes { get; } = [];
-
-        public List<int> ReportDefIds { get; } = [];
 
         public List<string> JobIds { get; } = [];
     }

@@ -390,76 +390,8 @@ public sealed partial class CalculationResultStore(
             : null;
     }
 
-    /// <inheritdoc />
-    /// <remarks>
-    /// ⚠ Кличеться ПІСЛЯ <see cref="SwitchCurrentRunAsync"/> у тій самій
-    /// транзакції (<c>RunCalculationHandler.CompleteAsync</c>), до
-    /// <c>SaveChanges</c>: прогін читається ВІДСТЕЖУВАНИМ запитом, щоб бачити
-    /// щойно поставлені в памʼяті <c>Status</c> і <c>FinishedAt</c>, а не ще
-    /// не збережені значення бази.
-    /// <para>
-    /// Лише ПОТОЧНІ зрізи: журнал — для людини, яка дивиться на звіт, а
-    /// замінений зріз уже замінено новішим. Застарілість замінених однаково
-    /// видно в переліку (<see cref="ReportSnapshotStaleness"/>).
-    /// </para>
-    /// </remarks>
-    public async Task<IReadOnlyList<InvalidatedReportSnapshot>> InvalidateReportSnapshotsAsync(
-        long calculationRunId, CancellationToken ct)
-    {
-        var run = await db.CalculationRuns
-            .FirstOrDefaultAsync(r => r.Id == calculationRunId, ct)
-            .ConfigureAwait(false);
-
-        // ⛔ Прогін, що не став актуальним (старіший за вже актуальний новіший),
-        // чисел звітові не дає — і нічого не старить.
-        if (run is not { IsCurrent: true, FinishedAt: { } becameCurrentAt })
-        {
-            return [];
-        }
-
-        var projectId = run.ProjectId;
-        var periodKey = run.PeriodKey;
-
-        // ⚠ «Застарів саме через цей прогін» = не був застарілим через інші.
-        // Інакше кожен наступний перерахунок заносив би в журнал ті самі зрізи
-        // знову, і журнал перестав би відповідати на питання «коли застарів».
-        var staleWithoutThisRun = ReportSnapshotStaleness.StaleSnapshotIds(db, exceptRunId: calculationRunId);
-
-        return await (
-                from snapshot in db.ReportSnapshots.AsNoTracking()
-                join project in db.Projects.AsNoTracking() on snapshot.ProjectId equals project.Id
-                where snapshot.ProjectId == projectId
-                      && snapshot.IsCurrent
-                      && (periodKey == null || snapshot.PeriodKey == null || snapshot.PeriodKey == periodKey)
-                      && snapshot.BuiltAt < becameCurrentAt
-                      && !staleWithoutThisRun.Contains(snapshot.Id)
-                orderby snapshot.Id
-                select new InvalidatedReportSnapshot(
-                    snapshot.Id,
-                    snapshot.ReportVersionId,
-                    snapshot.ProjectId,
-                    // ✎ RPT-STABLE B2: зріз за період - версія ПЕРІОДУ (шкала); зріз без періоду - чинна версія проєкту.
-                    snapshot.PeriodKey == null
-                        ? project.TemplateVersionId
-                        : EcrDbContext.VersionOf(project.Id, snapshot.PeriodKey.Value),
-                    snapshot.PeriodKey,
-                    snapshot.Status.ToString(),
-                    snapshot.BuiltAt))
-            .Take(MaxInvalidatedSnapshots)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-    }
-
     /// <summary>Стан прогону, що ще рахується (рядок, як у DDL).</summary>
     private const string RunningStatus = "Running";
-
-    /// <summary>Стеля записів журналу застарілості на один прогін.</summary>
-    /// <remarks>
-    /// Поточний зріз один на «версію × проєкт × період»; тисяча — з великим
-    /// запасом на всі версії звітів проєкту. Стеля — від нескінченного журналу,
-    /// а не від законного обсягу; сама застарілість від неї не залежить.
-    /// </remarks>
-    private const int MaxInvalidatedSnapshots = 1_000;
 
     /// <summary>Скільки ключів витіснених прогонів в одному UPDATE перемикання (стеля параметрів SQL Server — 2100).</summary>
     private const int SupersedeChunkSize = 1_000;

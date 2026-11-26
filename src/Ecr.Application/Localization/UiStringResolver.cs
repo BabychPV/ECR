@@ -241,7 +241,6 @@ public static partial class UiStringResolver
             ["err.ECR-TMPL-0409.deprecateRequiresPublished"] = ("status", "version"),
             ["err.ECR-TMPL-0409.structurallyFrozen"] = ("status", "version"),
             ["err.ECR-CALC-0409.draftRequired"] = ("status", "version"),
-            ["err.ECR-RPT-0409.versionNotDraft"] = ("status", "version"),
             ["err.ECR-DOC-0409.reopenWrongState"] = ("status", "sheet"),
             ["err.ECR-DOC-0409.submitWrongState"] = ("status", "sheet"),
             ["err.ECR-DOC-0409.approveWrongState"] = ("status", "sheet"),

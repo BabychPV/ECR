@@ -42,7 +42,8 @@ public sealed class ProjectTemplateStore(EcrDbContext db) : IProjectTemplateStor
                 v.Layout,
                 isPrimary,
                 db.Documents.Count(d => d.ProjectId == projectId
-                                        && (d.TemplateId == pt.TemplateId || (d.TemplateId == null && isPrimary))));
+                                        && (d.TemplateId == pt.TemplateId || (d.TemplateId == null && isPrimary))),
+                t.SingleDocumentPerProject);
     }
 
     /// <inheritdoc />

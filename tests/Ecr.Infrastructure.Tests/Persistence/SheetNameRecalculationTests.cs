@@ -952,7 +952,7 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
             var runs = new RunCalculationHandler(
                 Substitute.For<IPeriodStore>(), Substitute.For<IWorkflowStore>(), results?.Invoke(store) ?? store,
                 Substitute.For<IBackgroundJobScheduler>(), new UnitOfWork(db), Substitute.For<IAccessDecisionService>(),
-                Substitute.For<ICurrentUser>(), clock, Substitute.For<IAuditWriter>());
+                Substitute.For<ICurrentUser>(), clock);
 
             var messages = new List<string>();
             var progress = Substitute.For<IJobProgress>();
@@ -1057,10 +1057,6 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         public Task WriteTraceAsync(
             long calculationRunId, IReadOnlyList<CalculationOutput> outputs, TraceLevel traceLevel, CancellationToken ct)
             => inner.WriteTraceAsync(calculationRunId, outputs, traceLevel, ct);
-
-        public Task<IReadOnlyList<InvalidatedReportSnapshot>> InvalidateReportSnapshotsAsync(
-            long calculationRunId, CancellationToken ct)
-            => inner.InvalidateReportSnapshotsAsync(calculationRunId, ct);
 
         public Task<IReadOnlyList<SupersededRun>> SwitchCurrentRunAsync(
             long calculationRunId, string modulesProfileJson, CancellationToken ct)

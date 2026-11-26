@@ -116,6 +116,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'script.unknownUnit', N'kz', N'{unit} бірлігі бірліктер анықтамалығында жоқ.'),
     (N'script.unknownSubstance', N'ru', N'Вещество {code} не найдено в справочнике веществ.'),
     (N'script.unknownSubstance', N'kz', N'{code} заты заттар анықтамалығынан табылмады.'),
+    (N'script.ambiguousSubstance', N'ru', N'Вещество {code} есть в нескольких справочниках веществ ({entries}): укажите код записи.'),
+    (N'script.ambiguousSubstance', N'kz', N'{code} заты бірнеше заттар анықтамалығында бар ({entries}): жазба кодын көрсетіңіз.'),
     (N'script.unknownTable', N'ru', N'Таблица {table} не найдена в последней опубликованной версии ни одного шаблона.'),
     (N'script.unknownTable', N'kz', N'{table} кестесі ешбір үлгінің соңғы жарияланған нұсқасынан табылмады.'),
     (N'script.ambiguousTable', N'ru', N'Таблица {table} есть в нескольких шаблонах ({templates}): укажите Шаблон.Таблица.'),
@@ -320,6 +322,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'script.unitMismatch', N'en', N'Incompatible units in {name}: values in different units are combined without an explicit CONVERT, or the result does not match the declared unit.', 1),
     (N'script.unknownUnit', N'en', N'Unit {unit} does not exist in the unit catalogue.', 1),
     (N'script.unknownSubstance', N'en', N'Substance {code} was not found in the substance registry.', 1),
+    (N'script.ambiguousSubstance', N'en', N'Substance {code} exists in several substance registries ({entries}): write the entry code instead.', 1),
     (N'script.unknownTable', N'en', N'Table {table} was not found in the latest published version of any template.', 1),
     (N'script.ambiguousTable', N'en', N'Table {table} exists in several templates ({templates}): write Template.Table.', 1),
     (N'script.unknownColumn', N'en', N'Column {column} was not found in {table}, or it is a calculated column that no active binding writes.', 1),
@@ -426,6 +429,10 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-CALC-0422.switchReasonRequired', N'kz', N'Ауыстыру себебі қажет.'),
     (N'err.ECR-CALC-0422.switchVersionsRequired', N'ru', N'Укажите от 1 до {limit} версий для переключения.'),
     (N'err.ECR-CALC-0422.switchVersionsRequired', N'kz', N'Ауыстыру үшін 1-ден {limit}-ге дейін нұсқаны көрсетіңіз.'),
+    (N'err.ECR-CALC-0422.finalizeRefused', N'ru', N'Окончательный перенос отклонён: найдено проблем — {count}, ничего не изменено.'),
+    (N'err.ECR-CALC-0422.finalizeRefused', N'kz', N'Соңғы көшіру қабылданбады: табылған мәселелер — {count}, ештеңе өзгертілмеді.'),
+    (N'err.ECR-CALC-0409.finalizeNothingLeft', N'ru', N'Версий методологий на формулах больше нет: одноразовый перенос закрыт.'),
+    (N'err.ECR-CALC-0409.finalizeNothingLeft', N'kz', N'Формулалардағы әдістеме нұсқалары енді жоқ: бір реттік көшіру жабылды.'),
     (N'methodologyScript.checking', N'ru', N'Проверка…'),
     (N'methodologyScript.checking', N'kz', N'Тексеру…'),
     (N'methodologyScript.compare', N'ru', N'Сравнить с версией…'),
@@ -548,8 +555,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'methodologyScript.title', N'kz', N'Әдістеме скрипті'),
     (N'methodologyScript.unsaved', N'ru', N'Есть несохранённые изменения'),
     (N'methodologyScript.unsaved', N'kz', N'Сақталмаған өзгерістер бар'),
-    (N'methodologyScript.versions.note', N'ru', N'Эта версия написана скриптом. Откройте её в редакторе скрипта.'),
-    (N'methodologyScript.versions.note', N'kz', N'Бұл нұсқа скрипт ретінде жазылған. Оны скрипт редакторында ашыңыз.'),
     (N'methodologyScript.versions.openEditor', N'ru', N'Открыть редактор скрипта'),
     (N'methodologyScript.versions.openEditor', N'kz', N'Скрипт редакторын ашу'),
     (N'script.paramOutsideLibrary', N'ru', N'Параметры (param) можно объявлять только в библиотеке.'),
@@ -598,6 +603,8 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'err.ECR-CALC-0422.switchGroupIncomplete', N'en', N'A library and all its importers must be switched in one request; {count} version(s) are missing from the request.', 1),
     (N'err.ECR-CALC-0422.switchReasonRequired', N'en', N'A reason for the switch is required.', 1),
     (N'err.ECR-CALC-0422.switchVersionsRequired', N'en', N'Name from 1 to {limit} versions to switch.', 1),
+    (N'err.ECR-CALC-0422.finalizeRefused', N'en', N'The final transfer is refused: {count} problem(s) found, nothing was changed.', 1),
+    (N'err.ECR-CALC-0409.finalizeNothingLeft', N'en', N'No methodology version runs on formulas any more: the one-time transfer is closed.', 1),
     (N'methodologyScript.checking', N'en', N'Checking…', 1),
     (N'methodologyScript.compare', N'en', N'Compare with version…', 1),
     (N'methodologyScript.compare.legend', N'en', N'Left: the chosen version. Right: the text in the editor, including unsaved changes.', 1),
@@ -659,7 +666,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'methodologyScript.tests.value', N'en', N'Value', 1),
     (N'methodologyScript.title', N'en', N'Methodology script', 1),
     (N'methodologyScript.unsaved', N'en', N'Unsaved changes', 1),
-    (N'methodologyScript.versions.note', N'en', N'This version is written as a script. Open it in the script editor.', 1),
     (N'methodologyScript.versions.openEditor', N'en', N'Open script editor', 1),
     (N'script.paramOutsideLibrary', N'en', N'Parameters (param) can be declared only in a library.', 1),
     (N'scriptMigration.refused.duplicateEntry', N'en', N'The package lists this version more than once.', 1),
@@ -674,6 +680,33 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'switch.problem.outputsDiffer', N'en', N'Version {version}: the outputs derived from the script differ from the stored ones (only in the script: {onlyInScript}; only stored: {onlyStored}).', 1),
     (N'switch.problem.scriptMissing', N'en', N'Version {code} {version} has no script text: apply a package first.', 1),
     (N'switch.problem.substancesDiffer', N'en', N'Version {version}: the substances derived from the script differ from the stored ones (only in the script: {onlyInScript}; only stored: {onlyStored}).', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- MS:methodology-script ── кінець секції ──
+
+-- MS:methodology-script ── (SGF registry-as-of: діагностики речення `registry as of`, DESIGN-sg-flaring §5.2a) ru/kz: власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'script.duplicateRegistryAsOf', N'ru', N'В скрипте может быть только одно предложение registry as of.'),
+    (N'script.duplicateRegistryAsOf', N'kz', N'Скриптте тек бір registry as of сөйлемі болуы мүмкін.'),
+    (N'script.registryAsOfNotDate', N'ru', N'Для registry as of нужна дата, например row.EVENT_START: число, текст, true/false или null датой не являются.'),
+    (N'script.registryAsOfNotDate', N'kz', N'registry as of үшін күн керек, мысалы row.EVENT_START: сан, мәтін, true/false немесе null күн емес.'),
+    (N'script.registryAsOfWithoutRegistries', N'ru', N'Предложение registry as of ничего не меняет: скрипт не читает ни одного справочника.'),
+    (N'script.registryAsOfWithoutRegistries', N'kz', N'registry as of сөйлемі ештеңені өзгертпейді: скрипт бірде-бір анықтамалықты оқымайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- MS:methodology-script ── кінець секції ──
+
+-- MS:methodology-script ── en-порція (SGF registry-as-of) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'script.duplicateRegistryAsOf', N'en', N'A script can have only one registry as of clause.', 1),
+    (N'script.registryAsOfNotDate', N'en', N'registry as of needs a date, for example row.EVENT_START: a number, text, true/false or null is not a date.', 1),
+    (N'script.registryAsOfWithoutRegistries', N'en', N'The registry as of clause changes nothing: the script reads no registry.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

@@ -157,8 +157,8 @@ public sealed class RegistryEntryWriterTests
         Assert.Equal(
             new[]
             {
-                new RegistryEntryImportError(1, "E1", "CASE_NAME", "err.ECR-REG-0422.requiredFieldsMissing", new Dictionary<string, string> {["registryCode"] = "STREAM_CASE", ["fields"] = "CASE_NAME"}),
-                new RegistryEntryImportError(3, "E3", "NOPE", "err.ECR-REG-0422.unknownFields", new Dictionary<string, string> {["registryCode"] = "STREAM_CASE", ["fields"] = "NOPE"}),
+                new RegistryEntryImportError(1, "E1", "CASE_NAME", "err.ECR-REG-0422.requiredFieldsMissing", new Dictionary<string, string> {["registryCode"] = "FLARE_CASE", ["fields"] = "CASE_NAME"}),
+                new RegistryEntryImportError(3, "E3", "NOPE", "err.ECR-REG-0422.unknownFields", new Dictionary<string, string> {["registryCode"] = "FLARE_CASE", ["fields"] = "NOPE"}),
             },
             result.Errors);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
@@ -199,13 +199,13 @@ public sealed class RegistryEntryWriterTests
         var access = Substitute.For<IAccessDecisionService>();
         access.BuildProfileAsync(UserId, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = UserId }.Permission(UpsertRegistryEntryHandler.Permission).Build());
-        _registries.FindDefinitionAsync("STREAM_CASE", Arg.Any<CancellationToken>()).Returns(_definition);
+        _registries.FindDefinitionAsync("FLARE_CASE", Arg.Any<CancellationToken>()).Returns(_definition);
         _keyStore.FindLiveHoldersAsync(Arg.Any<int>(), Arg.Any<IReadOnlyCollection<byte[]>>(), Arg.Any<CancellationToken>())
             .Returns(Array.Empty<RegistryKeyHolder>());
 
         const string csv = "code,STREAM,CASE_NAME\r\nE1,1D-2,Winter\r\nE2,1D-2,Summer\r\n";
         var report = await new ImportRegistryEntriesHandler(_registries, _audit, access, _user, _clock, Writer())
-            .HandleAsync("STREAM_CASE", csv, csv.Length, ImportRegistryEntriesHandler.DefaultMaxBytes, dryRun: false, CancellationToken.None);
+            .HandleAsync("FLARE_CASE", csv, csv.Length, ImportRegistryEntriesHandler.DefaultMaxBytes, dryRun: false, CancellationToken.None);
 
         Assert.True(report.Applied);
         Assert.Equal(2, report.Added);
@@ -325,7 +325,7 @@ public sealed class RegistryEntryWriterTests
 
     private static (RegistryDef Definition, RegistryKeyDef Key) Registry()
     {
-        var definition = new RegistryDef(EcrCode.Create("STREAM_CASE"), Text("Stream cases"), isTemporal: false);
+        var definition = new RegistryDef(EcrCode.Create("FLARE_CASE"), Text("Flare cases"), isTemporal: false);
         SetId(definition, RegistryId);
 
         var stream = Field(StreamId, "STREAM", CellDataType.String, required: true);

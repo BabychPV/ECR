@@ -123,8 +123,6 @@ const registries = {
   /** `GET /api/v1/registries/{code}/hierarchy` - рівні ієрархічного довідника (NAE plan N1). */
   hierarchy: (code: string) => ['registries', 'hierarchy', code] as const,
 
-  /** `GET /api/v1/integration/flert-sync/status` — стан синку складу газу FLERT (D-476) для сторінок дзеркала. */
-  flertSync: () => ['registries', 'flertSync'] as const,
 
   /**
    * `GET /api/v1/registries/{code}/tree` - плаский список вузлів. Без параметрів - префікс для інвалідації всіх
@@ -149,36 +147,8 @@ const methodologies = {
   /** Префікс {@link methodologies.versionsOf} для будь-якої методології. */
   allVersionsOf: () => ['methodologies', 'versionsOf'] as const,
 
-  /**
-   * Формули чернетки версії.
-   *
-   * ⚠ `versionId` може бути `undefined` (доки версію не обрано на екрані) —
-   * той самий стан, що ніс старий рядковий ключ `['methodology-formulas',
-   * selected?.id]`. Запит із `undefined` не виконується (`enabled`), але
-   * КЛЮЧ мусить лишатися стабільним, щоб кеш не плодив запис на кожен рендер.
-   */
-  formulas: (versionId: number | undefined) => ['methodologies', 'formulas', versionId] as const,
-
-  /** Префікс {@link methodologies.formulas} — для інвалідації без відомого versionId. */
-  allFormulas: () => ['methodologies', 'formulas'] as const,
-
-  /** Константи версії (`ФВ-16.1`). */
-  constants: (versionId: number) => ['methodologies', 'constants', versionId] as const,
-
-  /** Перелік категорій констант версії (план CONST-CATEGORY). */
-  categories: (versionId: number) => ['methodologies', 'categories', versionId] as const,
-
-  /** Правила відбору рядків (`ФВ-13.3`). */
-  rules: (versionId: number) => ['methodologies', 'rules', versionId] as const,
-
-  /** Правило категорії константи версії (L-2, `calc.CategoryRule`). */
-  categoryRule: (versionId: number) => ['methodologies', 'categoryRule', versionId] as const,
-
   /** Обов'язкові вхідні колонки версії (директива «обов'язкові вхідні колонки методології»). */
   requiredInputs: (versionId: number) => ['methodologies', 'requiredInputs', versionId] as const,
-
-  /** Оголошені виходи версії (`ФВ-16.6`). */
-  outputs: (versionId: number) => ['methodologies', 'outputs', versionId] as const,
 
   /** Золотий набір тестів версії (`ФВ-13.7`). */
   tests: (versionId: number) => ['methodologies', 'tests', versionId] as const,
@@ -188,22 +158,6 @@ const methodologies = {
 
   /** Прапор «трасувати проміжні кроки» методології (`D-565`) — не версії. */
   traceSteps: (methodologyId: number) => ['methodologies', 'traceSteps', methodologyId] as const,
-
-  /**
-   * Матриця покриття «рядки реальних даних × правила» версії (`ФВ-13.4`,
-   * `ФВ-13.9`, `RuleCoveragePanel.tsx`).
-   *
-   * ⚠ `tableDefId` приймає `null` — «усі таблиці», той самий стан, що ніс
-   * старий рядковий ключ у компоненті. `periodFrom`/`periodTo` — частина
-   * ключа, а не лише параметр запиту: інше вікно періоду — інший
-   * запис кешу, так само як діяло до фабрики.
-   */
-  ruleCoverage: (
-    versionId: number,
-    tableDefId: number | null,
-    periodFrom: number,
-    periodTo: number,
-  ) => ['methodologies', 'ruleCoverage', versionId, tableDefId, periodFrom, periodTo] as const,
 };
 
 /**
@@ -372,6 +326,20 @@ const units = {
 };
 
 /**
+ * Домен `gasComposition`: сторінка «Склад газу» (D-NEW). `['gasComposition']` — префікс; перелік, шторка потоку й
+ * компоненти — під ним, тож одна інвалідація префікса оновлює все після імпорту з FLERT.
+ */
+const gasComposition = {
+  all: () => ['gasComposition'] as const,
+  /** `GET /api/v1/gas-composition/streams` — перелік потоків і стан імпорту. */
+  streams: () => ['gasComposition', 'streams'] as const,
+  /** `GET /api/v1/gas-composition/streams/{id}` — потік з кейсами й версіями. */
+  stream: (id: number | undefined) => ['gasComposition', 'stream', id ?? null] as const,
+  /** `GET /api/v1/gas-composition/components` — компоненти для редактора. */
+  components: () => ['gasComposition', 'components'] as const,
+};
+
+/**
  * Єдина точка правди для ключів TanStack Query.
  *
  * Охоплює домени, потрібні для першого зрізу навігаційної архітектури —
@@ -391,4 +359,5 @@ export const queryKeys = {
   projects,
   tableChat,
   units,
+  gasComposition,
 };

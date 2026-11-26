@@ -26,19 +26,18 @@ public static class CampaignProgressRule
 
     /// <summary>Класифікує проєкт.</summary>
     /// <param name="allApproved">Усі документи затверджено.</param>
-    /// <param name="hasSnapshot">Є хоча б один поточний зріз — підсумковий артефакт для регулятора.</param>
     /// <param name="deadlineUtc">Строк подання (виключно); <c>null</c> — межі ще не пораховано.</param>
     /// <param name="zone">Пояс проєкту.</param>
     /// <param name="utcNow">Поточний момент.</param>
     /// <param name="atRiskDays">Скільки днів до останнього дня подання вважаються ризиком.</param>
     public static CampaignProgress Classify(
-        bool allApproved, bool hasSnapshot, DateTime? deadlineUtc, TimeZoneInfo zone, DateTime utcNow, int atRiskDays)
+        bool allApproved, DateTime? deadlineUtc, TimeZoneInfo zone, DateTime utcNow, int atRiskDays)
     {
         ArgumentNullException.ThrowIfNull(zone);
 
-        // ⛔ Зріз обов'язковий: затверджені документи без зрізу — регулятор ще
-        // не отримав нічого.
-        if (allApproved && hasSnapshot)
+        // ✎ P-1124-3 (D-NEW): «готово» = усі документи затверджено. Умову «і є поточний зріз звітності» прибрано разом
+        // зі зрізами — звіт регулятору робить SSRS над сирим шаром rpt.*, і зрізу в застосунку не буде ніколи.
+        if (allApproved)
         {
             return CampaignProgress.Done;
         }

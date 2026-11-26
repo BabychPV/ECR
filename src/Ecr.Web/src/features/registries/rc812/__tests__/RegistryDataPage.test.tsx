@@ -122,7 +122,7 @@ describe('Дані довідника: табличний редактор', () 
   it('збереження скидає сторінку впливу довідника (L9-21)', async () => {
     mockServer();
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    client.setQueryData(['registry-impact', 'STREAM_CASE'], { items: [] });
+    client.setQueryData(['registry-impact', 'FLARE_CASE'], { items: [] });
     showDataPage(client);
     await screen.findByRole('grid');
 
@@ -130,7 +130,7 @@ describe('Дані довідника: табличний редактор', () 
     fireEvent.keyDown(window, { key: 's', ctrlKey: true });
 
     await vi.waitFor(() => {
-      expect(client.getQueryState(['registry-impact', 'STREAM_CASE'])?.isInvalidated).toBe(true);
+      expect(client.getQueryState(['registry-impact', 'FLARE_CASE'])?.isInvalidated).toBe(true);
     });
   });
 
@@ -280,7 +280,7 @@ describe('Дані довідника: табличний редактор', () 
     showDataPage();
     const grid = await screen.findByRole('grid');
     const lookupCalls = (): number =>
-      vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes('/registries/STREAM/rows')).length;
+      vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes('/registries/FLARE/rows')).length;
 
     act(() => cell(0, 0).focus());
     fireEvent.paste(grid, { clipboardData: { getData: () => 'S162\ns162\nS162\n' } });

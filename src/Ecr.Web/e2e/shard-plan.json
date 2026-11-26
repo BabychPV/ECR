@@ -35,7 +35,6 @@
       "lazyTables.spec.ts",
       "cellStates.spec.ts",
       "modalReopen.spec.ts",
-      "methodologyCategories.spec.ts",
       "methodologyUi.spec.ts",
       "documentsVersionColumn.spec.ts"
     ],

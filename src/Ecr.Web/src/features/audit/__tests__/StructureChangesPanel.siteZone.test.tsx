@@ -4,40 +4,45 @@ import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StructureChangesPanel } from '@/features/audit/StructureChangesPanel';
-import { formatDateTime } from '@/shared/format';
-import { siteMomentText } from '@/shared/siteMoment';
 import { testTheme } from '@/test/render';
 
 /**
- * ✎ debt-1109 F13 (P3 A): журнал «Reopen» — «до …» уже в часі майданчика (`zone` у конверті), а стовпець ЧАСУ
- * запису лишався в поясі браузера: 19:00Z у Токіо — «Nov 10» у причині й «Nov 9» у стовпці. Обидва — у часі сайту.
+ * ✎ P-1124-4 (слово людини 24.11: «показуй у місцевому часі»): журнал структурних змін і «Reopen» — стовпець часу
+ * в поясі ЧИТАЧА, 24-годинним записом. Пояс майданчика з конверта (`zone`) — у підказці до часу; строк «до …»
+ * лишається часом майданчика (це строк, а не момент запису) і несе назву поясу, щоб два часи в рядку не плутались.
+ * Замінює debt-1109 F13 (час запису в поясі майданчика без позначки).
  *
- * Мутація (локально): не передавати `zone` у `Timestamp` панелі — перший тест червоніє.
+ * Мутація (локально): у панелі знову `SiteChangedAt` — перший тест червоніє.
  */
 const ChangedAt = '2026-11-09T19:00:00Z';
+
+/** Місцевий час читача: пояс середовища тесту (CI — UTC, машина розробника — будь-який), 24 год, без AM/PM. */
+const Local = new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short', hourCycle: 'h23' }).format(new Date(ChangedAt));
 
 function respond(reason: string | null): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      const body = url.includes('/api/v1/audit/structure')
-        ? {
-            items: [
-              {
-                changedAt: ChangedAt,
-                changedByUserId: 1,
-                changedByDisplayName: 'Admin',
-                entityType: 'Document',
-                entityId: 7,
-                entityLabel: null,
-                operation: 'Reopen',
-                changeReason: reason,
-              },
-            ],
-            nextCursor: null,
-          }
-        : null;
+      const body = url.includes('/api/v1/audit/authors')
+        ? [{ userId: 1, displayName: 'Admin' }]
+        : url.includes('/api/v1/audit/structure')
+          ? {
+              items: [
+                {
+                  changedAt: ChangedAt,
+                  changedByUserId: 1,
+                  changedByDisplayName: 'Admin',
+                  entityType: 'Document',
+                  entityId: 7,
+                  entityLabel: null,
+                  operation: 'Reopen',
+                  changeReason: reason,
+                },
+              ],
+              nextCursor: null,
+            }
+          : null;
       return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }),
   );
@@ -60,8 +65,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('StructureChangesPanel: час запису Reopen — у часі майданчика', () => {
-  it('конверт із zone — стовпець часу в поясі сайту, як і «до …»', async () => {
+describe('StructureChangesPanel: час запису — місцевий час читача', () => {
+  it('конверт Reopen із zone — місцевий час 24 год; майданчик — у підказці; строк «до …» з назвою поясу', async () => {
     respond(
       JSON.stringify({
         k: 'document.reopen.audit.reopened',
@@ -70,19 +75,21 @@ describe('StructureChangesPanel: час запису Reopen — у часі ма
     );
     show();
 
-    await screen.findByRole('table', {}, { timeout: 60_000 });
+    const table = await screen.findByRole('table', {}, { timeout: 60_000 });
     const node = document.querySelector(`time[datetime="${ChangedAt}"]`);
-    expect(node?.textContent).toBe(siteMomentText(ChangedAt, 'Asia/Tokyo'));
-    // 19:00Z у Токіо — уже 10 листопада (середовище тестів — UTC).
-    expect(node?.textContent).toMatch(/Nov 10, 2026/u);
+    expect(node?.textContent).toBe(Local);
+    expect(node?.getAttribute('title')).toContain('Tokyo');
+    expect(node?.getAttribute('title')).toContain('Nov 10, 2026, 04:00');
+    expect(table.textContent).toContain('(Tokyo)');
   }, 90_000);
 
-  it('дзеркало: запис без zone — пояс читача, як і раніше', async () => {
+  it('дзеркало: запис без zone — той самий місцевий час, у підказці лише ISO', async () => {
     respond('Manual reason');
     show();
 
     await screen.findByRole('table', {}, { timeout: 60_000 });
     const node = document.querySelector(`time[datetime="${ChangedAt}"]`);
-    expect(node?.textContent).toBe(formatDateTime(ChangedAt));
+    expect(node?.textContent).toBe(Local);
+    expect(node?.getAttribute('title')).toBe(ChangedAt);
   }, 90_000);
 });

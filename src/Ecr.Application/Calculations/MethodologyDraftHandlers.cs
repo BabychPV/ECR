@@ -97,7 +97,8 @@ public sealed class CreateMethodologyVersionHandler(
     IMethodologyDraftStore drafts,
     IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    FormulaEngineAuthoring? formulaAuthoring = null)
 {
     /// <summary>Право на редагування формул (`02-contracts.md` §9).</summary>
     /// <remarks>
@@ -214,8 +215,21 @@ public sealed class CreateMethodologyVersionHandler(
         int userId,
         CancellationToken ct)
     {
+        // ✎ P-1124-1 (24.11, «має бути тільки наш новий редакор»): з вимкненим формульним авторингом пропущений рушій
+        // порожньої чернетки — скрипт, а явний Formulas — відмова.
+        var formulasAllowed = FormulaEngineAuthoring.Allows(formulaAuthoring);
+
         if (copyFromVersionId is not { } sourceId)
         {
+            if (!formulasAllowed)
+            {
+                engine ??= MethodologyEngine.Script;
+                if (engine == MethodologyEngine.Formulas)
+                {
+                    throw FormulaEngineAuthoring.Retired("create", versionNumber);
+                }
+            }
+
             if (engine != MethodologyEngine.Script)
             {
                 return new MethodologyVersion(methodology.Id, versionNumber, level, userId, clock.UtcNow);
@@ -258,6 +272,12 @@ public sealed class CreateMethodologyVersionHandler(
 
         // ⛔ Рівень береться з ДЖЕРЕЛА, а не з запиту. Клон, який змінив рівень
         // драбини (ФВ-9.2), — це вже інша методологія, а не її нова редакція.
+        // ✎ P-1124-1: клон бере рушій джерела — клон формульної версії завів би нову формульну.
+        if (!formulasAllowed && source.Engine != MethodologyEngine.Script)
+        {
+            throw FormulaEngineAuthoring.Retired("clone", source.Version);
+        }
+
         return source.CloneAsDraft(versionNumber, userId, clock.UtcNow);
     }
 }

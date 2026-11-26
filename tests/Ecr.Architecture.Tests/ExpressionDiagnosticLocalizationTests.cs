@@ -14,7 +14,7 @@ namespace Ecr.Architecture.Tests;
 /// в діалекті Methodology…» за будь-якої мови інтерфейсу: порада діалекту
 /// методологій (<c>Parser.ReportUnknownFunction</c>) і всі діагностики
 /// зв'язувача (<c>TypeChecker</c>, <c>UnitChecker</c>, <c>ReferenceResolver</c>,
-/// <c>PredicateValidator</c>, <c>RangeExpander</c>, <c>ReportExpressionChecker</c>,
+/// <c>PredicateValidator</c>, <c>RangeExpander</c>,
 /// <c>CycleDescription</c>) несли українське речення без ключа.
 /// <para>
 /// ⚠ Два сторожі, бо дефект має дві половини: (1) у коді <c>Ecr.Expressions</c>

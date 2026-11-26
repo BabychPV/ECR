@@ -126,6 +126,12 @@ public sealed class AwaitingOpenRunsSweepTests(SqlServerFixture sql)
 
         var runId = await PurgeKit.AddRunAsync(db, stand, "Current", BeforeOpen.AddDays(-3));
         await PurgeKit.InsertRowsAsync(db, stand, runId, 3, 1, 1, "S");
+
+        // ✎ P-1124: і проблема розрахунку прогону — застаріла разом із ним (не відкритий місяць), без сироти.
+        db.CalculationIssues.Add(new CalculationIssue(
+            stand.Document.DocumentId, stand.Period, stand.Document.TableDefId, null, "R-1", 1, stand.MethodologyId, runId,
+            BeforeOpen.AddDays(-3), CalculationIssue.MissingInputsKind));
+        await db.SaveChangesAsync();
         return new World(stand, runId);
     }
 
@@ -134,6 +140,12 @@ public sealed class AwaitingOpenRunsSweepTests(SqlServerFixture sql)
         await using var db = w.Stand.Builder.CreateContext();
         Assert.False(await db.CalculationRuns.AnyAsync(r => r.Id == w.RunId && r.Status == CalculationRun.CurrentStatus));
         Assert.Equal(0, await db.CalculationResults.CountAsync(r => r.CalculationRunId == w.RunId && r.PeriodKey == w.Stand.Period));
+
+        // ✎ P-1124: прогін прибрано повністю (D-560) — і його проблеми з ним; посилань у нікуди немає.
+        Assert.False(await db.CalculationRuns.AnyAsync(r => r.Id == w.RunId));
+        Assert.Equal(0, await db.CalculationIssues.CountAsync(i => i.CalculationRunId == w.RunId));
+        Assert.Equal(0, await db.CalculationIssues.CountAsync(
+            i => i.DocumentId == w.Stand.Document.DocumentId && !db.CalculationRuns.Any(r => r.Id == i.CalculationRunId)));
     }
 
     private static async Task AssertKeptAsync(World w)
@@ -141,6 +153,7 @@ public sealed class AwaitingOpenRunsSweepTests(SqlServerFixture sql)
         await using var db = w.Stand.Builder.CreateContext();
         Assert.True(await db.CalculationRuns.AnyAsync(r => r.Id == w.RunId && r.Status == CalculationRun.CurrentStatus));
         Assert.Equal(3, await db.CalculationResults.CountAsync(r => r.CalculationRunId == w.RunId && r.PeriodKey == w.Stand.Period));
+        Assert.Equal(1, await db.CalculationIssues.CountAsync(i => i.CalculationRunId == w.RunId));
     }
 
     private static async Task<PeriodState> StoredStateAsync(World w)

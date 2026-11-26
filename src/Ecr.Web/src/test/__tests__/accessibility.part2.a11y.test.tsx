@@ -77,7 +77,8 @@ const Pages: [string, () => JSX.Element, ParamRoute?][] = [
     {
       path: routes.adminMethodologyVersions.path,
       entry: '/admin/methodologies/1/versions',
-      content: () => screen.findByText('2026.1', undefined, Wait),
+      // ✎ 24.11: номер поточної версії-скрипта стоїть і в картці, і в таблиці — чекаємо саму картку.
+      content: () => screen.findByTestId('current-script-version', undefined, Wait),
     },
   ],
 ];

@@ -1,5 +1,5 @@
 import { Suspense, useId, useState, type JSX } from 'react';
-import { Badge, Button, Group, Loader, Stack, Tabs, Text } from '@mantine/core';
+import { Alert, Badge, Button, Group, Loader, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
@@ -10,6 +10,7 @@ import { DetailDrawer, useDetailPanel } from '@/shared/ui/DetailDrawer';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { KeyValue, type KeyValueItem } from '@/shared/ui/KeyValue';
 import { DataSourceFormModal, DataSourceScheduleTab, SourceEntitiesTab, SourceEventsTab } from './lazyDataSourceForm';
+import { CredentialsStateBadge, credentialsStateKeyOf } from './CredentialsStateBadge';
 import { TestDataSourceModal } from './TestDataSourceModal';
 import { hasDialogAbovePanel } from './nestedDialog';
 import { deleteDataSource, type DataSource } from './dataSourceApi';
@@ -52,6 +53,14 @@ function connectionItems(source: DataSource): KeyValueItem[] {
     { label: t('sources.endpoint'), value: source.endpoint, mono: true },
     { label: t('sources.secondaryEndpoint'), value: source.secondaryEndpoint, mono: true },
     { label: t('sources.catalog'), value: source.catalog, mono: true },
+    // Для PiWebApi сервер віддає `Windows` без логіна — рядок «Authentication» мало що каже, тож лише для SQL-транспортів.
+    ...(source.transport === 'PiWebApi'
+      ? []
+      : [
+          { label: t('sources.authMode'), value: t(source.authMode === 'UserPassword' ? 'sources.authMode.UserPassword' : 'sources.authMode.Windows') },
+          { label: t('sources.userName'), value: source.userName, mono: true },
+          { label: t('sources.password'), value: source.hasPassword ? t('sources.passwordSet') : null },
+        ]),
     { label: t('sources.maxParallel'), value: formatNumber(source.maxParallel) },
     { label: t('sources.entities'), value: formatNumber(source.sourceEntities) },
     { label: t('sources.schedules'), value: formatNumber(source.collectionSchedules) },
@@ -160,11 +169,14 @@ export function DataSourceDrawer({
         title={dataSourceName(source)}
         subtitle={source.code}
         badge={
-          source.isActive ? undefined : (
-            <Badge variant="outline" color="gray">
-              {t('sources.inactive')}
-            </Badge>
-          )
+          <Group gap="xs" wrap="nowrap">
+            {source.isActive ? null : (
+              <Badge variant="outline" color="gray">
+                {t('sources.inactive')}
+              </Badge>
+            )}
+            <CredentialsStateBadge source={source} />
+          </Group>
         }
         closeLabel={t('sources.closeDetails')}
         // Esc верхнього діалогу закриває лише його — шторка лишається (див. `hasDialogAbovePanel`).
@@ -230,6 +242,18 @@ export function DataSourceDrawer({
           </Tabs.List>
 
           <Tabs.Panel value="connection" pt="sm">
+            {credentialsStateKeyOf(source) !== null && (
+              <Alert color="statusError" mb="sm" data-credentials-state={source.credentialsState}>
+                <Stack gap="xs" align="flex-start">
+                  <Text size="sm">{t(source.credentialsState === 'Rejected' ? 'sources.credentialsRejected' : 'sources.credentialsUnreadable')}</Text>
+                  {canManage && (
+                    <Button variant="default" size="xs" onClick={() => setEditing(true)} data-enter-password="">
+                      {t('sources.changePassword')}
+                    </Button>
+                  )}
+                </Stack>
+              </Alert>
+            )}
             <KeyValue items={connectionItems(source)} />
           </Tabs.Panel>
 
@@ -268,6 +292,10 @@ export function DataSourceDrawer({
             sourceId={source.id}
             sourceName={dataSourceName(source)}
             onClose={() => setTesting(false)}
+            onEnterPassword={() => {
+              setTesting(false);
+              setEditing(true);
+            }}
           />
 
           {editing && (

@@ -69,24 +69,6 @@ public abstract class UserPerMinuteRateLimitPolicy : IRateLimiterPolicy<string>
     }
 }
 
-/// <summary>Межа <c>POST /api/v1/reports/snapshots/{id}/verify</c> (L1-05): звірка зрізу читає всі його рядки.</summary>
-/// <param name="configuration">Конфігурація застосунку.</param>
-public sealed class SnapshotVerifyRateLimitPolicy(IConfiguration configuration)
-    : UserPerMinuteRateLimitPolicy(configuration, PermitKey, DetailKey, DetailFallback)
-{
-    /// <summary>Ім'я політики для <c>[EnableRateLimiting]</c>.</summary>
-    public const string PolicyName = "snapshot-verify";
-
-    /// <summary>Ключ конфігурації: межа за хвилину на користувача.</summary>
-    public const string PermitKey = "Security:RateLimit:VerifyPermitPerMinute";
-
-    /// <summary>Ключ каталогу подробиці відмови (повним літералом — так його шукає сторож каталогу).</summary>
-    public const string DetailKey = "err.ECR-REQ-0429.tooManyVerifications";
-
-    /// <summary>Запасна подробиця відмови — коли каталог недоступний.</summary>
-    public const string DetailFallback = "Too many snapshot verification requests. Wait a moment and try again.";
-}
-
 /// <summary>Межа <c>POST /api/v1/documents/{id}/validate</c> (P1-08): кожен прогін читає документ і дописує результат.</summary>
 /// <param name="configuration">Конфігурація застосунку.</param>
 public sealed class DocumentValidateRateLimitPolicy(IConfiguration configuration)

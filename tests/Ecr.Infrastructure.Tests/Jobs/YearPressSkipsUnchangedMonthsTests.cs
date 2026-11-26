@@ -216,6 +216,8 @@ public sealed partial class YearPressSkipsUnchangedMonthsTests(SqlServerFixture 
             await db.Database.ExecuteSqlAsync($"""
                 DELETE FROM calc.CalculationResult WHERE CalculationRunId IN
                     (SELECT Id FROM calc.CalculationRun WHERE DocumentId = {document.DocumentId} AND PeriodKey = 202606);
+                DELETE FROM calc.CalculationIssue WHERE CalculationRunId IN
+                    (SELECT Id FROM calc.CalculationRun WHERE DocumentId = {document.DocumentId} AND PeriodKey = 202606);
                 DELETE FROM calc.CalculationRun WHERE DocumentId = {document.DocumentId} AND PeriodKey = 202606;
                 INSERT INTO calc.CalculationRun (ProjectId, PeriodKey, DocumentId, Status, StartedAt, FinishedAt)
                 VALUES ({document.ProjectId}, 202602, {document.DocumentId}, N'Failed', {Baseline.AddMinutes(5)}, {Baseline.AddMinutes(6)});
@@ -879,8 +881,7 @@ public sealed partial class YearPressSkipsUnchangedMonthsTests(SqlServerFixture 
             new UnitOfWork(db),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
-            clock,
-            Substitute.For<IAuditWriter>());
+            clock);
 
     private static RecalculationService FormulaService()
     {

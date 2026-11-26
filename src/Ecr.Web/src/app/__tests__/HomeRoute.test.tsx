@@ -4,17 +4,17 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { CurrentUserDto } from '@/api/types';
-import { HomeRoute, startsOnSnapshots } from '@/app/HomeRoute';
+import { HomeRoute, startsOnReportsNotice } from '@/app/HomeRoute';
 import { MeQueryKey } from '@/shared/session/useSession';
+import { PageDescriptionContext } from '@/shared/ui/pageDescription';
 import { theme } from '@/shared/theme/theme';
 
 /**
- * FP-1 (прохід «від першого обличчя» 2026-10-11, P1): роль без `Document.View`, але з
- * `Report.ViewRegulatory` (вбудована `ReportViewer`) стартує зі зрізів звітів, а не з
- * відмови на переліку документів.
+ * ✎ P-1124-3 (D-NEW): роль без `Document.View`, але з `Report.ViewRegulatory` (вбудована `ReportViewer`) на головній
+ * бачить пояснення «звіти — у SSRS», а не відмову переліку документів (зрізів у застосунку більше немає).
  *
- * ⛔ МУТАЦІЙНИЙ ДОКАЗ: у `HomeRoute` замінити умову перенаправлення на `false` — тест
- * «роль зі зрізами…» червоніє (на «/» лишається перелік документів).
+ * ⛔ МУТАЦІЙНИЙ ДОКАЗ: у `HomeRoute` замінити умову на `false` — тест «роль переглядача звітів…» червоніє (на «/»
+ * лишається перелік документів, тобто відмова).
  */
 
 function meWith(permissions: string[]): CurrentUserDto {
@@ -43,12 +43,14 @@ function renderHome(me: CurrentUserDto): ReturnType<typeof render> {
             <Route
               path="/"
               element={
-                <HomeRoute>
-                  <div data-testid="documents">Documents list</div>
-                </HomeRoute>
+                // Як у роутері: маршрут / несе опис переліку документів (handle.descriptionKey).
+                <PageDescriptionContext.Provider value="nav.documents.description">
+                  <HomeRoute>
+                    <div data-testid="documents">Documents list</div>
+                  </HomeRoute>
+                </PageDescriptionContext.Provider>
               }
             />
-            <Route path="/admin/snapshots" element={<div data-testid="snapshots">Snapshots</div>} />
           </Routes>
         </MemoryRouter>
       </QueryClientProvider>
@@ -56,7 +58,7 @@ function renderHome(me: CurrentUserDto): ReturnType<typeof render> {
   );
 }
 
-describe('HomeRoute — стартова сторінка ролі без перегляду документів (FP-1)', () => {
+describe('HomeRoute — стартова сторінка ролі без перегляду документів (P-1124-3)', () => {
   beforeEach(() => {
     // `staleTime: 0` у `useSession`: фоновий рефетч не має впасти на справжню мережу.
     vi.stubGlobal(
@@ -69,28 +71,34 @@ describe('HomeRoute — стартова сторінка ролі без пер
     vi.unstubAllGlobals();
   });
 
-  it('роль зі зрізами, без Document.View — перенаправлення на /admin/snapshots', () => {
-    renderHome(meWith(['Report.ViewRegulatory', 'Report.ViewSnapshot', 'Report.Export']));
+  it('роль переглядача звітів без Document.View — пояснення «звіти у SSRS», без посилань і без переліку', () => {
+    renderHome(meWith(['Report.ViewRegulatory']));
 
-    expect(screen.getByTestId('snapshots')).toBeTruthy();
+    const notice = screen.getByTestId('reports-in-ssrs');
+    expect(notice).toBeTruthy();
+    expect(notice.textContent).toContain('home.reportsInSsrs.heading');
+    // Мертвого посилання немає: адресу сервера звітів застосунок не знає.
+    expect(notice.querySelector('a')).toBeNull();
     expect(screen.queryByTestId('documents')).toBeNull();
+    // Опис маршруту / («відкрийте документ…») цій ролі не показується: документів у неї немає.
+    expect(screen.queryByTestId('page-description')).toBeNull();
   });
 
-  it('оператор із Document.View лишається на переліку документів (навіть із правом зрізів)', () => {
+  it('оператор із Document.View лишається на переліку документів (навіть із правом звітів)', () => {
     renderHome(meWith(['Document.View', 'Report.ViewRegulatory']));
 
     expect(screen.getByTestId('documents')).toBeTruthy();
-    expect(screen.queryByTestId('snapshots')).toBeNull();
+    expect(screen.queryByTestId('reports-in-ssrs')).toBeNull();
   });
 
-  it('без жодного з двох прав — головна без мовчазного переходу', () => {
+  it('без жодного з двох прав — головна без підміни', () => {
     renderHome(meWith(['Calculation.View']));
 
     expect(screen.getByTestId('documents')).toBeTruthy();
-    expect(screen.queryByTestId('snapshots')).toBeNull();
+    expect(screen.queryByTestId('reports-in-ssrs')).toBeNull();
   });
 
-  it('startsOnSnapshots: профіль ще не завантажено — не перенаправляє', () => {
-    expect(startsOnSnapshots(undefined)).toBe(false);
+  it('startsOnReportsNotice: профіль ще не завантажено — не підміняє', () => {
+    expect(startsOnReportsNotice(undefined)).toBe(false);
   });
 });

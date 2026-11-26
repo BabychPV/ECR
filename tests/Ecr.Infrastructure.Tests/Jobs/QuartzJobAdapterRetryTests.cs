@@ -52,11 +52,11 @@ public sealed class QuartzJobAdapterRetryTests
     /// </summary>
     private sealed class DomainFailingJob : IBackgroundJob
     {
-        internal const string Reason = "Зріз за період уже поданий: перебудувати його не можна.";
+        internal const string Reason = "Версія шаблону вже опублікована: змінити її структуру не можна.";
 
         public Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
             => throw new Ecr.Domain.Abstractions.DomainException(
-                Ecr.Domain.Errors.ErrorCodes.ReportImmutable, Reason);
+                Ecr.Domain.Errors.ErrorCodes.TemplateFrozen, Reason);
     }
 
     /// <summary>Прикладна відмова з кодом (ретраїться, як будь-який <c>BusinessRuleException</c>).</summary>
@@ -272,7 +272,7 @@ public sealed class QuartzJobAdapterRetryTests
     }
 
     /// <summary>
-    /// Доменна відмова («зріз уже поданий», <c>ECR-RPT-0409</c>) не є
+    /// Доменна відмова («версія шаблону заморожена», <c>ECR-TMPL-0409</c>) не є
     /// транзієнтною: повтор прочитає той самий стан і дістане той самий
     /// вердикт.
     /// </summary>
@@ -313,7 +313,7 @@ public sealed class QuartzJobAdapterRetryTests
             Arg.Is<string?>(m => m != null && m.Contains(DomainFailingJob.Reason, StringComparison.Ordinal)),
             Arg.Any<DateTime>(),
             Arg.Any<CancellationToken>(),
-            "ECR-RPT-0409"); // BE-08: код доменного винятку, не системний
+            "ECR-TMPL-0409"); // BE-08: код доменного винятку, не системний
 
         // ⚠ Деталь задачі лишається: ручний перезапуск має що перезапускати.
         await scheduler.DidNotReceive().DeleteJob(Arg.Any<JobKey>(), Arg.Any<CancellationToken>());

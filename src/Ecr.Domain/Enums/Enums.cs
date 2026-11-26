@@ -1,4 +1,4 @@
-﻿// src/Ecr.Domain/Enums/Enums.cs
+// src/Ecr.Domain/Enums/Enums.cs
 namespace Ecr.Domain.Enums;
 
 /// <summary>Стан версії шаблону.</summary>
@@ -117,11 +117,8 @@ public enum ExpressionDialect : byte
     /// <summary>Формули методології: NCalc-діалект, аргументи <c>@Arg</c>, константи <c>CST.</c>.</summary>
     Methodology = 1,
 
-    /// <summary>
-    /// Правила звіту (<c>D-52a</c>): колонки поточного рядка зрізу <c>[Code]</c> і параметри
-    /// звіту <c>@Name</c>. ⚠ У КІНЦІ: значення лежить байтом у <c>cfg.FormulaDef.Dialect</c>.
-    /// </summary>
-    Report = 2
+    // ✎ P-1124-3 (D-NEW): значення 2 (діалект правил звіту, D-52a) прибрано разом із конструктором звітів. Значення лежить
+    // байтом у cfg.FormulaDef.Dialect — 2 НЕ перевикористовувати.
 }
 
 /// <summary>Рівень результату валідації.</summary>
@@ -616,14 +613,6 @@ public enum TraceLevel : byte
     Full = 2
 }
 
-/// <summary>Статус зрізу звітності (D-65).</summary>
-public enum SnapshotStatus : byte
-{
-    Draft = 0,
-    Approved = 1,
-    Submitted = 2
-}
-
 /// <summary>Транспорт до зовнішнього джерела (ФВ-11.2).</summary>
 /// <remarks>
 /// ⚠ Не всі значення ведуть у PI, і це головне, що тут варто знати.
@@ -649,6 +638,20 @@ public enum ExternalTransport : byte
     /// </para>
     /// </remarks>
     Sql = 2
+}
+
+/// <summary>Як джерело входить у зовнішню систему (P-1126-SRCCRED). Числа лежать у базі — не перенумеровувати.</summary>
+/// <remarks>
+/// ⛔ <see cref="Windows"/> = 0 — умовчання колонки <c>ext.DataSource.AuthMode</c>: наявні рядки після міграції
+/// ходять так само, як до неї (обліковим записом служби ECR), без жодного <c>UPDATE</c>.
+/// </remarks>
+public enum SourceAuthMode : byte
+{
+    /// <summary>Windows-автентифікація облікового запису служби ECR (як до P-1126-SRCCRED).</summary>
+    Windows = 0,
+
+    /// <summary>Логін і пароль, задані адміністратором (лише <c>PiSqlClient</c> і <c>Sql</c>).</summary>
+    UserPassword = 1,
 }
 
 /// <summary>Режим роботи з редакцією SQL Server (АРХ-7).</summary>

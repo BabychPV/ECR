@@ -66,6 +66,12 @@ internal sealed class ScriptBinder
 
     private Scope scope = new(null);
     private bool needsRegistries;
+
+    // ✎ §5.2a: `registry as of <вираз>;` — вираз, його текст і чи є речення в тексті взагалі (для `asof.*`).
+    private AstNode? registryAsOf;
+    private string? registryAsOfText;
+    private RegistryAsOfSyntax? registryAsOfSyntax;
+    private bool hasRegistryAsOf;
     private bool inFunction;
     private string? currentFunction;
     private string? foreachVar;
@@ -218,6 +224,9 @@ internal sealed class ScriptBinder
                 case RowsSyntax r:
                     BindRows(r);
                     break;
+                case RegistryAsOfSyntax asOf:
+                    BindRegistryAsOf(asOf);
+                    break;
                 case FunctionSyntax f:
                     BindFunction(f);
                     break;
@@ -234,7 +243,10 @@ internal sealed class ScriptBinder
 
         CheckRecursion();
 
-        if (!options.IsLibrary && !options.IsModuleLevel && rows.Count == 0)
+        // ✎ P-1124-1 (UI-прохід 24.11, вимога людини «свіжа чернетка — 0 проблем»): текст без жодної конструкції
+        // (лише коментарі — стартова заготовка `ScriptStarter`) не має проблем; порожню версію однаково не
+        // опублікувати — публікація відмовляє `noBoundOutput` (жоден вихід не прив'язано).
+        if (!options.IsLibrary && !options.IsModuleLevel && rows.Count == 0 && program.Items.Count > 0)
         {
             Report(ScriptDiagnosticCodes.MissingRows, new ScriptSpan(0, 0, 1, 1),
                 "A script must contain at least one 'rows from …;' clause.");
@@ -279,6 +291,13 @@ internal sealed class ScriptBinder
             }
         }
 
+        // ✎ §5.2a: речення без жодного читання довідника нічого не змінює — це помилка автора, а не тихий no-op.
+        if (registryAsOfSyntax is { } asOfSyntax && !needs)
+        {
+            Report(ScriptDiagnosticCodes.RegistryAsOfWithoutRegistries, ClauseSpan(asOfSyntax),
+                "'registry as of' has no effect: the script reads no registry (REGFIND, REGONE, REGFIELD, REGSUM, …).");
+        }
+
         return new CompiledScript
         {
             IsLibrary = options.IsLibrary,
@@ -293,6 +312,8 @@ internal sealed class ScriptBinder
             RegistryEntries = registryEntries,
             RegistryCodes = codes,
             NeedsRegistries = needs,
+            RegistryAsOf = registryAsOf,
+            RegistryAsOfText = registryAsOfText,
             Units = units,
             Members = members,
             Statements = topStatements,
@@ -457,11 +478,98 @@ internal sealed class ScriptBinder
                     RegisterGlobal(o.Code, "output", o.CodeSpan);
                     topLevelNames.Add(o.Code);
                     break;
+                case RegistryAsOfSyntax:
+                    // `asof.*` видно в усіх операторах, навіть написаних вище за речення.
+                    hasRegistryAsOf = !options.IsLibrary;
+                    break;
                 default:
                     break;
             }
         }
     }
+
+    // ───── registry as of (§5.2a) ─────
+
+    private static ScriptSpan ClauseSpan(RegistryAsOfSyntax syntax)
+        => new(syntax.Span.Start, Math.Min(syntax.Span.Length, "registry as of".Length), syntax.Span.Line, syntax.Span.Column);
+
+    /// <summary>
+    /// <c>registry as of &lt;вираз&gt;;</c>: одне на скрипт, після <c>rows from</c>, не в бібліотеці. Вираз опускається в
+    /// ПОРОЖНІЙ області: він обчислюється до першого оператора рядка, тож змінних ще немає (лише <c>row.*</c>,
+    /// <c>period.*</c>, константи, функції).
+    /// </summary>
+    private void BindRegistryAsOf(RegistryAsOfSyntax syntax)
+    {
+        var span = ClauseSpan(syntax);
+        if (options.IsLibrary)
+        {
+            Report(ScriptDiagnosticCodes.RowsInLibrary, span, "A library cannot contain 'registry as of': it belongs to the rows of a script.");
+            return;
+        }
+
+        if (registryAsOfSyntax is not null)
+        {
+            Report(ScriptDiagnosticCodes.DuplicateRegistryAsOf, span, "Only one 'registry as of' clause is allowed in a script.");
+            return;
+        }
+
+        registryAsOfSyntax = syntax;
+        if (rows.Count == 0)
+        {
+            Report(ScriptDiagnosticCodes.UnexpectedToken, span, "'registry as of' must come after 'rows from …;'.", ("token", "registry"));
+        }
+
+        var saved = scope;
+        scope = new Scope(null);
+        AstNode node;
+        try
+        {
+            node = Lower(syntax.Date);
+        }
+        finally
+        {
+            scope = saved;
+        }
+
+        if (node is LiteralNode { Type: not ExpressionValueType.Date })
+        {
+            Report(ScriptDiagnosticCodes.RegistryAsOfNotDate, syntax.Date.Span,
+                "'registry as of' needs a date, for example row.EVENT_START; a number, text, true/false or null is not a date.");
+        }
+
+        registryAsOf = node;
+        registryAsOfText = Slice(syntax.Date.Span);
+    }
+
+    /// <summary><c>asof.Date</c>, <c>asof.Month</c>, <c>asof.Year</c> — дата рядка з <c>registry as of</c>.</summary>
+    private bool TryLowerAsOf(string name, List<Accessor> accessors, ScriptSpan span, out AstNode node)
+    {
+        node = Null();
+        if (!string.Equals(name, "asof", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!hasRegistryAsOf)
+        {
+            Report(ScriptDiagnosticCodes.UnknownName, span,
+                "'asof' is available only in a script with 'registry as of <date>;'.", ("name", "asof"));
+            return true;
+        }
+
+        if (accessors is [{ Member: "Date" or "Month" or "Year" } only])
+        {
+            node = At(new FunctionNode(AsOfHost, [Lit(only.Member!)]), span);
+            return true;
+        }
+
+        Report(ScriptDiagnosticCodes.UnknownName, span,
+            "Unknown 'asof' property. Available: asof.Date, asof.Month, asof.Year.", ("name", span.Length > 0 ? Slice(span) : "asof"));
+        return true;
+    }
+
+    /// <summary>Хостова функція <c>asof.*</c>: аргумент — назва властивості.</summary>
+    internal const string AsOfHost = "$asof";
 
     private ScriptConst BuildConst(ConstValueSyntax syntax, string? unit)
     {
@@ -1552,7 +1660,7 @@ internal sealed class ScriptBinder
             return true;
         }
 
-        return false;
+        return TryLowerAsOf(name, accessors, span, out node);
     }
 
     private AstNode LowerImportMember(string libraryName, CompiledScript lib, List<Accessor> accessors, ScriptSpan span)

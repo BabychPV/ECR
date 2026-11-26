@@ -512,6 +512,19 @@ export const routes = {
     handle: { labelKey: 'nav.units', permission: 'Calculation.View', icon: 'units', descriptionKey: 'nav.units.description' },
     showInNav: true,
   },
+  /** Склад газу (D-NEW, людина 24.11: «Додай в бічній панелі пункт»): потоки, кейси, версії складу — власник ECR. */
+  adminGasComposition: {
+    id: 'admin-gas-composition',
+    path: '/admin/gas-composition',
+    handle: {
+      labelKey: 'nav.gasComposition',
+      permission: 'GasComposition.View',
+      icon: 'gasComposition',
+      descriptionKey: 'nav.gasComposition.description',
+      skeletonShape: 'table',
+    },
+    showInNav: true,
+  },
   adminSecurity: {
     id: 'admin-security',
     path: '/admin/security',
@@ -566,15 +579,22 @@ export const routes = {
     path: '/projects/:id/periods',
     handle: { labelKey: 'projects.tab.periods', permission: 'Period.Configure', numericParams: ['id'] },
   },
-  projectSettings: {
-    id: 'project-settings',
-    path: '/projects/:id/settings',
-    handle: { labelKey: 'projects.tab.settings', permission: 'Period.Configure', numericParams: ['id'] },
+  // ✎ 24.11 (рішення людини «Одна таблиця шаблонів»): колишня Settings — дві вкладки; `/projects/:id/settings`
+  // лишається перенаправленням на Templates (`router.tsx`, `LegacyProjectTabRedirect`).
+  projectTemplates: {
+    id: 'project-templates',
+    path: '/projects/:id/templates',
+    handle: { labelKey: 'projects.tab.templates', permission: 'Period.Configure', numericParams: ['id'] },
   },
   projectLifecycle: {
     id: 'project-lifecycle',
     path: '/projects/:id/lifecycle',
     handle: { labelKey: 'projects.tab.lifecycle', permission: 'Period.Configure', numericParams: ['id'] },
+  },
+  projectGeneral: {
+    id: 'project-general',
+    path: '/projects/:id/general',
+    handle: { labelKey: 'projects.tab.general', permission: 'Period.Configure', numericParams: ['id'] },
   },
   adminSources: {
     id: 'admin-sources',
@@ -647,12 +667,6 @@ export const routes = {
     id: 'admin-jobs',
     path: '/admin/jobs',
     handle: { labelKey: 'nav.jobs', permission: 'System.ViewHealth', icon: 'jobs', descriptionKey: 'nav.jobs.description' },
-    showInNav: true,
-  },
-  adminSnapshots: {
-    id: 'admin-snapshots',
-    path: '/admin/snapshots',
-    handle: { labelKey: 'nav.snapshots', permission: 'Report.ViewRegulatory', icon: 'snapshots', descriptionKey: 'nav.snapshots.description' },
     showInNav: true,
   },
   /**
@@ -803,8 +817,8 @@ export interface NavGroup {
  * (`routeConfig.test.ts`): пункт поза групами зник би з меню мовчки.
  */
 export const navGroups: readonly NavGroup[] = [
-  // ✎ Projects (людина 08.11: «проджект перенеси в розділ work»): Documents, Projects, My groups, Reporting campaign.
-  { id: 'work', labelKey: 'nav.group.work', routes: [routes.home, routes.projects, routes.myGroups, routes.adminCampaign] },
+  // ✎ Projects (людина 08.11: «проджект перенеси в розділ work»): Documents, Projects, Reporting campaign.
+  { id: 'work', labelKey: 'nav.group.work', routes: [routes.home, routes.projects, routes.adminCampaign] },
   {
     id: 'configure',
     labelKey: 'nav.group.configure',
@@ -815,6 +829,7 @@ export const navGroups: readonly NavGroup[] = [
       routes.adminMethodologies,
       routes.adminExpressions,
       routes.adminUnits,
+      routes.adminGasComposition,
       routes.adminSources,
       routes.adminDependencyGraph,
       routes.adminMapping,
@@ -822,13 +837,13 @@ export const navGroups: readonly NavGroup[] = [
       routes.adminPiData,
     ],
   },
-  { id: 'access', labelKey: 'nav.group.access', routes: [routes.adminSecurity] },
+  // ✎ людина 25.11: «my groups перенеси в секюріті бо не логічно» — My groups у Access після Security (маршрут /my-groups без змін).
+  { id: 'access', labelKey: 'nav.group.access', routes: [routes.adminSecurity, routes.myGroups] },
   {
     id: 'operate',
     labelKey: 'nav.group.operate',
     routes: [
       routes.adminJobs,
-      routes.adminSnapshots,
       routes.adminAudit,
       routes.adminConsistency,
       routes.adminUiStrings,

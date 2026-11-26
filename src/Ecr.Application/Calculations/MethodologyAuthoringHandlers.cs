@@ -413,7 +413,25 @@ public sealed class SaveMethodologyRuleHandler(
                 });
 
         // ⛔ MS: версія-скрипт не редагується вручну — і тоді, коли обробник кличуть повз контролер.
-        MethodologyVersionScope.RequireHandEditable(version);
+        // ✎ c11-10: єдиний виняток — ВИМКНЕННЯ наявного правила чернетки-скрипта з тим самим предикатом і пріоритетом. Рядки
+        // відбирає текст скрипта; правила мігрованої версії живлять лише підказки, покриття й вимоги обов'язкових входів. Коли
+        // текст звужено (ECW_C11_10 V5 без 28 позичених умов), правило без умови в тексті вимикається, а не лишається хибним
+        // джерелом «рахується методологією». Увімкнути, додати чи змінити правило скрипта так само не можна.
+        if (version.Engine == MethodologyEngine.Script)
+        {
+            var retired = await drafts.FindRuleAsync(methodologyVersionId, ruleCode.Value, ct).ConfigureAwait(false);
+            if (isActive
+                || retired is null
+                || !string.Equals(retired.MatchJson, matchJson, StringComparison.Ordinal)
+                || retired.Priority != priority)
+            {
+                MethodologyVersionScope.RequireHandEditable(version);
+            }
+
+            version.EditRule(retired!, retired!.MatchJson, retired.Priority, isActive: false);
+            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            return MethodologyAuthoringMap.Rule(retired);
+        }
 
         // ⛔ V-18: предикат і узгодженість набору перевіряються ДО зміни
         // сутності. Доти зберігалося будь-що — `{not json`, `[1,2]`, однакові
@@ -620,6 +638,64 @@ public sealed class SaveMethodologyRequiredInputHandler(
             .ToHashSet();
 
         return MethodologyAuthoringMap.RequiredInput(requiredInput, activeColumns.Contains(columnDefId));
+    }
+}
+
+/// <summary>
+/// Прибирає обов'язкову вхідну колонку **чернетки** (✎ P-1124-1, UI-прохід редактора скрипта 24.11: вимогу можна
+/// було лише завести й змінити, а помилково заведену — ні).
+/// </summary>
+/// <remarks>
+/// ⚠ Те саме право, що й запис (<see cref="SaveMethodologyRequiredInputHandler.Permission"/>); дозвіл дає домен
+/// (<c>MethodologyVersion.RemoveRequiredInput</c>: лише чернетка, лише свій запис); слід — як у запису вимоги
+/// (журнал структури не пишеться: вимога чернетки нічого не рахує, доки версію не опубліковано).
+/// </remarks>
+public sealed class DeleteMethodologyRequiredInputHandler(
+    IMethodologyDraftStore drafts,
+    IUnitOfWork uow,
+    IAccessDecisionService access,
+    ICurrentUser currentUser)
+{
+    /// <summary>Право — те саме, що й на запис вимоги.</summary>
+    public const string Permission = SaveMethodologyRequiredInputHandler.Permission;
+
+    /// <summary>Видаляє вимогу.</summary>
+    /// <param name="methodologyVersionId">Версія-чернетка.</param>
+    /// <param name="columnDefId">Колонка вимоги.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException">Версії або вимоги для колонки немає.</exception>
+    /// <exception cref="DomainException">Версія не чернетка.</exception>
+    public async Task HandleAsync(int methodologyVersionId, int columnDefId, CancellationToken ct)
+    {
+        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+
+        var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException(
+                "ECR-CALC-0404",
+                $"Версії методології {methodologyVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.version",
+                    ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
+                });
+
+        var existing = await drafts
+            .FindRequiredInputAsync(methodologyVersionId, columnDefId, ct)
+            .ConfigureAwait(false)
+            ?? throw new NotFoundException(
+                "ECR-CALC-0404",
+                $"Обов'язкової вхідної колонки {columnDefId} у версії {methodologyVersionId} немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.requiredInput",
+                    ["columnDefId"] = columnDefId.ToString(CultureInfo.InvariantCulture),
+                    ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
+                });
+
+        version.RemoveRequiredInput(existing);
+        drafts.Remove(existing);
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 }
 

@@ -61,6 +61,11 @@ internal static class IntegrationConfigAudit
             secondaryEndpoint = source.SecondaryEndpoint,
             maxParallel = source.MaxParallel,
             isActive = source.IsActive,
+
+            // P-1126-SRCCRED: режим, логін і ФАКТ пароля — ніколи не значення, блоб чи довжина.
+            authMode = source.AuthMode,
+            userName = source.UserName,
+            hasPassword = source.HasPassword,
         },
         Options);
 

@@ -29,15 +29,59 @@ public static class ExternalRegistryGuard
     /// <summary>Ключ каталогу відмови.</summary>
     public const string MessageKey = "err.ECR-REG-0409.externalSource";
 
-    /// <summary>Ключ каталогу відмови для дзеркала FLERT (<c>D-476</c>): «змінюйте у FLERT».</summary>
-    public const string FlertMessageKey = "err.ECR-REG-0409.externalSourceFlert";
+    /// <summary>
+    /// Ключ каталогу відмови для довідників складу газу (D-NEW): «змінюйте на сторінці Склад газу». Замінив
+    /// <c>externalSourceFlert</c> («змінюйте у FLERT», <c>D-476</c>): власник складу тепер ECR.
+    /// </summary>
+    public const string GasCompositionMessageKey = "err.ECR-REG-0409.managedByGasComposition";
 
-    /// <summary>Чи довідник — дзеркало складу газу FLERT (<c>STREAM</c>, <c>STREAM_CASE</c>, <c>GAS_COMPOSITION</c>).</summary>
+    /// <summary>
+    /// Чи довідник — склад газу (<c>STREAM</c>, <c>STREAM_CASE</c>, <c>GAS_COMPOSITION</c>), який пише лише сторінка «Склад газу»
+    /// (шкала версій, замкнені періоди, Σ) — загальні редактори довідників ці правила обійшли б.
+    /// </summary>
     /// <param name="registryCode">Код довідника.</param>
-    public static bool IsFlertMirror(string registryCode)
+    public static bool IsGasCompositionRegistry(string registryCode)
         => string.Equals(registryCode, Flert.FlertCompositionSchema.StreamRegistry, StringComparison.OrdinalIgnoreCase)
            || string.Equals(registryCode, Flert.FlertCompositionSchema.CaseRegistry, StringComparison.OrdinalIgnoreCase)
            || string.Equals(registryCode, Flert.FlertCompositionSchema.CompositionRegistry, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// ✎ DESIGN-sg-flaring §5.7 (C4): запобіжник довідників факелів (<see cref="FlaringRegistryLock.RegistryCodes"/>) —
+    /// право <c>GasComposition.Edit</c> і замкнені періоди старого/нового вікна кожного зачепленого запису. Для решти
+    /// довідників — нічого (і зміни навіть не обчислюються).
+    /// </summary>
+    /// <param name="definition">Довідник, записи якого змінює запит.</param>
+    /// <param name="edits">Як дістати зміни записів (викликається лише для довідника факелів).</param>
+    /// <param name="flaring">Запобіжник із контейнера.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⛔ Виклик — у КОЖНОМУ загальному писачі записів, що кличе <see cref="EnsureManualEditAllowed"/> (upsert, пакет, CSV,
+    /// видалення, вікно чинності, перенесення, виведення/відновлення, очищення) — сторож
+    /// <c>FlaringRegistryLockGuardTests</c> (Architecture, D6). Обробник, зібраний руками без запобіжника, для довідника
+    /// факелів відмовляє (fail closed), а не пропускає.
+    /// </remarks>
+    public static async Task EnsureFlaringEditAllowedAsync(
+        RegistryDef definition,
+        Func<Task<IReadOnlyCollection<FlaringRegistryEdit>>> edits,
+        FlaringRegistryLock? flaring,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(edits);
+
+        if (!FlaringRegistryLock.Applies(definition.Code))
+        {
+            return;
+        }
+
+        if (flaring is null)
+        {
+            throw new InvalidOperationException(
+                $"Довідник «{definition.Code}» під запобіжником факелів, а обробник зібрано без FlaringRegistryLock.");
+        }
+
+        await flaring.EnsureEditAllowedAsync(definition, await edits().ConfigureAwait(false), ct).ConfigureAwait(false);
+    }
 
     /// <summary>Відмовляє, якщо записи довідника синхронізуються з AF.</summary>
     /// <param name="definition">Довідник, записи якого змінює запит.</param>
@@ -50,22 +94,23 @@ public static class ExternalRegistryGuard
         // типів дозволів записів не має й не матиме.
         Permits.Groups.PermitGroupRegistryGuard.RequireNotManaged(definition.Code);
 
-        if (definition.SourceKind != RegistrySourceKind.External)
-        {
-            return;
-        }
-
-        // D-476: дзеркало складу газу FLERT — master FLERT, а не AF; порада «змінюйте в AF» послала б людину не туди.
-        if (IsFlertMirror(definition.Code))
+        // D-NEW: склад газу — власність ECR, але писати його можна лише сторінкою «Склад газу» (незалежно від SourceKind:
+        // і колишнє дзеркало External, і Local): там шкала версій без перетинів, замкнені періоди й перевірка Σ.
+        if (IsGasCompositionRegistry(definition.Code))
         {
             throw new BusinessRuleException(
                 ErrorCodes.RegistryEntryInUse,
-                $"Записи довідника «{definition.Code}» — копія складу газу FLERT: змінюйте їх у FLERT (D-476).",
+                $"Записи довідника «{definition.Code}» — склад газу: змінюйте їх на сторінці «Склад газу» (D-NEW).",
                 new Dictionary<string, object?>
                 {
-                    ["messageKey"] = FlertMessageKey,
+                    ["messageKey"] = GasCompositionMessageKey,
                     ["registryCode"] = definition.Code,
                 });
+        }
+
+        if (definition.SourceKind != RegistrySourceKind.External)
+        {
+            return;
         }
 
         throw new BusinessRuleException(

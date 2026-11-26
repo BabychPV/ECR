@@ -57,6 +57,53 @@ describe('Pass2 п. 7: підзаголовок переліку докумен�
   });
 });
 
+/*
+ * ✎ B74 (людина 24.11, live): «у проєкту вже є документ… або натисніть Next, щоб створити ще один» — проєкт тримає
+ * документи кількох шаблонів, а сервер на шаблоні «один документ на проєкт» відмовляє `409 ECR-DOC-4092`. Тексти
+ * — про документ ЦЬОГО ШАБЛОНУ і без запрошення створити ще один; розгорнуті бази — рядком `#UiChanged` старе → нове.
+ */
+describe('B74: тексти «документ уже є» — про шаблон, без «Next — ще один»', () => {
+  const old: Record<string, Record<'en' | 'ru' | 'kz', string>> = {
+    'documents.createExistsTitle': {
+      en: 'This project already has a document',
+      ru: 'У этого проекта уже есть документ',
+      kz: 'Бұл жобаның құжаты бұрыннан бар',
+    },
+    'documents.createExistsText': {
+      en: '{key} is already kept for this project. One document per object, all months inside it: open it, or press Next to create another one.',
+      ru: '{key} уже ведётся по этому проекту. Один документ — на объект, все месяцы внутри него: откройте его или нажмите «Далее», чтобы создать ещё один.',
+      kz: '{key} осы жоба бойынша жүргізіліп жатыр. Бір нысанға бір құжат, барлық айлар оның ішінде: оны ашыңыз немесе тағы біреуін құру үшін «Келесі» басыңыз.',
+    },
+    'documents.createExistsReview': {
+      en: 'The project already has {key}: another document will be created.',
+      ru: 'У проекта уже есть {key}: будет создан ещё один документ.',
+      kz: 'Жобада {key} бұрыннан бар: тағы бір құжат құрылады.',
+    },
+  };
+
+  it('B74: en/ru/kz кажуть про шаблон і не запрошують «Next — створити ще один»', () => {
+    for (const key of Object.keys(old)) {
+      expect(catalogValue(key, 'en'), key).toMatch(/template/);
+      expect(catalogValue(key, 'en'), key).not.toMatch(/press Next|create another/);
+      expect(catalogValue(key, 'ru'), key).toMatch(/шаблон/);
+      expect(catalogValue(key, 'ru'), key).not.toMatch(/«Далее»|создать ещё один/);
+      expect(catalogValue(key, 'kz'), key).toMatch(/үлгі/);
+      expect(catalogValue(key, 'kz'), key).not.toMatch(/«Келесі»|тағы біреуін құру/);
+    }
+  });
+
+  it('B74: на кожен ключ і мову є рядок «змінені тексти» старе → нове', () => {
+    const changed = seed.slice(seed.indexOf('INSERT INTO #UiChanged'));
+    for (const [key, byLang] of Object.entries(old)) {
+      for (const lang of ['en', 'ru', 'kz'] as const) {
+        const current = (catalogValue(key, lang) ?? '').replace(/'/g, "''");
+        const row = `(N'${key}', N'${lang}', N'${(byLang[lang] ?? '').replace(/'/g, "''")}', N'${current}')`;
+        expect(changed.includes(row), `немає рядка змінених текстів ${key} / ${lang}`).toBe(true);
+      }
+    }
+  });
+});
+
 describe('Pass2 пп. 4–6: нові ключі каталогу', () => {
   const files = [
     path.resolve(webRoot, 'src', 'features', 'documents', 'CreateDocumentModal.tsx'),
@@ -68,6 +115,9 @@ describe('Pass2 пп. 4–6: нові ключі каталогу', () => {
     'documents.createExistsOpen',
     'documents.createExistsShowAll',
     'documents.createExistsReview',
+    // ✎ B74 (24.11): шаблон «один документ на проєкт» із документом — Next вимкнено.
+    'documents.createExistsSingleText',
+    'documents.createExistsSingleHidden',
     'documents.createDiscardTitle',
     'documents.createDiscardText',
     'documents.createDiscardVerb',

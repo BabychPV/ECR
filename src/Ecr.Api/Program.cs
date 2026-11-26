@@ -79,6 +79,9 @@ builder.Services.AddPiAfAdapters(
 // чим оголоситися.
 builder.Services.AddSqlAdapters();
 builder.Services.AddEcrApplication();
+// ✎ P-1124-1: формульний авторинг (нові формульні версії, клон, публікація, імпорт пакета) — у продукті вимкнено.
+builder.Services.AddSingleton(Ecr.Application.Calculations.FormulaEngineAuthoring.From(
+    builder.Configuration[Ecr.Application.Calculations.FormulaEngineAuthoring.EnabledKey]));
 
 builder.Services.AddEcrAuthentication(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
@@ -194,6 +197,7 @@ builder.Services.AddOpenApi(options =>
 {
     options.AddSchemaTransformer<Ecr.Api.Startup.DictionarySchemaTransformer>();
     options.AddSchemaTransformer<Ecr.Api.Startup.NumericSchemaTransformer>();
+    options.AddSchemaTransformer<Ecr.Api.Startup.SecretStringSchemaTransformer>();
 
     // ⛔ `/health/*` — middleware, а не контролер: генератор його не бачить,
     // і саме тому клієнт описував відповідь руками — звідси `A7-04`/`A7-36`.

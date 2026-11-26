@@ -51,7 +51,6 @@ describe('хто затримує', () => {
       submitted: 0,
       approved: 0,
       rejected: 0,
-      snapshots: 0,
       progress,
       submissionDeadline: null,
     };

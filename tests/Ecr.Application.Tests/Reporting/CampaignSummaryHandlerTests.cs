@@ -183,9 +183,8 @@ public sealed class CampaignSummaryHandlerTests
         Assert.Null(summary.Totals.Approved);
         Assert.Null(summary.Totals.Rejected);
 
-        // Те, що не залежить від прихованого, лишається: кількість документів і зрізів (Q15-07).
+        // Те, що не залежить від прихованого, лишається: кількість документів (Q15-07).
         Assert.Equal(2, summary.Totals.Documents);
-        Assert.Equal(1, summary.Totals.Snapshots);
     }
 
     [Fact]
@@ -228,6 +227,35 @@ public sealed class CampaignSummaryHandlerTests
         Assert.Equal(2, summary.Totals.Documents);
     }
 
+    /// <summary>
+    /// ✎ P-1124-3 (D-NEW): «Готово» = усі документи затверджено; зрізів звітності в застосунку більше немає, тож умова
+    /// «і є поточний зріз» прибрана. ⛔ Без зміни (<c>allApproved &amp;&amp; hasSnapshot</c>) проєкт без зрізу лишався б «прострочено»
+    /// назавжди — тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Усе_затверджено_проєкт_готовий_без_жодного_зрізу()
+    {
+        Profile(new AccessBuilder { UserId = 7 }.Permission(GetCampaignSummaryHandler.Permission));
+        var pastDeadline = new DateTime(2026, 1, 10, 19, 0, 0, DateTimeKind.Utc);
+        _store.ListAsync(Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(_ => new CampaignProjectPage(
+                Total: 1,
+                Projects:
+                [
+                    new CampaignProjectFacts(
+                        Mine, $"P{Mine}", new LocalizedText(new Dictionary<string, string> { ["en"] = "Approved" }),
+                        Documents: 2, Draft: 0, Submitted: 0, Approved: 2, Rejected: 0,
+                        SubmissionDeadlineUtc: pastDeadline, TimeZoneId: "Asia/Atyrau", Sheets: 2, NotSubmittedSheets: 0),
+                ],
+                Buckets: [new CampaignBucket(pastDeadline, "Asia/Atyrau", true, Projects: 1, 2, 0, 0, 2, 0, Sheets: 2)]));
+
+        var summary = await Handler().HandleAsync(202601, default);
+
+        Assert.Equal(CampaignProgress.Done, Assert.Single(summary.Projects).Progress);
+        Assert.Equal((1, 0, 0, 0), (summary.Totals.Done, summary.Totals.Overdue, summary.Totals.AtRisk, summary.Totals.InProgress));
+    }
+
     private void ReturnBuckets()
         => _store.ListAsync(Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(call => new CampaignProjectPage(
@@ -235,8 +263,8 @@ public sealed class CampaignSummaryHandlerTests
                 Projects: [Row(Mine), Row(Foreign)],
                 Buckets:
                 [
-                    new CampaignBucket(null, "Asia/Atyrau", false, false, Projects: 1, 1, 1, 0, 0, 0, 0, Sheets: 3, NotSubmittedSheets: 2),
-                    new CampaignBucket(null, "Asia/Atyrau", false, true, Projects: 1, 1, 1, 0, 0, 0, 1, Sheets: 4, NotSubmittedSheets: 2),
+                    new CampaignBucket(null, "Asia/Atyrau", false, Projects: 1, 1, 1, 0, 0, 0, Sheets: 3, NotSubmittedSheets: 2),
+                    new CampaignBucket(null, "Asia/Atyrau", false, Projects: 1, 1, 1, 0, 0, 0, Sheets: 4, NotSubmittedSheets: 2),
                 ]));
 
     private static CampaignProjectFacts Row(int projectId)
@@ -244,7 +272,7 @@ public sealed class CampaignSummaryHandlerTests
             projectId,
             $"P{projectId}",
             new LocalizedText(new Dictionary<string, string> { ["en"] = $"Project {projectId}" }),
-            Documents: 1, Draft: 1, Submitted: 0, Approved: 0, Rejected: 0, Snapshots: 0,
+            Documents: 1, Draft: 1, Submitted: 0, Approved: 0, Rejected: 0,
             SubmissionDeadlineUtc: null, TimeZoneId: "Asia/Atyrau", Sheets: 3, NotSubmittedSheets: 2);
 
     private GetCampaignSummaryHandler Handler()

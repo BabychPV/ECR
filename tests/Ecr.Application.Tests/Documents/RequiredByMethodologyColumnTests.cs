@@ -122,9 +122,10 @@ public sealed class RequiredByMethodologyColumnTests
     /// <see cref="Методологія_без_правила_прив_язки_не_позначає_колонку"/>
     /// перевіряє, що позначка на сітці не бреше про це.
     /// </param>
-    private void WithMethodology(bool withRule = true)
+    /// <param name="engine">Рушій версії (P-1124-1: версія-скрипт без правил позначає колонку).</param>
+    private void WithMethodology(bool withRule = true, MethodologyEngine engine = MethodologyEngine.Formulas)
     {
-        var version = new MethodologyVersion(MethodologyId, "1.0", CalculationLevel.Configuration, 1, Now);
+        var version = new MethodologyVersion(MethodologyId, "1.0", CalculationLevel.Configuration, 1, Now, engine);
         var rules = withRule
             ? (IReadOnlyList<MethodologyRule>)[version.AddRule(EcrCode.Create("all"), "{}", 100)]
             : [];
@@ -139,6 +140,25 @@ public sealed class RequiredByMethodologyColumnTests
                       .Returns(Task.FromResult(rules));
         _methodologies.GetRequiredInputsAsync(version.Id, Arg.Any<CancellationToken>())
                       .Returns(Task.FromResult<IReadOnlyList<MethodologyRequiredInput>>([requiredInput]));
+
+        var methodology = new Methodology(EcrCode.Create("ECW_TEST"), Text("Test"));
+        SetId(methodology, MethodologyId);
+        methodology.AddVersion(version);
+        _methodologies.FindByVersionAsync(version.Id, Arg.Any<CancellationToken>()).Returns(methodology);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "MethodologyRequiredInput")]
+    public async Task Версія_скрипт_без_правил_позначає_обовязкову_колонку_P_1124_1()
+    {
+        // ✎ P-1124-1: версія-скрипт правил відбору не має (рядки вибирає скрипт) — gate перевіряє її вимоги на
+        // кожному рядку, тож зірочка в заголовку чесна. Мутація: прибрати IsScriptVersionAsync — колонка без позначки.
+        WithMethodology(withRule: false, engine: MethodologyEngine.Script);
+
+        var slice = await Handler().HandleAsync(Document, TableInstance, Profile(), "en", CancellationToken.None);
+
+        Assert.True(slice.Columns.Single(c => c.Code == "Category").IsRequiredByMethodology);
+        Assert.False(slice.Columns.Single(c => c.Code == "Volume").IsRequiredByMethodology);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]

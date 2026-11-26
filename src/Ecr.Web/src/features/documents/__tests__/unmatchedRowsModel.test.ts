@@ -141,4 +141,37 @@ describe('groupUnmatchedRows', () => {
     expect(groups[0]!.inactiveCount).toBe(7);
     expect(unmatchedRowCount(groups)).toBe(7);
   });
+
+  // Missing-input month alias (live doc 96, Land 1.0.20.0): сервер тепер називає псевдонім місячного входу колонкою місяця
+  // періоду з заголовком і місяцем (`CalculationRejectionReasonsMonthAliasTests`). Модель показує її колонкою (назва, без
+  // «(this table has no such column)»), а справжній вхід поза колонками — підписом каталогу. Перехід банера/панелі бере
+  // першу `column: true` — тобто `_M10`. Клієнт для цього не змінювався: тест закріплює контракт із сервером (мутація
+  // `missingColumnsOf`: порожня назва → колонка, або непорожня → вхід — червоніє).
+  it('рік: псевдонім місячного входу — колонка місяця з назвою, вхід поза колонками — підписом', () => {
+    const groups = groupUnmatchedRows(
+      [
+        issue(1, 3, {
+          rowKey: 'S1_3',
+          kind: 'MissingInputs',
+          ruleCode: 'R_C05_04_01',
+          monthNumber: 10,
+          columns: [
+            { code: 'Land_RunningHoursMonthly_M10', nameL10n: { values: { en: 'Running hours per month (h) · Oct' } } },
+            { code: 'LiquidFuelConsumption_M10', nameL10n: { values: { en: 'Liquid fuel consumption (t) · Oct' } } },
+            { code: 'Land_Density', nameL10n: { values: {} } },
+          ],
+        }),
+      ],
+      [table(1, 'Fuel')],
+    );
+
+    const row = groups[0]!.rows[0]!;
+    expect(groups[0]!.missingInputs).toBe(true);
+    expect(row.missingColumns).toEqual([
+      { code: 'Land_RunningHoursMonthly_M10', name: 'Running hours per month (h) · Oct', column: true },
+      { code: 'LiquidFuelConsumption_M10', name: 'Liquid fuel consumption (t) · Oct', column: true },
+      { code: 'Land_Density', name: '⟦document.missingInputRows.argument (code=Land_Density)⟧', column: false },
+    ]);
+    expect(row.missingColumns.find((column) => column.column)?.code).toBe('Land_RunningHoursMonthly_M10');
+  });
 });

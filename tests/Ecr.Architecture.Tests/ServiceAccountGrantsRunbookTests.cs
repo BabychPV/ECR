@@ -19,10 +19,14 @@ namespace Ecr.Architecture.Tests;
 /// </remarks>
 public sealed partial class ServiceAccountGrantsRunbookTests
 {
-    /// <summary>Процедури, текст виклику яких застосунок лише ПОКАЗУЄ DBA, а не виконує.</summary>
+    /// <summary>
+    /// Процедури, які застосунок у базі ECR не виконує: текст лише ПОКАЗУЄ DBA, або процедура чужої бази, куди ходить
+    /// джерело <c>ext.DataSource</c> під власним входом.
+    /// </summary>
     private static readonly Dictionary<string, string> NotExecutedByApplication = new(StringComparer.Ordinal)
     {
         ["arc.usp_EnsurePartitions"] = "GetPartitionScriptHandler.Command — текст для DBA (D15-12); виконує SQL Agent під своїм principal",
+        ["dbo.usp_GetAllStreamDataFlattened"] = "процедура БАЗИ FLERT (Flert:Sync:CompositionQuery): виконує джерело FLERT під своїм входом; GRANT — runbook §4.3, сторож FlertReadOnlyAdapterTests",
     };
 
     [Fact]

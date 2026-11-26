@@ -68,6 +68,45 @@ public sealed class DataSource : Entity<int>
     public int MaxParallel { get; private set; }
     public bool IsActive { get; private set; }
 
+    /// <summary>Найбільша довжина логіна джерела (домен разом з іменем); та сама, що в стовпці.</summary>
+    public const int UserNameMaxLength = 256;
+
+    /// <summary>Як джерело входить у зовнішню систему; наявні рядки — <see cref="SourceAuthMode.Windows"/>.</summary>
+    public SourceAuthMode AuthMode { get; private set; }
+
+    /// <summary>Логін джерела (не секрет); лише за <see cref="SourceAuthMode.UserPassword"/>.</summary>
+    public string? UserName { get; private set; }
+
+    /// <summary>
+    /// ⛔ Пароль джерела, УЖЕ зашифрований шаром, що володіє DataProtection (як SMTP, <c>D-263</c>). Назовні —
+    /// лише <see cref="HasPassword"/>: ні значення, ні довжини.
+    /// </summary>
+    public byte[]? PasswordProtected { get; private set; }
+
+    /// <summary>
+    /// Коли джерело востаннє відмовило в автентифікації збереженим паролем; <c>null</c> — не відмовляло або пароль
+    /// відтоді замінено. Поки задано, збір і перевірка за id до джерела не ходять (захист облікового запису від
+    /// блокування, R-03).
+    /// </summary>
+    public DateTime? CredentialsRejectedAt { get; private set; }
+
+    /// <summary>
+    /// Відмову входу збереженим паролем отримано В ЦЬОМУ ПРОЦЕСІ (прогоні) — ознака лише в пам'яті, у базу не йде.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Не <see cref="CredentialsRejectedAt"/>: та колонка ставиться лише окремим <c>UPDATE</c> з умовою на версію рядка
+    /// (L3). Якби прогін ставив її на відстежуваній сутності, наступний <c>SaveChanges</c> збору записав би її в обхід
+    /// цієї умови (або впав би конфліктом версії).
+    /// </remarks>
+    public bool CredentialsRejectedInProcess { get; private set; }
+
+    /// <summary>Чи збереженим паролем до джерела ходити не можна (мітка в базі або відмова в цьому прогоні).</summary>
+    public bool CredentialsBlocked
+        => AuthMode == SourceAuthMode.UserPassword && (CredentialsRejectedAt is not null || CredentialsRejectedInProcess);
+
+    /// <summary>Чи заданий пароль — єдине, що про нього дозволено показувати.</summary>
+    public bool HasPassword => PasswordProtected is { Length: > 0 };
+
     /// <summary>Версія рядка: дві правки одного з'єднання не затирають одна одну.</summary>
     public byte[] RowVersion { get; private set; } = [];
 
@@ -109,6 +148,60 @@ public sealed class DataSource : Entity<int>
         Transport = transport;
         Endpoint = endpoint;
         IsActive = isActive;
+    }
+
+    /// <summary>Чи транспорт уміє входити логіном і паролем (лише рядки з'єднання: PiSqlClient і Sql, R-11).</summary>
+    /// <param name="transport">Транспорт.</param>
+    public static bool SupportsUserPassword(ExternalTransport transport)
+        => transport is ExternalTransport.PiSqlClient or ExternalTransport.Sql;
+
+    /// <summary>
+    /// Замінює облікові дані ЦІЛКОМ: режим, логін і вже зашифрований пароль (P-1126-SRCCRED). Мітку відмови скидає.
+    /// </summary>
+    /// <param name="authMode">Режим входу.</param>
+    /// <param name="userName">Логін; за Windows ігнорується.</param>
+    /// <param name="protectedPassword">Зашифрований пароль; за Windows ігнорується.</param>
+    /// <remarks>
+    /// ⛔ Інваріанти: Windows ⇒ ні логіна, ні пароля (перехід на Windows їх стирає); UserPassword ⇒ непорожні логін і
+    /// пароль, і лише на транспорті, що вміє логін (<see cref="SupportsUserPassword"/>).
+    /// </remarks>
+    public void ReplaceCredentials(SourceAuthMode authMode, string? userName, byte[]? protectedPassword)
+    {
+        if (authMode == SourceAuthMode.UserPassword)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(userName);
+
+            if (protectedPassword is not { Length: > 0 } || !SupportsUserPassword(Transport))
+            {
+                throw new InvalidOperationException("UserPassword потребує пароля й транспорту PiSqlClient або Sql.");
+            }
+        }
+
+        var windows = authMode == SourceAuthMode.Windows;
+        AuthMode = authMode;
+        UserName = windows ? null : userName;
+        PasswordProtected = windows ? null : protectedPassword;
+        CredentialsRejectedAt = null;
+        CredentialsRejectedInProcess = false;
+    }
+
+    /// <summary>Джерело відмовило в автентифікації збереженим паролем: збір і перевірка за id далі не ходять (R-03).</summary>
+    /// <param name="utcNow">Момент відмови, UTC.</param>
+    public void MarkCredentialsRejected(DateTime utcNow)
+    {
+        if (AuthMode == SourceAuthMode.UserPassword)
+        {
+            CredentialsRejectedAt = utcNow;
+        }
+    }
+
+    /// <summary>Відмова входу збереженим паролем у цьому прогоні: далі прогін до джерела не ходить (L2), у базу не пишеться.</summary>
+    public void MarkCredentialsRejectedInProcess()
+    {
+        if (AuthMode == SourceAuthMode.UserPassword)
+        {
+            CredentialsRejectedInProcess = true;
+        }
     }
 
     /// <summary>Вимикає джерело; збір із нього припиняється.</summary>

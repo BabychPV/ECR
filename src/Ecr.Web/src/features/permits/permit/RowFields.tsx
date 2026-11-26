@@ -1,6 +1,7 @@
 import type { JSX } from 'react';
 import { Button, Select, Switch, Text, TextInput } from '@mantine/core';
 import { t } from '@/shared/i18n';
+import { DecimalInput } from '@/shared/ui/DecimalInput';
 import { scopeOf, type PickerScope } from '../lib/pickerScope';
 import { DateField } from './DateField';
 import { isLookup, pickerOptions, type FormValues, type PermitField, type PickerData } from './model';
@@ -103,6 +104,33 @@ function Field({ field, form, errors, onChange, readOnly, picker, pickerPending,
     );
   }
 
+  const unit =
+    column.unit === undefined
+      ? {}
+      : {
+          rightSection: (
+            <Text size="xs" c="dimmed">
+              {column.unit}
+            </Text>
+          ),
+          rightSectionWidth: 56,
+        };
+
+  // Число: без фокуса — читабельне подання з точним у підказці, на фокусі — збережений рядок повністю (людина 25.11).
+  if (column.type === 'number') {
+    return (
+      <DecimalInput
+        label={column.label}
+        required={required}
+        value={value}
+        readOnly={readOnly}
+        error={error}
+        onValueChange={(next) => onChange(column.code, next)}
+        {...unit}
+      />
+    );
+  }
+
   return (
     <TextInput
       label={column.label}
@@ -111,17 +139,7 @@ function Field({ field, form, errors, onChange, readOnly, picker, pickerPending,
       readOnly={readOnly}
       error={error}
       onChange={(event) => onChange(column.code, event.currentTarget.value)}
-      {...(column.type === 'number' ? { inputMode: 'decimal' as const, styles: { input: { fontFamily: 'var(--mantine-font-family-monospace)' } } } : {})}
-      {...(column.unit === undefined
-        ? {}
-        : {
-            rightSection: (
-              <Text size="xs" c="dimmed">
-                {column.unit}
-              </Text>
-            ),
-            rightSectionWidth: 56,
-          })}
+      {...unit}
     />
   );
 }

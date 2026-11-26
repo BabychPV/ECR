@@ -172,6 +172,7 @@ public static class DependencyInjection
         services.AddScoped<Projects.ActivateProjectHandler>();
         services.AddScoped<Projects.ArchiveProjectHandler>();
         services.AddScoped<Projects.DeleteProjectHandler>();
+        services.AddScoped<Projects.PurgeProjectHandler>(); // ✎ 25.11: видалення проєкту з даними (Project.DeleteWithData)
         services.AddScoped<Projects.ChangeProjectTimeZoneHandler>();
 
         // Документи і комірки (модуль 1.8)
@@ -278,10 +279,8 @@ public static class DependencyInjection
         services.AddScoped<Periods.GetPeriodCalendarHandler>();
 
         // Робочий процес (модулі 3.4–3.6)
-        // ⚠ Проведення стану аркушів у зрізи звітності — окрема залежність
-        // обох обробників: питання «що тепер зі зрізом» одне, і відповідь на
-        // нього має бути одна (`H-23b`).
-        services.AddScoped<Reporting.ReportSnapshotSync>();
+        // ✎ P-1124-3 (D-NEW, людина 24.11): проведення стану аркушів у зрізи звітності прибрано разом
+        // із конструктором зрізів — звітність лише SSRS над сирим шаром rpt.*.
 
         // ✎ D-451: листи «Аркуш подано/повернуто» (вимкнені, доки немає правила матриці) — після коміту дії.
         services.AddScoped<Workflow.SheetWorkflowNotifier>();
@@ -363,7 +362,6 @@ public static class DependencyInjection
         services.AddScoped<Units.ConvertUnitHandler>();
         services.AddScoped<Units.CreateUnitHandler>();
         services.AddScoped<Units.UnitUsageHandler>();
-        services.AddScoped<Calculations.ConstantUsageHandler>();
         services.AddScoped<Templates.ColumnUsageHandler>();
         services.AddScoped<Units.DeleteUnitHandler>();
         services.AddScoped<Units.GetUnitHandler>();
@@ -487,6 +485,7 @@ public static class DependencyInjection
         services.AddScoped<Calculations.Scripting.GetScriptTablesHandler>();
         services.AddScoped<Calculations.Scripting.Migration.ApplyScriptPackageHandler>();
         services.AddScoped<Calculations.Scripting.Migration.SwitchScriptEngineHandler>();
+        services.AddScoped<Calculations.Scripting.Migration.FinalizeFormulasHandler>();
 
         // Авторство методології з нуля (директива №09, `W6`): сама методологія,
         // константи, правила відбору, виходи, золотий набір, режими і прив'язка
@@ -507,6 +506,7 @@ public static class DependencyInjection
         services.AddScoped<Calculations.DeleteMethodologyCategoryHandler>();
         services.AddScoped<Calculations.ListMethodologyRequiredInputsHandler>();
         services.AddScoped<Calculations.SaveMethodologyRequiredInputHandler>();
+        services.AddScoped<Calculations.DeleteMethodologyRequiredInputHandler>();
         services.AddScoped<Calculations.ListMethodologyOutputsHandler>();
         services.AddScoped<Calculations.SaveMethodologyOutputHandler>();
         services.AddScoped<Calculations.ListMethodologyTestCasesHandler>();
@@ -555,24 +555,11 @@ public static class DependencyInjection
         services.AddScoped<Documents.DocumentDataExporter>();
         services.AddScoped<Documents.PreviewImportHandler>();
         services.AddScoped<Documents.ApplyImportHandler>();
-        services.AddScoped<Reporting.ListReportSnapshotsHandler>();
-        services.AddScoped<Reporting.BuildReportSnapshotHandler>();
-        services.AddScoped<Reporting.VerifyReportSnapshotHandler>();
-        services.AddScoped<Reporting.GetSnapshotRowsHandler>();
-        services.AddScoped<Reporting.ExportSnapshotHandler>();
         services.AddScoped<Reporting.GetCampaignSummaryHandler>();
-
-        // W7: опис звіту як ДАНІ (`ФВ-10.4`). Без цих чотирьох `rpt.ReportDef`
-        // і `rpt.ReportVersion` не створювало ніщо — ні код, ні seed, ні
-        // тести, — тому побудова зрізу не мала за що зачепитися.
-        services.AddScoped<Reporting.ListReportDefsHandler>();
-        services.AddScoped<Reporting.CreateReportDefHandler>();
-        services.AddScoped<Reporting.CreateReportVersionHandler>();
-        services.AddScoped<Reporting.PublishReportVersionHandler>();
         services.AddScoped<Integration.ListSourceEntitiesHandler>();
         services.AddScoped<Integration.CollectFromSourceHandler>();
-        services.AddScoped<Integration.SyncFlertNowHandler>(); // D-476 F3: «Синхронізувати зараз»
-        services.AddScoped<Integration.GetFlertSyncStatusHandler>();
+        services.AddScoped<GasComposition.GasCompositionService>(); // D-NEW: сторінка «Склад газу» (власник — ECR)
+        services.AddScoped<Registries.FlaringRegistryLock>(); // DESIGN-sg-flaring §5.7 (C4): замкнені місяці довідників факелів
         services.AddScoped<Integration.GetJobStatusHandler>();
         services.AddScoped<Integration.ListJobsHandler>();
         services.AddScoped<Integration.GetJobsSummaryHandler>();
@@ -594,6 +581,8 @@ public static class DependencyInjection
         services.AddScoped<Integration.SaveDataSourceHandler>();
         services.AddScoped<Integration.DeleteDataSourceHandler>();
         services.AddScoped<Integration.TestDataSourceConnectionHandler>();
+        services.AddSingleton<Integration.SourceTargetLockout>();
+        services.AddScoped<Integration.TestDataSourceFormHandler>();
         services.AddScoped<Integration.BrowseSourceCatalogHandler>();
 
         // ФВ-13.17: «Перевірити конфігурацію» до першого збору — пробне

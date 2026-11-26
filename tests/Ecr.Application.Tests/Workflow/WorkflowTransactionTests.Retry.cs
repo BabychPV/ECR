@@ -1,6 +1,5 @@
 // tests/Ecr.Application.Tests/Workflow/WorkflowTransactionTests.Retry.cs
 using Ecr.Application.Common;
-using Ecr.Application.Reporting;
 using Ecr.Application.Workflow;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
@@ -67,8 +66,7 @@ public sealed partial class WorkflowTransactionTests
             var user = Substitute.For<ICurrentUser>();
             user.UserId.Returns(ApproverId);
             var handler = new ApproveSheetHandler(
-                new WorkflowStore(db), AccessAt(step: null), new ReportSnapshotSync(NoSnapshots(), Documents(world)),
-                new UnitOfWork(db), user, new TestClock(Now), new AuditWriter(db), Documents(world));
+                new WorkflowStore(db), AccessAt(step: null), new UnitOfWork(db), user, new TestClock(Now), new AuditWriter(db), Documents(world));
 
             await handler
                 .HandleAsync(world.DocumentId, world.SheetDefId, PeriodKeyValue, approved: true, reason: null, CancellationToken.None)

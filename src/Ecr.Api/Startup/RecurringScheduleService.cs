@@ -373,18 +373,10 @@ public sealed partial class RecurringScheduleService(
             .ScheduleAsync<Infrastructure.Jobs.OrphanScanJob>(NightlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);
 
-        // ⛔ Q-2xx (аудит фази 3, звітність). Без цього рядка задача існувала
-        // б у коді й ніколи не виконувалася б: rpt.ReportSnapshot/ReportRow
-        // росли б вічно — на кожен звіт, кожен проєкт, кожен період, кожну
-        // повторну побудову (B16 §4, D-71).
+        // P1-08: нічна ретенція прогонів перевірки документа (wf.ValidationResult). ✎ P-1124-3: прибирання зрізів
+        // звітності з неї прибрано разом зі зрізами; код задачі той самий (історія itg.MaintenanceRun).
         await scheduler
             .ScheduleAsync<Infrastructure.Jobs.ReportRetentionJob>(NightlyCron, null, CancellationToken.None)
-            .ConfigureAwait(false);
-
-        // Класифікація формату суми старих зрізів (рішення 2026-09-21): у запиті
-        // переліку її не робить ніхто, тож без цього рядка старі лишалися б `unknown`.
-        await scheduler
-            .ScheduleAsync<Infrastructure.Jobs.ReportSnapshotFormatJob>(NightlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);
 
         // AN-134: прибирання старих зрізів подання. Нічне вікно; за замовчуванням лише рахує (dry-run) —
@@ -400,12 +392,9 @@ public sealed partial class RecurringScheduleService(
             .ScheduleAsync<Infrastructure.Jobs.SupersededResultsSweepJob>(NightlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);
 
-        // D-476: синк складу газу FLERT → дзеркало (людина 11.11: щодня, 02:00 часу сервера). Ставиться завжди:
-        // вимкнений (`Flert:Sync:Enabled=false`, типово) прогін лише пише «вимкнено» в журнал обслуговування.
-        await scheduler
-            .ScheduleAsync<Infrastructure.Jobs.FlertCompositionSyncJob>(
-                Infrastructure.Jobs.FlertCompositionSyncOptions.Cron, null, CancellationToken.None)
-            .ConfigureAwait(false);
+        // D-NEW (людина 24.11): щоденного синку FLERT більше немає — склад газу належить ECR, FLERT читається разово
+        // кнопкою «Імпортувати з FLERT» (FlertCompositionSyncJob без розкладу).
+
 
         await scheduler
             .ScheduleAsync<Infrastructure.Jobs.PeriodStateJob>(TenMinuteCron, null, CancellationToken.None)

@@ -752,7 +752,7 @@ function Fill-StructureSql([int]$vid) {
         # D-474: наявні таблиці й колонки чернетки-клону підтягуються до моделі там, де модель тепер інша, а `$have` нижче їх
         # пропускає: (i) прив'язка місяця (лише додається, не знімається), (ii) LayoutKind, (iii) видимість МІСЯЧНИХ колонок,
         # (iv) DefaultValue. Лише чернетка (Status=0) і лише при розбіжності: повтор - 0 змін.
-        $d474 = @{ month = 0; layout = 0; unhide = 0; default = 0; unit = 0; toFormula = 0; unbound = 0 }; $unitSet = @(); $toFormula = @()
+        $d474 = @{ month = 0; layout = 0; unhide = 0; default = 0; unit = 0; toFormula = 0; unbound = 0; toCalculated = 0; unformula = 0 }; $unitSet = @(); $toFormula = @(); $toCalculated = @()
         $draftGuard = 'JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId JOIN cfg.TemplateVersion v ON v.Id=s.TemplateVersionId WHERE c.Id=@i AND v.Id=@v AND v.Status=0'
         foreach ($sh in @($Mdl.sheets)) {
             foreach ($tb in @($sh.tables)) {
@@ -785,6 +785,14 @@ function Fill-StructureSql([int]$vid) {
                         if ($nF8 -ne 1) { throw "Колонка $($tb.code).$($c.code): Calculated -> Formula не застосовано (не чернетка або є значення)." }
                         $d474.toFormula++; $toFormula += "$($tb.code).$($c.code)"
                         $d474.unbound += [int](Sql-Exec $cn ("DELETE b FROM cfg.CalculationBinding b JOIN cfg.ColumnDef c ON c.Id=b.ColumnDefId JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId JOIN cfg.TemplateVersion v ON v.Id=s.TemplateVersionId WHERE c.Id=@i AND v.Id=@v AND v.Status=0") @{ i = $hiD.id; v = $vid })
+                    }                    # ✎ P-1124-2 (вода, Land 1.0.21.0): зворотний крок — формула таблиці в чернетці-клоні знову стає виходом методології
+                    # (модель: Calculated). Лише чернетка, лише без значень у doc.CellValue; формулу колонки знято (IsDeleted), прив'язки
+                    # «вихід -> колонка» кладе етап Methodologies за calc моделі. Повтор: колонка вже Calculated — 0 змін.
+                    if ([string]$c.dataType -eq 'Calculated' -and $hiD.type -eq 6) {
+                        $nC = [int](Sql-Exec $cn ("UPDATE c SET DataType=8, IsReadOnly=1 FROM cfg.ColumnDef c $draftGuard AND c.DataType=6 AND NOT EXISTS (SELECT 1 FROM doc.CellValue cv WHERE cv.ColumnDefId=c.Id)") @{ i = $hiD.id; v = $vid })
+                        if ($nC -ne 1) { throw "Колонка $($tb.code).$($c.code): Formula -> Calculated не застосовано (не чернетка або є значення)." }
+                        $d474.toCalculated++; $toCalculated += "$($tb.code).$($c.code)"
+                        $d474.unformula += [int](Sql-Exec $cn ("UPDATE f SET IsDeleted=1 FROM cfg.FormulaDef f JOIN cfg.ColumnDef c ON c.Id=f.ColumnDefId JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId JOIN cfg.TemplateVersion v ON v.Id=s.TemplateVersionId WHERE c.Id=@i AND v.Id=@v AND v.Status=0 AND f.IsDeleted=0") @{ i = $hiD.id; v = $vid })
                     }
                 }
             }
@@ -794,6 +802,8 @@ function Fill-StructureSql([int]$vid) {
         foreach ($k in @($unitSet | Select-Object -First 30)) { Log "    одиниця: $k" }
         Log ("  вихід методології -> формула таблиці (чернетка-клон): колонок {0}, знято прив'язок {1}" -f $d474.toFormula, $d474.unbound)
         foreach ($k in @($toFormula | Select-Object -First 30)) { Log "    формула: $k" }
+        Log ("  формула таблиці -> вихід методології (чернетка-клон, P-1124-2): колонок {0}, знято формул {1}" -f $d474.toCalculated, $d474.unformula)
+        foreach ($k in @($toCalculated | Select-Object -First 30)) { Log "    вихід методології: $k" }
         $dt = New-Object System.Data.DataTable
         foreach ($n in 'TableDefId:int', 'Code:string', 'HeaderL10n:string', 'Ordinal:int', 'DataType:byte', 'Precision:byte', 'Scale:byte', 'IsReadOnly:bool', 'IsRequired:bool',
             'IsHidden:bool', 'IsMonthColumn:bool', 'MonthNumber:byte', 'DefaultValue:string', 'LookupRegistryDefId:int', 'UnitId:int', 'IsBusinessKey:bool', 'IsScopeField:bool', 'IsIndexed:bool', 'IsDeleted:bool') {
@@ -1634,6 +1644,12 @@ function Stage-Methodologies {
     $ms = Items (Api GET '/api/v1/methodologies').Json
     if (-not ($ms | Where-Object { $_.code -eq 'ECW_C05_01' })) {
         $pkg = Get-Content -LiteralPath $afFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        # P-1124-1: імпорт пакета AF заводить формульні чернетки, а формульний авторинг у продукті вимкнено -
+        # стенд збирання має бути піднятий з ECR_Calculations__FormulaEngineAuthoring__Enabled=true.
+        $probe = Invoke-Ecr -Method POST -Path '/api/v1/methodologies/import?dryRun=true&timeZone=Asia%2FAtyrau' -Body $pkg
+        if ([string]$probe.Text -match 'formulaEngineRetired') {
+            throw 'Стенд відхиляє формульний авторинг (err.ECR-CALC-0422.formulaEngineRetired): підніміть API з ECR_Calculations__FormulaEngineAuthoring__Enabled=true для збирання Land з AF.'
+        }
         $dry = Api POST '/api/v1/methodologies/import?dryRun=true&timeZone=Asia%2FAtyrau' $pkg
         Log ("  dry-run імпорту: outcome={0}" -f $dry.Json.outcome)
         $imp = Api POST '/api/v1/methodologies/import?dryRun=false&timeZone=Asia%2FAtyrau' $pkg
@@ -1865,6 +1881,8 @@ function Bind-ResultColumns($mid) {
                     $v = $vers | Sort-Object id -Descending | Select-Object -First 1
                     $codes = @{}
                     foreach ($f in @(Items (Api GET "/api/v1/methodologies/$m/versions/$([int]$v.id)/formulas").Json)) { $codes[[string]$f.code] = $true }
+                    # ✎ P-1124-2: версія на ECR Script формул не має — виходи беруться з матеріалізованого складу (outputs) версії.
+                    foreach ($f in @(Items (Api GET "/api/v1/methodologies/$m/versions/$([int]$v.id)/outputs").Json)) { $codes[[string]$f.code] = $true }
                     # B5: наявні прив'язки - одним GET; PUT лише відсутніх/змінених (8 тис. місячних прив'язок YearMonths, повтор - 0 PUT)
                     $have = @{}
                     foreach ($b in @(Items (Api GET "/api/v1/methodologies/$m/bindings").Json)) { $have["$([int]$b.columnDefId)|$([string]$b.outputCode)"] = $b }

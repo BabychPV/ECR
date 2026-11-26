@@ -364,25 +364,18 @@ public sealed class SubmitApproveTests
     /// </remarks>
     private readonly INotificationOutbox _outbox = Substitute.For<INotificationOutbox>();
 
-    /// <summary>Побудовник зрізів звітності — предмет `H-23b`.</summary>
-    private readonly IReportSnapshotBuilder _reportSnapshots = Substitute.For<IReportSnapshotBuilder>();
-
     private readonly IDocumentStore _documents = Substitute.For<IDocumentStore>();
     private readonly IMetadataCache _metadata = Substitute.For<IMetadataCache>();
 
     /// <summary>Шапка документа — тести цього файлу її не читають.</summary>
     private readonly IDocumentHeaderStore _headers = CreateHeaderStore();
 
-    /// <summary>Проведення стану аркушів у зрізи звітності.</summary>
-    private Ecr.Application.Reporting.ReportSnapshotSync Reports()
-        => new(_reportSnapshots, _documents);
-
     private SubmitSheetHandler Submit(
         SheetWorkflowNotifier? notifier = null, Ecr.Application.Recalculation.ISubmitRecalculation? recalculation = null)
         => new(_cells, _rows, _workflow, _documents, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                _headers,
-               Reports(), _uow, _user, _clock, Substitute.For<ISheetEditGate>(),
+               _uow, _user, _clock, Substitute.For<ISheetEditGate>(),
                recalculation ?? NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
                _methodologies,
                _versions,
@@ -417,9 +410,9 @@ public sealed class SubmitApproveTests
 
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
 
-    private ApproveSheetHandler Approve() => new(_workflow, _access, Reports(), _uow, _user, _clock, _audit, _documents);
+    private ApproveSheetHandler Approve() => new(_workflow, _access, _uow, _user, _clock, _audit, _documents);
 
-    private ReopenDocumentHandler Reopen() => new(_workflow, _access, _uow, _user, _clock, _documents, Reports());
+    private ReopenDocumentHandler Reopen() => new(_workflow, _access, _uow, _user, _clock, _documents);
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Requirement", "ФВ-3.2")]
@@ -472,33 +465,6 @@ public sealed class SubmitApproveTests
         await _outbox.DidNotReceive().EnqueueAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<string?>(), Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Finding", "H-23b")]
-    public async Task Подання_морозить_зріз_звітності_за_період()
-    {
-        // ⛔ Регресія: подання знову перестає доходити до зрізу. Ніщо не
-        // падає — просто `ER-C-11` («подане не перераховується») знову
-        // тримається на позначці, якої не ставить ніхто, і зріз за поданим
-        // звітом одного дня перебудується з іншими числами (ФВ-9.17).
-        _documents.FindProjectIdAsync(Document, Arg.Any<CancellationToken>()).Returns(3);
-
-        _reportSnapshots.ListAsync(3, Period, null, Arg.Any<CancellationToken>())
-            .Returns([
-                new ReportSnapshotSummary(
-                    55, ReportVersionId: 1, ProjectId: 3, PeriodKey: Period,
-                    Status: nameof(SnapshotStatus.Draft), IsCurrent: true,
-                    RowCount: 10, ContentHash: null, BuiltAt: Now),
-            ]);
-
-        _reportSnapshots.RefreshStatusAsync(55, Arg.Any<CancellationToken>())
-            .Returns(SnapshotStatus.Submitted);
-
-        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
-
-        await _reportSnapshots.Received(1).MarkSubmittedAsync(55, 9, Arg.Any<CancellationToken>());
     }
 
     // ──────────────────────────── Погодження ──────────────────────────
@@ -587,7 +553,7 @@ public sealed class SubmitApproveTests
             ]);
         var refresh = new ApprovalSnapshotRefresh(
             Substitute.For<ISheetEditGate>(), _cells, _rows, _documents, _metadata, _headers, _workflow, recalculation);
-        var handler = new ApproveSheetHandler(_workflow, _access, Reports(), _uow, _user, _clock, _audit, _documents, refresh);
+        var handler = new ApproveSheetHandler(_workflow, _access, _uow, _user, _clock, _audit, _documents, refresh);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => handler.HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None));

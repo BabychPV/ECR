@@ -34,6 +34,7 @@ import { useEditAssignmentsAction } from '@/features/editAssignments/EditAssignm
 import { documentLockOf, hasLockedSheet, locksDataActions } from '@/features/documents/documentLock';
 import { useDocumentPeriodReopen } from '@/features/documents/periodReopen/useDocumentPeriodReopen';
 import { DocumentProgress } from '@/features/documents/DocumentProgress';
+import { yearStateOfPeriods } from '@/features/documents/documentSheets';
 import { permitRowWarningsOf, publishRowFindings } from '@/features/grid/rowAttentionStore';
 import type { HeldEdit } from '@/features/grid/pendingStore';
 import { editsDeferToServer, isEditable } from '@/features/workflow/sheetEditability';
@@ -151,9 +152,10 @@ const PeriodPicker = lazy(async () => ({ default: (await loadPeriodPicker()).Per
 const YearMonthReopen = lazy(async () => ({
   default: (await import('@/features/documents/periodReopen/YearMonthReopen')).YearMonthReopen,
 }));
-// ✎ L7c: банер усіх відкритих для документа місяців року — окремим чанком і лише коли такі є (D-132).
-const YearReopenedBanner = lazy(async () => ({
-  default: (await import('@/features/documents/periodReopen/YearReopenedBanner')).YearReopenedBanner,
+// ✎ b14 doc-notices-compact (замість банера-списку L7c): відкриті для документа місяці року — один чип у шапці,
+// окремим чанком і лише коли такі є (D-132).
+const ReopenedMonthsChip = lazy(async () => ({
+  default: (await import('@/features/documents/periodReopen/ReopenedMonthsChip')).ReopenedMonthsChip,
 }));
 /*
  * B113: заглушка — та сама коробка, що й сам вибір періоду (`.ecr-period`: висота `--ecr-ctl-height`, 28/36 px за
@@ -180,8 +182,9 @@ const ExecutorStrip = lazy(async () => ({
 }));
 // ✎ B78: ОДНА панель «Проблеми розрахунку» замість банерів «Formula errors» і «Some rows are not included» — лінива,
 // як були вони (бюджет маршруту 250 КБ, D-132).
-const CalculationIssuesPanel = lazy(async () => ({
-  default: (await import('@/features/documents/CalculationIssuesPanel')).CalculationIssuesPanel,
+// ✎ b14 doc-notices-compact: панелі місяців зведено в ОДНУ смугу (панелі — її «Technical details»), той самий чанк-підхід.
+const CalculationIssuesStrip = lazy(async () => ({
+  default: (await import('@/features/documents/calcIssuesStrip/CalculationIssuesStrip')).CalculationIssuesStrip,
 }));
 
 // Місце банера перерахунку проєкту (lane A) — за `import()`, як на Documents: хук опитування задач і модель
@@ -961,6 +964,39 @@ export function DocumentPage(): JSX.Element {
     if (layoutKnown && !yearLayout && focusMonth !== null) setFocusMonth(null);
   }, [layoutKnown, yearLayout, focusMonth, setFocusMonth]);
 
+  /*
+   * ✎ b14 documents-board-yearly (людина 25.11): «Sheet: Draft» без місяця не казав, ЧИЙ це стан — у документі «рік»
+   * це був стан аркуша за ЯКІР (січень), хоч документ «Partly submitted», а вересень перевідкрито. Тепер чип каже період:
+   * - «рік»: стан аркуша ЗА РІК — зведення станів місяців (`submission-target.monthColumns`, той самий запит і ключ, що в
+   *   рядку дій) по розпочатих місяцях тим самим правилом, що й стан документа за рік у переліку (`yearStateOfPeriods`);
+   *   місяців немає (річний проєкт без місячних колонок, збій, ще в дорозі) — стан якоря з назвою його місяця;
+   * - копія на місяць: «September 2026», а місяць, відкритий лише для цього документа, — «· Reopened for this document».
+   */
+  const yearSheetTarget = useQuery({
+    queryKey: submissionTargetKey(documentId, active?.sheetDefId ?? 0, periodKey, active?.sheetCopyId ?? null),
+    queryFn: () => fetchSubmissionTarget(documentId, active?.sheetDefId ?? 0, periodKey, active?.sheetCopyId ?? null),
+    enabled: yearLayout && active !== undefined && yearAnchor === periodKey,
+  });
+  const yearSheetMonths = useMemo(() => {
+    const columns = yearLayout && Array.isArray(yearSheetTarget.data?.monthColumns) ? yearSheetTarget.data.monthColumns : [];
+    const byKey = new Map<number, string>();
+    for (const column of columns) if (!byKey.has(column.periodKey)) byKey.set(column.periodKey, column.sheetStatus);
+    return [...byKey].map(([key, value]) => ({ periodKey: key, state: value }));
+  }, [yearLayout, yearSheetTarget.data]);
+  const startedYearMonths = useMemo(() => new Set(openYearMonths), [openYearMonths]);
+  const sheetYearState =
+    yearSheetMonths.length > 0 && calendar.data !== undefined ? yearStateOfPeriods(yearSheetMonths, startedYearMonths) : undefined;
+  const periodReopenedForDocument =
+    !yearLayout &&
+    calendar.data?.periods?.find((period) => period.periodKey === periodKey)?.state === 'Closed' &&
+    periodReopen.periodState === 'Grace';
+  const sheetStateScope =
+    sheetYearState !== undefined
+      ? t('calcResults.yearChip', { year: Math.trunc(periodKey / 100) })
+      : `${formatPeriodKey(periodKey, (summary.data ?? baseSummary.data)?.periodKind ?? undefined)}${
+          periodReopenedForDocument ? ` · ${t('documents.strip.reopened')}` : ''
+        }`;
+
   const refetchBoth = (): void => {
     void summary.refetch();
     void tables.refetch();
@@ -1057,10 +1093,21 @@ export function DocumentPage(): JSX.Element {
             // CALC-RESULTS (макет, варіант A): «Year YYYY» замість перемикача місяця (L7a: меню «Calculated» прибрано).
             <Group gap="xs" wrap="nowrap">
               <YearLayoutChips periodKey={periodKey} />
+              {/* ✎ b14 doc-notices-compact: відкриті для документа місяці року — чип із діапазонами (замість банера-списку). */}
+              {(summary.data?.reopenedPeriods?.length ?? 0) > 0 && (
+                <Suspense fallback={null}>
+                  <ReopenedMonthsChip periods={summary.data?.reopenedPeriods ?? []} timeZoneId={calendar.data?.timeZoneId} />
+                </Suspense>
+              )}
               {/* ✎ LAND-YEAR L7a: відкрити закритий МІСЯЦЬ року для цього документа — вибір місяця замість ?periodKey. */}
               {yearReopenMonths !== null && (
                 <Suspense fallback={null}>
-                  <YearMonthReopen documentId={documentId} months={yearReopenMonths} timeZoneId={calendar.data?.timeZoneId} />
+                  <YearMonthReopen
+                    documentId={documentId}
+                    months={yearReopenMonths}
+                    timeZoneId={calendar.data?.timeZoneId}
+                    reopened={(summary.data?.reopenedPeriods ?? []).map((period) => period.periodKey)}
+                  />
                 </Suspense>
               )}
             </Group>
@@ -1131,6 +1178,8 @@ export function DocumentPage(): JSX.Element {
                   onShowIssues={() => undefined}
                   // ✎ B143 (B75): шаблон без подання й затвердження — «No approval» замість стану аркуша.
                   workflowOff={document.workflowMode === 'None'}
+                  stateScope={sheetStateScope}
+                  stateOverride={sheetYearState}
                 />
                 <DocumentSaveState readOnly={gridReadOnly} periodKey={periodKey} />
                 {/* ✎ D-446: застарілість не визначена — частину документа читачеві закрито (те саме, що в рядку переліку). */}
@@ -1141,23 +1190,24 @@ export function DocumentPage(): JSX.Element {
         </Suspense>
       )}
 
-      {/* ✎ B78: помилки формул (C-1, блокують подання) і рядки поза розрахунком — одна панель, рядок на причину. */}
-      {/* ✎ W15z M4: «рік» — панель на кожен місяць із проблемами (заголовок називає місяць). */}
-      {issuePanels.map((month) => (
-        <Suspense key={month.periodKey} fallback={null}>
-          <CalculationIssuesPanel
+      {/* ✎ B78: помилки формул (C-1, блокують подання) і рядки поза розрахунком — рядок на причину.
+          ✎ b14 doc-notices-compact: усі місяці (W15z M4: «рік» — кожен місяць із проблемами) — ОДНА смуга в рядок,
+          згорнута; «Details» — матриця «причина × місяць», панелі місяців — у її «Technical details». Поки чанк
+          вантажиться, місце тримає коробка висоти смуги (сітка не стрибає). */}
+      {issuePanels.length > 0 && (
+        <Suspense fallback={<div style={{ height: 32 }} aria-hidden="true" />}>
+          <CalculationIssuesStrip
             userId={session.data?.userId}
             documentId={can(session.data, 'Calculation.View') ? documentId : undefined}
-            periodKey={month.periodKey}
-            rows={month.rows}
+            months={issuePanels}
             tables={tables.data ?? []}
             onOpenCell={openUnmatchedRow}
-            onOpenHse400={() => openHse400(month.periodKey)}
+            onOpenHse400={openHse400}
             onOpenSource={openSource}
             narrow={narrow}
           />
         </Suspense>
-      ))}
+      )}
 
       {projectId !== null && (
         <Suspense fallback={null}>
@@ -1174,14 +1224,9 @@ export function DocumentPage(): JSX.Element {
         </Suspense>
       )}
 
-      {/* ✎ L7c: «рік» — усі відкриті місяці року з картки; банер якоря (лише січень) тут не показується. */}
-      {yearLayout
-        ? (summary.data?.reopenedPeriods?.length ?? 0) > 0 && (
-            <Suspense fallback={null}>
-              <YearReopenedBanner periods={summary.data?.reopenedPeriods ?? []} timeZoneId={calendar.data?.timeZoneId} />
-            </Suspense>
-          )
-        : periodReopen.banner}
+      {/* ✎ L7c → b14 doc-notices-compact: «рік» — відкриті місяці року лише чипом у шапці (банер-список прибрано);
+          копія на місяць — банер свого місяця, як було (у ньому причина й хто відкрив). */}
+      {yearLayout ? null : periodReopen.banner}
       {periodReopen.dialog}
 
       {/* EA-5b: передача місяця - «Місяць передано вам», «Заповнено», коментар повернення. Права комірок рішає сервер. */}

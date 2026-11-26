@@ -286,6 +286,18 @@ export function cellChangesQuery(filter: CellChangeFilter): string {
 }
 
 /**
+ * ✎ AC-8: рядок запиту `GET /audit/cells/columns` — колонки документа, змінені у вікні (варіанти фільтра «Column»).
+ * Вікно — ті самі межі доби в поясі браузера, що й у переліку (`windowStart`/`windowEnd`).
+ */
+export function cellChangeColumnsQuery(from: string, to: string, documentId: number): string {
+  const params = new URLSearchParams();
+  params.set('from', windowStart(from));
+  params.set('to', windowEnd(to));
+  params.set('documentId', String(documentId));
+  return params.toString();
+}
+
+/**
  * Рядок запиту CSV-експорту журналу комірок: ті самі фільтри й порядок, що в переліку, БЕЗ `limit` і `cursor` —
  * експорт віддає всю видачу фільтра (до стелі сервера), а не сторінку.
  */
@@ -500,6 +512,41 @@ export function securityEventsQuery(filter: SecurityEventFilter): string {
   }
 
   return params.toString();
+}
+
+/** Рядок запиту типів подій безпеки за вікном — та сама межа вікна, що в переліку (`windowStart`/`windowEnd`). */
+export function securityEventTypesQuery(from: string, to: string): string {
+  const params = new URLSearchParams();
+  params.set('from', windowStart(from));
+  params.set('to', windowEnd(to));
+
+  return params.toString();
+}
+
+/**
+ * ✎ P-1124-4: типи подій безпеки, що є у вікні, — варіанти фільтра «Event type». Поле було вільним текстом із
+ * ТОЧНИМ збігом коду на сервері (`EventType = @eventType`): набране «Access denied» чи «access» давало порожній
+ * журнал, а коду `AccessDenied` людина не знає.
+ */
+export function useSecurityEventTypes(from: string, to: string): UseQueryResult<string[]> {
+  const query = securityEventTypesQuery(from, to);
+
+  return useQuery({
+    queryKey: ['audit-security-event-types', query],
+    queryFn: () => apiFetch<string[]>(`/api/v1/audit/security/event-types?${query}`),
+    staleTime: 60 * 1000,
+  });
+}
+
+/** ✎ P-1124-4: типи сутностей журналу структурних змін у вікні — варіанти фільтра «Entity type» (те саме, що вище). */
+export function useStructureEntityTypes(from: string, to: string): UseQueryResult<string[]> {
+  const query = securityEventTypesQuery(from, to);
+
+  return useQuery({
+    queryKey: ['audit-structure-entity-types', query],
+    queryFn: () => apiFetch<string[]>(`/api/v1/audit/structure/entity-types?${query}`),
+    staleTime: 60 * 1000,
+  });
 }
 
 // ✎ W-3: журнали безпеки, структури й погодження читаються сторінками — `journalPages.ts`.

@@ -135,6 +135,131 @@ public sealed class AuditSecurityEventsTests(SqlServerFixture sql)
         Assert.Contains("audit/security",evt.GetProperty("detailsJson").GetString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-5.24")]
+    public async Task Типи_подій_у_вікні_для_вибору_у_фільтрі_і_той_самий_поріг_права()
+    {
+        // ✎ P-1124-4: «Event type» був вільним текстом із ТОЧНИМ збігом коду — людина не знає `AccessDenied`.
+        using var app = new EcrApiFactory(sql);
+        var (auditor, _) = await LoginAsync(app, "et", ["Security.ViewAudit"]);
+        var (stranger, _) = await LoginAsync(app, "en", ["Template.Edit"]);
+
+        var inside = $"T{_tag}E";
+        await WriteAsync(inside, 1);
+        await WriteAsync(inside, 2);
+
+        var from = DateTime.UtcNow.AddDays(-1);
+        var to = DateTime.UtcNow.AddMinutes(1);
+        var response = await auditor.GetAsync(new Uri(TypesUrl(from, to), UriKind.Relative));
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {app.ErrorsText}");
+
+        // ⛔ Мутація: прибрати `DISTINCT` — тип прийде двічі.
+        var types = (await response.Content.ReadFromJsonAsync<List<string>>())!;
+        Assert.Single(types, t => t == inside);
+
+        // ⛔ Мутація: прибрати вікно з запиту — тип із вікна в минулому теж приїде.
+        var past = await auditor.GetAsync(new Uri(TypesUrl(from.AddDays(-30), from.AddDays(-29)), UriKind.Relative));
+        Assert.DoesNotContain(inside, (await past.Content.ReadFromJsonAsync<List<string>>())!);
+
+        // ⛔ Мутація: прибрати перевірку права в `EventTypesAsync` — стане 200.
+        Assert.Equal(HttpStatusCode.Forbidden, (await stranger.GetAsync(new Uri(TypesUrl(from, to), UriKind.Relative))).StatusCode);
+
+        // ⛔ Мутація: прибрати `AuditWindow.Require` — рік читав би кожну партицію.
+        Assert.Equal(
+            HttpStatusCode.UnprocessableEntity,
+            (await auditor.GetAsync(new Uri(TypesUrl(to.AddDays(-365), to), UriKind.Relative))).StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-5.24")]
+    public async Task Автори_для_фільтра_за_правом_аудиту_без_ManageUsers_і_без_логіна()
+    {
+        // ✎ P-1124-4: «By user» брав перелік із `GET /users` (лише `Security.ManageUsers`) — в аудитора порожньо.
+        using var app = new EcrApiFactory(sql);
+        var (auditor, auditorId) = await LoginAsync(app, "ab", ["Security.ViewAudit"]);
+        var (stranger, _) = await LoginAsync(app, "an", ["Template.Edit"]);
+
+        var response = await auditor.GetAsync(new Uri("/api/v1/audit/authors", UriKind.Relative));
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {app.ErrorsText}");
+
+        var authors = (await response.Content.ReadFromJsonAsync<JsonElement>()).EnumerateArray().ToList();
+        var self = Assert.Single(authors, a => a.GetProperty("userId").GetInt32() == auditorId);
+        Assert.Equal($"audse_ab_{_tag}", self.GetProperty("displayName").GetString());
+
+        // ⛔ R-A2/D-86: номер, ім'я й поле логіна — для унікального імені порожнє (AC-7); SID і e-mail не віддаються.
+        Assert.Equal(
+            ["displayName", "login", "userId"], self.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(JsonValueKind.Null, self.GetProperty("login").ValueKind);
+
+        // ⛔ Мутація: прибрати перевірку права в `AuthorsAsync` — стане 200 (перелік людей кожному).
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            (await stranger.GetAsync(new Uri("/api/v1/audit/authors", UriKind.Relative))).StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-5.24")]
+    public async Task Автори_з_однаковим_ім_ям_отримують_логін_а_унікальні_ні_за_тим_самим_правом()
+    {
+        // ✎ AC-7 (audit-filters-contract): однакові імена (тимчасові акаунти вікон) у «By user» розрізнялись лише «#id».
+        using var app = new EcrApiFactory(sql);
+        var (auditor, auditorId) = await LoginAsync(app, "ac", ["Security.ViewAudit"]);
+        var (manager, _) = await LoginAsync(app, "am", ["Security.ManageUsers"]);
+
+        var twin = $"Twin {_tag}";
+        var first = await AddUserAsync($"audtw1_{_tag}", twin);
+        var second = await AddUserAsync($"audtw2_{_tag}", twin);
+        var unique = await AddUserAsync($"audun_{_tag}", $"Unique {_tag}");
+
+        // Ім'я, що відрізняється лише регістром, — не збіг: клієнт розрізняє такі імена й без логіна.
+        var cased = await AddUserAsync($"audca_{_tag}", $"twin {_tag}");
+
+        var response = await auditor.GetAsync(new Uri("/api/v1/audit/authors", UriKind.Relative));
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {app.ErrorsText}");
+        var body = await response.Content.ReadAsStringAsync();
+        var authors = JsonDocument.Parse(body).RootElement.EnumerateArray()
+            .ToDictionary(a => a.GetProperty("userId").GetInt32());
+
+        // ⛔ Мутація: прибрати відсів за збігом у `WithLoginsOnCollision` (логін кожному) — унікальні отримають логін.
+        Assert.Equal($"audtw1_{_tag}", authors[first].GetProperty("login").GetString());
+        Assert.Equal($"audtw2_{_tag}", authors[second].GetProperty("login").GetString());
+        Assert.Equal(JsonValueKind.Null, authors[unique].GetProperty("login").ValueKind);
+        Assert.Equal(JsonValueKind.Null, authors[cased].GetProperty("login").ValueKind);
+        Assert.Equal(JsonValueKind.Null, authors[auditorId].GetProperty("login").ValueKind);
+        Assert.DoesNotContain($"audun_{_tag}", body, StringComparison.Ordinal);
+        Assert.DoesNotContain($"audca_{_tag}", body, StringComparison.Ordinal);
+
+        // Право не змінилося: без `Security.ViewAudit` — 403, і `Security.ManageUsers` його не замінює.
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            (await manager.GetAsync(new Uri("/api/v1/audit/authors", UriKind.Relative))).StatusCode);
+    }
+
+    /// <summary>Користувач без ролей (локальний — з паролем, <c>CK_User_Provider</c>) — лише ім'я й логін у переліку авторів.</summary>
+    private async Task<int> AddUserAsync(string login, string displayName)
+    {
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+
+        var user = new User(login, displayName, AuthProvider.Local);
+        user.SetPassword(new PasswordHasher().Hash(Password));
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        return user.Id;
+    }
+
+    private static string TypesUrl(DateTime from, DateTime to)
+        => "/api/v1/audit/security/event-types"
+           + $"?from={Uri.EscapeDataString(from.ToString("O", CultureInfo.InvariantCulture))}"
+           + $"&to={Uri.EscapeDataString(to.ToString("O", CultureInfo.InvariantCulture))}";
+
     private static string Url(string filters)
         => Url(filters, DateTime.UtcNow.AddDays(-1), DateTime.UtcNow.AddMinutes(1), 50);
 

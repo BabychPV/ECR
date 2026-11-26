@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Configuration;
@@ -26,9 +26,12 @@ public sealed class ContractIntegrityTests
     /// побудовою. Кожна фонова задача — окрема реалізація, і їх рівно стільки,
     /// скільки задач (архівація, збір, перевірка інваріантів, стан періодів,
     /// сповіщення, запас партицій, пошук осиротілих рядків).
+    ///
+    /// ✎ P-1126-SRCCRED: <c>IConnectionPoolReset</c> — по реалізації на кожен драйвер (SqlClient і ODBC), резолвиться
+    /// колекцією: після заміни пароля джерела скидаються пули ВСІХ драйверів процесу (R-20).
     /// </remarks>
     private static readonly string[] Plural =
-        ["IExternalDataSource", "ICalculationModule", "IBackgroundJob"];
+        ["IExternalDataSource", "ICalculationModule", "IBackgroundJob", "IConnectionPoolReset"];
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -99,6 +102,8 @@ public sealed class ContractIntegrityTests
     /// ⚠ <c>ECR-SCHM-0409</c> зі списку ПІШОВ: ФВ-7.4 доведена до відмови
     /// операції в <c>PatchPresentationHandler</c>. Саме так цей список і має
     /// коротшати — не правкою «щоб зелене», а виконаною вимогою.
+    ///
+    /// ✎ P-1124-3 (D-NEW, людина 24.11): коди <c>ECR-RPT-*</c> прибрано з каталогу разом із конструктором звітів і зрізами.
     /// </remarks>
     private static readonly string[] ReservedCodes =
         ["ECR-CELL-4222"];

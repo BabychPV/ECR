@@ -379,6 +379,7 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
   });
   await page.reload();
   // ✎ B78: одна панель «Проблеми розрахунку» — причина «немає входних даних» рядком з бейджем; перелік — у деталях.
+  await revealCalcPanels(page);
   const panel = page.getByTestId('document-calc-issues');
   await expect(panel).toBeVisible({ timeout: 60_000 });
   const cause = page.getByTestId('document-calc-issue');
@@ -406,4 +407,17 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
   const calcItem = page.locator(`[role="treeitem"][data-tree-table]`, { hasText: 'Calculated table' });
   await expect(calcItem).toHaveAttribute('aria-selected', 'true', { timeout: 30_000 });
   await expect(page.locator('.ecr-cell-nav-target'), 'підсвічена комірка рядка').toHaveCount(1, { timeout: 30_000 });
+}
+
+/**
+ * ✎ b14 doc-notices-compact: проблеми розрахунку над сіткою — ОДНА смуга, згорнута; панелі місяців — у її «Details →
+ * Technical details». Розгорнути обидва рівні (Details пам'ятається між відкриттями, Technical details — ні).
+ */
+async function revealCalcPanels(page: Page): Promise<void> {
+  const toggle = page.getByTestId('document-calc-strip-toggle');
+  await expect(toggle, 'смуги проблем розрахунку немає').toBeVisible({ timeout: 60_000 });
+  if ((await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click();
+  const technical = page.getByTestId('document-calc-strip-technical-toggle');
+  await expect(technical).toBeVisible();
+  if ((await technical.getAttribute('aria-expanded')) === 'false') await technical.click();
 }

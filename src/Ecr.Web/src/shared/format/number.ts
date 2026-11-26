@@ -152,26 +152,169 @@ interface StringAwareNumberFormat {
  * поведінка решти викликачів не змінюється.
  *
  * ⚠ `number` на вході теж приймається — колонки `Int`/`Lookup` їдуть числами й
- * далі. `String(number)` в експоненційному записі (`1e-7`) `normalizeDecimal`
- * свідомо відхиляє, тож такі значення повертаються як `null` і показуються
- * викликачем як є — рівно так, як їх малювала сітка до цього переходу.
+ * далі. `String(number)` в експоненційному записі (`1e-7`) розгортається в
+ * звичайний дріб (`0.0000001`) зсувом коми — без нових цифр (картка
+ * number-format-consistent, 25.11: експоненти на екрані не показуються).
  */
 export function formatDecimal(
   value: unknown,
-  lang?: Language,
-  maxFractionDigits: number = MaxIntlFractionDigits,
-  minFractionDigits = 0,
+  ...rest: [lang?: Language, maxFractionDigits?: number, minFractionDigits?: number]
 ): string | null {
+  return formatDecimalExact(value, ...rest);
+}
+
+/** Значущих цифр у читабельному поданні за замовчуванням (людина 25.11: «6–8 значущих»). */
+export const ReadableSignificantDigits = 7;
+
+/**
+ * Групування тисяч у поданні (картка number-format-consistent, 25.11: «75,435.96» поруч із «9363.267» в одному
+ * стовпці читалося як два різні формати).
+ *
+ * - `'always'` — від 1 000 (`9,363.267`): стовпець таблиці, де є хоч одна ціла частина ≥ 10 000 (`columnGrouping`);
+ * - `'never'` — ніде: поля вводу (набране не змішується з розділювачами) і стовпці без великих значень (рік/код `2031`);
+ * - `'min2'` — від 10 000 (окреме значення поза стовпцем; поведінка до цієї картки).
+ */
+export type DecimalGrouping = 'always' | 'never' | 'min2';
+
+/** Межа, від якої стовпець групується цілком: ціла частина з п'яти цифр. */
+const ColumnGroupingFrom = 5;
+
+/**
+ * Правило групування для СТОВПЦЯ таблиці: `'always'`, якщо хоч одне значення (разом із підсумком, якщо він у тому ж
+ * стовпці) має цілу частину ≥ 10 000 за модулем, інакше `'never'`. Так стовпець має розділювач тисяч скрізь або ніде,
+ * і «скорочене» значення не відрізняється виглядом від нескороченого. Нечислові й порожні — не враховуються.
+ */
+export function columnGrouping(values: Iterable<unknown>): 'always' | 'never' {
+  for (const value of values) {
+    const plain = plainDecimal(value);
+    if (plain === null) continue;
+    const integer = (plain.startsWith('-') ? plain.slice(1) : plain).split('.')[0] ?? '';
+    if (integer.length >= ColumnGroupingFrom) return 'always';
+  }
+  return 'never';
+}
+
+/**
+ * Точний канонічний десятковий рядок БЕЗ експоненти й без локалі (`'0.0000008700'` → `'0.00000087'`, `8.7e-7` →
+ * `'0.00000087'`); `null` — не десяткове. Для початкового тексту полів вводу й порівнянь: не округлює, не групує.
+ */
+export function plainDecimal(value: unknown): string | null {
   const text =
     typeof value === 'string'
       ? value
       : typeof value === 'number' && Number.isFinite(value)
-        ? String(value)
+        ? expandExponent(String(value))
         : null;
+  return text === null ? null : normalizeDecimal(text);
+}
 
-  if (text === null) return null;
+/**
+ * Ввід оператора в експоненті (`1e-9`, `1.397E-9`, `-4,013e-13`) → звичайний десятковий рядок (`0.000000001`) — лише
+ * зсувом коми над цифрами, без `Number` (значення те саме, що набрано). Будь-який інший текст повертається як є: розбір
+ * локалі й помилки вводу лишаються викликачеві.
+ */
+export function expandExponentInput(text: string): string {
+  const match = /^([+-]?)(\d*)(?:[.,](\d*))?[eE]([+-]?\d{1,4})$/.exec(text.trim());
+  if (match === null) return text;
+  const [, sign = '', head = '', tail = '', exp = '0'] = match;
+  if (head.length + tail.length === 0) return text;
+  const digits = head + tail;
+  const point = head.length + Number(exp);
+  const shifted =
+    point <= 0
+      ? `0.${'0'.repeat(-point)}${digits}`
+      : point >= digits.length
+        ? `${digits}${'0'.repeat(point - digits.length)}`
+        : `${digits.slice(0, point)}.${digits.slice(point)}`;
+  const canonical = normalizeDecimal(shifted);
+  if (canonical === null) return text;
+  return sign === '-' && canonical !== '0' ? `-${canonical}` : canonical;
+}
 
-  const canonical = normalizeDecimal(text);
+/**
+ * Стеля дробу для ЧИТАБЕЛЬНОГО подання: ES2023 `Intl` приймає до 100 знаків (Chromium ≥ 106, Node ≥ 20 — обидва
+ * середовища продукту). Потрібна, щоб `1e-25` не стало «0»: без експоненти крихітне значення показується повним дробом.
+ */
+const MaxReadableFractionDigits = 100;
+
+/** Читабельне подання десяткового: що показати, точне значення і чи було округлення. */
+export interface ReadableDecimal {
+  /** Що показати в клітинці/полі без фокуса. */
+  readonly text: string;
+  /** Повне точне значення мовою інтерфейсу (підказка, зчитувач екрана). */
+  readonly exact: string;
+  /** Чи `text` коротший за точне значення (тоді точне — у підказці й на фокусі). */
+  readonly rounded: boolean;
+}
+
+/**
+ * Десяткове для ЧИТАННЯ (людина 25.11, LIVE: «поля обрізають 0.0000000000004013…», «98.0835451945116000»).
+ *
+ * - хвостові нулі зрізано (`98.0835451945116000` → `98.08355`);
+ * - не більше `significant` значущих цифр, але ЦІЛА частина не округлюється ніколи (`123456789.12` →
+ *   `123,456,789`) — значення не може змінити порядок;
+ * - групування тисяч — за `grouping` (`DecimalGrouping`): у таблиці його задає СТОВПЕЦЬ (`columnGrouping`), у полі
+ *   вводу — `'never'`; дефолт `'min2'` (від п'яти цифр) — для окремого значення поза стовпцем;
+ * - БЕЗ експоненти (картка number-format-consistent, 25.11: «8.7E-7», «1.397E-9» поруч із «0.00004283738» читалися як
+ *   різні формати): крихітне — звичайним дробом, `significant` значущих після провідних нулів, до точності сховища
+ *   (`0.0000000000004013`);
+ * - точне значення (`exact`) — для підказки й фокуса: поле на фокусі показує збережений рядок повністю, і
+ *   незмінене значення йде на сервер тим самим рядком (подання не торкається даних).
+ *
+ * ⛔ Усе — над РЯДКОМ (`Intl` приймає рядок, див. `formatDecimalExact`), без `Number(...)`.
+ * `null` — значення не десяткове; викликач показує його як є.
+ */
+export function formatDecimalReadable(
+  value: unknown,
+  significant: number = ReadableSignificantDigits,
+  lang?: Language,
+  grouping: DecimalGrouping = 'min2',
+): ReadableDecimal | null {
+  const canonical = plainDecimal(value);
+  if (canonical === null) return null;
+
+  const unsigned = canonical.startsWith('-') ? canonical.slice(1) : canonical;
+  const [integer = '0', fraction = ''] = unsigned.split('.');
+  const cap = Math.min(fraction.length, MaxReadableFractionDigits);
+  const exact = formatDecimalExact(canonical, lang, cap, 0, grouping, MaxReadableFractionDigits) ?? canonical;
+  const digits = Math.max(1, Math.trunc(significant));
+
+  const leadingZeros = integer === '0' ? (/^0*/.exec(fraction)?.[0].length ?? 0) : 0;
+  const keep =
+    integer === '0'
+      ? Math.min(cap, leadingZeros + digits)
+      : Math.min(cap, Math.max(0, digits - integer.length));
+  const shown = formatDecimalExact(canonical, lang, keep, 0, grouping, MaxReadableFractionDigits) ?? exact;
+  return { text: shown, exact, rounded: keep < fraction.length };
+}
+
+/**
+ * Найкоротший запис `double` (`String(2.5e-7)` = `'2.5e-7'`) — звичайним десятковим (`'0.00000025'`), без нових
+ * цифр: лише зсув коми. Значення, що приїхали числом (стовпці дозволів), інакше `normalizeDecimal` відхилив би.
+ */
+function expandExponent(text: string): string {
+  const match = /^(-?)(\d)(?:\.(\d+))?e([+-]\d+)$/.exec(text);
+  if (match === null) return text;
+  const [, sign = '', head = '', tail = '', exp = '0'] = match;
+  const digits = head + tail;
+  const point = 1 + Number(exp);
+  if (point <= 0) return `${sign}0.${'0'.repeat(-point)}${digits}`;
+  if (point >= digits.length) return `${sign}${digits}${'0'.repeat(point - digits.length)}`;
+  return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
+}
+
+/** Точне подання (див. `formatDecimal`). */
+function formatDecimalExact(
+  value: unknown,
+  lang?: Language,
+  maxFractionDigits: number = MaxIntlFractionDigits,
+  minFractionDigits = 0,
+  grouping?: DecimalGrouping,
+  fractionCap: number = MaxIntlFractionDigits,
+): string | null {
+  // ⚠ Число в експоненті (`1e-7` — найкоротший запис double) розгортається зсувом коми, а не показується як `1e-7`
+  // (картка number-format-consistent): нових цифр не з'являється.
+  const canonical = plainDecimal(value);
   if (canonical === null) return null;
 
   const dot = canonical.indexOf('.');
@@ -180,12 +323,15 @@ export function formatDecimal(
   // ⚠ Доповнення нулями (`minFractionDigits`) робить сам `Intl` над РЯДКОМ —
   // жодного `Number(...).toFixed()`, який з'їв би знаки за 17-ю значущою.
   // Мінімум не перевищує стелю: `Intl` кидає `RangeError`, коли min > max.
-  const ceiling = Math.min(maxFractionDigits, MaxIntlFractionDigits);
+  const ceiling = Math.min(maxFractionDigits, fractionCap);
   const minimum = Math.max(0, Math.min(Math.trunc(minFractionDigits), ceiling));
 
   const format = formatter(formatLocale(lang), {
     minimumFractionDigits: minimum,
     maximumFractionDigits: Math.max(minimum, Math.min(fractionDigits, ceiling)),
+    // ES2023 `useGrouping: 'min2' | 'always' | false` (типи lib ES2022 знають лише boolean). Без `grouping` —
+    // дефолт `Intl` (поведінка `formatDecimal` не змінюється).
+    ...(grouping === undefined ? {} : { useGrouping: (grouping === 'never' ? false : grouping) as unknown as boolean }),
   }) as unknown as StringAwareNumberFormat;
 
   return format.format(canonical);

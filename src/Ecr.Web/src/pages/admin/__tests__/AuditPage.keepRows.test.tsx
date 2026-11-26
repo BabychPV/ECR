@@ -39,7 +39,7 @@ describe('AuditPage: зміна фільтра не прибирає табли�
           return json({ userId: 1, userName: 'a', language: 'en', permissions: [], grants: {}, denies: [], isSimulation: false, simulatedForUserId: null, mustChangePassword: false });
         }
 
-        if (url.includes('documentId=')) {
+        if (url.includes('/api/v1/audit/cells') && url.includes('lateOnly=true')) {
           // Друга сторінка «в дорозі», доки тест її не відпустить.
           await new Promise<void>((resolve) => {
             release = resolve;
@@ -62,7 +62,8 @@ describe('AuditPage: зміна фільтра не прибирає табли�
 
     expect(await screen.findByText('AKT-001')).toBeTruthy();
 
-    fireEvent.change(screen.getByRole('textbox', { name: /audit\.document/ }), { target: { value: '7' } });
+    // ✎ audit-filters-live D2: «Document» — вибір із переліку, тож зміну фільтра дає прапорець «Late edits only».
+    fireEvent.click(screen.getByRole('checkbox', { name: /audit\.lateOnly/ }));
 
     // Застосований фільтр дійшов до запиту…
     await waitFor(() => expect(release).not.toBeNull());

@@ -52,7 +52,6 @@ public sealed partial class ProjectTemplateVersionB74GuardTests
         ["Ecr.Application.Periods.SetCurrentPeriodHandler"] = 1,                       // P2: мітка версії в журналі
         ["Ecr.Application.Periods.PeriodStateCatchUp"] = 1,                            // P2: мітка версії в журналі
         ["Ecr.Infrastructure.Jobs.PeriodStateJob"] = 1,                                // P2: мітка версії в журналі
-        ["Ecr.Infrastructure.Persistence.CalculationResultStore"] = 1,                 // P2: зріз без періоду
         ["Ecr.Infrastructure.Persistence.CollectionStore"] = 1,                        // P2: збір пише в версію шаблону
         ["Ecr.Infrastructure.Persistence.SourceEventMapStore"] = 1,                    // P2
         ["Ecr.Infrastructure.Jobs.ConsistencyCheckJob"] = 1,                           // P2 (P5 - нові перевірки)

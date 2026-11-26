@@ -3,6 +3,7 @@ import { Stack, Text, Title } from '@mantine/core';
 import type { ConsistencyIssue } from '@/api/types';
 import { t } from '@/shared/i18n';
 import { consistencyFindingText } from './consistencyFindingText';
+import { FindingLinks } from './FindingLinks';
 import { KeyValue } from '@/shared/ui/KeyValue';
 import { Timestamp } from '@/shared/ui/Timestamp';
 
@@ -28,6 +29,8 @@ export default function ConsistencyIssueDetail({ issue }: { readonly issue: Cons
           {t('consistency.what')}
         </Title>
         <Text size="sm">{finding.text}</Text>
+        {/* ✎ 24.11: перехід до місця знахідки — документ за період, методологія (з підстановок конверта). */}
+        <FindingLinks message={issue.message} />
         {!finding.translated && (
           <Text size="xs" c="dimmed">
             {t('consistency.messageLanguage')}

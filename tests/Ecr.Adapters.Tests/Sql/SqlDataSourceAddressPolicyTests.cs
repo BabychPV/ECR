@@ -36,7 +36,7 @@ public sealed class SqlDataSourceAddressPolicyTests
     {
         var adapter = new SqlDataSource(StoreWith(endpoint), Substitute.For<ISecretProvider>(), Settings());
 
-        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+        var error = await Assert.ThrowsAsync<SourceNotConfiguredException>(
             () => adapter.ReadAsync(
                 new CollectionRequest(1, 7, "STREAM-1", Midnight, Midnight.AddHours(1), 10),
                 CancellationToken.None));
@@ -61,7 +61,7 @@ public sealed class SqlDataSourceAddressPolicyTests
     {
         var adapter = new SqlDataSource(StoreWith(endpoint), Substitute.For<ISecretProvider>(), Settings());
 
-        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+        var error = await Assert.ThrowsAsync<SourceNotConfiguredException>(
             () => adapter.ReadAsync(
                 new CollectionRequest(1, 7, "STREAM-1", Midnight, Midnight.AddHours(1), 10),
                 CancellationToken.None));

@@ -116,8 +116,7 @@ public sealed class RecalculationJobCoveredDependentsTests(SqlServerFixture sql)
             new UnitOfWork(db),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
-            clock,
-            Substitute.For<IAuditWriter>());
+            clock);
 
     /// <summary>Фаза формул: перше звернення до екземплярів таблиць — «перше читання входів» прогону.</summary>
     private static RecalculationService FormulaService(Action onFirstInputRead)

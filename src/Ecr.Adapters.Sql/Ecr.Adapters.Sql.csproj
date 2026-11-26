@@ -17,4 +17,8 @@
     <PackageReference Include="Microsoft.Data.SqlClient" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Ecr.Adapters.Tests" />
+  </ItemGroup>
+
 </Project>

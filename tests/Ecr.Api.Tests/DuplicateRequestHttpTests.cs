@@ -223,55 +223,6 @@ public sealed partial class DuplicateRequestHttpTests(
         await AssertTwoJobsEachAsync("calc-year-export", first, second, url, body, s.DocumentId).ConfigureAwait(true);
     }
 
-    /// <summary>
-    /// Чинна поведінка: побудова зрізу звіту — задача на кожен запит (<c>BuildReportSnapshotHandler</c>:
-    /// <c>EnqueueAsync</c> без ключа; кожна побудова — новий незмінний зріз). Поточним лишається не більше одного.
-    /// </summary>
-    [Fact]
-    [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Чинна_поведінка_дві_однакові_побудови_зрізу_звіту_ставлять_дві_задачі_поточний_зріз_один()
-    {
-        var s = await ArrangeDocumentAsync(209907).ConfigureAwait(true);
-        var (one, two) = await SignInTwiceAsync(
-            ["Report.EditDefinition", "Report.BuildSnapshot", "Report.ViewRegulatory", "System.ViewHealth", "Document.View"],
-            (ResourceKind.Project, s.ProjectId, GrantLevel.Write)).ConfigureAwait(true);
-        using var first = one;
-        using var second = two;
-
-        var (code, versionId) = await PublishReportAsync(first).ConfigureAwait(true);
-        var url = $"/api/v1/reports/{code}/build";
-        var jobCode = typeof(IReportSnapshotJob).FullName!;
-        var before = await JobCountAsync(jobCode, documentId: null).ConfigureAwait(true);
-
-        // Послідовно — у періоді 209907; одночасно — у 209908 (щоб лічити зрізи окремо).
-        var body = new { projectId = s.ProjectId, periodKey = 209907 };
-        var a = await SendAsync(first, HttpMethod.Post, url, body).ConfigureAwait(true);
-        var b = await SendAsync(first, HttpMethod.Post, url, body).ConfigureAwait(true);
-        Assert.True(a.Status == HttpStatusCode.Accepted && b.Status == HttpStatusCode.Accepted, $"{a}\n{b}\n{App.ErrorsText}");
-
-        var racedBody = new { projectId = s.ProjectId, periodKey = 209908 };
-        var replies = await RaceAsync("report-build", first, second, HttpMethod.Post, url, racedBody).ConfigureAwait(true);
-        Assert.All(replies, r => Assert.True(r.Status == HttpStatusCode.Accepted, $"{r}\n{App.ErrorsText}"));
-
-        var jobIds = new[] { a, b, replies[0], replies[1] }.Select(r => r.Json.GetProperty("jobId").GetString()!).ToList();
-        _created.JobIds.AddRange(jobIds);
-        Assert.Equal(4, jobIds.Distinct(StringComparer.Ordinal).Count());
-        Assert.Equal(before + 4, await JobCountAsync(jobCode, documentId: null).ConfigureAwait(true));
-
-        // Задачі доходять до кінця (успіх чи відмова — не предмет тесту); поточних зрізів — не більше одного на період.
-        foreach (var jobId in jobIds)
-        {
-            output.WriteLine($"JOB report-build {await WaitJobAsync(first, jobId).ConfigureAwait(true)}");
-        }
-
-        foreach (var period in new[] { 209907, 209908 })
-        {
-            var (total, current) = await SnapshotsAsync(versionId, s.ProjectId, period).ConfigureAwait(true);
-            output.WriteLine($"SNAPSHOTS report-build period={period} total={total} current={current}");
-            Assert.True(current <= 1, $"поточних зрізів {current} за період {period}");
-        }
-    }
-
     // ───────────────────────────── маршрут погодження ─────────────────────────────
 
     [Fact]
@@ -512,30 +463,6 @@ public sealed partial class DuplicateRequestHttpTests(
         Assert.Equal(messageKey, reply.MessageKey);
     }
 
-    private async Task<string> WaitJobAsync(HttpClient client, string jobId)
-    {
-        var url = $"/api/v1/jobs/{Uri.EscapeDataString(jobId)}";
-        var state = "?";
-
-        for (var attempt = 0; attempt < 240; attempt++)
-        {
-            var reply = await SendAsync(client, HttpMethod.Get, url, null).ConfigureAwait(false);
-            Assert.True(reply.Status == HttpStatusCode.OK, $"задача {jobId}: {reply}\n{App.ErrorsText}");
-
-            state = reply.Json.GetProperty("state").GetString() ?? "?";
-            if (state is not ("Queued" or "Running"))
-            {
-                // Разом зі станом — повідомлення й код помилки задачі (у вивід тесту).
-                return $"{state} {Text(reply.Json, "errorCode")} {Text(reply.Json, "message")}";
-            }
-
-            await Task.Delay(250).ConfigureAwait(false);
-        }
-
-        Assert.Fail($"задача {jobId} не дійшла до кінця за 60 с (стан {state}).\n{App.ErrorsText}");
-        return state;
-    }
-
     // ───────────────────────────── читання бази ─────────────────────────────
 
     private EcrDbContext Db() => new TestDocumentBuilder(sql.ConnectionString).CreateContext();
@@ -569,16 +496,6 @@ public sealed partial class DuplicateRequestHttpTests(
         return await db.JobProgresses.AsNoTracking()
             .CountAsync(j => j.JobCode == jobCode && (documentId == null || j.DocumentId == documentId))
             .ConfigureAwait(false);
-    }
-
-    private async Task<(int Total, int Current)> SnapshotsAsync(int versionId, int projectId, int periodKey)
-    {
-        await using var db = Db();
-        var flags = await db.ReportSnapshots.AsNoTracking()
-            .Where(x => x.ReportVersionId == versionId && x.ProjectId == projectId && x.PeriodKey == periodKey)
-            .Select(x => x.IsCurrent)
-            .ToListAsync().ConfigureAwait(false);
-        return (flags.Count, flags.Count(f => f));
     }
 
     private async Task<(int Routes, int[] StepRoles)> RouteAsync(int projectId)
@@ -681,37 +598,6 @@ public sealed partial class DuplicateRequestHttpTests(
         await db.SaveChangesAsync().ConfigureAwait(false);
 
         return (registry.Id, $"DQ{tag}", entry.Id);
-    }
-
-    private async Task<(string Code, int VersionId)> PublishReportAsync(HttpClient client)
-    {
-        var code = $"DQ{Guid.NewGuid():N}"[..16];
-        var created = await SendAsync(client, HttpMethod.Post, "/api/v1/reports", new
-        {
-            code,
-            nameL10n = new Dictionary<string, string> { ["en"] = "Duplicate request report" },
-            isRegulatory = true,
-            version = "1.0",
-            columns = new[]
-            {
-                new { code = "DocumentId", kind = "number" },
-                new { code = "OutputCode", kind = "text" },
-                new { code = "Value", kind = "number" },
-            },
-            rules = (object?)null,
-        }).ConfigureAwait(false);
-        Assert.True((int)created.Status is >= 200 and < 300, $"опис звіту: {created}\n{App.ErrorsText}");
-
-        var definitionId = created.Json.GetProperty("id").GetInt32();
-        _created.ReportDefIds.Add(definitionId);
-        var versionId = created.Json.GetProperty("versions")[0].GetProperty("id").GetInt32();
-
-        var published = await SendAsync(
-            client, HttpMethod.Post, $"/api/v1/reports/{definitionId}/versions/{versionId}/publish",
-            new { reason = "публікація для тесту повторних запитів" }).ConfigureAwait(false);
-        Assert.True((int)published.Status is >= 200 and < 300, $"публікація звіту: {published}\n{App.ErrorsText}");
-
-        return (code, versionId);
     }
 
     private async Task<string> PublishPermitTypeAsync(HttpClient client)

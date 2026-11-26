@@ -463,6 +463,13 @@ public static partial class ScriptParser
 
         private ItemSyntax ParseItem()
         {
+            // ✎ §5.2a: `registry as of <вираз>;` — контекстні слова, не ключові: ідентифікатор `registry` деінде
+            // лишається звичайним іменем, а на місці оператора ідентифікатор і досі помилка.
+            if (IsRegistryAsOf())
+            {
+                return ParseRegistryAsOf();
+            }
+
             if (Cur.Kind == ScriptTokenKind.Keyword)
             {
                 switch (Cur.Text)
@@ -485,6 +492,21 @@ public static partial class ScriptParser
             }
 
             return ParseStatement();
+        }
+
+        private bool IsRegistryAsOf()
+            => Cur is { Kind: ScriptTokenKind.Identifier, Text: "registry" }
+               && PeekTok(1) is { Kind: ScriptTokenKind.Identifier, Text: "as" }
+               && PeekTok(2) is { Kind: ScriptTokenKind.Identifier, Text: "of" };
+
+        private RegistryAsOfSyntax ParseRegistryAsOf()
+        {
+            var first = Advance();
+            Advance();
+            Advance();
+            var date = ParseExpr();
+            Expect(ScriptTokenKind.Semicolon, "';'");
+            return new RegistryAsOfSyntax(date, SpanFrom(first));
         }
 
         private TableRef ParseTableRef()

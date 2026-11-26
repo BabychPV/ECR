@@ -1,11 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { MethodologyDraftVersionDto } from '@/api/types';
-import {
-  createMethodologyVersion,
-  deleteMethodologyFormula,
-  saveMethodologyFormula,
-} from '@/features/methodologies/api';
-import { defaultVersion, formulaBody, mayEditContent } from '@/features/methodologies/draft';
+import { createMethodologyVersion } from '@/features/methodologies/api';
+import { mayEditContent } from '@/features/methodologies/draft';
 
 /**
  * Редагування методології у вебі (`ФВ-9.15`).
@@ -52,69 +48,6 @@ describe('Конфігуратор методологій', () => {
     expect(mayEditContent(draft, false)).toBe(false);
     expect(mayEditContent(undefined, true)).toBe(false);
   });
-
-  it('ФВ-9.15: екран відкривається на чернетці, а не на першій версії', () => {
-    const published = version({ id: 1, isEditable: false });
-    const draft = version({ id: 2, versionNumber: '2.0', status: 'Draft', isEditable: true });
-
-    // ⚠ Перелік іде за номером версії, тож опублікована стоїть першою. Взяти
-    // «першу» означало б щоразу відкривати екран редагування на версії, де
-    // жодної дії немає й бути не може.
-    expect(defaultVersion([published, draft], null)?.id).toBe(2);
-
-    // Явний вибір користувача важливіший за здогад.
-    expect(defaultVersion([published, draft], '1')?.id).toBe(1);
-
-    // Чернеток немає — показуємо хоч щось, а не порожнечу.
-    expect(defaultVersion([published], null)?.id).toBe(1);
-    expect(defaultVersion([], null)).toBeUndefined();
-  });
-
-  it('текстовий результат іде без одиниці', () => {
-    const draft = {
-      versionId: 5,
-      code: 'verdict',
-      expression: "'Сверхнорматив'",
-      resultType: 'Text',
-      outputUnitId: 3,
-      arguments: [],
-      isNew: false,
-    } as const;
-
-    // ⛔ Вимір — властивість числа. Сервер таку пару відхиляє
-    // (`ECR-CALC-0422`), і лишити одиницю від попереднього вибору означало б
-    // показати відмову там, де людина все зробила правильно: вона перемкнула
-    // тип, а поле одиниці при цьому зникло з очей.
-    expect(formulaBody(draft).outputUnitId).toBeNull();
-
-    // Числовий результат одиницю зберігає — на ній тримається перевірка
-    // розмірностей при публікації.
-    expect(formulaBody({ ...draft, resultType: 'Number' }).outputUnitId).toBe(3);
-  });
-
-  it('похідні аргументи: тіло запиту НЕ несе argumentsCsv, хоч би що показував діалог', () => {
-    const draft = {
-      versionId: 5,
-      code: 'gsec',
-      expression: '@Flow? * CST.k1',
-      resultType: 'Number',
-      outputUnitId: 3,
-      arguments: [
-        { kind: 'Argument', name: 'Flow', isOptional: true, text: '@Flow?' },
-        { kind: 'Constant', name: 'k1', isOptional: false, text: 'CST.k1' },
-      ],
-      isNew: false,
-    } as const;
-
-    // ⛔ ✎ 2026-11-02: список аргументів виводить сервер із виразу. Поле запиту застаріле й лишене
-    // ОДИН реліз заради маркерів `Name?` старих клієнтів; надіслати сюди показаний список означало б
-    // знову зробити ручний список джерелом істини — тим, що розходилося з виразом.
-    const body = formulaBody(draft);
-    expect('argumentsCsv' in body).toBe(false);
-
-    // Необов'язковість живе у ВИРАЗІ (`@Flow?`), і вираз іде як є.
-    expect(body.expression).toBe('@Flow? * CST.k1');
-  });
 });
 
 describe('Звернення конфігуратора методологій', () => {
@@ -142,45 +75,12 @@ describe('Звернення конфігуратора методологій',
     vi.unstubAllGlobals();
   });
 
-  it('ФВ-9.15: формула адресується кодом, а запис іде PUT', async () => {
-    await saveMethodologyFormula(4, {
-      versionId: 9,
-      code: 'gsec',
-      expression: '@Flow * CST.k1',
-      resultType: 'Number',
-      outputUnitId: 3,
-      arguments: [],
-      isNew: false,
-    });
-
-    const call = calls[0];
-
-    // ⚠ Код у шляху — це те, чим на формулу посилаються вирази (`!Name`).
-    // Саме тому створення й зміна — одна дія: повторний `PUT` із тим самим
-    // тілом дає той самий стан.
-    expect(call?.url).toBe('/api/v1/methodologies/4/versions/9/formulas/gsec');
-    expect(call?.init?.method).toBe('PUT');
-
-    expect(JSON.parse(String(call?.init?.body))).toStrictEqual({
-      expression: '@Flow * CST.k1',
-      resultType: 'Number',
-      outputUnitId: 3,
-    });
-  });
-
-  it('ФВ-9.15: видалення формули йде DELETE на ту саму адресу', async () => {
-    await deleteMethodologyFormula(4, 9, 'gsec');
-
-    expect(calls[0]?.url).toBe('/api/v1/methodologies/4/versions/9/formulas/gsec');
-    expect(calls[0]?.init?.method).toBe('DELETE');
-  });
-
   it('ФВ-9.1: клон версії називає джерело, а порожня чернетка — ні', async () => {
     await createMethodologyVersion(4, {
       versionNumber: '2.0',
       copyFromVersionId: 9,
       level: 'Configuration',
-      engine: 'Formulas',
+      engine: 'Script',
     });
 
     // ⛔ Без `copyFromVersionId` сервер зробив би ПОРОЖНЮ чернетку. Для
@@ -190,7 +90,7 @@ describe('Звернення конфігуратора методологій',
       versionNumber: '2.0',
       copyFromVersionId: 9,
       level: 'Configuration',
-      engine: 'Formulas',
+      engine: 'Script',
     });
 
     await createMethodologyVersion(4, {
@@ -201,7 +101,7 @@ describe('Звернення конфігуратора методологій',
     });
 
     expect(JSON.parse(String(calls[1]?.init?.body)).copyFromVersionId).toBeNull();
-    // ⛔ Рушій іде завжди явно: пропущений сервер читає як `Formulas`.
+    // ⛔ Рушій іде завжди явно (✎ 24.11: лише `Script` — формульний рушій виведено з інтерфейсу).
     expect(JSON.parse(String(calls[1]?.init?.body)).engine).toBe('Script');
   });
 });

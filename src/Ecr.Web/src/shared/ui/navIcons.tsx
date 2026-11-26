@@ -129,6 +129,17 @@ function UnitsIcon(): JSX.Element {
   );
 }
 
+/** Gas composition — колба з рівнем рідини й бульбашкою (склад газу, D-NEW). */
+function GasCompositionIcon(): JSX.Element {
+  return (
+    <Icon>
+      <path d="M9.5 3h5M10.5 3v5.5L5.2 18.2A1.9 1.9 0 0 0 6.9 21h10.2a1.9 1.9 0 0 0 1.7-2.8L13.5 8.5V3" />
+      <path d="M7.6 14h8.8" />
+      <circle cx="11" cy="17.5" r="0.9" />
+    </Icon>
+  );
+}
+
 /** Security — щит із позначкою. */
 function SecurityIcon(): JSX.Element {
   return (
@@ -199,16 +210,6 @@ function JobsIcon(): JSX.Element {
     <Icon>
       <circle cx="12" cy="12" r="3" />
       <path d="M12 2.5v3M12 18.5v3M4.4 4.4l2.1 2.1M17.5 17.5l2.1 2.1M2.5 12h3M18.5 12h3M4.4 19.6l2.1-2.1M17.5 6.5l2.1-2.1" />
-    </Icon>
-  );
-}
-
-/** Report snapshots — фотоапарат (знімок стану). */
-function SnapshotsIcon(): JSX.Element {
-  return (
-    <Icon>
-      <path d="M4 8.5h3l1.8-2h6.4l1.8 2h3v10.5H4V8.5Z" />
-      <circle cx="12" cy="13.5" r="3.25" />
     </Icon>
   );
 }
@@ -310,6 +311,7 @@ const navIcons: Record<string, () => JSX.Element> = {
   methodologies: MethodologiesIcon,
   expressions: ExpressionsIcon,
   units: UnitsIcon,
+  gasComposition: GasCompositionIcon,
   security: SecurityIcon,
   periods: PeriodsIcon,
   sources: SourcesIcon,
@@ -317,7 +319,6 @@ const navIcons: Record<string, () => JSX.Element> = {
   pipeline: PipelineIcon,
   piData: PiDataIcon,
   jobs: JobsIcon,
-  snapshots: SnapshotsIcon,
   audit: AuditIcon,
   consistency: ConsistencyIcon,
   dependencyGraph: DependencyGraphIcon,

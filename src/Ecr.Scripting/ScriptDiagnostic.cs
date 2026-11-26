@@ -128,6 +128,17 @@ public static class ScriptDiagnosticCodes
     public const string ParamOutsideLibrary = "paramOutsideLibrary";
     public const string TooDeep = "tooDeep";
 
+    // ✎ DESIGN-sg-flaring §5.2a: `registry as of <вираз>;`.
+
+    /// <summary>Друге речення <c>registry as of</c> у скрипті.</summary>
+    public const string DuplicateRegistryAsOf = "duplicateRegistryAsOf";
+
+    /// <summary>Вираз <c>registry as of</c> — літерал, що не є датою (число, текст, булеве, <c>null</c>).</summary>
+    public const string RegistryAsOfNotDate = "registryAsOfNotDate";
+
+    /// <summary><c>registry as of</c> у скрипті, що не читає жодного довідника (разом з імпортами).</summary>
+    public const string RegistryAsOfWithoutRegistries = "registryAsOfWithoutRegistries";
+
     // §13.7
     public const string TableColumnOutsideAggregate = "tableColumnOutsideAggregate";
     public const string AggregateNeedsTable = "aggregateNeedsTable";
@@ -144,6 +155,9 @@ public static class ScriptDiagnosticCodes
     // Перевірки оточення (потребують БД; створюються поза цим проєктом).
     public const string UnknownUnit = "unknownUnit";
     public const string UnknownSubstance = "unknownSubstance";
+
+    /// <summary>✎ c11-10: код речовини є в кількох довідниках, і методологія жодного з них ще не вживає.</summary>
+    public const string AmbiguousSubstance = "ambiguousSubstance";
     public const string UnknownTable = "unknownTable";
     public const string AmbiguousTable = "ambiguousTable";
     public const string UnknownColumn = "unknownColumn";

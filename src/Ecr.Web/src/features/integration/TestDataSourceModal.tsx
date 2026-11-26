@@ -6,6 +6,7 @@ import { formatCount } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { problemText } from '@/shared/ui/problemText';
+import { CredentialsStateKeys } from './credentialsStates';
 import { testDataSource, type DataSourceTestResult } from './dataSourceApi';
 
 /**
@@ -19,8 +20,8 @@ import { testDataSource, type DataSourceTestResult } from './dataSourceApi';
  * не збій — просто чекати.
  */
 export type TestOutcome =
-  | { readonly kind: 'ok'; readonly entities: number }
-  | { readonly kind: 'failed'; readonly reason: string | null }
+  | { readonly kind: 'ok'; readonly entities: number; readonly note: string | null }
+  | { readonly kind: 'failed'; readonly reason: string | null; readonly key: string | null }
   | { readonly kind: 'running'; readonly detail: string | null };
 
 /** Причина, коли сервер не назвав ключа: та сама, що в категорії `other`. */
@@ -31,17 +32,22 @@ const FallbackFailureKey = 'integration.test.failed.other';
  *
  * ⛔ Причина відмови — ЛИШЕ з каталогу за `messageKey`
  * (`integration.test.failed.<категорія>`). Поле `error` несе категорію
- * (`auth`, `unreachable`, `tls`, `timeout`, `other`), а не текст винятку (S3
+ * (`auth`, `unreachable`, `tls`, `timeout`, `notConfigured`, `query`, `other`), а не текст винятку (S3
  * аудиту безпеки: сирий текст робив кнопку сканером мережі), і людині його
  * сирим не показуємо. Ключа немає — загальна причина «other», а не `error`.
  */
-export function outcomeOf(result: DataSourceTestResult): TestOutcome {
-  if (result.ok) return { kind: 'ok', entities: result.entities };
-
+export function outcomeOf(result: DataSourceTestResult, sourceName?: string): TestOutcome {
+  // ⚠ b14 source-test-flert (AC-2): успіх із ключем — з'єднання ціле, а каталогу сутностей у джерела немає
+  // (`integration.test.connectedNoCatalog`, FLERT для складу газу). «0 сутностей» читалося б як порожній каталог.
   const named = result.messageKey ?? '';
-  const key = named.length > 0 ? named : FallbackFailureKey;
+  const fallback = result.ok ? null : FallbackFailureKey;
+  const key = named.length > 0 ? named : fallback;
+  // `{dataSource}` у тексті `connectFailedNoRetry` — назва з'єднання; інші тексти параметра не мають.
+  const text = key === null ? null : t(key, sourceName === undefined ? undefined : { dataSource: sourceName });
 
-  return { kind: 'failed', reason: t(key) };
+  return result.ok
+    ? { kind: 'ok', entities: result.entities, note: text }
+    : { kind: 'failed', reason: text, key: named.length > 0 ? named : null };
 }
 
 /**
@@ -79,11 +85,14 @@ export function TestDataSourceModal({
   sourceId,
   sourceName,
   onClose,
+  onEnterPassword,
 }: {
   readonly opened: boolean;
   readonly sourceId: number;
   readonly sourceName: string;
   readonly onClose: () => void;
+  /** Для «пароль не читається / відхилено»: відкрити правку з'єднання, щоб ввести пароль заново. */
+  readonly onEnterPassword?: (() => void) | undefined;
 }): JSX.Element {
   const [reason, setReason] = useState('');
 
@@ -107,7 +116,7 @@ export function TestDataSourceModal({
   const trimmed = reason.trim();
 
   const outcome: TestOutcome | null =
-    test.data !== undefined ? outcomeOf(test.data) : runningOf(test.error);
+    test.data !== undefined ? outcomeOf(test.data, sourceName) : runningOf(test.error);
 
   // Будь-яка інша відмова (403, 422, 5xx) — справжній збій запиту.
   const failure = test.error !== null && outcome === null ? test.error : null;
@@ -124,7 +133,7 @@ export function TestDataSourceModal({
           autosize
         />
 
-        {outcome !== null && <OutcomeBanner outcome={outcome} />}
+        {outcome !== null && <OutcomeBanner outcome={outcome} onEnterPassword={onEnterPassword} />}
 
         {failure !== null && <ErrorAlert error={failure} />}
 
@@ -161,12 +170,18 @@ export function TestDataSourceModal({
  * збою запиту (`ErrorAlert`) не роль, а `data-test-outcome` і відсутність
  * коду кореляції.
  */
-function OutcomeBanner({ outcome }: { readonly outcome: TestOutcome }): JSX.Element {
+export function OutcomeBanner({
+  outcome,
+  onEnterPassword,
+}: {
+  readonly outcome: TestOutcome;
+  readonly onEnterPassword?: (() => void) | undefined;
+}): JSX.Element {
   switch (outcome.kind) {
     case 'ok':
       return (
         <Alert color="statusSuccess" title={t('sources.testOk')} data-test-outcome="ok">
-          {formatCount(outcome.entities, 'sources.testEntities')}
+          {outcome.note ?? formatCount(outcome.entities, 'sources.testEntities')}
         </Alert>
       );
 
@@ -176,6 +191,12 @@ function OutcomeBanner({ outcome }: { readonly outcome: TestOutcome }): JSX.Elem
           {/* `D15-06`: причини немає — немає й порожнього рядка. */}
           {outcome.reason !== null && outcome.reason.length > 0 && (
             <Text size="sm">{outcome.reason}</Text>
+          )}
+          {/* Єдина дія при «не читається / відхилено» — ввести пароль заново. */}
+          {onEnterPassword !== undefined && outcome.key !== null && outcome.key in CredentialsStateKeys && (
+            <Button variant="default" size="xs" mt="xs" onClick={onEnterPassword} data-enter-password="">
+              {t('sources.changePassword')}
+            </Button>
           )}
         </Alert>
       );

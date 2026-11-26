@@ -204,18 +204,20 @@ public interface IMethodologyStore
     public Task ReplaceScriptImportsAsync(int versionId, IReadOnlyList<int> importedMethodologyIds, CancellationToken ct);
 
     /// <summary>
-    /// Id записів довідника речовин за кодами речовин (те саме джерело, що <see cref="GetSubstanceCodesAsync"/>).
+    /// УСІ записи довідників речовин, що відповідають кодам речовин скрипта (те саме джерело, що
+    /// <see cref="GetSubstanceCodesAsync"/>), — разом із довідником і ознакою, що довідник уже вживає ця методологія.
     /// </summary>
     /// <param name="codes">Коди речовин («301», «NOx»).</param>
+    /// <param name="methodologyId">Методологія, чиї речовини (будь-якої версії) задають бажаний довідник.</param>
     /// <param name="ct">Токен скасування.</param>
-    /// <returns>Код (як у запиті) → Id запису; невідомих кодів у словнику немає.</returns>
+    /// <returns>Кандидати; невідомого коду серед них немає.</returns>
     /// <remarks>
-    /// Код речовини — значення поля <c>SUBSTANCE_CODE</c> запису довідника, інакше код самого запису; шукаються лише
-    /// записи довідників, що мають таке поле. Збіг неточний за регістром, якщо так порівнює база. Кілька записів з одним
-    /// кодом — береться запис із найменшим Id.
+    /// Код речовини — значення поля <c>SUBSTANCE_CODE</c> запису довідника, інакше (коли за полем збігу немає) код самого
+    /// запису; шукаються лише записи довідників, що мають таке поле. ✎ c11-10: кандидатів може бути кілька — «333» є і в
+    /// LAND_HSE400_SUBSTANCE (C333), і в LAND_AIR_SUBSTANCE (E333); вибір робить <c>ScriptSubstanceResolver</c>, а не «менший Id».
     /// </remarks>
-    public Task<IReadOnlyDictionary<string, long>> FindSubstanceEntryIdsAsync(
-        IReadOnlyCollection<string> codes, CancellationToken ct);
+    public Task<IReadOnlyList<SubstanceCandidate>> FindSubstanceCandidatesAsync(
+        IReadOnlyCollection<string> codes, int methodologyId, CancellationToken ct);
 
     /// <summary>
     /// «Живі» таблиці з цим кодом: таблиця останньої опублікованої версії кожного шаблону, разом із колонками й
@@ -632,3 +634,11 @@ public sealed record LiveTable(
     string TableCode,
     IReadOnlyList<LiveColumn> Columns,
     IReadOnlyList<string> MonthAliases);
+
+/// <summary>Кандидат на код речовини скрипта: запис довідника речовин (✎ c11-10).</summary>
+/// <param name="Code">Код речовини, як у скрипті («333»).</param>
+/// <param name="EntryId">Id запису довідника.</param>
+/// <param name="EntryCode">Код самого запису («E333») — ним автор знімає неоднозначність у тексті.</param>
+/// <param name="RegistryCode">Код довідника.</param>
+/// <param name="UsedByMethodology">Довідник уже вживає ця методологія (речовини будь-якої її версії).</param>
+public sealed record SubstanceCandidate(string Code, long EntryId, string EntryCode, string RegistryCode, bool UsedByMethodology);

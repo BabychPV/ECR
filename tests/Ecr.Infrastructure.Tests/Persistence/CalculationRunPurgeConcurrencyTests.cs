@@ -17,7 +17,7 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// <c>D-560</c>: читачі, що читають прогони й рядки КІЛЬКОМА запитами, не губляться, коли між запитами інший прогін
 /// стає актуальним і швидкий шлях прибирає витіснений (M1); перемикання не робить актуальним прогін, закритий як
 /// покинутий (M2); <c>Failed</c> прибирається за будь-якою віссю актуальності, але без актуального лишається (LOW-a);
-/// висячі посилання на прибрані прогони не ламають читачів (LOW-c).
+/// проблеми розрахунку прибраного прогону зникають разом із ним (LOW-c, ✎ P-1124).
 /// </summary>
 /// <remarks>
 /// Мутації: прибрати перечитування прогонів у <c>ChangedResultsAsync</c> / <c>ReadYearAsync</c> /
@@ -186,11 +186,15 @@ public sealed class CalculationRunPurgeConcurrencyTests(SqlServerFixture sql)
         Assert.Equal((2, 2, 2), await PurgeKit.CountsAsync(db, failedAlone));
     }
 
-    /// <summary>LOW-c: проблема розрахунку, що посилається на прибраний прогін (FK немає), читається як і раніше.</summary>
+    /// <summary>
+    /// LOW-c → ✎ P-1124: висячих посилань на прибраний прогін більше немає — прибирання видаляє проблеми прогону разом із
+    /// його рядком (<c>FK_CIssue_Run</c>). Доти проблема лишалась із посиланням у нікуди (323 сироти на копії live).
+    /// Поточні проблеми неперерахованих таблиць до прибирання переходять на новий прогін (<c>CalculationIssueRunLifetimeTests</c>).
+    /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Проблеми_розрахунку_з_посиланням_на_прибраний_прогін_читаються()
+    public async Task Проблеми_розрахунку_прибраного_прогону_зникають_разом_із_ним()
     {
         var f = await PurgeKit.ArrangeAsync(sql, 202606);
         await using var db = f.Builder.CreateContext();
@@ -207,7 +211,8 @@ public sealed class CalculationRunPurgeConcurrencyTests(SqlServerFixture sql)
 
         var issues = await new CalculationIssueStore(db, new TestClock(T0))
             .ListAsync(f.Document.DocumentId, f.Period, null, CancellationToken.None);
-        Assert.Single(issues);
+        Assert.Empty(issues);
+        Assert.Equal(0, await db.CalculationIssues.AsNoTracking().CountAsync(i => i.CalculationRunId == old));
     }
 
     private static Task<int> SetInstanceAsync(EcrDbContext db, long runId, long instanceId)
@@ -226,8 +231,7 @@ public sealed class CalculationRunPurgeConcurrencyTests(SqlServerFixture sql)
             new UnitOfWork(db),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
-            clock,
-            Substitute.For<IAuditWriter>());
+            clock);
 
         await handler.CompleteAsync(runId, new ModuleProfile(), CancellationToken.None);
     }

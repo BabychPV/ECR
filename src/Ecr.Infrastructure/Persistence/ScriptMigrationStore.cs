@@ -51,4 +51,8 @@ public sealed class ScriptMigrationStore(EcrDbContext db) : IScriptMigrationStor
 
         return await LibraryEditionDates.LoadAsync(db, start, later.Count == 0 ? null : later.Min(), ct).ConfigureAwait(false);
     }
+
+    /// <inheritdoc />
+    public Task<int> CountFormulasVersionsAsync(CancellationToken ct)
+        => db.MethodologyVersions.AsNoTracking().CountAsync(v => v.Engine == Domain.Enums.MethodologyEngine.Formulas, ct);
 }

@@ -17,11 +17,23 @@ export function LegacyProjectRedirect({ tab }: { readonly tab: ProjectTabId }): 
   );
 }
 
+/**
+ * ✎ 24.11 (рішення людини «Одна таблиця шаблонів»): колишня вкладка `/projects/:id/settings` (закладки, листи) веде на
+ * Templates — там шаблони й погодження, тобто більша частина колишнього вмісту; поточний період, політика й часовий
+ * пояс — на сусідній вкладці General. `replace` — з тієї ж причини, що й вище.
+ */
+export function LegacyProjectTabRedirect({ tab }: { readonly tab: ProjectTabId }): JSX.Element {
+  const projectId = Number(useParams()['id']);
+
+  return <Navigate to={projectTabPath(projectId, tab)} replace />;
+}
+
 /** Вміст вкладки: проєкт — з адреси (`:id`, ціле число стереже `numericParams` у `AppLayout`). */
 export function ProjectTab({ tab }: { readonly tab: ProjectTabId }): JSX.Element {
   const projectId = Number(useParams()['id']);
 
-  if (tab === 'settings') return <ProjectSettingsPage projectId={projectId} />;
+  if (tab === 'templates') return <ProjectSettingsPage projectId={projectId} view="templates" />;
+  if (tab === 'general') return <ProjectSettingsPage projectId={projectId} view="general" />;
   if (tab === 'lifecycle') return <ProjectLifecycleTab projectId={projectId} />;
 
   return <PeriodsPage projectId={projectId} />;

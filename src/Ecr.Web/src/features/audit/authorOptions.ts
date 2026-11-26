@@ -3,7 +3,13 @@ import { useQuery } from '@tanstack/react-query';
 import { allUsersQuery } from '@/features/security/allUsers';
 import { t } from '@/shared/i18n';
 import { isHumanCellChange } from '@/features/audit/api';
+import { apiFetch } from '@/api/client';
+import type { components } from '@/api/schema';
 import { can, useSession } from '@/shared/session/useSession';
+import { disambiguateNames, pickedLabel, type FilterOption } from '@/features/audit/filterOptions';
+
+/** Автор для фільтра «By user» (`GET /api/v1/audit/authors`, ✎ P-1124-4): номер, ім'я; логін — лише для однакових імен (AC-7). */
+type AuditAuthor = components['schemas']['AuditAuthorView'];
 
 /** Рядок журналу з автором — спільна форма журналу комірок і структури. */
 interface AuthoredRow {
@@ -60,12 +66,24 @@ export function cellAuthorHint(row: AuthoredRow & { readonly origin: string; rea
 export function useAuthorOptions(
   items: readonly AuthoredRow[] | undefined,
   selected: number | null,
+  picked: FilterOption | null = null,
 ): { value: string; label: string; disabled?: boolean }[] {
   const session = useSession();
   // ⛔ PSS-19c: усі користувачі (`allUsersQuery`), а не перші 200 мовчки — 201-й автор не мав імені у фільтрі.
   const users = useQuery({
     ...allUsersQuery,
     enabled: can(session.data, 'Security.ManageUsers'),
+    staleTime: 5 * 60 * 1000,
+  });
+  /*
+   * ✎ P-1124-4: автори за правом САМОГО журналу (`Security.ViewAudit`). `GET /users` вимагає `Security.ManageUsers`,
+   * якого вбудовані ролі не мають, — і в аудитора «By user» стояв порожнім «Anyone» без жодного варіанта (живий екран
+   * 24.11): у журналі безпеки більшість рядків — «Система» чи анонімна спроба входу, імені в рядку немає.
+   */
+  const authors = useQuery({
+    queryKey: ['audit-authors'],
+    queryFn: () => apiFetch<AuditAuthor[]>('/api/v1/audit/authors'),
+    enabled: can(session.data, 'Security.ViewAudit'),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -78,7 +96,11 @@ export function useAuthorOptions(
       let next: Map<number, string> | null = null;
 
       for (const item of items) {
-        const name = item.changedByDisplayName;
+        // ✎ P-1124-4: «Система» (0) і анонімна спроба входу (-1) — теж варіанти фільтра: імені в рядку в них немає.
+        const name =
+          item.changedByUserId === SystemUserId || item.changedByUserId === AnonymousUserId
+            ? authorName(item)
+            : item.changedByDisplayName;
         if (name !== null && name !== undefined && previous.get(item.changedByUserId) !== name) {
           next ??= new Map(previous);
           next.set(item.changedByUserId, name);
@@ -92,18 +114,35 @@ export function useAuthorOptions(
   return useMemo(() => {
     const names = new Map<number, string>(seen);
 
+    for (const author of Array.isArray(authors.data) ? authors.data : []) {
+      names.set(author.userId, authorName({ changedByUserId: author.userId, changedByDisplayName: author.displayName }));
+    }
+
     for (const user of users.data?.items ?? []) {
       names.set(user.id, user.displayName.length > 0 ? user.displayName : user.userName);
     }
 
     if (selected !== null && !names.has(selected)) {
-      names.set(selected, authorName({ changedByUserId: selected }));
+      // ✎ AC-11: щойно обраного автора не показуємо як «User #id», поки перелік/журнал перезавантажуються.
+      names.set(selected, pickedLabel(picked, selected) ?? authorName({ changedByUserId: selected }));
     }
 
+    // audit-filters-live D4: однакові імена (тимчасові акаунти вікон) розрізняються логіном, без нього — номером.
+    // ✎ AC-7: логін для однакових імен віддає сам `GET /audit/authors` (за `Security.ViewAudit`); перелік користувачів
+    // (`Security.ManageUsers`) — доповнює.
+    const logins = new Map<number, string>();
+    for (const author of Array.isArray(authors.data) ? authors.data : []) {
+      if (typeof author.login === 'string' && author.login.length > 0) logins.set(author.userId, author.login);
+    }
+    for (const user of users.data?.items ?? []) logins.set(user.id, user.userName);
+
     return [
-      ...[...names.entries()]
-        .sort((a, b) => a[1].localeCompare(b[1]))
-        .map(([id, label]) => ({ value: String(id), label })),
+      ...disambiguateNames(
+        [...names.entries()]
+          .sort((a, b) => a[1].localeCompare(b[1]))
+          .map(([id, label]) => ({ value: String(id), label })),
+        logins,
+      ),
       // PSS-19c / L4: користувачів дочитано лише до запобіжника — останнім неактивним пунктом сказано прямо.
       // ⚠ Те саме, що `truncatedOption` (`@/shared/ui/truncatedOption`), але рядком тут: `AuditPage` — біля межі
       // бюджету `D-132`, а окремий спільний чанк ради трьох рядків коштував би маршруту ~0,2 КБ (рецензія L10, M3).
@@ -111,5 +150,5 @@ export function useAuthorOptions(
         ? []
         : [{ value: '__list-truncated__', label: t('common.shownSoFar', { shown: users.data.items.length }), disabled: true }]),
     ];
-  }, [seen, users.data, selected]);
+  }, [seen, authors.data, users.data, selected, picked]);
 }

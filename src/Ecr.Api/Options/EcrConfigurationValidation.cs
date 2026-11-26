@@ -67,7 +67,6 @@ public static partial class EcrConfigurationValidation
         ("Security:RateLimit:SmtpTestSystemPermitPerHour", 1),
         ("Security:RateLimit:RecalculatePermitPerMinute", 1),
         ("Security:RateLimit:RecalculateUserPermitPerMinute", 1),
-        ("Security:RateLimit:VerifyPermitPerMinute", 1),
         ("Security:RateLimit:ValidatePermitPerMinute", 1),
         (Ecr.Api.Security.TableDiscussionPostRateLimitPolicy.PermitKey, 1),
         (Ecr.Api.Security.DocumentExportRateLimitPolicy.PermitKey, 1),
@@ -194,6 +193,9 @@ public static partial class EcrConfigurationValidation
         // Q-17: читається `GetValue<bool>` у DependencyInjection (Infrastructure).
         "Collection:MonthColumnRouting",
 
+        // P-1124-1: опечатка («ture») мовчки лишила б формульний авторинг вимкненим на стенді збирання — краще стоп.
+        Ecr.Application.Calculations.FormulaEngineAuthoring.EnabledKey,
+
         // ✎ B179 L2, P-0118-31/33: ключів HSE400 «перерахунок залежних Land» і «склад із документа» більше немає —
         // вирішує лише біт зв'язки. Залишкова змінна середовища не перевіряється й не читається (старт не падає).
 
@@ -220,11 +222,6 @@ public static partial class EcrConfigurationValidation
         Ecr.Infrastructure.Persistence.SupersededPurgeOptions.IncludeTraceKey,
         Ecr.Infrastructure.Persistence.SupersededPurgeOptions.RebuildAfterKey,
 
-        // D-476: синк складу газу FLERT; «ture» інакше мовчки лишав би синк вимкненим.
-        Ecr.Infrastructure.Jobs.FlertCompositionSyncOptions.EnabledKey,
-
-        // FLERT F6: після синку зі змінами — перерахунок залежних документів відкритих періодів (типово вимкнено).
-        Ecr.Infrastructure.Jobs.FlertSyncDependentsTrigger.EnabledKey,
     ];
 
     /// <summary>Ключі з переліком допустимих значень (без урахування регістру).</summary>

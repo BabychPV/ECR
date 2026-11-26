@@ -266,8 +266,7 @@ public sealed class RecalculationJobYearRunTests(SqlServerFixture sql)
             Substitute.For<IUnitOfWork>(),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
-            new TestClock(DateTime.UtcNow),
-            Substitute.For<Ecr.Application.Ports.IAuditWriter>());
+            new TestClock(DateTime.UtcNow));
 
     /// <summary>Один виклик оркестратора: з яким періодом і з якими прив'язками.</summary>
     private sealed record RunnerCall(PeriodKey PeriodKey, IReadOnlyList<CalculationBindingRef> Bindings);

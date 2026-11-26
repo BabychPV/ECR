@@ -57,9 +57,14 @@ public sealed record ComputedCellDto(string RowKey, string ColumnCode, object? V
 /// <param name="Message">Локалізований текст.</param>
 /// <param name="RowKey">Рядок, якого стосується; <c>null</c> — рівень таблиці.</param>
 /// <param name="ColumnCode">Колонка; <c>null</c> — рівень рядка.</param>
+/// <param name="Methodologies">
+/// ✎ 25.11: для <c>ECR-CALC-0437</c> — коди методологій, яким потрібна колонка (одне повідомлення на рядок і
+/// колонку); клієнт зводить їх по колонці. <c>null</c> — для решти правил.
+/// </param>
 public sealed record ValidationMessageDto(
     string Severity,
     string RuleCode,
     string Message,
     string? RowKey,
-    string? ColumnCode);
+    string? ColumnCode,
+    IReadOnlyList<string>? Methodologies = null);

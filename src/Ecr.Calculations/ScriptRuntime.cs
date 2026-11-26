@@ -84,6 +84,12 @@ public sealed class ScriptRuntime
     private MethodologyPhaseReadCache? _phaseReads;
     private MethodologyResolver? _tables;
 
+    /// <summary>
+    /// ✎ DESIGN-sg-flaring §5.2a (E4): джерело знімків «на дату рядка» для <c>registry as of</c>; <c>null</c> — речення
+    /// немає (усі рядки бачать знімок на кінець періоду).
+    /// </summary>
+    internal Ecr.Application.Registries.DatedRegistrySnapshots? DatedRegistries { get; init; }
+
     internal ScriptRuntime(
         LoadedProgram program,
         ScriptDataAccess data,

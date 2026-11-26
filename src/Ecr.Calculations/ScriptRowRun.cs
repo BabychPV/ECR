@@ -98,6 +98,12 @@ internal sealed class ScriptRowRun(
         var script = binding.Script!;
         try
         {
+            // ✎ §5.2a: `registry as of` — до першого оператора: від нього залежить, яку версію довідника бачить рядок.
+            if (script.RegistryAsOf is { } asOf)
+            {
+                RegistryAsOf(asOf, script.RegistryAsOfText ?? string.Empty);
+            }
+
             foreach (var statement in script.Statements)
             {
                 Execute(statement);
@@ -335,6 +341,75 @@ internal sealed class ScriptRowRun(
                 ["reason"] = condition.IsError ? condition.ErrorCode : "reject",
             });
     }
+
+    /// <summary>Причина відхилення: дата <c>registry as of</c> порожня або помилкова.</summary>
+    internal const string AsOfEmptyReason = "registryAsOfEmpty";
+
+    /// <summary>Причина відхилення: дата <c>registry as of</c> поза періодом документа.</summary>
+    internal const string AsOfOutsideReason = "registryAsOfOutsidePeriod";
+
+    /// <summary>
+    /// ✎ DESIGN-sg-flaring §5.2a (E5): дата рядка → знімок довідників цього рядка. Порожня/помилкова дата або дата поза
+    /// <c>[period.Start, period.End]</c> — рядок ВІДХИЛЕНО з причиною (та сама форма, що <c>reject when</c>), а не нуль і не
+    /// знімок на кінець періоду: інакше рядок мовчки прочитав би не ту версію.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Дата — календарна дата значення в поясі проєкту: час події (<c>$start</c>) уже записано в комірку в поясі проєкту
+    /// (<c>SourceEventRowBuilder</c> → <c>SourceEventPeriods.ToProjectTime</c>), тож тут перерахунку поясу немає.
+    /// </remarks>
+    private void RegistryAsOf(AstNode expression, string text)
+    {
+        var value = Evaluate(expression);
+        if (value.ErrorCode == Expressions.ExpressionErrors.BudgetExceeded)
+        {
+            trace.Failed("RegistryAsOf", text, Expressions.ExpressionErrors.BudgetExceeded);
+            foreach (var output in binding.Script!.Outputs)
+            {
+                trace.OutputFailed(output.Code, Expressions.ExpressionErrors.BudgetExceeded);
+            }
+
+            _halted = true;
+            return;
+        }
+
+        if (value is not { Type: ExpressionValueType.Date, Value: DateTime moment })
+        {
+            throw AsOfRejected(text, AsOfEmptyReason, "registry as of date is empty");
+        }
+
+        var date = DateOnly.FromDateTime(moment);
+        if (date < binding.Period.Start || date > binding.Period.End)
+        {
+            throw AsOfRejected(
+                text,
+                AsOfOutsideReason,
+                string.Create(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    $"registry date {date:yyyy-MM-dd} outside the document period {binding.Period.Start:yyyy-MM-dd}…{binding.Period.End:yyyy-MM-dd}"));
+        }
+
+        if ((runtime.DatedRegistries?.Get(date) ?? binding.Registries) is { } snapshot)
+        {
+            context.UseRegistriesAsOf(date, snapshot);
+        }
+
+        trace.Step(
+            "RegistryAsOf",
+            "registry as of " + date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) + " (" + text + ")",
+            value: null);
+    }
+
+    /// <summary>Відхилення рядка (оркестратор пише <c>CategoryRuleRejected</c>, перегляд — «rejected»): ключ <c>reject when</c>.</summary>
+    private static DomainException AsOfRejected(string text, string reason, string why)
+        => new(
+            "ECR-CALC-0422",
+            $"Скрипт відхилив рядок: «{why}» ({text}).",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CALC-0422.categoryRuleFailed",
+                ["expression"] = why + " (" + text + ")",
+                ["reason"] = reason,
+            });
 
     /// <summary>
     /// <c>reject when</c> із умовою <c>#BUDGET</c>: рядок без чисел, кожен вихід скрипта — без результату з

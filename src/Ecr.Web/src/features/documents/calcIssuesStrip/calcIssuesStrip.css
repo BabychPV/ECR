@@ -1,0 +1,61 @@
+/* ✎ b14 doc-notices-compact: смуга проблем розрахунку — рівно один рядок (висота не стрибає при оновленні). */
+.ecr-calc-strip-line {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+  height: 32px;
+  padding-inline: var(--mantine-spacing-xs);
+  border-radius: var(--mantine-radius-sm);
+  border: 1px solid var(--mantine-color-brand-light-hover, var(--mantine-color-default-border));
+  background: var(--mantine-color-brand-light);
+  overflow: hidden;
+}
+
+.ecr-calc-strip-line[data-tone='error'] {
+  border-color: var(--mantine-color-statusError-light-hover, var(--mantine-color-default-border));
+  background: var(--mantine-color-statusError-light);
+}
+
+.ecr-calc-strip-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mantine-color-white);
+  background: var(--mantine-color-brand-filled);
+}
+
+.ecr-calc-strip-line[data-tone='error'] .ecr-calc-strip-icon {
+  background: var(--mantine-color-statusError-filled);
+}
+
+.ecr-calc-strip-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ecr-calc-strip-toggle {
+  flex: none;
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 500;
+  color: var(--mantine-color-anchor);
+  padding-inline: 6px;
+  border-radius: var(--mantine-radius-sm);
+}
+
+.ecr-calc-strip-toggle:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: 1px;
+}
+
+.ecr-calc-strip-matrix {
+  overflow-x: auto;
+}

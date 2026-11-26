@@ -42,9 +42,8 @@ public sealed class SheetNameFunctionTests
         Assert.True(Expr.Parse("sheetname()", ExpressionDialect.Template).IsSuccess);
         Assert.False(Expr.Parse("SHEETNAME(1)", ExpressionDialect.Template).IsSuccess);
 
-        // Методологія аркуша не має (02b §3.4), звіт — теж: там функції немає.
+        // Методологія аркуша не має (02b §3.4).
         Assert.False(Expr.Parse("SHEETNAME()", ExpressionDialect.Methodology).IsSuccess);
-        Assert.False(Expr.Parse("SHEETNAME()", ExpressionDialect.Report).IsSuccess);
     }
 
     [Fact]

@@ -37,6 +37,7 @@ public sealed partial class AdapterRefusalClientKeysTests
         ["err.ECR-INT-0422.eventQueryNotConfigured"] = "ReadEventsAsync — синк подій, не прогін збору",
         ["err.ECR-INT-0422.eventTimestampUnreadable"] = "ReadEventsAsync — синк подій, не прогін збору",
         ["err.ECR-INT-0503.catalogUnavailable"] = "перегляд каталогу PI Web API, не читання значень",
+        ["err.ECR-INT-0422.catalogQueryFailed"] = "DiscoverAsync SQL-джерела — каталог і проба з'єднання, не читання значень",
     };
 
     [Fact]

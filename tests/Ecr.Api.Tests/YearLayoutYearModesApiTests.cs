@@ -47,8 +47,14 @@ public sealed class YearLayoutYearModesApiTests(SqlServerFixture sql)
         {
             await using (var db = s.Builder.CreateContext())
             {
-                db.CalculationIssues.Add(new CalculationIssue(s.Doc.DocumentId, Jan, s.Doc.TableDefId, null, s.RowKey, 1, null, 1, Now));
-                db.CalculationIssues.Add(new CalculationIssue(s.Doc.DocumentId, Nov, s.Doc.TableDefId, null, s.RowKey, 1, null, 1, Now));
+                // ✎ P-1124: проблема посилається на справжній прогін свого місяця (FK_CIssue_Run).
+                var janRun = new CalculationRun(s.Doc.ProjectId, Jan, triggeredByUserId: null, Now, s.Doc.DocumentId);
+                var novRun = new CalculationRun(s.Doc.ProjectId, Nov, triggeredByUserId: null, Now, s.Doc.DocumentId);
+                db.CalculationRuns.AddRange(janRun, novRun);
+                await db.SaveChangesAsync().ConfigureAwait(true);
+
+                db.CalculationIssues.Add(new CalculationIssue(s.Doc.DocumentId, Jan, s.Doc.TableDefId, null, s.RowKey, 1, null, janRun.Id, Now));
+                db.CalculationIssues.Add(new CalculationIssue(s.Doc.DocumentId, Nov, s.Doc.TableDefId, null, s.RowKey, 1, null, novRun.Id, Now));
                 await db.SaveChangesAsync().ConfigureAwait(true);
             }
 

@@ -1807,6 +1807,35 @@
         ],
         "type": "object"
       },
+      "AuditAuthorView": {
+        "description": "✎ P-1124-4: автор для фільтра «By user» журналів аудиту — номер і ім'я. ⛔ Не SID і не e-mail (R-A2, D-86).",
+        "properties": {
+          "displayName": {
+            "description": "Ім'я; порожнє ім'я в записі — `null` (клієнт покаже «користувач #id»).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "login": {
+            "description": "✎ AC-7 (audit-filters-contract, рішення координатора 26.11): логін (`sec.User.UserName`) — ЛИШЕ коли таке саме\nнепорожнє ім'я (точний збіг) має ще бодай один користувач переліку, щоб «By user» розрізнив однакові імена (тимчасові\nакаунти вікон) логіном, а не «#id». Унікальне ім'я або без імені — `null`: логіни решти людей не віддаються.\nПраво — те саме, що відкриває перелік (`Security.ViewAudit`).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "userId": {
+            "description": "Номер користувача — значення фільтра.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "userId",
+          "displayName"
+        ],
+        "type": "object"
+      },
       "AuditSort": {
         "description": "Порядок сторінок журналів аудиту (вкладки Cell changes / Structure changes / Security events / Workflow events).",
         "enum": [
@@ -1865,34 +1894,6 @@
         },
         "required": [
           "registryDefId"
-        ],
-        "type": "object"
-      },
-      "BuildSnapshotRequest": {
-        "description": "Запит на побудову зрізу.",
-        "properties": {
-          "parameters": {
-            "additionalProperties": {},
-            "description": "Значення параметрів звіту за іменем (`R6`, `02b` §8a): число,\nрядок, булеве або дата рядком — тип диктує ОГОЛОШЕННЯ параметра у версії.\nНевідоме ім'я, обов'язковий параметр без значення і без `default` або\nзначення не того типу — `422 ECR-RPT-0422` одразу у відповіді на цей\nзапит, а не невдалою задачею через хвилину.",
-            "type": [
-              "null",
-              "object"
-            ]
-          },
-          "periodKey": {
-            "description": "Період.",
-            "format": "int32",
-            "type": "integer"
-          },
-          "projectId": {
-            "description": "Проєкт.",
-            "format": "int32",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "projectId",
-          "periodKey"
         ],
         "type": "object"
       },
@@ -3232,11 +3233,6 @@
               "integer"
             ]
           },
-          "snapshots": {
-            "description": "Скільки ПОТОЧНИХ зрізів звітності побудовано за цей період\n(`rpt.ReportSnapshot.IsCurrent`). Останній етап кампанії: документи\nзатверджено, але доки зрізу немає — регулятор не отримав нічого.",
-            "format": "int32",
-            "type": "integer"
-          },
           "submissionDeadline": {
             "description": "Строк подання в поясі проєкту, ВИКЛЮЧНО: це момент переходу періоду\n`Open → Grace` (`Period.ComputedGraceAt`, опівніч\n`PeriodEnd + GraceOffsetDays`), після якого правки позначаються\nпізніми (`D-70`). Останній день подання — доба ПЕРЕД цим моментом.\n`null` — межі періоду ще не пораховано.",
             "format": "date-time",
@@ -3263,7 +3259,6 @@
           "submitted",
           "approved",
           "rejected",
-          "snapshots",
           "progress",
           "submissionDeadline"
         ],
@@ -3387,11 +3382,6 @@
               "integer"
             ]
           },
-          "snapshots": {
-            "description": "Сума поточних зрізів.",
-            "format": "int32",
-            "type": "integer"
-          },
           "submitted": {
             "description": "Сума `Submitted`.",
             "format": "int32",
@@ -3408,7 +3398,6 @@
           "submitted",
           "approved",
           "rejected",
-          "snapshots",
           "done",
           "overdue",
           "atRisk",
@@ -3449,6 +3438,74 @@
           "errorCode",
           "since",
           "source"
+        ],
+        "type": "object"
+      },
+      "CellChangeColumnView": {
+        "description": "✎ AC-8: колонка, яку змінювали в документі у вікні, — варіант фільтра «Column» (незалежно від завантажених сторінок\nжурналу). Лише структура: значень тут немає.",
+        "properties": {
+          "columnCode": {
+            "description": "Код колонки; `null` — колонки вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "columnDefId": {
+            "description": "Колонка — значення фільтра.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "columnHeaderL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Заголовок колонки мовами каталогу."
+              }
+            ]
+          },
+          "sheetCode": {
+            "description": "Код аркуша колонки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sheetNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва аркуша мовами каталогу."
+              }
+            ]
+          },
+          "tableCode": {
+            "description": "Код таблиці колонки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tableNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва таблиці мовами каталогу."
+              }
+            ]
+          }
+        },
+        "required": [
+          "columnDefId"
         ],
         "type": "object"
       },
@@ -3675,6 +3732,14 @@
                 "$ref": "#/components/schemas/LocalizedText",
                 "description": "Підпис фіксованого рядка (`cfg.RowDef.LabelL10n`) за ключем рядка; `null` — рядок динамічний\nабо визначення вже немає. Лише структура, значень комірок тут немає."
               }
+            ]
+          },
+          "rowOrdinal": {
+            "description": "✎ AC-13: порядковий номер рядка на екрані (`doc.TableRow.Ordinal`, від 1) — щоб рядок, доданий людиною (без\nмітки шаблону, ключ — GUID), читався «Row N». `null` — рядка вже немає в `doc.TableRow` (видалено фізично,\nперіод в архіві).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
             ]
           },
           "sheetCode": {
@@ -5318,6 +5383,35 @@
         ],
         "type": "object"
       },
+      "ConsistencyCheckTally": {
+        "description": "Одне правило прогону.",
+        "properties": {
+          "complete": {
+            "description": "Перевірено повністю (D-480); `false` — уперлося в стелю, старі знахідки правила лишились.",
+            "type": "boolean"
+          },
+          "found": {
+            "description": "Знахідок цього прогону.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "ruleCode": {
+            "description": "Код правила.",
+            "type": "string"
+          },
+          "skipped": {
+            "description": "Не виконувалось (умова вимкнена, напр. прибирання витіснених прогонів).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ruleCode",
+          "found",
+          "complete",
+          "skipped"
+        ],
+        "type": "object"
+      },
       "ConsistencyIssuePage": {
         "description": "Сторінка знахідок із загальними лічильниками.",
         "properties": {
@@ -5495,6 +5589,39 @@
         ],
         "type": "object"
       },
+      "ConsistencyLastRun": {
+        "description": "Останній завершений прогін перевірки узгодженості (`itg.MaintenanceRun`, `consistency-check`).",
+        "properties": {
+          "checks": {
+            "description": "Правила прогону в порядку показу; порожньо — прогін до 24.11 (деталі без переліку) або збій.",
+            "items": {
+              "$ref": "#/components/schemas/ConsistencyCheckTally"
+            },
+            "type": "array"
+          },
+          "finishedAt": {
+            "description": "Кінець, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "startedAt": {
+            "description": "Старт, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "description": "`Succeeded` (знахідок немає), `Degraded` (є знахідки) або `Failed`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "startedAt",
+          "finishedAt",
+          "status",
+          "checks"
+        ],
+        "type": "object"
+      },
       "ConsistencySeverityTotals": {
         "description": "Лічильники знахідок за вагою в межах фільтра переліку (без фільтра ваги).",
         "properties": {
@@ -5540,6 +5667,17 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "lastRun": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConsistencyLastRun",
+                "description": "✎ 24.11: останній ЗАВЕРШЕНИЙ прогін перевірки з переліком правил і кількістю знахідок кожного — екран показує,\nЩО перевірено, а не лише «0 знахідок»; `null` — завершених прогонів ще не було."
+              }
             ]
           },
           "total": {
@@ -6300,90 +6438,6 @@
         ],
         "type": "object"
       },
-      "CreateReportDefRequest": {
-        "description": "Запит на створення опису звіту разом із першою версією.",
-        "properties": {
-          "code": {
-            "description": "Код звіту; ним адресується побудова зрізу.",
-            "type": "string"
-          },
-          "columns": {
-            "description": "Колонки зрізу: код і тип значення.",
-            "items": {
-              "$ref": "#/components/schemas/ReportColumnCommand"
-            },
-            "type": "array"
-          },
-          "isRegulatory": {
-            "description": "Чи звіт іде регулятору: від цього залежить фільтр статусів у вʼюсі\n`rpt.v_*` (`D-65`), а не «важливість».",
-            "type": "boolean"
-          },
-          "nameL10n": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "description": "Назва мовами каталогу.",
-            "type": "object"
-          },
-          "rules": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ReportRulesCommand",
-                "description": "Правила відбору рядків; `null` — джерело за замовчуванням."
-              }
-            ]
-          },
-          "version": {
-            "description": "Номер першої версії.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "code",
-          "nameL10n",
-          "isRegulatory",
-          "version",
-          "columns",
-          "rules"
-        ],
-        "type": "object"
-      },
-      "CreateReportVersionRequest": {
-        "description": "Запит на створення версії-чернетки опису звіту.",
-        "properties": {
-          "columns": {
-            "description": "Колонки зрізу.",
-            "items": {
-              "$ref": "#/components/schemas/ReportColumnCommand"
-            },
-            "type": "array"
-          },
-          "rules": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ReportRulesCommand",
-                "description": "Правила відбору рядків; `null` — джерело за замовчуванням."
-              }
-            ]
-          },
-          "version": {
-            "description": "Номер версії; унікальний у межах опису.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "version",
-          "columns",
-          "rules"
-        ],
-        "type": "object"
-      },
       "CreateRoleRequest": {
         "description": "Запит на створення ролі.",
         "properties": {
@@ -7092,6 +7146,9 @@
       "DataSourceView": {
         "description": "Джерело даних — рядок екрана конфігуратора (`BE-21`, ФВ-14.3).",
         "properties": {
+          "authMode": {
+            "$ref": "#/components/schemas/SourceAuthMode"
+          },
           "catalog": {
             "type": [
               "null",
@@ -7105,8 +7162,21 @@
             "format": "int32",
             "type": "integer"
           },
+          "credentialsRejectedAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "credentialsState": {
+            "$ref": "#/components/schemas/SourceCredentialsState"
+          },
           "endpoint": {
             "type": "string"
+          },
+          "hasPassword": {
+            "type": "boolean"
           },
           "hasSecret": {
             "type": "boolean"
@@ -7143,6 +7213,12 @@
           },
           "transport": {
             "$ref": "#/components/schemas/ExternalTransport"
+          },
+          "userName": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         },
         "required": [
@@ -7158,7 +7234,12 @@
           "hasSecret",
           "sourceEntities",
           "collectionSchedules",
-          "rowVersion"
+          "rowVersion",
+          "authMode",
+          "userName",
+          "hasPassword",
+          "credentialsState",
+          "credentialsRejectedAt"
         ],
         "type": "object"
       },
@@ -9894,8 +9975,7 @@
         "description": "Діалект виразу. Визначає набір дозволених функцій і посилань.",
         "enum": [
           "Template",
-          "Methodology",
-          "Report"
+          "Methodology"
         ]
       },
       "ExpressionFunctionDto": {
@@ -10157,6 +10237,127 @@
           "Blank"
         ]
       },
+      "FinalizeFormulasEntryDto": {
+        "description": "Версія, яку переносять на скрипт остаточно, і доказ цього тексту.",
+        "properties": {
+          "proof": {
+            "description": "Джерело доказу: `reference` (рядки старої системи), `synthetic` (рядки гілок), `legacy` (результати\nстарої системи), `stored` (збережені `calc.CalculationResult` версії відтворено на тих самих входах), `noRules` (у версії немає правил рядків — ні формули, ні скрипт нічого не рахують),\n`unusedLibrary` (бібліотека, яку ніхто не імпортує).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "provenValues": {
+            "description": "Скільки значень порівняно з 0 розбіжностей (для `reference`/`synthetic`/`legacy` ≥ 1).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "scriptHash": {
+            "description": "SHA-256 (hex) тексту, на якому доведено паритет; має збігатися з `ScriptHash` у базі.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "text": {
+            "description": "Текст скрипта, що стане текстом версії (convert «повного життя»: чернетки, витіснені версії, тінь яких усічена межею наступної\nверсії); `null` — береться тіньовий текст із бази. Хеш цього тексту мусить дорівнювати ScriptHash\n(доведено саме його); попередня тінь іде в журнал.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "versionId": {
+            "description": "Версія (рушій `Formulas`).",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "versionId",
+          "scriptHash",
+          "proof",
+          "provenValues"
+        ],
+        "type": "object"
+      },
+      "FinalizeFormulasRequest": {
+        "description": "Запит остаточного перенесення.",
+        "properties": {
+          "entries": {
+            "description": "Версії.",
+            "items": {
+              "$ref": "#/components/schemas/FinalizeFormulasEntryDto"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "reason": {
+            "description": "Причина (у журнал).",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "reason",
+          "entries"
+        ],
+        "type": "object"
+      },
+      "FinalizeFormulasResponse": {
+        "description": "Відповідь остаточного перенесення.",
+        "properties": {
+          "finalized": {
+            "description": "Перенесені версії.",
+            "items": {
+              "$ref": "#/components/schemas/FinalizedVersionDto"
+            },
+            "type": "array"
+          },
+          "formulasVersionsLeft": {
+            "description": "Скільки версій на `Formulas` лишилось після запиту.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "finalized",
+          "formulasVersionsLeft"
+        ],
+        "type": "object"
+      },
+      "FinalizedVersionDto": {
+        "description": "Перенесена версія.",
+        "properties": {
+          "methodologyCode": {
+            "description": "Код методології.",
+            "type": "string"
+          },
+          "proof": {
+            "description": "Джерело доказу.",
+            "type": "string"
+          },
+          "version": {
+            "description": "Номер версії.",
+            "type": "string"
+          },
+          "versionId": {
+            "description": "Версія.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "versionId",
+          "methodologyCode",
+          "version",
+          "proof"
+        ],
+        "type": "object"
+      },
       "FlertSyncRunDto": {
         "description": "Один прогін синку FLERT (`itg.MaintenanceRun``flert-composition-sync`).",
         "properties": {
@@ -10234,39 +10435,6 @@
           "reactivated",
           "issueCount",
           "message"
-        ],
-        "type": "object"
-      },
-      "FlertSyncStatusDto": {
-        "description": "Стан синку FLERT.",
-        "properties": {
-          "enabled": {
-            "description": "Синк увімкнено (`Flert:Sync:Enabled`); вимкнений прогін лише пише «вимкнено».",
-            "type": "boolean"
-          },
-          "lastRun": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/FlertSyncRunDto",
-                "description": "Останній прогін; `null` — не було жодного."
-              }
-            ]
-          },
-          "registryCodes": {
-            "description": "Коди довідників-дзеркала (`STREAM`, `STREAM_CASE`, `GAS_COMPOSITION`) — де показувати стан.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "enabled",
-          "registryCodes",
-          "lastRun"
         ],
         "type": "object"
       },
@@ -10658,6 +10826,709 @@
           "Row",
           "Cell"
         ]
+      },
+      "GasCaseDto": {
+        "description": "Кейс потоку зі шкалою версій.",
+        "properties": {
+          "name": {
+            "description": "Назва кейсу.",
+            "type": "string"
+          },
+          "versions": {
+            "description": "Версії за датою дії.",
+            "items": {
+              "$ref": "#/components/schemas/GasVersionDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "versions"
+        ],
+        "type": "object"
+      },
+      "GasCaseRenameRequest": {
+        "description": "Перейменування кейсу (усіх його версій).",
+        "properties": {
+          "from": {
+            "description": "Поточна назва.",
+            "type": "string"
+          },
+          "to": {
+            "description": "Нова назва.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "GasChangeResultDto": {
+        "description": "Результат зміни: потік після неї і поставлений перерахунок.",
+        "properties": {
+          "failedYears": {
+            "description": "Роки, за які поставити не вдалося (перерахуйте вручну).",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "queuedYears": {
+            "description": "Роки, за які поставлено перерахунок залежних документів.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "stream": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GasStreamDetailDto",
+                "description": "Потік після зміни; `null` — потік видалено."
+              }
+            ]
+          }
+        },
+        "required": [
+          "stream",
+          "queuedYears",
+          "failedYears"
+        ],
+        "type": "object"
+      },
+      "GasComponentDto": {
+        "description": "Компонент для редактора.",
+        "properties": {
+          "code": {
+            "description": "Код.",
+            "type": "string"
+          },
+          "formula": {
+            "description": "Формула.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "group": {
+            "description": "Група для показу: `inert`, `hydrocarbon`, `aromatic`, `sulphur`, `other`.",
+            "type": "string"
+          },
+          "mw": {
+            "description": "Молярна маса.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва з довідника `COMPONENT` за мовами — лише та, що відрізняється від коду (імпорт заводить компонент із назвою, рівною\nкоду FLERT). Порожньо — клієнт показує типову назву з каталогу рядків (`gasComposition.component.&lt;код&gt;`).",
+            "type": "object"
+          }
+        },
+        "required": [
+          "code",
+          "names",
+          "formula",
+          "mw",
+          "group"
+        ],
+        "type": "object"
+      },
+      "GasComponentValue": {
+        "description": "Компонент складу у запиті: код і мол.%.",
+        "properties": {
+          "code": {
+            "description": "Код компонента (`COMPONENT`).",
+            "type": "string"
+          },
+          "molPct": {
+            "description": "Мол.%, 0…100.",
+            "format": "decimal",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "molPct"
+        ],
+        "type": "object"
+      },
+      "GasImportStatusDto": {
+        "description": "Стан разового імпорту з FLERT.",
+        "properties": {
+          "available": {
+            "description": "Імпорт можливий: у ECR ще немає жодного потоку.",
+            "type": "boolean"
+          },
+          "lastRun": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FlertSyncRunDto",
+                "description": "Останній прогін імпорту; `null` — не було."
+              }
+            ]
+          }
+        },
+        "required": [
+          "available",
+          "lastRun"
+        ],
+        "type": "object"
+      },
+      "GasLockDto": {
+        "description": "Замкнений період, що тримає версію.",
+        "properties": {
+          "period": {
+            "description": "Підпис періоду (`2026-03` або `2026`).",
+            "type": "string"
+          },
+          "reason": {
+            "description": "`closed` або `approved`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "period",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "GasStreamDetailDto": {
+        "description": "Потік з кейсами.",
+        "properties": {
+          "canEdit": {
+            "description": "Право змін.",
+            "type": "boolean"
+          },
+          "cases": {
+            "description": "Кейси.",
+            "items": {
+              "$ref": "#/components/schemas/GasCaseDto"
+            },
+            "type": "array"
+          },
+          "group": {
+            "description": "Група.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "hidden": {
+            "description": "Прихований у списках.",
+            "type": "boolean"
+          },
+          "hmbDoc": {
+            "description": "Документ HMB.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "description": "Запис потоку.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "isHmb": {
+            "description": "Потік HMB.",
+            "type": "boolean"
+          },
+          "isOnshore": {
+            "description": "Суша.",
+            "type": "boolean"
+          },
+          "isSour": {
+            "description": "Кислий.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Назва.",
+            "type": "string"
+          },
+          "number": {
+            "description": "Номер.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "streamId": {
+            "description": "Id потоку.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "streamId",
+          "number",
+          "name",
+          "isOnshore",
+          "isSour",
+          "isHmb",
+          "hmbDoc",
+          "group",
+          "hidden",
+          "cases",
+          "canEdit"
+        ],
+        "type": "object"
+      },
+      "GasStreamListDto": {
+        "description": "Перелік потоків.",
+        "properties": {
+          "canEdit": {
+            "description": "Чи має користувач право змінювати.",
+            "type": "boolean"
+          },
+          "canImport": {
+            "description": "Чи може користувач запустити імпорт (право змін + керування інтеграціями).",
+            "type": "boolean"
+          },
+          "import": {
+            "$ref": "#/components/schemas/GasImportStatusDto",
+            "description": "Стан імпорту з FLERT."
+          },
+          "streams": {
+            "description": "Потоки.",
+            "items": {
+              "$ref": "#/components/schemas/GasStreamListItemDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "streams",
+          "canEdit",
+          "canImport",
+          "import"
+        ],
+        "type": "object"
+      },
+      "GasStreamListItemDto": {
+        "description": "Потік у переліку.",
+        "properties": {
+          "caseCount": {
+            "description": "Кейсів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "deviatingVersions": {
+            "description": "Версій, у яких Σ поза 100 ± 0.5 (зокрема без складу).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "hidden": {
+            "description": "Прихований у списках.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Запис потоку.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "isHmb": {
+            "description": "Потік HMB.",
+            "type": "boolean"
+          },
+          "isOnshore": {
+            "description": "Суша.",
+            "type": "boolean"
+          },
+          "isSour": {
+            "description": "Кислий.",
+            "type": "boolean"
+          },
+          "latestFrom": {
+            "description": "Найпізніша дата дії серед версій; `null` — версій немає.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lowSumVersions": {
+            "description": "Версій, у яких 0 &lt; Σ &lt; 90 % (у FLERT — 7 кейсів): найімовірніше неповний склад.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Назва.",
+            "type": "string"
+          },
+          "noCompositionVersions": {
+            "description": "Версій без складу (Σ = 0, «No composition»; у FLERT — 16).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "number": {
+            "description": "Номер.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "streamId": {
+            "description": "Id потоку (на нього посилаються події PI, FLERT `FlaringStream.ID`).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "versionCount": {
+            "description": "Версій усіх кейсів.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "streamId",
+          "number",
+          "name",
+          "isOnshore",
+          "isSour",
+          "isHmb",
+          "hidden",
+          "caseCount",
+          "versionCount",
+          "latestFrom",
+          "deviatingVersions",
+          "lowSumVersions",
+          "noCompositionVersions"
+        ],
+        "type": "object"
+      },
+      "GasStreamRequest": {
+        "description": "Атрибути потоку.",
+        "properties": {
+          "group": {
+            "description": "Група.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "hidden": {
+            "description": "Прихований у списках.",
+            "type": "boolean"
+          },
+          "hmbDoc": {
+            "description": "Документ HMB.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isHmb": {
+            "description": "Потік HMB.",
+            "type": "boolean"
+          },
+          "isOnshore": {
+            "description": "Суша.",
+            "type": "boolean"
+          },
+          "isSour": {
+            "description": "Кислий.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Назва (унікальна разом із «суша/море»).",
+            "type": "string"
+          },
+          "number": {
+            "description": "Номер.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "number",
+          "isOnshore",
+          "isSour",
+          "isHmb",
+          "hmbDoc",
+          "group",
+          "hidden"
+        ],
+        "type": "object"
+      },
+      "GasVersionCreateRequest": {
+        "description": "Нова версія кейсу (або перша версія нового кейсу).",
+        "properties": {
+          "acceptSumDeviation": {
+            "description": "Підтвердження Σ поза 100 ± 0.5.",
+            "type": "boolean"
+          },
+          "caseName": {
+            "description": "Кейс.",
+            "type": "string"
+          },
+          "components": {
+            "description": "Компоненти.",
+            "items": {
+              "$ref": "#/components/schemas/GasComponentValue"
+            },
+            "type": "array"
+          },
+          "densityOp": {
+            "description": "Густина.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "mwHysys": {
+            "description": "Молярна маса.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "temperatureC": {
+            "description": "Температура.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validFrom": {
+            "description": "З якого місяця діє (1-ше число).",
+            "format": "date",
+            "type": "string"
+          },
+          "z": {
+            "description": "Стисливість.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "caseName",
+          "validFrom",
+          "temperatureC",
+          "densityOp",
+          "mwHysys",
+          "z",
+          "components",
+          "acceptSumDeviation"
+        ],
+        "type": "object"
+      },
+      "GasVersionDto": {
+        "description": "Версія кейсу.",
+        "properties": {
+          "components": {
+            "description": "Ненульові компоненти.",
+            "items": {
+              "$ref": "#/components/schemas/GasComponentValue"
+            },
+            "type": "array"
+          },
+          "densityOp": {
+            "description": "Робоча густина.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "flertAliases": {
+            "description": "Значення довгих колонок-дублів FLERT, що розійшлися з коротким кодом (довідково).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "description": "Запис версії.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "legacyCompositionId": {
+            "description": "Id складу FLERT.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "legacyTypeId": {
+            "description": "Id кейсу FLERT.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "locks": {
+            "description": "Замкнені періоди всередині вікна: значення змінювати не можна.",
+            "items": {
+              "$ref": "#/components/schemas/GasLockDto"
+            },
+            "type": "array"
+          },
+          "mwHysys": {
+            "description": "Молярна маса HYSYS.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "noComposition": {
+            "description": "Складу немає.",
+            "type": "boolean"
+          },
+          "ruleParse": {
+            "description": "Правило FLERT (довідково).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sum": {
+            "description": "Σ мол.%.",
+            "format": "decimal",
+            "type": "string"
+          },
+          "temperatureC": {
+            "description": "Температура, °C.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validFrom": {
+            "description": "Початок дії.",
+            "format": "date",
+            "type": "string"
+          },
+          "validTo": {
+            "description": "Кінець (виключно); `null` — чинна.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "z": {
+            "description": "Стисливість.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "validFrom",
+          "validTo",
+          "temperatureC",
+          "densityOp",
+          "mwHysys",
+          "z",
+          "ruleParse",
+          "legacyTypeId",
+          "legacyCompositionId",
+          "flertAliases",
+          "sum",
+          "noComposition",
+          "components",
+          "locks"
+        ],
+        "type": "object"
+      },
+      "GasVersionUpdateRequest": {
+        "description": "Зміна версії.",
+        "properties": {
+          "acceptSumDeviation": {
+            "description": "Підтвердження Σ поза 100 ± 0.5.",
+            "type": "boolean"
+          },
+          "components": {
+            "description": "Компоненти (повний склад версії).",
+            "items": {
+              "$ref": "#/components/schemas/GasComponentValue"
+            },
+            "type": "array"
+          },
+          "densityOp": {
+            "description": "Густина.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "mwHysys": {
+            "description": "Молярна маса.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "temperatureC": {
+            "description": "Температура.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validFrom": {
+            "description": "З якого місяця діє.",
+            "format": "date",
+            "type": "string"
+          },
+          "z": {
+            "description": "Стисливість.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "validFrom",
+          "temperatureC",
+          "densityOp",
+          "mwHysys",
+          "z",
+          "components",
+          "acceptSumDeviation"
+        ],
+        "type": "object"
       },
       "GrantLevel": {
         "description": "Рівень ресурсного гранта. Порядок значень значущий: більше = ширше.",
@@ -20112,6 +20983,220 @@
         ],
         "type": "object"
       },
+      "ProjectPurgeCounts": {
+        "description": "Кількості рядків, що зникнуть разом із проєктом.",
+        "properties": {
+          "approvalEvents": {
+            "description": "Події погодження.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "approvalStates": {
+            "description": "Стани аркуш × період.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "calculationIssues": {
+            "description": "Проблеми розрахунків.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "calculationResults": {
+            "description": "Результати розрахунків.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "calculationRuns": {
+            "description": "Прогони розрахунків.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "cells": {
+            "description": "Комірки.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "periods": {
+            "description": "Періоди проєкту.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "submissionSnapshots": {
+            "description": "Зрізи подання.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cells",
+          "calculationResults",
+          "calculationRuns",
+          "calculationIssues",
+          "approvalEvents",
+          "approvalStates",
+          "submissionSnapshots",
+          "periods"
+        ],
+        "type": "object"
+      },
+      "ProjectPurgeDependant": {
+        "description": "Документ ІНШОГО проєкту, що читає дані цього (B80: зв'язка документа-джерела).",
+        "properties": {
+          "businessKey": {
+            "description": "Його ключ.",
+            "type": "string"
+          },
+          "documentId": {
+            "description": "Документ-споживач.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "projectCode": {
+            "description": "Його проєкт.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Чим залежить: `SourceBinding:&lt;код зв'язки&gt;:&lt;рік&gt;` або `SourceEventMap`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documentId",
+          "businessKey",
+          "projectCode",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "ProjectPurgeDocument": {
+        "description": "Документ, що буде видалений.",
+        "properties": {
+          "businessKey": {
+            "description": "Ключ документа.",
+            "type": "string"
+          },
+          "cells": {
+            "description": "Скільки комірок зі значеннями.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "templateCode": {
+            "description": "Код шаблону (може бути `null` для документів до B74).",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "documentId",
+          "businessKey",
+          "templateCode",
+          "cells"
+        ],
+        "type": "object"
+      },
+      "ProjectPurgePreviewDto": {
+        "description": "Попередній перегляд видалення проєкту з даними — що зникне і що заважає.",
+        "properties": {
+          "approvedMonths": {
+            "description": "Періоди із затвердженими аркушами — видаляються без повернення (C2-f, у журнал).",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "archivedPeriodKeys": {
+            "description": "Заархівовані періоди (B69) — видалення заборонене.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "blocker": {
+            "description": "Чому видалити не можна: `null` — можна; інакше ключ каталогу причини (той самий, що у відмові 409).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "code": {
+            "description": "Код (людина набирає його для підтвердження).",
+            "type": "string"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/ProjectPurgeCounts",
+            "description": "Кількості рядків."
+          },
+          "dataMonths": {
+            "description": "Місяці з даними (`yyyyMM`).",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "dependants": {
+            "description": "Документи інших проєктів, що читають цей (B80) — видалення заборонене.",
+            "items": {
+              "$ref": "#/components/schemas/ProjectPurgeDependant"
+            },
+            "type": "array"
+          },
+          "documents": {
+            "description": "Документи з ключами й кількістю комірок.",
+            "items": {
+              "$ref": "#/components/schemas/ProjectPurgeDocument"
+            },
+            "type": "array"
+          },
+          "eventMaps": {
+            "description": "Документи ЦЬОГО проєкту з мапами подій джерела — прибрати в Sources (✎ R3 C2-b).",
+            "items": {
+              "$ref": "#/components/schemas/ProjectPurgeDependant"
+            },
+            "type": "array"
+          },
+          "projectId": {
+            "description": "Проєкт.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "status": {
+            "description": "Стан.",
+            "type": "string"
+          },
+          "warnings": {
+            "description": "Попередження без блокування (ProjectPurgeWarnings): рішення за людиною.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "projectId",
+          "code",
+          "status",
+          "documents",
+          "counts",
+          "dataMonths",
+          "archivedPeriodKeys",
+          "dependants",
+          "eventMaps",
+          "approvedMonths",
+          "warnings",
+          "blocker"
+        ],
+        "type": "object"
+      },
       "ProjectRecalculationAcceptedResponse": {
         "description": "Прийнятий у чергу перерахунок УСЬОГО проєкту (Q-151).",
         "properties": {
@@ -20267,6 +21352,10 @@
             "format": "int32",
             "type": "integer"
           },
+          "singleDocumentPerProject": {
+            "description": "✎ B74 (24.11): шаблон дозволяє щонайбільше один документ у проєкті (B151); з `DocumentCount` &gt; 0 майстер\nнового документа замість Next пропонує відкрити наявний — створення однаково дало б `409 ECR-DOC-4092`.",
+            "type": "boolean"
+          },
           "templateCode": {
             "description": "Код шаблону (префікс бізнес-ключа в багатошаблонному проєкті).",
             "type": "string"
@@ -20294,7 +21383,8 @@
           "version",
           "layout",
           "isPrimary",
-          "documentCount"
+          "documentCount",
+          "singleDocumentPerProject"
         ],
         "type": "object"
       },
@@ -20490,19 +21580,6 @@
         ],
         "type": "object"
       },
-      "PublishReportVersionRequest": {
-        "description": "Запит на публікацію версії опису звіту (ФВ-14.7).",
-        "properties": {
-          "reason": {
-            "description": "Причина публікації; обов'язкова, порожня відхиляється (`ECR-REQ-0422`) і потрапляє в\nжурнал структурних змін.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "reason"
-        ],
-        "type": "object"
-      },
       "PublishVersionRequest": {
         "description": "Запит на публікацію версії.",
         "properties": {
@@ -20512,6 +21589,30 @@
           }
         },
         "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
+      "PurgeProjectRequest": {
+        "description": "Тіло запиту видалення проєкту з даними.",
+        "properties": {
+          "code": {
+            "description": "Код проєкту, набраний людиною (має збігтися точно).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reason": {
+            "description": "Причина (обов'язкова; іде в журнал безпеки).",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "code",
           "reason"
         ],
         "type": "object"
@@ -23984,429 +25085,6 @@
         ],
         "type": "object"
       },
-      "ReportColumnCommand": {
-        "description": "Колонка зрізу в описі версії звіту.",
-        "properties": {
-          "code": {
-            "description": "Код колонки; він же ключ у рядку зрізу.",
-            "type": "string"
-          },
-          "kind": {
-            "description": "Тип значення: `text`, `number` або `date`.",
-            "type": "string"
-          },
-          "nameL10n": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "description": "Підписи колонки мовами каталогу (`R9`); `null` — колонка\nпідписується КОДОМ, тобто рівно як до `R9`. У JSON опису поля тоді\nнемає взагалі, і `ColumnsJson` лишається побайтно тим самим.\n⚠ На `rpt.ReportRow` і на `ContentHash` не впливає — це подання.",
-            "type": [
-              "null",
-              "object"
-            ]
-          }
-        },
-        "required": [
-          "code",
-          "kind"
-        ],
-        "type": "object"
-      },
-      "ReportDefinitionDto": {
-        "description": "Опис звіту разом із його версіями.",
-        "properties": {
-          "code": {
-            "description": "Код звіту — саме ним будується зріз.",
-            "type": "string"
-          },
-          "id": {
-            "description": "Ідентифікатор опису.",
-            "format": "int32",
-            "type": "integer"
-          },
-          "isActive": {
-            "description": "Чи звіт в обігу.",
-            "type": "boolean"
-          },
-          "isRegulatory": {
-            "description": "Чи звіт іде регулятору. Не позначка «важливий»: від неї залежить, який\nфільтр статусів піде у вʼюху `rpt.v_*` (`D-65`).",
-            "type": "boolean"
-          },
-          "nameL10n": {
-            "$ref": "#/components/schemas/LocalizedText",
-            "description": "Назва мовами каталогу."
-          },
-          "versions": {
-            "description": "Версії, найновіша першою.",
-            "items": {
-              "$ref": "#/components/schemas/ReportVersionDto"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "id",
-          "code",
-          "nameL10n",
-          "isRegulatory",
-          "isActive",
-          "versions"
-        ],
-        "type": "object"
-      },
-      "ReportExpressionContext": {
-        "description": "На що може послатися правило звіту і що воно має повернути.",
-        "properties": {
-          "columns": {
-            "description": "Колонки рядка зрізу — `[Code]`.",
-            "items": {
-              "$ref": "#/components/schemas/ReportSymbolDeclaration"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "expectedType": {
-            "description": "Очікуваний тип результату: `Boolean` для умови `when`; `null` — довільний.",
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "parameters": {
-            "description": "Параметри звіту — `@Name`.",
-            "items": {
-              "$ref": "#/components/schemas/ReportSymbolDeclaration"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          }
-        },
-        "required": [
-          "columns",
-          "parameters",
-          "expectedType"
-        ],
-        "type": "object"
-      },
-      "ReportLayoutCommand": {
-        "description": "Макет зрізу (`RulesJson`, схема 2, секція `layout`).",
-        "properties": {
-          "groupBy": {
-            "description": "Код колонки групування; `null` — плаский перелік, і тоді підсумки, якщо\nвони задані, дають один підсумковий рядок.",
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "showGroupHeader": {
-            "default": false,
-            "description": "Чи малювати рядок заголовка групи.",
-            "type": "boolean"
-          },
-          "totals": {
-            "description": "Підсумки в порядку опису.",
-            "items": {
-              "$ref": "#/components/schemas/ReportTotalCommand"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          }
-        },
-        "type": "object"
-      },
-      "ReportParameterCommand": {
-        "description": "Оголошення параметра звіту в описі версії (`RulesJson`, схема 2).",
-        "properties": {
-          "code": {
-            "description": "Ім'я параметра без `@`; у виразі — `@Code`.",
-            "type": "string"
-          },
-          "default": {
-            "description": "Значення, яке бере побудова, коли параметр не переданий; JSON-значення\nоголошеного типу (дата — рядком)."
-          },
-          "required": {
-            "default": false,
-            "description": "Чи побудова без значення неможлива. `Required` разом із `Default` —\nзаконна пара: замовчування і є тим значенням, без якого не будують.",
-            "type": "boolean"
-          },
-          "type": {
-            "description": "`Number`, `Text`, `Boolean` або `Date`; регістр не важить.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "code",
-          "type"
-        ],
-        "type": "object"
-      },
-      "ReportRuleCommand": {
-        "description": "Правило рядка зрізу: «умова → значення» або «умова → приховати рядок» (`D-52a`).",
-        "properties": {
-          "then": {
-            "$ref": "#/components/schemas/ReportRuleThenCommand",
-            "description": "Дія: рівно одна з `set` і `hideRow`."
-          },
-          "when": {
-            "description": "Умова — вираз діалекту `Report` типу `Boolean` (`02b` §8a).",
-            "type": "string"
-          }
-        },
-        "required": [
-          "when",
-          "then"
-        ],
-        "type": "object"
-      },
-      "ReportRuleSetCommand": {
-        "description": "Присвоєння колонці рядка.",
-        "properties": {
-          "column": {
-            "description": "Код ОПИСАНОЇ колонки версії.",
-            "type": "string"
-          },
-          "value": {
-            "description": "Вираз діалекту `Report`; тип сумісний із типом колонки.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "column",
-          "value"
-        ],
-        "type": "object"
-      },
-      "ReportRuleThenCommand": {
-        "description": "Дія правила.",
-        "properties": {
-          "hideRow": {
-            "description": "`true` — рядок у зріз не потрапляє.",
-            "type": [
-              "null",
-              "boolean"
-            ]
-          },
-          "set": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ReportRuleSetCommand",
-                "description": "Присвоїти колонці значення."
-              }
-            ]
-          }
-        },
-        "type": "object"
-      },
-      "ReportRulesCommand": {
-        "description": "Правила відбору рядків зрізу.",
-        "properties": {
-          "layout": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ReportLayoutCommand",
-                "description": "Макет зрізу (схема 2, `R8`): одна група й підсумки. У JSON схеми 1 поля\nнемає взагалі. ⚠ На `rpt.ReportRow` і на `ContentHash` не впливає —\nзастосовується на видачі."
-              }
-            ]
-          },
-          "parameters": {
-            "description": "Параметри звіту (схема 2, `R6`): на них посилаються вирази правил як\n`@Code`, а значення задаються при побудові зрізу. У JSON схеми 1 поля\nнемає взагалі.",
-            "items": {
-              "$ref": "#/components/schemas/ReportParameterCommand"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "rowSource": {
-            "description": "Звідки беруться рядки. Єдине відоме будівнику значення —\nstring ReportDefinitionSpec.CalculationResults.",
-            "type": "string"
-          },
-          "rules": {
-            "description": "Правила рядка (схема 2) у порядку застосування; у JSON схеми 1 поля немає взагалі.",
-            "items": {
-              "$ref": "#/components/schemas/ReportRuleCommand"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "schema": {
-            "description": "Версія схеми правил; `null` — чинна (int ReportRules.CurrentSchema).",
-            "format": "int32",
-            "type": [
-              "null",
-              "integer"
-            ]
-          }
-        },
-        "required": [
-          "rowSource"
-        ],
-        "type": "object"
-      },
-      "ReportSnapshotSummary": {
-        "description": "Зріз у переліку.",
-        "properties": {
-          "builtAt": {
-            "description": "Коли побудовано.",
-            "format": "date-time",
-            "type": "string"
-          },
-          "contentHash": {
-            "description": "Контрольна сума вмісту в hex; `null` — не рахувалася.",
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "hashFormat": {
-            "description": "Яким форматом пораховано суму: `current`, `legacy` (до BE-17) або\n`unknown` — формат ще не визначено (старий зріз, який не звіряли й не\nкласифікувала нічна задача; зріз без суми; вміст не збігся за жодним форматом).",
-            "type": "string"
-          },
-          "id": {
-            "description": "Ідентифікатор зрізу.",
-            "format": "int64",
-            "type": "integer"
-          },
-          "isCurrent": {
-            "description": "Чи це поточний зріз для пари «версія × проєкт × період».",
-            "type": "boolean"
-          },
-          "isStale": {
-            "description": "Чи застарів зріз (ФВ-10.5): після його побудови актуальним став прогін\nрозрахунку, що зачіпає його проєкт і період, тож числа в системі вже\nможуть відрізнятися від чисел зрізу.",
-            "type": "boolean"
-          },
-          "periodKey": {
-            "description": "Період; `null` — увесь рік проєкту.",
-            "format": "int32",
-            "type": [
-              "null",
-              "integer"
-            ]
-          },
-          "projectId": {
-            "description": "Проєкт.",
-            "format": "int32",
-            "type": "integer"
-          },
-          "reportVersionId": {
-            "description": "Версія звіту.",
-            "format": "int32",
-            "type": "integer"
-          },
-          "rowCount": {
-            "description": "Скільки рядків.",
-            "format": "int32",
-            "type": "integer"
-          },
-          "status": {
-            "description": "Статус даних зрізу (D-65).",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "reportVersionId",
-          "projectId",
-          "periodKey",
-          "status",
-          "isCurrent",
-          "rowCount",
-          "contentHash",
-          "builtAt"
-        ],
-        "type": "object"
-      },
-      "ReportSymbolDeclaration": {
-        "description": "Оголошення колонки або параметра.",
-        "properties": {
-          "name": {
-            "description": "Код колонки або ім'я параметра (без `@`).",
-            "type": "string"
-          },
-          "type": {
-            "description": "`Number`, `Text`, `Boolean` або `Date`.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "type"
-        ],
-        "type": "object"
-      },
-      "ReportTotalCommand": {
-        "description": "Підсумок над колонкою зрізу.",
-        "properties": {
-          "column": {
-            "description": "Код ОПИСАНОЇ колонки версії.",
-            "type": "string"
-          },
-          "fn": {
-            "description": "Функція: `sum`, `count`, `avg`, `min`, `max`.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "column",
-          "fn"
-        ],
-        "type": "object"
-      },
-      "ReportVersionDto": {
-        "description": "Версія опису звіту.",
-        "properties": {
-          "columnsJson": {
-            "description": "Опис колонок зрізу.",
-            "type": "string"
-          },
-          "createdAt": {
-            "description": "Коли створено.",
-            "format": "date-time",
-            "type": "string"
-          },
-          "id": {
-            "description": "Ідентифікатор версії.",
-            "format": "int32",
-            "type": "integer"
-          },
-          "rulesJson": {
-            "description": "Правила відбору рядків.",
-            "type": "string"
-          },
-          "status": {
-            "description": "`Draft` або `Published`. Зріз будується ЛИШЕ за опублікованою\n        (Task&lt;ReportVersionRef?&gt; IReportDefinitionStore.FindCurrentVersionAsync(string code, CancellationToken ct)).",
-            "type": "string"
-          },
-          "version": {
-            "description": "Номер версії; унікальний у межах опису.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "version",
-          "status",
-          "columnsJson",
-          "rulesJson",
-          "createdAt"
-        ],
-        "type": "object"
-      },
       "RequiredInputSeverity": {
         "description": "Критичність незаповненої обов'язкової вхідної колонки методології\n(директива «обов'язкові вхідні колонки методології», gate перед\nзбереженням).",
         "enum": [
@@ -25607,153 +26285,6 @@
           "Count"
         ]
       },
-      "RuleCoverageCombinationDto": {
-        "description": "Одна комбінація значень (коди, не числа звітності) і що з нею роблять правила.",
-        "properties": {
-          "documents": {
-            "description": "Кількість документів.",
-            "format": "int32",
-            "type": "integer"
-          },
-          "matchedRuleCodes": {
-            "description": "Усі збіжні правила; після переможця — нічия або затінені.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "rows": {
-            "description": "Кількість рядків.",
-            "format": "int64",
-            "type": "integer"
-          },
-          "state": {
-            "$ref": "#/components/schemas/RuleCoverageState",
-            "description": "Стан."
-          },
-          "values": {
-            "description": "Значення в порядку `ColumnDefIds`; `null` — порожньо.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "winnerRuleCode": {
-            "description": "Правило-переможець; `null` для розриву.",
-            "type": [
-              "null",
-              "string"
-            ]
-          }
-        },
-        "required": [
-          "values",
-          "state",
-          "winnerRuleCode",
-          "matchedRuleCodes",
-          "rows",
-          "documents"
-        ],
-        "type": "object"
-      },
-      "RuleCoverageDto": {
-        "description": "Матриця покриття «рядки реальних даних × правила» версії методології.",
-        "properties": {
-          "columnDefIds": {
-            "description": "Колонки осі — ті, що згадують правила; порядок значень у комбінації.",
-            "items": {
-              "format": "int32",
-              "type": "integer"
-            },
-            "type": "array"
-          },
-          "combinations": {
-            "description": "Комбінації: розриви → конфлікти → покриті, далі за кількістю рядків.",
-            "items": {
-              "$ref": "#/components/schemas/RuleCoverageCombinationDto"
-            },
-            "type": "array"
-          },
-          "excludedRows": {
-            "default": 0,
-            "description": "D-425: рядків відсіяно фільтром активності методології (статус не активний або порожній) — вони не рахуються\nпрогоном і не є «непокритими»; `0` — фільтра немає.",
-            "format": "int64",
-            "type": "integer"
-          },
-          "methodologyVersionId": {
-            "description": "Версія.",
-            "format": "int32",
-            "type": "integer"
-          },
-          "periodFrom": {
-            "description": "Нижня межа вікна періодів (включно), фактично застосована.",
-            "format": "int32",
-            "type": "integer"
-          },
-          "periodTo": {
-            "description": "Верхня межа (включно).",
-            "format": "int32",
-            "type": "integer"
-          },
-          "rules": {
-            "description": "Активні правила в порядку пріоритету.",
-            "items": {
-              "$ref": "#/components/schemas/RuleCoverageRuleDto"
-            },
-            "type": "array"
-          },
-          "tableDefIds": {
-            "description": "Таблиці, рядки яких бралися.",
-            "items": {
-              "format": "int32",
-              "type": "integer"
-            },
-            "type": "array"
-          },
-          "truncated": {
-            "description": "Комбінацій більше за стелю; показано найчисленніші.",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "methodologyVersionId",
-          "periodFrom",
-          "periodTo",
-          "tableDefIds",
-          "columnDefIds",
-          "rules",
-          "combinations",
-          "truncated"
-        ],
-        "type": "object"
-      },
-      "RuleCoverageRuleDto": {
-        "description": "Правило осі матриці.",
-        "properties": {
-          "code": {
-            "description": "Код правила.",
-            "type": "string"
-          },
-          "priority": {
-            "description": "Пріоритет; менше — вищий.",
-            "format": "int32",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "code",
-          "priority"
-        ],
-        "type": "object"
-      },
-      "RuleCoverageState": {
-        "description": "Стан комбінації значень у матриці покриття (ФВ-13.9).",
-        "enum": [
-          "Gap",
-          "Conflict",
-          "Covered"
-        ]
-      },
       "RunConsistencyCheckRequest": {
         "description": "Запит на прогін перевірки узгодженості.",
         "properties": {
@@ -26121,12 +26652,28 @@
       "SaveDataSourceRequest": {
         "description": "Тіло створення і зміни джерела.",
         "properties": {
+          "authMode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SourceAuthMode",
+                "description": "Як джерело входить у систему (P-1126-SRCCRED): `Windows` — обліковий запис служби ECR, `UserPassword` —\nлогін і пароль нижче (лише `PiSqlClient` і `Sql`). `null` — не змінювати (клієнт, що не знає поля)."
+              }
+            ]
+          },
           "catalog": {
             "description": "Каталог або база джерела.",
             "type": [
               "null",
               "string"
             ]
+          },
+          "clearPassword": {
+            "default": false,
+            "description": "Стерти збережений пароль (як `clearPassword` у SMTP).",
+            "type": "boolean"
           },
           "code": {
             "description": "Код джерела; при зміні ігнорується.",
@@ -26170,6 +26717,15 @@
               "object"
             ]
           },
+          "password": {
+            "description": "⛔ Лише запис: пароль джерела. `null` або порожній — не змінювати. Шифрується перед записом і НЕ повертається\nніколи — у відповіді лише `hasPassword`.",
+            "format": "password",
+            "type": [
+              "null",
+              "string"
+            ],
+            "writeOnly": true
+          },
           "secondaryEndpoint": {
             "description": "Запасна адреса; `null` — немає.",
             "type": [
@@ -26179,14 +26735,23 @@
           },
           "secretConfirmation": {
             "description": "Повторно введений секрет джерела. Обов'язковий, лише коли в середовищі\nзаданий секрет під це джерело і адреса нова (створення або зміна\nтранспорту, основної чи запасної адреси); інакше ігнорується. Не\nзберігається й не повертається.",
+            "format": "password",
             "type": [
               "null",
               "string"
-            ]
+            ],
+            "writeOnly": true
           },
           "transport": {
             "$ref": "#/components/schemas/ExternalTransport",
             "description": "Транспорт: `PiWebApi`, `PiSqlClient`, `Sql`."
+          },
+          "userName": {
+            "description": "Логін джерела, 1..256 символів; `null` — не змінювати.",
+            "type": [
+              "null",
+              "string"
+            ]
           }
         },
         "required": [
@@ -29363,190 +29928,12 @@
         ],
         "type": "object"
       },
-      "SnapshotColumn": {
-        "description": "Колонка зрізу.",
-        "properties": {
-          "code": {
-            "description": "Код — ключ у IReadOnlyDictionary&lt;string, object?&gt; SnapshotRow.Cells.",
-            "type": "string"
-          },
-          "kind": {
-            "description": "Тип значення: `text`, `number`, `date`.",
-            "type": "string"
-          },
-          "name": {
-            "description": "Підпис колонки мовою запиту (`R9`), уже з розгорнутим фолбеком\n`мова → en → код` (ReportColumnNames). ⚠ Ніколи\nне порожній: опис без назв підписує колонку її КОДОМ, тож споживачеві не\nтреба знати про фолбек і тримати другу його копію.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "code",
-          "kind",
-          "name"
-        ],
-        "type": "object"
-      },
-      "SnapshotRow": {
-        "description": "Рядок зрізу.",
-        "properties": {
-          "cells": {
-            "additionalProperties": {},
-            "description": "Значення за кодом колонки: рядок, число або `null`.",
-            "type": "object"
-          },
-          "rowNo": {
-            "description": "Номер рядка в зрізі.",
-            "format": "int32",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "rowNo",
-          "cells"
-        ],
-        "type": "object"
-      },
-      "SnapshotRowGroup": {
-        "description": "Група рядків зрізу (`R8`, макет з однією групою).",
-        "properties": {
-          "column": {
-            "description": "Код колонки групування.",
-            "type": "string"
-          },
-          "rowCount": {
-            "description": "Скільки рядків у групі. ⚠ По ВСЬОМУ зрізу — групи можуть не вміститися в\nодну сторінку, і саме за цим числом книга знає, де група закінчується.",
-            "format": "int32",
-            "type": "integer"
-          },
-          "totals": {
-            "description": "Підсумки цієї групи; порожньо — підсумків не оголошено.",
-            "items": {
-              "$ref": "#/components/schemas/SnapshotTotal"
-            },
-            "type": "array"
-          },
-          "value": {
-            "description": "Значення колонки, спільне для рядків групи; `null` — порожнє."
-          }
-        },
-        "required": [
-          "column",
-          "value",
-          "rowCount",
-          "totals"
-        ],
-        "type": "object"
-      },
-      "SnapshotRowsPage": {
-        "description": "Сторінка рядків зрізу.",
-        "properties": {
-          "columns": {
-            "description": "Колонки в порядку опису версії.",
-            "items": {
-              "$ref": "#/components/schemas/SnapshotColumn"
-            },
-            "type": "array"
-          },
-          "groups": {
-            "description": "Групи макета по ВСЬОМУ зрізу в порядку показу; `null` — версія\nгрупування не оголошує.",
-            "items": {
-              "$ref": "#/components/schemas/SnapshotRowGroup"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "nextCursor": {
-            "description": "Курсор наступної сторінки; `null` — рядків більше немає.",
-            "format": "int32",
-            "type": [
-              "null",
-              "integer"
-            ]
-          },
-          "rows": {
-            "description": "Рядки за зростанням `RowNo`, а з макетом (`R8`) — у порядку груп.",
-            "items": {
-              "$ref": "#/components/schemas/SnapshotRow"
-            },
-            "type": "array"
-          },
-          "showGroupHeader": {
-            "default": false,
-            "description": "Чи показувати рядок заголовка групи. ⚠ Групи й підсумки рахуються по ВСЬОМУ\nзрізу й тому приходять однакові на кожній сторінці: підсумок, що міняється\nвід сторінки до сторінки, не є підсумком.",
-            "type": "boolean"
-          },
-          "totals": {
-            "description": "Підсумки по ВСЬОМУ зрізу; `null` — версія підсумків не оголошує.",
-            "items": {
-              "$ref": "#/components/schemas/SnapshotTotal"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          }
-        },
-        "required": [
-          "columns",
-          "rows",
-          "nextCursor"
-        ],
-        "type": "object"
-      },
-      "SnapshotTotal": {
-        "description": "Порахований підсумок.",
-        "properties": {
-          "column": {
-            "description": "Код колонки.",
-            "type": "string"
-          },
-          "fn": {
-            "description": "Функція: `sum`, `count`, `avg`, `min`, `max`.",
-            "type": "string"
-          },
-          "value": {
-            "description": "Значення; `null` — рахувати не було з чого."
-          }
-        },
-        "required": [
-          "column",
-          "fn",
-          "value"
-        ],
-        "type": "object"
-      },
-      "SnapshotVerifyResponse": {
-        "description": "Підсумок перевірки зрізу.",
-        "properties": {
-          "actual": {
-            "description": "Сума, перерахована за збереженими рядками (hex).",
-            "type": "string"
-          },
-          "matchedFormat": {
-            "description": "За яким форматом суми збіглося: `current`, `legacy` (зріз,\nпобудований до BE-17) або `null` — не збіглося за жодним.",
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "matches": {
-            "description": "Чи перерахована сума збіглася зі збереженою.",
-            "type": "boolean"
-          },
-          "stored": {
-            "description": "Сума, записана при побудові (hex).",
-            "type": "string"
-          }
-        },
-        "required": [
-          "matches",
-          "stored",
-          "actual",
-          "matchedFormat"
-        ],
-        "type": "object"
+      "SourceAuthMode": {
+        "description": "Як джерело входить у зовнішню систему (P-1126-SRCCRED). Числа лежать у базі — не перенумеровувати.",
+        "enum": [
+          "Windows",
+          "UserPassword"
+        ]
       },
       "SourceCatalogItem": {
         "description": "Позиція каталогу джерела: елемент або атрибут.",
@@ -29619,6 +30006,14 @@
           "nextCursor"
         ],
         "type": "object"
+      },
+      "SourceCredentialsState": {
+        "description": "Стан облікових даних джерела для значка в переліку (P-1126-SRCCRED, R-03) — без розшифрування пароля.",
+        "enum": [
+          "Ok",
+          "Rejected",
+          "Unreadable"
+        ]
       },
       "SourceEntityDto": {
         "description": "Сутність збору у відповіді на заведення чи прив'язку.",
@@ -33306,6 +33701,77 @@
         ],
         "type": "object"
       },
+      "TestDataSourceConnectionRequest": {
+        "description": "Тіло перевірки з'єднання з НЕЗБЕРЕЖЕНИХ значень форми (`POST /api/v1/data-sources/test-connection`,\nP-1126-SRCCRED §13.1). Нічого не зберігає.",
+        "properties": {
+          "authMode": {
+            "$ref": "#/components/schemas/SourceAuthMode",
+            "description": "Як входити: `Windows` або `UserPassword`."
+          },
+          "catalog": {
+            "description": "Каталог або база джерела.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "endpoint": {
+            "description": "Рядок з'єднання — без облікових даних (та сама валідація, що при збереженні).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "password": {
+            "description": "⛔ Лише запис: пароль з форми; не зберігається, не повертається, не пишеться в журнал.",
+            "format": "password",
+            "type": [
+              "null",
+              "string"
+            ],
+            "writeOnly": true
+          },
+          "reason": {
+            "description": "Причина; обов'язкова, потрапляє в журнал безпеки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "secondaryEndpoint": {
+            "description": "Запасна адреса; `null` — немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sourceId": {
+            "description": "Джерело, чий збережений пароль можна підставити, — лише коли ціль (транспорт, адреси, логін) не змінилася;\n`null` — нове з'єднання.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "transport": {
+            "$ref": "#/components/schemas/ExternalTransport",
+            "description": "Транспорт: з тіла перевіряються лише `PiSqlClient` і `Sql`."
+          },
+          "userName": {
+            "description": "Логін за `UserPassword`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "sourceId",
+          "transport",
+          "endpoint"
+        ],
+        "type": "object"
+      },
       "TestDataSourceRequest": {
         "description": "Тіло перевірки з'єднання.",
         "properties": {
@@ -34699,17 +35165,6 @@
             "description": "Текст виразу.",
             "type": "string"
           },
-          "report": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ReportExpressionContext",
-                "description": "Оточення діалекту `Report`: колонки, параметри, очікуваний тип."
-              }
-            ]
-          },
           "rowKey": {
             "description": "Рядок формули; `null` для формул рівня колонки.",
             "type": [
@@ -34822,6 +35277,16 @@
           "message": {
             "description": "Локалізований текст.",
             "type": "string"
+          },
+          "methodologies": {
+            "description": "✎ 25.11: для `ECR-CALC-0437` — коди методологій, яким потрібна колонка (одне повідомлення на рядок і\nколонку); клієнт зводить їх по колонці. `null` — для решти правил.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "rowKey": {
             "description": "Рядок, якого стосується; `null` — рівень таблиці.",
@@ -36104,6 +36569,65 @@
         ]
       }
     },
+    "/api/v1/audit/authors": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AuditAuthorView"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AuditAuthorView"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AuditAuthorView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Автори для фільтра «By user» журналів аудиту (✎ P-1124-4): номер і ім'я; логін — лише за збігу імені з іншим\nавтором (✎ AC-7), SID і e-mail — ніколи. Право\n`Security.ViewAudit` — те саме, що відкриває журнали; `GET /users` вимагає `Security.ManageUsers`.",
+        "tags": [
+          "Audit"
+        ]
+      }
+    },
     "/api/v1/audit/cells": {
       "get": {
         "description": "Таблиця партиційована за `ChangedAt`, а не за періодом: місяць\nзміни і звітний період — різні осі (зміна за січень може статися в\nберезні). Тому запит **обов'язково** обмежений вікном часу — інакше він\nпіде по всіх партиціях.\n\n⚠ Одна дія, ДВА рівні доступу (D15-16). `documentId + rowKey +\ncolumnDefId` разом — це історія ОДНІЄЇ комірки, і її бачить той, хто\nбачить документ (`Document.View` плюс грант на проєкт). Будь-який\nширший запит — загальний журнал, і для нього поріг лишається\n`Security.ViewAudit`. Розділяти це на два маршрути означало б\nдублювати вікно, курсор і всі п'ять фільтрів заради різниці, яка\nвиражається самим фільтром.\n\n⚠ `rowKey`/`columnDefId` без `documentId` —\n`422 ECR-REQ-0422`: ключ рядка унікальний у межах екземпляра\nтаблиці, а не системи, тож без документа він не адресує нічого.\nРодина `REQ`, а не `AUD`/`CELL`: суб'єкт відмови —\nпараметр запиту, і саме так тут уже відмовляють обидві перевірки вікна.",
@@ -36303,6 +36827,135 @@
           }
         },
         "summary": "Історія змін комірок. Право `Security.ViewAudit` — або\n`Document.View`, коли задано повну адресу однієї комірки.",
+        "tags": [
+          "Audit"
+        ]
+      }
+    },
+    "/api/v1/audit/cells/columns": {
+      "get": {
+        "description": "⛔ Прихована читачу колонка (заборона колонки, таблиці чи аркуша) у переліку відсутня.",
+        "parameters": [
+          {
+            "description": "Початок вікна в UTC, включно.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кінець вікна в UTC, виключно.",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Документ; без нього — порожній перелік.",
+            "in": "query",
+            "name": "documentId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CellChangeColumnView"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CellChangeColumnView"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CellChangeColumnView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Колонки документа, які змінювали у вікні, — варіанти фільтра «Column» (✎ AC-8), незалежно від завантажених\nсторінок журналу. Право, вікно, грант на документ і межі читання — як у `cells`.",
         "tags": [
           "Audit"
         ]
@@ -36733,6 +37386,125 @@
         ]
       }
     },
+    "/api/v1/audit/security/event-types": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Початок вікна в UTC, включно.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кінець вікна в UTC, виключно.",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Типи подій безпеки, що є у вікні, — варіанти фільтра «Event type» (✎ P-1124-4). Право й вікно — як у\n`security`.",
+        "tags": [
+          "Audit"
+        ]
+      }
+    },
     "/api/v1/audit/security/export.csv": {
       "get": {
         "description": "Ті самі стеля, кодування й захист, що в `cells/export.csv`; подія безпеки `AuditSecurityExported`.",
@@ -36972,6 +37744,125 @@
           }
         },
         "summary": "Загальний журнал структурних змін (`BE-16`). Право `Security.ViewAudit`.",
+        "tags": [
+          "Audit"
+        ]
+      }
+    },
+    "/api/v1/audit/structure/entity-types": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Початок вікна в UTC, включно.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кінець вікна в UTC, виключно.",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Типи сутностей журналу структурних змін, що є у вікні, — варіанти фільтра «Entity type» (✎ P-1124-4). Право й\nвікно — як у `structure`.",
         "tags": [
           "Audit"
         ]
@@ -38757,6 +39648,157 @@
         ]
       }
     },
+    "/api/v1/data-sources/test-connection": {
+      "post": {
+        "description": "⚠ Нічого не зберігає. Лише `PiSqlClient` і `Sql` (інакше `422 dataSourceTestTransport`); та сама\nвалідація адреси, що при збереженні. Пароль — з тіла; збережений підставляється лише за `sourceId` при тій\nсамій цілі й логіні, інакше `422 dataSourcePasswordReentryRequired`. Не більше 5 на хвилину на користувача\n(`429 tooManySourceTests`); після 3 відмов входу поспіль ціль на паузі 15 хв (`429 sourceTestTargetPaused`).\nВідповідь — як у `POST …/{id}/test`: лише категорія; у журналі безпеки — без адреси й пароля.",
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestDataSourceConnectionRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestDataSourceConnectionRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestDataSourceConnectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataSourceTestResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataSourceTestResult"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataSourceTestResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          }
+        },
+        "summary": "Перевіряє з'єднання з НЕЗБЕРЕЖЕНИХ значень форми (P-1126-SRCCRED §13.1). Право `Integration.Manage`.",
+        "tags": [
+          "DataSources"
+        ]
+      }
+    },
     "/api/v1/data-sources/{id}": {
       "delete": {
         "description": "⛔ Каскаду немає: джерело із сутностями збору або розкладами — це\n`409 ECR-JOB-0409` із лічильниками в деталях. Видалення потягнуло б\nза собою зібрані точки й журнал покриття, за якими вже пораховані\nдокументи. Джерело, з якого більше не збирають, вимикається\n(`isActive = false`). Потребує `If-Match`, як і зміна.",
@@ -39510,7 +40552,7 @@
     },
     "/api/v1/data-sources/{id}/test": {
       "post": {
-        "description": "⚠ `200`, а не `202`: проба читає ОДИН рівень каталогу джерела\nі вкладається у відповідь — на відміну від збору, який іде по діапазону\nі тому віддає `jobId`.\n\n⚠ Причина обов'язкова і йде в журнал безпеки; відмова джерела — це\n`{ ok: false, error, messageKey }`, а не помилка запиту. Проба цього ж\nджерела, яка вже виконується, — `409 ECR-JOB-0409`.\n\n⛔ `error` — лише категорія (`auth`, `unreachable`,\n`tls`, `timeout`, `other`, `adapterNotRegistered`),\n`messageKey` — `integration.test.failed.{категорія}`. Сирий\nтекст винятку — лише в серверному журналі (S3: інакше кнопка — сканер мережі).",
+        "description": "⚠ `200`, а не `202`: проба читає ОДИН рівень каталогу джерела\nі вкладається у відповідь — на відміну від збору, який іде по діапазону\nі тому віддає `jobId`.\n\n⚠ Причина обов'язкова і йде в журнал безпеки; відмова джерела — це\n`{ ok: false, error, messageKey }`, а не помилка запиту. Проба цього ж\nджерела, яка вже виконується, — `409 ECR-JOB-0409`.\n\n⛔ `error` — лише категорія (`auth`, `unreachable`,\n`tls`, `timeout`, `notConfigured`, `query`, `other`,\n`adapterNotRegistered`), `messageKey` — `integration.test.failed.{категорія}`.\nСирий текст винятку — лише в серверному журналі (S3: інакше кнопка — сканер мережі).\nДжерело без запиту каталогу (FLERT, склад газу) перевіряється самим з'єднанням:\n`{ ok: true, entities: 0, messageKey: integration.test.connectedNoCatalog }`.",
         "parameters": [
           {
             "in": "path",
@@ -49182,6 +50224,1153 @@
         ]
       }
     },
+    "/api/v1/gas-composition/components": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GasComponentDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GasComponentDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GasComponentDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Компоненти для редактора складу.",
+        "tags": [
+          "GasComposition"
+        ]
+      }
+    },
+    "/api/v1/gas-composition/import": {
+      "post": {
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Разовий імпорт із FLERT (лише в порожню базу): 202 з `jobId`.",
+        "tags": [
+          "GasComposition"
+        ]
+      }
+    },
+    "/api/v1/gas-composition/streams": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasStreamListDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasStreamListDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasStreamListDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Перелік потоків зі зведенням версій, право змін і стан імпорту з FLERT.",
+        "tags": [
+          "GasComposition"
+        ]
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasStreamRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasStreamRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasStreamRequest"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Новий потік (Id = найбільший + 1).",
+        "tags": [
+          "GasComposition"
+        ]
+      }
+    },
+    "/api/v1/gas-composition/streams/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Запис потоку.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Логічне видалення потоку з усіма версіями.",
+        "tags": [
+          "GasComposition"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "Запис потоку.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasStreamDetailDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasStreamDetailDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasStreamDetailDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Потік з кейсами й версіями.",
+        "tags": [
+          "GasComposition"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Запис потоку.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasStreamRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasStreamRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasStreamRequest"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Зміна атрибутів потоку.",
+        "tags": [
+          "GasComposition"
+        ]
+      }
+    },
+    "/api/v1/gas-composition/streams/{id}/cases": {
+      "put": {
+        "parameters": [
+          {
+            "description": "Запис потоку.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasCaseRenameRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasCaseRenameRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasCaseRenameRequest"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Перейменування кейсу потоку (усіх його версій).",
+        "tags": [
+          "GasComposition"
+        ]
+      }
+    },
+    "/api/v1/gas-composition/streams/{id}/versions": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Запис потоку.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasVersionCreateRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasVersionCreateRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasVersionCreateRequest"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Нова версія кейсу (або перша версія нового кейсу).",
+        "tags": [
+          "GasComposition"
+        ]
+      }
+    },
+    "/api/v1/gas-composition/versions/{versionId}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "versionId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Видалення версії (попередня продовжується на її вікно).",
+        "tags": [
+          "GasComposition"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "versionId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasVersionUpdateRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasVersionUpdateRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GasVersionUpdateRequest"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/GasChangeResultDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Зміна версії (значення і/або місяць початку).",
+        "tags": [
+          "GasComposition"
+        ]
+      }
+    },
     "/api/v1/health/facts": {
       "get": {
         "responses": {
@@ -49260,107 +51449,6 @@
         "summary": "Готова команда для DBA на створення наступних партицій. Право `System.ViewHealth`.",
         "tags": [
           "SystemHealth"
-        ]
-      }
-    },
-    "/api/v1/integration/flert-sync": {
-      "post": {
-        "description": "⚠ 202 з `jobId`: синк ходить до FLERT. Поки попередній у черзі — той самий `jobId` (злиття).",
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobAcceptedResponse"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobAcceptedResponse"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobAcceptedResponse"
-                }
-              }
-            },
-            "description": "Accepted"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Forbidden"
-          }
-        },
-        "summary": "Ставить синк у чергу позачергово («Синхронізувати зараз»). Право `Integration.Manage`.",
-        "tags": [
-          "FlertSync"
-        ]
-      }
-    },
-    "/api/v1/integration/flert-sync/status": {
-      "get": {
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FlertSyncStatusDto"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FlertSyncStatusDto"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/FlertSyncStatusDto"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Forbidden"
-          }
-        },
-        "summary": "Стан синку: чи увімкнено, де показувати (коди довідників-дзеркала) і останній прогін.\nПраво `Integration.View` або `Integration.Manage`.",
-        "tags": [
-          "FlertSync"
         ]
       }
     },
@@ -50982,6 +53070,118 @@
           }
         },
         "summary": "Звіряє пакет `package.json` з базою й записує тіньові тексти. Право `Calculation.Publish`.",
+        "tags": [
+          "MethodologyScriptMigration"
+        ]
+      }
+    },
+    "/api/v1/methodologies/script-migration/finalize": {
+      "post": {
+        "description": "Атомарно: будь-яка проблема (чинна версія, інший хеш, недоведена, не компілюється, інший склад) —\n`422 finalizeRefused`, нічого не змінено. Перед перемиканням вміст формул пишеться в журнал\n(`aud.PublicationEvent`, `scriptMigration.finalize`). Коли версій на формулах немає —\n`409 finalizeNothingLeft`.",
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinalizeFormulasRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinalizeFormulasRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinalizeFormulasRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinalizeFormulasResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinalizeFormulasResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinalizeFormulasResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "✎ P-1124-2: одноразове остаточне перенесення НЕ чинних версій (витіснених і чернеток) з формул на скрипт тим самим Id\nверсії. Право `Calculation.Publish`.",
         "tags": [
           "MethodologyScriptMigration"
         ]
@@ -52928,89 +55128,6 @@
         ]
       }
     },
-    "/api/v1/methodologies/{id}/versions/{vid}/constants/{code}/usage": {
-      "get": {
-        "parameters": [
-          {
-            "description": "Методологія.",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "format": "int32",
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Версія.",
-            "in": "path",
-            "name": "vid",
-            "required": true,
-            "schema": {
-              "format": "int32",
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Код константи.",
-            "in": "path",
-            "name": "code",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UsageResponse"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UsageResponse"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/UsageResponse"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Not Found"
-          }
-        },
-        "summary": "Формули версії, що посилаються на константу (ФВ-8.14). Право `Calculation.View`.",
-        "tags": [
-          "Methodologies"
-        ]
-      }
-    },
     "/api/v1/methodologies/{id}/versions/{vid}/coverage": {
       "get": {
         "parameters": [
@@ -54044,6 +56161,92 @@
       }
     },
     "/api/v1/methodologies/{id}/versions/{vid}/required-inputs/{columnDefId}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Колонка вимоги.",
+            "in": "path",
+            "name": "columnDefId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Прибирає обов'язкову вхідну колонку чернетки (✎ P-1124-1). Право `Calculation.ManageRequiredInputs` —\nте саме, що й запис.",
+        "tags": [
+          "Methodologies"
+        ]
+      },
       "put": {
         "description": "⛔ Окреме право від `Calculation.EditRule`/`EditFormula`\nнавмисно: gate перед збереженням клітинки (`PatchCellsHandler`)\nзастосовується до ВСІХ, хто вводить дані, а хто вирішує, ЯКІ колонки\nобов'язкові, — окрема, вужча відповідальність.",
         "parameters": [
@@ -54167,127 +56370,6 @@
         "summary": "Заводить або змінює обов'язкову вхідну колонку. Право\n`Calculation.ManageRequiredInputs` (директива «обов'язкові вхідні\nколонки методології»).",
         "tags": [
           "Methodologies"
-        ]
-      }
-    },
-    "/api/v1/methodologies/{id}/versions/{vid}/rule-coverage": {
-      "get": {
-        "parameters": [
-          {
-            "description": "Методологія.",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "format": "int32",
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Версія.",
-            "in": "path",
-            "name": "vid",
-            "required": true,
-            "schema": {
-              "format": "int32",
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Лише одна з таблиць прив'язок.",
-            "in": "query",
-            "name": "tableDefId",
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Нижня межа вікна періодів; типово — початок минулого року.",
-            "in": "query",
-            "name": "periodFrom",
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Верхня межа; типово — кінець поточного року.",
-            "in": "query",
-            "name": "periodTo",
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RuleCoverageDto"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RuleCoverageDto"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/RuleCoverageDto"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "summary": "Матриця покриття «рядки реальних даних × правила» (ФВ-13.9). Право `Calculation.View`.",
-        "tags": [
-          "MethodologyVersions"
         ]
       }
     },
@@ -61311,6 +63393,89 @@
         ]
       }
     },
+    "/api/v1/projects/{id}/deletion-preview": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Проєкт.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectPurgePreviewDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectPurgePreviewDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectPurgePreviewDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "✎ 25.11: попередній перегляд видалення проєкту З ДАНИМИ — документи з ключами, кількості комірок, результатів,\nпроблем, погоджень, місяці; заархівовані періоди (B69) і документи інших проєктів, що читають цей (B80), — тоді\n`blocker` називає причину. Право `Project.DeleteWithData` (глобальне, лише SystemAdministrator).",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
     "/api/v1/projects/{id}/document-template": {
       "get": {
         "description": "⚠ Не потребує `Template.View`: це не перегляд шаблону, а рівно те,\nбез чого не створити документ, — версію визначає проєкт.",
@@ -61468,6 +63633,134 @@
           }
         },
         "summary": "Календар періодів проєкту. Право `Document.View`.",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{id}/purge": {
+      "post": {
+        "description": "Тіло — набраний код проєкту (точний збіг) і обов'язкова причина (`422 ECR-PRD-0422`: `purgeCodeMismatch`,\n`purgeReasonRequired`). Відмова `409 ECR-PRD-0409`: `purgeArchived` (архів незмінний, B69),\n`purgeHasDependants` (документи інших проєктів читають цей, B80). Одна транзакція; подія журналу безпеки\n`ProjectDeletedWithData` з причиною й підсумком.",
+        "parameters": [
+          {
+            "description": "Проєкт.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurgeProjectRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurgeProjectRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurgeProjectRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "✎ 25.11: видаляє проєкт будь-якого стану з УСІМА даними — незворотно. Право `Project.DeleteWithData`.",
         "tags": [
           "Projects"
         ]
@@ -66356,776 +68649,6 @@
         "summary": "Де використано довідник. Право `Registry.EditDefinition` (`BE-24`).",
         "tags": [
           "Registries"
-        ]
-      }
-    },
-    "/api/v1/reports": {
-      "get": {
-        "description": "⚠ Версії приходять разом з описом, а не окремим запитом: побудувати\nзріз можна лише за ОПУБЛІКОВАНОЮ версією, і перелік, у якому цього не\nвидно, показував би звіти, кожен другий з яких відмовляє на побудову\nбез пояснення.",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/ReportDefinitionDto"
-                  },
-                  "type": "array"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/ReportDefinitionDto"
-                  },
-                  "type": "array"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/ReportDefinitionDto"
-                  },
-                  "type": "array"
-                }
-              }
-            },
-            "description": "OK"
-          }
-        },
-        "summary": "Перелік описів звітів. Право `Report.ViewRegulatory`.",
-        "tags": [
-          "Reports"
-        ]
-      },
-      "post": {
-        "description": "⚠ Колонки й правила приходять СТРУКТУРОЮ, а не рядком JSON: у базі це\nсправді JSON (`ФВ-10.4` — опис звіту є даними), але клієнт, який\nскладає його сам, рано чи пізно складе такий, якого побудова не\nпрочитає, і дізнається про це порожнім зрізом.",
-        "requestBody": {
-          "content": {
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateReportDefRequest"
-              }
-            },
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateReportDefRequest"
-              }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateReportDefRequest"
-              }
-            }
-          },
-          "description": "Токен скасування.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReportDefinitionDto"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReportDefinitionDto"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReportDefinitionDto"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "summary": "Заводить опис звіту разом із першою версією-чернеткою.\nПраво `Report.EditDefinition`.",
-        "tags": [
-          "Reports"
-        ]
-      }
-    },
-    "/api/v1/reports/snapshots": {
-      "get": {
-        "description": "У переліку є час побудови й контрольна сума: споживач має бачити, на\nяких даних побудовано зріз. Два зрізи однієї версії за один період\nвідрізняються лише цим.",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "projectId",
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "periodKey",
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/ReportSnapshotSummary"
-                  },
-                  "type": "array"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/ReportSnapshotSummary"
-                  },
-                  "type": "array"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/ReportSnapshotSummary"
-                  },
-                  "type": "array"
-                }
-              }
-            },
-            "description": "OK"
-          }
-        },
-        "summary": "Перелік побудованих зрізів. Право `Report.ViewRegulatory`.",
-        "tags": [
-          "Reports"
-        ]
-      }
-    },
-    "/api/v1/reports/snapshots/{id}/export.xlsx": {
-      "get": {
-        "description": "⚠ Файл у відповіді ОДРАЗУ, без `202` і фонової задачі, на відміну\nвід експорту документа: там книга на 500×60×12 не вкладається в жоден\nтаймаут, тут стеля — `ExportSnapshotHandler.MaxRows` рядків одного\nплаского аркуша. Черга заради цього коштувала б користувачеві двох\nзайвих кроків і GUID у руках.\n\n⛔ `D-52a` не зсувається: це ЗРІЗ, а не державна форма. PDF\nдержформи лишається в SSRS (`D-52`).",
-        "parameters": [
-          {
-            "description": "Зріз.",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "format": "int64",
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
-                "schema": {
-                  "$ref": "#/components/schemas/FileResult"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "404": {
-            "content": {
-              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "422": {
-            "content": {
-              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "summary": "Вивантажує зріз у `.xlsx`. Права `Report.Export` і\n`Report.ViewSnapshot` у проєкті зрізу.",
-        "tags": [
-          "Reports"
-        ]
-      }
-    },
-    "/api/v1/reports/snapshots/{id}/rows": {
-      "get": {
-        "description": "D-52a: другий споживач `rpt.*` поруч із SSRS. Колонки — з опису\nверсії, за якою зріз побудовано; чужий зріз — той самий 404, що й неіснуючий.",
-        "parameters": [
-          {
-            "description": "Зріз.",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "format": "int64",
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Останній уже отриманий `rowNo`; без нього — з початку.",
-            "in": "query",
-            "name": "cursor",
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Розмір сторінки, не більше 500; типово 100.",
-            "in": "query",
-            "name": "limit",
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SnapshotRowsPage"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SnapshotRowsPage"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/SnapshotRowsPage"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Not Found"
-          }
-        },
-        "summary": "Рядки зрізу сторінками, у широкому вигляді. Права `Report.ViewRegulatory`\nі `Report.ViewSnapshot` у проєкті зрізу.",
-        "tags": [
-          "Reports"
-        ]
-      }
-    },
-    "/api/v1/reports/snapshots/{id}/verify": {
-      "post": {
-        "description": "⚠ `POST`, хоча нічого не змінює: це дія з ціною (читає всі рядки\nзрізу), а не ресурс, який можна кешувати чи підвантажувати наперед.",
-        "parameters": [
-          {
-            "description": "Зріз.",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "format": "int64",
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SnapshotVerifyResponse"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SnapshotVerifyResponse"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/SnapshotVerifyResponse"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Too Many Requests"
-          }
-        },
-        "summary": "Перевіряє незмінність зрізу: перераховує суму збереженого вмісту й\nпорівнює зі збереженою. Право `Report.ViewRegulatory`.",
-        "tags": [
-          "Reports"
-        ]
-      }
-    },
-    "/api/v1/reports/{code}/build": {
-      "post": {
-        "description": "Зріз **незмінний**: повторна побудова створює новий, а не переписує\nстарий. Інакше звіт, роздрукований учора, і той самий звіт сьогодні\nдавали б різні числа без жодного сліду.",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "code",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/BuildSnapshotRequest"
-              }
-            },
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BuildSnapshotRequest"
-              }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BuildSnapshotRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobAcceptedResponse"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobAcceptedResponse"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobAcceptedResponse"
-                }
-              }
-            },
-            "description": "Accepted"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Too Many Requests"
-          }
-        },
-        "summary": "Будує зріз. Право `Report.BuildSnapshot`.",
-        "tags": [
-          "Reports"
-        ]
-      }
-    },
-    "/api/v1/reports/{id}/versions": {
-      "post": {
-        "description": "⛔ Єдиний спосіб змінити опублікований опис: опублікована версія\nнезмінна, бо на її колонки посилаються вже побудовані зрізи, які читає\nSSRS. Дії «правити версію» немає навмисно.",
-        "parameters": [
-          {
-            "description": "Опис звіту.",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "format": "int32",
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateReportVersionRequest"
-              }
-            },
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateReportVersionRequest"
-              }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateReportVersionRequest"
-              }
-            }
-          },
-          "description": "Токен скасування.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReportVersionDto"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReportVersionDto"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReportVersionDto"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "summary": "Заводить нову версію-чернетку наявного опису. Право `Report.EditDefinition`.",
-        "tags": [
-          "Reports"
-        ]
-      }
-    },
-    "/api/v1/reports/{id}/versions/{vid}/publish": {
-      "post": {
-        "description": "⛔ Побудова бере ЛИШЕ опубліковану версію — чернетка зрізу не дає\nвзагалі. Опис звіту правлять саме тоді, коли ще не впевнені в ньому, і\nзріз за чернеткою потрапив би в регуляторну вʼюху нарівні зі справжнім.",
-        "parameters": [
-          {
-            "description": "Опис звіту.",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "format": "int32",
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Версія.",
-            "in": "path",
-            "name": "vid",
-            "required": true,
-            "schema": {
-              "format": "int32",
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/PublishReportVersionRequest"
-              }
-            },
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PublishReportVersionRequest"
-              }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PublishReportVersionRequest"
-              }
-            }
-          },
-          "description": "Токен скасування.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReportVersionDto"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReportVersionDto"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReportVersionDto"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "summary": "Публікує версію опису звіту. Право `Report.EditDefinition`.",
-        "tags": [
-          "Reports"
         ]
       }
     },
@@ -79605,10 +81128,10 @@
       "name": "Expressions"
     },
     {
-      "name": "FlertSync"
+      "name": "FormulaManualOverride"
     },
     {
-      "name": "FormulaManualOverride"
+      "name": "GasComposition"
     },
     {
       "name": "GroupAssignments"
@@ -79723,9 +81246,6 @@
     },
     {
       "name": "RegistryRows"
-    },
-    {
-      "name": "Reports"
     },
     {
       "name": "RowLocks"
