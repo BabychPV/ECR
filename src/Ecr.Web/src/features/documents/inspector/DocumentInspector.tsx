@@ -52,6 +52,7 @@ import {
 import { LockedRows } from './LockedRows';
 import { SheetLog, type InspectorSheet, type SheetLogTarget } from './SheetLog';
 import './inspector.css';
+import { provenanceLines, useCellProvenance } from './cellProvenance';
 
 export type { InspectorSheet, SheetLogTarget } from './SheetLog';
 
@@ -997,6 +998,10 @@ function InfoTab({
 }): JSX.Element {
   // ⚠ Той самий ключ запиту, що в `SheetFillSummary`: зайвого запиту немає.
   const status = useTableStatus(documentId, periodKey);
+  // ✎ DOCUX: «Calculated by» / «Read by» — з контракту doc-ux-server (до зведення — без джерела, без рядків).
+  const provenance = useCellProvenance(
+    cell === null ? null : { documentId, tableInstanceId: cell.tableInstanceId, periodKey: cell.periodKey, rowKey: cell.rowKey, columnCode: cell.columnCode },
+  );
 
   if (cell === null || table === undefined) {
     return <Empty title={t('inspector.noCellTitle')} hint={t('inspector.noCellHint')} />;
@@ -1026,6 +1031,7 @@ function InfoTab({
           ? t('inspector.info.inputReadOnly')
           : t('inspector.info.inputManual'),
     },
+    ...provenanceLines(provenance).map((line) => ({ label: line.label, value: line.value })),
     { label: t('inspector.info.value'), value: cell.value.length === 0 ? null : cell.value, mono: true },
     // ✎ LAND-YEAR L7a: рік — ЧИЯ комірка: місячна колонка належить своєму місяцю, решта — році (якорю, річний агрегат).
     ...(year === undefined
