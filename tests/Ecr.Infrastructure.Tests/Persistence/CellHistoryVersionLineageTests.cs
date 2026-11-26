@@ -96,6 +96,67 @@ public sealed class CellHistoryVersionLineageTests(SqlServerFixture sql) : IDisp
         Assert.Equal(3L, summary.Total);
     }
 
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ (AC-14): у <c>GetCellChangesHandler.ChangedColumnsAsync</c> замість
+    /// <c>CollapseByLineage(...)</c> повернути <c>shown</c> — у переліку знову C1 і P1 окремо, тест червоніє; прибрати
+    /// <c>ColumnLineage</c> у <c>WithVisibleLineageAsync3</c> — другий тест віддає лише «8».
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-7.5")]
+    public async Task Перелік_колонок_після_переносу_згортає_версії_однієї_колонки_в_один_пункт()
+    {
+        var world = await ArrangeAsync();
+        await AuditAsync(world);
+
+        var auditor = Reader(world).Permission(GetCellChangesHandler.Permission);
+        var columns = await WithHandlerAsync(auditor, h => h.ChangedColumnsAsync(
+            Now.AddDays(-30), Now.AddDays(1), world.Doc.DocumentId, CancellationToken.None));
+
+        // P1 і C1 — одна колонка; P0 (зміна лише на старому Id) — окрема, з Id поточної C0; PX поза видимими не потрапляє.
+        Assert.Equal(new[] { world.C0, world.C1 }.Order(), columns.Select(c => c.ColumnDefId).Order());
+        Assert.DoesNotContain(columns, c => c.ColumnDefId == world.P0 || c.ColumnDefId == world.P1 || c.ColumnDefId == world.PX);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-7.5")]
+    public async Task Фільтр_за_згорнутою_колонкою_повертає_зміни_з_обох_версій_і_не_чужі()
+    {
+        var world = await ArrangeAsync();
+        await AuditAsync(world);
+
+        var auditor = Reader(world).Permission(GetCellChangesHandler.Permission);
+        foreach (var (picked, expected) in new[] { (world.C1, new[] { "8", "7" }), (world.C0, ["a"]) })
+        {
+            var page = await WithHandlerAsync(auditor, h => h.HandleAsync(
+                new CellChangeFilter(Now.AddDays(-30), Now.AddDays(1), world.Doc.DocumentId, ColumnDefId: picked),
+                new CursorRequest(50),
+                CancellationToken.None));
+
+            Assert.Equal(expected, page.Items.Select(c => c.NewValue));
+            Assert.Equal(expected.Length, page.TotalCount);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Перелік_колонок_з_Deny_не_виказує_приховану_колонку_й_її_версію()
+    {
+        var world = await ArrangeAsync();
+        await AuditAsync(world);
+
+        var auditor = Reader(world).Permission(GetCellChangesHandler.Permission).Deny(ResourceKind.Column, world.C1);
+        var columns = await WithHandlerAsync(auditor, h => h.ChangedColumnsAsync(
+            Now.AddDays(-30), Now.AddDays(1), world.Doc.DocumentId, CancellationToken.None));
+
+        Assert.Equal([world.C0], columns.Select(c => c.ColumnDefId));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
