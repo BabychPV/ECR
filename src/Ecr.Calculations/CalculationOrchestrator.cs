@@ -667,7 +667,8 @@ public sealed class CalculationOrchestrator(
 
                     // AN-164: рядок закрито правилом, але жодного значення — бо формулам бракує аргументів. Без цього
                     // сліду він був тихим нулем: 0 результатів, 0 невдалих кроків (`#NULL` — «немає значення»), 0 проблем.
-                    if (output.Values.Count == 0 && output.MissingArguments is { Count: > 0 } missingArguments)
+                    // ✎ D-578 (Q2): і рядок з частиною виходів — модуль називає аргументи лише коли хоч одного виходу немає.
+                    if (output.MissingArguments is { Count: > 0 } missingArguments)
                     {
                         missingInputs.Add((RowOf(input), missingArguments));
                     }

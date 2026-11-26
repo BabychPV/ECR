@@ -65,6 +65,28 @@ public sealed class MissingInputsRowIssueTests
         Assert.Empty(ModuleProfile.ReadMissingArguments(profile.ToJson(), DocumentId + 1));
     }
 
+    /// <summary>
+    /// ✎ D-578 (Q2, рішення людини 26.11: «бракує даних — не 0»): рядок, що дав ЧАСТИНУ виходів (Count), а вихід, якому
+    /// бракує поля (Total ← Qty), не дав, — теж названа проблема MissingInputs з аргументом, а не тихий пропуск.
+    /// Рядок з усіма виходами — без сліду.
+    /// </summary>
+    /// <remarks>
+    /// Мутація (локально): у <c>GenericCalculationModule</c> повернути умову <c>values.Count == 0</c> (або в
+    /// <c>CalculationOrchestrator</c> — <c>output.Values.Count == 0 &amp;&amp;</c>) — тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "D-578")]
+    public async Task D578_рядок_з_частиною_виходів_і_порожнім_полем_дає_названу_проблему()
+    {
+        var profile = await RunAsync("@Qty * 2", [5m, null], second: "1");
+
+        var row = Assert.Single(profile.MissingInputRows);
+        Assert.Equal(new RejectedRow(TableInstance, 2, "R001", DocumentId, Methodology), row);
+        Assert.Equal(["Qty"], profile.MissingArgumentsOf(row));
+        Assert.Empty(profile.StepErrorRows);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Рядок_без_обовязкового_аргументу_ARG_теж_лишає_слід()
@@ -177,9 +199,10 @@ public sealed class MissingInputsRowIssueTests
         Assert.Equal(2, trace.FailedStepCount);
     }
 
-    private static async Task<ModuleProfile> RunAsync(string expression, decimal?[] qtyByRow, string? unused = null)
+    private static async Task<ModuleProfile> RunAsync(
+        string expression, decimal?[] qtyByRow, string? unused = null, string? second = null)
     {
-        using var provider = Arrange(expression, qtyByRow, unused);
+        using var provider = Arrange(expression, qtyByRow, unused, second);
         var orchestrator = new CalculationOrchestrator(
             provider.GetRequiredService<MethodologyResolver>(),
             provider.GetRequiredService<IPeriodStore>(),
@@ -194,7 +217,7 @@ public sealed class MissingInputsRowIssueTests
             CancellationToken.None);
     }
 
-    private static ServiceProvider Arrange(string expression, decimal?[] qtyByRow, string? unused = null)
+    private static ServiceProvider Arrange(string expression, decimal?[] qtyByRow, string? unused = null, string? second = null)
     {
         var store = Substitute.For<IMethodologyStore>();
         var periods = Substitute.For<IPeriodStore>();
@@ -215,10 +238,19 @@ public sealed class MissingInputsRowIssueTests
             formulas = [formula, extra];
         }
 
+        // ✎ D-578: другий вихід (Count), що не читає Qty, — рядок дає частину виходів.
+        MethodologyOutput[] outputs = [new MethodologyOutput(Version, EcrCode.Create("Total"), unitId: 1)];
+        if (second is not null)
+        {
+            var count = new MethodologyFormula(Version, EcrCode.Create("Count"), second);
+            count.SetEvaluationOrder(3);
+            formulas = [.. formulas, count];
+            outputs = [.. outputs, new MethodologyOutput(Version, EcrCode.Create("Count"), unitId: 1)];
+        }
+
         store.GetFormulasAsync(Version, Arg.Any<CancellationToken>()).Returns(formulas);
         store.GetSubstancesAsync(Version, Arg.Any<CancellationToken>()).Returns([]);
-        store.GetOutputsAsync(Version, Arg.Any<CancellationToken>())
-             .Returns([new MethodologyOutput(Version, EcrCode.Create("Total"), unitId: 1)]);
+        store.GetOutputsAsync(Version, Arg.Any<CancellationToken>()).Returns(outputs);
 
         periods.FindPeriodBoundsAsync(DocumentId, Period, Arg.Any<CancellationToken>())
                .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));

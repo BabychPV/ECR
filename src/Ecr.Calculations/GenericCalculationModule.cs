@@ -665,7 +665,8 @@ public sealed class GenericCalculationModule(
             input.TableInstanceId > 0 ? input.TableInstanceId : (long?)null)
         {
             // AN-164: рядок без жодного значення — назвати аргументи, яких бракує (інакше тихий нуль).
-            MissingArguments = values.Count == 0 && outputs.Count > 0
+            // ✎ D-578 (Q2): і рядок з частиною виходів — коли хоч одного виходу немає (розбір формул лише тоді, не на кожен рядок).
+            MissingArguments = outputs.Count > 0 && ScriptCalculationModule.AnyOutputAbsent(outputs.Select(o => o.Code), values)
                 ? MissingArgumentsOf(ordered, binding.Libraries, arguments, optionalArguments, input.Arguments)
                 : null,
 
