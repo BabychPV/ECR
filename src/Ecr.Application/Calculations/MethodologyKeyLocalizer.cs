@@ -121,5 +121,10 @@ public sealed record LocalizedRule(string Code, int Priority, string MatchJson, 
 /// <param name="IsMapped">Чи знайшлась колонка з тим самим шляхом у версії документа.</param>
 /// <param name="Severity">Блокує чи лише попереджає.</param>
 /// <param name="HintL10n">Текст поверх типового шаблону.</param>
+/// <param name="Derived">
+/// ✎ D-578: вимогу ВИВЕДЕНО автоматично з полів, які читає скрипт версії (<c>calc.MethodologyReadField</c>), а не заведено
+/// методологом. Блокує подання (і «Перевірити» показує), але НЕ збереження комірки (люди заповнюють рядки поступово).
+/// </param>
 public sealed record LocalizedRequiredInput(
-    int ColumnDefId, int SourceColumnDefId, bool IsMapped, RequiredInputSeverity Severity, LocalizedText? HintL10n);
+    int ColumnDefId, int SourceColumnDefId, bool IsMapped, RequiredInputSeverity Severity, LocalizedText? HintL10n,
+    bool Derived = false);

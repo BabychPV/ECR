@@ -188,6 +188,8 @@ public static class DependencyInjection
         services.AddScoped<GetDocumentHandler>();
         services.AddScoped<Documents.CalcStatus.DocumentStaleMonths>();               // D-577 (L3)
         services.AddScoped<Documents.CalcStatus.GetDocumentCalcStatusHandler>();      // D-577 (L3)
+        services.AddScoped<Documents.RequiredInputs.RequiredInputsScanner>();         // D-577 (L6)
+        services.AddScoped<Documents.RequiredInputs.GetRequiredInputsHandler>();      // D-577 (L6)
         services.AddScoped<GetTableSliceHandler>();
         services.AddScoped<CreateRowHandler>();
         services.AddScoped<DeleteRowHandler>();
