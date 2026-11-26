@@ -297,7 +297,7 @@ describe('Облікові дані джерела у формі', () => {
     });
 
     // «Не читається» — з єдиною дією: ввести пароль заново.
-    expect(await screen.findByText('⟦integration.test.failed.credentialsUnreadable⟧')).toBeTruthy();
+    expect(await screen.findByText('⟦integration.test.failed.credentialsUnreadable (dataSource=Main)⟧')).toBeTruthy();
     fireEvent.click(document.querySelector('[data-enter-password]') as HTMLElement);
     expect(passwordInput().value).toBe('');
   });
@@ -353,5 +353,72 @@ describe('Облікові дані джерела у формі', () => {
     fireEvent.click(screen.getByTestId('confirm-verb'));
     await waitFor(() => expect(document.querySelector('[data-field="confirmEndpointChange"]')).not.toBeNull());
     expect(saveButton('⟦common.save⟧').disabled).toBe(true);
+  });
+  it('PiSqlClient: «{», «}», «;» у логіні чи паролі — відмова до відправки, текст біля поля', () => {
+    serve();
+    open(null);
+    fillNew();
+    pick('⟦sources.authMode.UserPassword⟧');
+    type(userNameInput(), 'svc');
+    type(passwordInput(), 'ok-pw');
+    expect(saveButton('⟦sources.create⟧').disabled).toBe(false);
+
+    type(passwordInput(), 'a;b');
+    expect(screen.getByText('⟦err.ECR-REQ-0422.dataSourceCredentialsCharacters⟧')).toBeTruthy();
+    expect(saveButton('⟦sources.create⟧').disabled).toBe(true);
+
+    type(passwordInput(), 'ok-pw');
+    type(userNameInput(), 'sv{c');
+    expect(screen.getByText('⟦err.ECR-REQ-0422.dataSourceCredentialsCharacters⟧')).toBeTruthy();
+    expect(saveButton('⟦sources.create⟧').disabled).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('422 dataSourcePasswordUnencrypted стоїть біля поля адреси', async () => {
+    serve(() =>
+      json(
+        {
+          title: 'Unprocessable',
+          status: 422,
+          errorCode: 'ECR-REQ-0422',
+          correlationId: 'c-4',
+          messageKey: 'err.ECR-REQ-0422.dataSourcePasswordUnencrypted',
+        },
+        422,
+      ),
+    );
+    open({ ...Stored, transport: 'Sql', endpoint: 'Server=a;Database=b' } as unknown as DataSource);
+    fireEvent.click(saveButton('⟦common.save⟧'));
+
+    const message = await screen.findByText('⟦err.ECR-REQ-0422.dataSourcePasswordUnencrypted⟧');
+    expect(screen.getByLabelText(/sources\.endpoint⟧/).getAttribute('aria-describedby')).toContain(message.id);
+  });
+
+  it('422 dataSourceCredentialsCharacters від сервера стоїть біля поля пароля', async () => {
+    serve(() =>
+      json(
+        {
+          title: 'Unprocessable',
+          status: 422,
+          errorCode: 'ECR-REQ-0422',
+          correlationId: 'c-5',
+          messageKey: 'err.ECR-REQ-0422.dataSourceCredentialsCharacters',
+        },
+        422,
+      ),
+    );
+    open(Stored);
+    fireEvent.click(saveButton('⟦common.save⟧'));
+
+    expect(await screen.findByText('⟦err.ECR-REQ-0422.dataSourceCredentialsCharacters⟧')).toBeTruthy();
+  });
+
+  it('Test connection: connectFailedNoRetry показує текст каталогу з назвою зʼєднання', async () => {
+    serve(() => json({ ok: false, entities: 0, error: 'other', messageKey: 'err.ECR-INT-0503.connectFailedNoRetry' }));
+    open(Stored);
+    type(screen.getByLabelText(/sources\.testReason⟧/), 'check');
+    fireEvent.click(screen.getByRole('button', { name: '⟦sources.testConnection⟧' }));
+
+    expect(await screen.findByText('⟦err.ECR-INT-0503.connectFailedNoRetry (dataSource=Main)⟧')).toBeTruthy();
   });
 });

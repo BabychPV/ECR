@@ -28,11 +28,14 @@ function throttledText(error: unknown): string | null {
 export function FormTestConnection({
   build,
   disabled,
+  sourceName,
   onEnterPassword,
 }: {
   /** Тіло без причини: форма знає свої поля, цей блок — лише причину. */
   readonly build: () => Omit<TestConnectionBody, 'reason'>;
   readonly disabled: boolean;
+  /** Підставляється в `{dataSource}` текстів відмов. */
+  readonly sourceName: string;
   readonly onEnterPassword: () => void;
 }): JSX.Element {
   const [reason, setReason] = useState('');
@@ -56,7 +59,7 @@ export function FormTestConnection({
         autosize
       />
 
-      {test.data !== undefined && <OutcomeBanner outcome={outcomeOf(test.data)} onEnterPassword={onEnterPassword} />}
+      {test.data !== undefined && <OutcomeBanner outcome={outcomeOf(test.data, sourceName)} onEnterPassword={onEnterPassword} />}
 
       {test.error !== null &&
         (throttledText(test.error) === null ? (

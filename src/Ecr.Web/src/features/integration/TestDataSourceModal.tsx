@@ -36,13 +36,14 @@ const FallbackFailureKey = 'integration.test.failed.other';
  * аудиту безпеки: сирий текст робив кнопку сканером мережі), і людині його
  * сирим не показуємо. Ключа немає — загальна причина «other», а не `error`.
  */
-export function outcomeOf(result: DataSourceTestResult): TestOutcome {
+export function outcomeOf(result: DataSourceTestResult, sourceName?: string): TestOutcome {
   // ⚠ b14 source-test-flert (AC-2): успіх із ключем — з'єднання ціле, а каталогу сутностей у джерела немає
   // (`integration.test.connectedNoCatalog`, FLERT для складу газу). «0 сутностей» читалося б як порожній каталог.
   const named = result.messageKey ?? '';
   const fallback = result.ok ? null : FallbackFailureKey;
   const key = named.length > 0 ? named : fallback;
-  const text = key === null ? null : t(key);
+  // `{dataSource}` у тексті `connectFailedNoRetry` — назва з'єднання; інші тексти параметра не мають.
+  const text = key === null ? null : t(key, sourceName === undefined ? undefined : { dataSource: sourceName });
 
   return result.ok
     ? { kind: 'ok', entities: result.entities, note: text }
@@ -115,7 +116,7 @@ export function TestDataSourceModal({
   const trimmed = reason.trim();
 
   const outcome: TestOutcome | null =
-    test.data !== undefined ? outcomeOf(test.data) : runningOf(test.error);
+    test.data !== undefined ? outcomeOf(test.data, sourceName) : runningOf(test.error);
 
   // Будь-яка інша відмова (403, 422, 5xx) — справжній збій запиту.
   const failure = test.error !== null && outcome === null ? test.error : null;

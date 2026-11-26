@@ -162,6 +162,10 @@ const FieldOfKey: Readonly<Record<string, FailedField>> = {
   // P-1126-SRCCRED: адреса, транспорт чи логін змінились — пароль вводять заново, біля поля пароля.
   'err.ECR-REQ-0422.dataSourcePasswordReentryRequired': 'password',
   'err.ECR-REQ-0422.dataSourceCredentialsInvalid': 'userName',
+  // Символи, що ламають рядок ODBC (`{`, `}`, `;`): біля поля, де їх ввели (поле уточнює `field`, типово — пароль).
+  'err.ECR-REQ-0422.dataSourceCredentialsCharacters': 'password',
+  // Sql з паролем: Encrypt=false / TrustServerCertificate=true в адресі — біля поля адреси.
+  'err.ECR-REQ-0422.dataSourcePasswordUnencrypted': 'endpoint',
   'err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed': 'confirmEndpointChange',
 };
 
@@ -187,9 +191,22 @@ export function fieldFailureOf(error: unknown): FieldFailure | null {
       ? named
       : byKey;
 
+  // Символи в логіні: сервер може назвати поле `userName`.
+  const finalField = key === 'err.ECR-REQ-0422.dataSourceCredentialsCharacters' && named === 'userName' ? 'userName' : field;
+
   const code = error.problem.extensions2?.['code'];
 
-  return { field, text: t(key, typeof code === 'string' ? { code } : undefined) };
+  return { field: finalField, text: t(key, typeof code === 'string' ? { code } : undefined) };
+}
+
+/** PI SQL Client ламає рядок ODBC на `{`, `}`, `;` у логіні й паролі (сервер: `dataSourceCredentialsCharacters`). */
+const OdbcBreakers = /[{};]/;
+
+function credentialCharactersProblem(draft: Pick<Draft, 'userName' | 'password'>): 'userName' | 'password' | null {
+  if (OdbcBreakers.test(draft.userName)) return 'userName';
+  if (OdbcBreakers.test(draft.password)) return 'password';
+
+  return null;
 }
 
 /** Відмова збереження «пароль не читається / відхилено» → ключ стану; `null` — відмова не про це. */
@@ -436,7 +453,10 @@ function DataSourceForm({
     userPassword &&
     (!storedPassword || needsPasswordReentry(draft, source) || passwordAsked || stateKey !== null || draft.changingPassword);
 
+  const badChars = userPassword && draft.transport === 'PiSqlClient' ? credentialCharactersProblem(draft) : null;
+
   const incomplete =
+    badChars !== null ||
     (userPassword && (draft.userName.trim().length === 0 || (passwordNeeded && draft.password.length === 0))) ||
     draft.name.trim().length === 0 ||
     draft.endpoint.trim().length === 0 ||
@@ -576,8 +596,20 @@ function DataSourceForm({
           source={source}
           draft={draft}
           passwordRequired={passwordNeeded}
-          passwordError={onField?.field === 'password' ? onField.text : undefined}
-          userNameError={onField?.field === 'userName' ? onField.text : undefined}
+          passwordError={
+            badChars === 'password'
+              ? t('err.ECR-REQ-0422.dataSourceCredentialsCharacters')
+              : onField?.field === 'password'
+                ? onField.text
+                : undefined
+          }
+          userNameError={
+            badChars === 'userName'
+              ? t('err.ECR-REQ-0422.dataSourceCredentialsCharacters')
+              : onField?.field === 'userName'
+                ? onField.text
+                : undefined
+          }
           stateKey={stateKey}
           onChange={patch}
         />
@@ -585,7 +617,8 @@ function DataSourceForm({
 
       {supportsCredentials(draft.transport) && (
         <FormTestConnection
-          disabled={draft.endpoint.trim().length === 0 || (userPassword && draft.userName.trim().length === 0)}
+          disabled={badChars !== null || draft.endpoint.trim().length === 0 || (userPassword && draft.userName.trim().length === 0)}
+          sourceName={draft.name.trim().length > 0 ? draft.name.trim() : draft.code}
           onEnterPassword={() => patch({ changingPassword: true })}
           build={() => {
             const body = bodyOf(draft, source);

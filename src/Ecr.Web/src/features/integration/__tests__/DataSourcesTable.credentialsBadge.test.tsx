@@ -9,9 +9,9 @@ const source = (state: string): DataSource => ({ credentialsState: state }) as u
 
 describe('CredentialsStateBadge', () => {
   it.each([
-    ['Rejected', '⟦sources.credentialsRejected⟧'],
-    ['Unreadable', '⟦sources.credentialsUnreadable⟧'],
-  ])('%s показує бейдж із повним текстом стану', (state, text) => {
+    ['Rejected', '⟦sources.credentialsRejected⟧', '⟦sources.credentialsRejectedBadge⟧'],
+    ['Unreadable', '⟦sources.credentialsUnreadable⟧', '⟦sources.credentialsUnreadableBadge⟧'],
+  ])('%s: видимий короткий підпис, повний текст у title', (state, text, label) => {
     render(
       <MantineProvider>
         <CredentialsStateBadge source={source(state)} />
@@ -19,6 +19,7 @@ describe('CredentialsStateBadge', () => {
     );
 
     const badge = document.querySelector(`[data-credentials-state-badge="${state}"]`);
+    expect(badge?.textContent).toBe(label);
     expect(badge?.getAttribute('title')).toBe(text);
     expect(screen.getByLabelText(new RegExp(text.replace(/[⟦⟧.]/g, '.')))).toBeTruthy();
   });
