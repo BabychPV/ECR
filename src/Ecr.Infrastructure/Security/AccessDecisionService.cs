@@ -2482,7 +2482,9 @@ public sealed class AccessDecisionService(
 
                         annual = (shared with
                         {
-                            PeriodState = AnnualPeriodRule.AggregateState(periodStates),
+                            // ✎ b14 (D-577): шаблон з «вікном року» — стан річних даних від меж року проєкту + зміщення,
+                            // а не агрегат місяців (людина 25.11: HSE401 правиться до архівації року).
+                            PeriodState = calendar.YearWindowState ?? AnnualPeriodRule.AggregateState(periodStates),
                             SheetStatus = AnnualPeriodRule.AggregateStatus(sheetStatuses),
                             IsCurrentApprover = false,
                         }, keys);
@@ -2693,7 +2695,12 @@ public sealed class AccessDecisionService(
     /// <summary>Стани періодів року документа (ефективні, на <c>clock.UtcNow</c>) за номером місяця.</summary>
     /// <param name="Year">Рік періоду екземпляра.</param>
     /// <param name="States">Місяць (<c>Period.Sequence</c>) → ефективний стан; місяця без рядка періоду немає.</param>
-    private sealed record MonthEnvironment(int Year, IReadOnlyDictionary<byte, PeriodState> States);
+    /// <param name="YearWindowState">
+    /// ✎ b14 (D-577): шаблон документа з «вікном року» — стан річних даних (<see cref="Domain.Services.YearEditWindowRule"/>);
+    /// <c>null</c> — шаблон без вікна, діє агрегат місяців.
+    /// </param>
+    private sealed record MonthEnvironment(
+        int Year, IReadOnlyDictionary<byte, PeriodState> States, PeriodState? YearWindowState = null);
 
     /// <summary>Умови місячної колонки: стан її періоду, стан аркуша за цей період і ключ періоду.</summary>
     private sealed record MonthState(PeriodState State, DocumentStatus Status, int PeriodKey);
@@ -2710,6 +2717,7 @@ public sealed class AccessDecisionService(
     {
         var now = clock.UtcNow;
         var yearFirst = instancePeriod.Year * 100;
+        var periodKeyValue = instancePeriod.Value;
         var project = await (
                 from d in db.Documents.AsNoTracking()
                 where d.Id == documentId
@@ -2719,9 +2727,18 @@ public sealed class AccessDecisionService(
                     p.Id,
                     p.Status,
                     p.PeriodKind,
+                    p.PeriodStart,
                     p.PeriodEnd,
                     p.YearGraceOffsetDays,
                     p.TimeZoneId,
+
+                    // ✎ b14 (D-577): прапорець «вікно року» шаблону документа (без шаблону — шаблон версії ПЕРІОДУ проєкту,
+                    // doc.fn_VersionOf; чинну версію проєкту тут не читаємо — RPT-STABLE Part B).
+                    YearEditWindow = db.Templates.Any(t => t.YearEditWindow
+                        && (t.Id == d.TemplateId
+                            || (d.TemplateId == null
+                                && db.TemplateVersions.Any(v => v.Id == EcrDbContext.VersionOf(d.ProjectId, periodKeyValue)
+                                                                && v.TemplateId == t.Id)))),
 
                     // Приймальна 08.11 (i): місяці року, відкриті лише для ЦЬОГО документа, — тим самим запитом.
                     Reopened = db.DocumentPeriodReopens
@@ -2759,7 +2776,14 @@ public sealed class AccessDecisionService(
                 effective, project.Reopened.Contains(row.PeriodKeyValue));
         }
 
-        return new MonthEnvironment(instancePeriod.Year, states);
+        // ⚠ Як і стани місяців вище: за датою — лише для активного проєкту; чернетка лишається на збереженому агрегаті.
+        var yearWindow = project.YearEditWindow && project.Status == ProjectStatus.Active
+            ? Domain.Services.YearEditWindowRule.State(
+                now, project.PeriodStart, project.PeriodEnd, project.YearGraceOffsetDays,
+                SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo())
+            : (PeriodState?)null;
+
+        return new MonthEnvironment(instancePeriod.Year, states, yearWindow);
     }
 
     /// <summary>

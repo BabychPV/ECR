@@ -63,6 +63,20 @@ export function setTemplateDocumentPolicy(templateId: number, singleDocumentPerP
 }
 
 /**
+ * ✎ b14 (D-577): «вікно редагування = рік проєкту + зміщення» для річних даних шаблону (`true`) або стан періоду
+ * (`false`). Правило «один документ на проєкт» передається поточним — той самий ендпоінт, без зміни прапорця B151.
+ */
+export function setTemplateYearEditWindow(card: TemplateCard, yearEditWindow: boolean): Promise<TemplateCard> {
+  return apiFetch<TemplateCard>(`/api/v1/templates/${String(card.id)}/document-policy`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      singleDocumentPerProject: card.singleDocumentPerProject,
+      yearEditWindow,
+    } satisfies SetTemplateDocumentPolicyRequest),
+  });
+}
+
+/**
  * Скільки всього роботи зачепить архівування — одне число для попередження.
  *
  * ⚠ Версії в суму НЕ входять: вони належать самому шаблону, а питання перед

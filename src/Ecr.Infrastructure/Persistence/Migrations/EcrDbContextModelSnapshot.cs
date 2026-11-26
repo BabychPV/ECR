@@ -2938,6 +2938,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<bool>("YearEditWindow")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false, "DF_Template_YearEditWindow");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Code")

@@ -54,12 +54,24 @@ public sealed class Template : Entity<int>
     /// </remarks>
     public bool SingleDocumentPerProject { get; private set; }
 
+    /// <summary>
+    /// ✎ b14 document-move (рішення людини 25.11, D-577): річні дані документів шаблону в місячному проєкті правляться
+    /// у «вікні року проєкту + зміщення» (<c>Project.PeriodStart…PeriodEnd + YearGraceOffsetDays</c>), а не за станом
+    /// закритого січня-якоря (<see cref="Services.YearEditWindowRule"/>). <c>false</c> — як доти (Land, HSE400);
+    /// <c>true</c> — HSE401 (таблиця вводу без подання й погодження).
+    /// </summary>
+    public bool YearEditWindow { get; private set; }
+
     /// <summary>Версії шаблону.</summary>
     public IReadOnlyList<TemplateVersion> Versions => _versions;
 
     /// <summary>Задає, скільки документів цього шаблону дозволено в проєкті (B151).</summary>
     /// <param name="single"><c>true</c> — один на проєкт; <c>false</c> — скільки завгодно.</param>
     public void SetSingleDocumentPerProject(bool single) => SingleDocumentPerProject = single;
+
+    /// <summary>Задає «вікно редагування = рік проєкту + зміщення» для річних даних (D-577).</summary>
+    /// <param name="enabled"><c>true</c> — вікно року; <c>false</c> — стан періоду, як доти.</param>
+    public void SetYearEditWindow(bool enabled) => YearEditWindow = enabled;
 
     /// <summary>
     /// Змінює назву шаблону. <b>Код не змінюється ніколи</b>.

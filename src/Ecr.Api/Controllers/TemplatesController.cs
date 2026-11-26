@@ -118,6 +118,7 @@ public sealed class TemplatesController(
     /// <remarks>
     /// Увімкнення «один документ на проєкт», коли в якомусь проєкті документів шаблону вже кілька, —
     /// <c>409 ECR-TMPL-0409</c> (<c>singleDocumentDuplicates</c>) з переліком видимих дублікатів.
+    /// ✎ b14 (D-577): <c>yearEditWindow</c> — «вікно редагування = рік проєкту + зміщення» (не передано — без змін).
     /// </remarks>
     [HttpPut("{id:int}/document-policy")]
     [ProducesResponseType<Ecr.Application.Ports.TemplateCard>(StatusCodes.Status200OK)]
@@ -129,7 +130,9 @@ public sealed class TemplatesController(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        return Ok(await documentPolicy.HandleAsync(id, request.SingleDocumentPerProject, ct).ConfigureAwait(false));
+        return Ok(await documentPolicy
+            .HandleAsync(id, request.SingleDocumentPerProject, request.YearEditWindow, ct)
+            .ConfigureAwait(false));
     }
 
     /// <summary>Сторінка версій шаблону. Право <c>Template.View</c>.</summary>
@@ -197,7 +200,11 @@ public sealed record RenameTemplateRequest(IReadOnlyDictionary<string, string> N
 
 /// <summary>✎ B151: запит на правило «один документ на проєкт».</summary>
 /// <param name="SingleDocumentPerProject"><c>true</c> — один документ шаблону на проєкт; <c>false</c> — скільки завгодно.</param>
-public sealed record SetTemplateDocumentPolicyRequest(bool SingleDocumentPerProject);
+/// <param name="YearEditWindow">
+/// ✎ b14 (D-577): <c>true</c> — річні дані правляться у вікні «рік проєкту + зміщення»; <c>false</c> — за станом періоду;
+/// <c>null</c> (не передано) — без змін.
+/// </param>
+public sealed record SetTemplateDocumentPolicyRequest(bool SingleDocumentPerProject, bool? YearEditWindow = null);
 
 /// <summary>Запит на створення версії шаблону.</summary>
 /// <param name="VersionNumber">Номер нової версії.</param>

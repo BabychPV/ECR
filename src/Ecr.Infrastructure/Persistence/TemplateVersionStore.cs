@@ -1277,7 +1277,8 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
                 versions.Count(v => v.Status == Domain.Enums.TemplateVersionStatus.Published),
                 projects,
                 documents),
-            template.SingleDocumentPerProject);
+            template.SingleDocumentPerProject,
+            template.YearEditWindow);
     }
 
     /// <inheritdoc />

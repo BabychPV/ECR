@@ -7,6 +7,7 @@ import {
   renameTemplate,
   restoreTemplate,
   setTemplateDocumentPolicy,
+  setTemplateYearEditWindow,
 } from '../templateApi';
 
 /**
@@ -28,6 +29,7 @@ function card(overrides: Partial<TemplateCard> = {}): TemplateCard {
     createdAt: '2026-01-01T00:00:00Z',
     dependents: { versions: 3, publishedVersions: 2, projects: 4, documents: 91 },
     singleDocumentPerProject: false,
+    yearEditWindow: false,
     ...overrides,
   };
 }
@@ -109,6 +111,18 @@ describe('templateApi: адреса й метод кожної дії картк
     expect(calls[0]?.method).toBe('PUT');
     expect(calls[0]?.body).toStrictEqual({ singleDocumentPerProject: true });
     expect(calls[1]?.body).toStrictEqual({ singleDocumentPerProject: false });
+  });
+
+  it('b14 (D-577): вікно року — той самий PUT …/document-policy, прапорець B151 передається поточним', async () => {
+    const { calls } = mockServer();
+
+    await setTemplateYearEditWindow(card({ id: 9, singleDocumentPerProject: true }), true);
+    await setTemplateYearEditWindow(card({ id: 9, singleDocumentPerProject: false, yearEditWindow: true }), false);
+
+    expect(calls[0]?.url).toBe('/api/v1/templates/9/document-policy');
+    expect(calls[0]?.method).toBe('PUT');
+    expect(calls[0]?.body).toStrictEqual({ singleDocumentPerProject: true, yearEditWindow: true });
+    expect(calls[1]?.body).toStrictEqual({ singleDocumentPerProject: false, yearEditWindow: false });
   });
 });
 
