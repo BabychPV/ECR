@@ -40,6 +40,8 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
         await using var connection = new SqlConnection(db.Database.GetConnectionString());
         await connection.OpenAsync(ct).ConfigureAwait(false);
 
+        filter = await NarrowVisibleToWindowAsync(connection, filter, ct).ConfigureAwait(false);
+
         await using var command = connection.CreateCommand();
 
         var where = BuildCellChangeWhere(filter, command, AuditCursor.Decode(page.Cursor, filter.Sort));
@@ -90,6 +92,8 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
         await using var connection = new SqlConnection(db.Database.GetConnectionString());
         await connection.OpenAsync(ct).ConfigureAwait(false);
 
+        filter = await NarrowVisibleToWindowAsync(connection, filter, ct).ConfigureAwait(false);
+
         await using var command = connection.CreateCommand();
 
         // ⚠ Той самий WHERE, що й у читанні сторінки (одне джерело — BuildCellChangeWhere): вікно за
@@ -117,6 +121,63 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                 return (IReadOnlyList<CellChangeColumnCount>)counts;
             },
             log).ConfigureAwait(false);
+    }
+
+    /// <summary>Від скількох видимих колонок перелік спершу звужується до колонок, що змінювались у вікні документа.</summary>
+    internal const int NarrowVisibleThreshold = 500;
+
+    /// <summary>
+    /// ✎ audit-filters-live D1: межі читання документа Land — десятки тисяч Id (видимі колонки × версії шаблону; копія
+    /// live, документ 96: 125 263), а у вікні змінювались лічені сотні колонок (114). Перелік звужується до тих, що є в
+    /// журналі документа за ВСЕ вікно (гаряче + архів), — результат той самий (рядки поза цими колонками у вікні не
+    /// існують), а в запит сторінки й підрахунку їде кілька сотень Id замість 766 КБ JSON.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Лише ЗВУЖУЄ <see cref="CellChangeFilter.VisibleColumnIds"/> (перетин), ніколи не розширює: колонка поза
+    /// межами читання не з'явиться, порожній перетин дає <c>1 = 0</c>. Вікно — повне <c>From/To</c> фільтра без
+    /// курсора, тож набір — надмножина колонок будь-якої сторінки.
+    /// </remarks>
+    private async Task<CellChangeFilter> NarrowVisibleToWindowAsync(
+        SqlConnection connection, CellChangeFilter filter, CancellationToken ct)
+    {
+        if (filter.VisibleColumnIds is not { Count: > NarrowVisibleThreshold } visible || filter.DocumentId is not { } documentId)
+        {
+            return filter;
+        }
+
+        await using var command = connection.CreateCommand();
+        foreach (var (name, value) in new[] { ("@from", filter.From), ("@to", filter.To) })
+        {
+            var edge = command.Parameters.Add(name, SqlDbType.DateTime2);
+            edge.Scale = 3;
+            edge.Value = value;
+        }
+
+        command.Parameters.Add("@documentId", SqlDbType.BigInt).Value = documentId;
+        const string hot =
+            "SELECT DISTINCT ColumnDefId FROM aud.CellChange WHERE ChangedAt >= @from AND ChangedAt < @to AND DocumentId = @documentId";
+        const string archive =
+            "\nUNION\nSELECT ColumnDefId FROM arc.AuditCellChange WHERE ChangedAt >= @from AND ChangedAt < @to AND DocumentId = @documentId";
+
+        var present = await WithArchiveFallbackAsync(
+            async withArchive =>
+            {
+                command.CommandText = withArchive
+                    ? "IF OBJECT_ID(N'arc.AuditCellChange', N'U') IS NOT NULL\n" + hot + archive + ";\nELSE\n" + hot + ";"
+                    : hot + ";";
+
+                var ids = new HashSet<int>();
+                await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    ids.Add(reader.GetInt32(0));
+                }
+
+                return ids;
+            },
+            log).ConfigureAwait(false);
+
+        return filter with { VisibleColumnIds = [.. visible.Where(present.Contains)] };
     }
 
     /// <summary>Читає сторінку журналу з вже підготовленої команди.</summary>
@@ -252,19 +313,25 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
     /// так само, як до D-247 (без архіву), а не падає на кожному зверненні до журналу.
     /// </remarks>
     internal static string CellChangesPageSql(string where, string order, string outerOrder)
-        => WithArchiveProbe(
-            CellChangesHotSql(where, order, outerOrder),
-            CellChangesWithArchiveSql(where, order, outerOrder));
+        => WithVisiblePrelude(where, WithArchiveProbe(
+            HotPageBody(where, order, outerOrder),
+            ArchivePageBody(where, order, outerOrder)));
 
     /// <summary>План «лише гаряче»: сторінка журналу над самою <c>aud.CellChange</c> (як до НФ-8.9.6).</summary>
     internal static string CellChangesHotSql(string where, string order, string outerOrder)
+        => WithVisiblePrelude(where, HotPageBody(where, order, outerOrder));
+
+    /// <summary>План «гаряче + архів»: <c>UNION ALL</c> двох таблиць, у кожної гілки свій <c>TOP</c>.</summary>
+    internal static string CellChangesWithArchiveSql(string where, string order, string outerOrder)
+        => WithVisiblePrelude(where, ArchivePageBody(where, order, outerOrder));
+
+    private static string HotPageBody(string where, string order, string outerOrder)
         => PageWithNames(
             AuditPaging.TopPage(CellChangeColumns, "aud.CellChange", where, order),
             fromArchive: "CAST(0 AS bit)",
             outerOrder);
 
-    /// <summary>План «гаряче + архів»: <c>UNION ALL</c> двох таблиць, у кожної гілки свій <c>TOP</c>.</summary>
-    internal static string CellChangesWithArchiveSql(string where, string order, string outerOrder)
+    private static string ArchivePageBody(string where, string order, string outerOrder)
         => PageWithNames(
             "SELECT TOP (@take) " + CellChangeColumns + ", FromArchive\n"
             + "  FROM (\n"
@@ -301,7 +368,7 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
         var hot = select + "\n  FROM aud.CellChange\n WHERE (" + where + ")" + valueChangesOnly + "\n GROUP BY ColumnDefId;";
         if (!withArchive)
         {
-            return hot;
+            return WithVisiblePrelude(where, hot);
         }
 
         var archive = select + "\n"
@@ -310,8 +377,24 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
             + "        SELECT ColumnDefId, ChangedAt, Origin FROM arc.AuditCellChange WHERE (" + where + ")" + valueChangesOnly + ") AS x\n"
             + " GROUP BY ColumnDefId;";
 
-        return WithArchiveProbe(hot, archive);
+        return WithVisiblePrelude(where, WithArchiveProbe(hot, archive));
     }
+
+    /// <summary>Ім'я табличної змінної видимих колонок, на яку посилається умова з <see cref="BuildCellChangeWhere"/>.</summary>
+    internal const string VisibleSetName = "@visibleSet";
+
+    /// <summary>
+    /// ✎ audit-filters-live D1: перелік видимих колонок розбирається з <c>@visibleColumns</c> ОДИН раз — у табличну
+    /// змінну з первинним ключем — на початку пакета, якщо умова на нього посилається.
+    /// </summary>
+    /// <param name="where">Умова з <see cref="BuildCellChangeWhere"/>.</param>
+    /// <param name="sql">Повний текст пакета.</param>
+    internal static string WithVisiblePrelude(string where, string sql)
+        => where.Contains(VisibleSetName, StringComparison.Ordinal)
+            ? "DECLARE " + VisibleSetName + " TABLE (Id int NOT NULL PRIMARY KEY);\n"
+              + "INSERT INTO " + VisibleSetName + " (Id) SELECT DISTINCT CAST([value] AS int) FROM OPENJSON(@visibleColumns);\n"
+              + sql
+            : sql;
 
     /// <summary>Вибір між планом «лише гаряче» і «гаряче + архів» за пробником <see cref="ArchiveWindowProbe"/>.</summary>
     private static string WithArchiveProbe(string hot, string archive)
@@ -513,7 +596,11 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
             }
             else
             {
-                where.Append("\n                   AND ColumnDefId IN (SELECT CAST([value] AS int) FROM OPENJSON(@visibleColumns))");
+                // ✎ audit-filters-live D1: умова — по ТАБЛИЧНІЙ ЗМІННІЙ @visibleSet (PK), яку заповнює ОДИН розбір
+                // OPENJSON на початку пакета (VisibleColumnsPrelude). Підзапит `IN (… OPENJSON(@visibleColumns))`
+                // оптимізатор ставив внутрішньою стороною вкладених циклів і розбирав JSON НА КОЖЕН рядок журналу:
+                // копія live, документ 96 (125 263 Id із родоводом, 766 КБ JSON) — понад 45 с, на live — тайм-аут 503.
+                where.Append("\n                   AND ColumnDefId IN (SELECT Id FROM " + VisibleSetName + ")");
                 command.Parameters.Add("@visibleColumns", SqlDbType.NVarChar, -1).Value =
                     "[" + string.Join(",", visible.Select(v => v.ToString(CultureInfo.InvariantCulture))) + "]";
             }

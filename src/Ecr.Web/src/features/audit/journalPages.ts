@@ -20,6 +20,8 @@ import {
  * ⚠ Ключі — `[…, 'pages', запит]`: `DocumentInspector` читає `['audit-cells', запит]` звичайним `useQuery`, і спільний
  * ключ дав би запис кешу двох форм.
  * ⚠ `refetchOnWindowFocus: false`: журнал — історія; повернення у вкладку перечитувало б ВСІ довантажені сторінки підряд.
+ * ⛔ `retry: false` (audit-filters-live AC-6): запит журналу, що впав тайм-аутом (`503 ECR-SYS-0503`), НЕ повторюється сам —
+ *   на live кожен повтор тримав сесію SQL ~30 с, а екран ~100 с показував скелет. Відмову видно одразу, з кнопкою «Retry».
  */
 
 type CellChangeFilter = Omit<Parameters<typeof cellChangesQuery>[0], 'cursor'>;
@@ -41,6 +43,7 @@ export function useCellChangePages(
     initialPageParam: null as string | null,
     getNextPageParam: (last, _pages, lastParam) => nextCursorOf(last, lastParam),
     refetchOnWindowFocus: false,
+    retry: false,
   });
 }
 
@@ -61,6 +64,7 @@ export function useSecurityEventPages(
     initialPageParam: null as string | null,
     getNextPageParam: (last, _pages, lastParam) => nextCursorOf(last, lastParam),
     refetchOnWindowFocus: false,
+    retry: false,
   });
 }
 
@@ -81,6 +85,7 @@ export function useStructureChangePages(
     initialPageParam: null as string | null,
     getNextPageParam: (last, _pages, lastParam) => nextCursorOf(last, lastParam),
     refetchOnWindowFocus: false,
+    retry: false,
   });
 }
 
@@ -101,5 +106,6 @@ export function useWorkflowEventPages(
     initialPageParam: null as string | null,
     getNextPageParam: (last, _pages, lastParam) => nextCursorOf(last, lastParam),
     refetchOnWindowFocus: false,
+    retry: false,
   });
 }
