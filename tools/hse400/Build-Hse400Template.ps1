@@ -127,9 +127,9 @@ function Get-Hse400ProjectDocument {
     $tplDocs = @(Get-Hse400Items (Invoke-Hse400Ok -Method GET -Path ("/api/v1/documents?limit=200&templateCode={0}" -f [Uri]::EscapeDataString([string]$model.template.code))).Json)
     $doc = $tplDocs | Where-Object { [string]$_.projectId -eq [string]$projectId } | Select-Object -First 1
     if ($Work) {
-        $codes = @{}; $years = @{}
-        foreach ($pr in Get-Hse400AllItems -Path '/api/v1/projects') { $codes[[string]$pr.id] = [string]$pr.code; $years[[string]$pr.id] = $pr.year }
-        $known = @($tplDocs | ForEach-Object { @{ Id = $_.id; ProjectCode = $codes[[string]$_.projectId]; Year = $(if ($null -ne $years[[string]$_.projectId]) { [int]$years[[string]$_.projectId] } else { 0 }) } })
+        # ✎ огляд M-2: рік проєкту - з його періодів (ProjectSummary року не має).
+        $known = Get-Hse400YearDocuments -Documents $tplDocs -Projects @(Get-Hse400AllItems -Path '/api/v1/projects') `
+            -PeriodsOf { param($projectId) (Invoke-Hse400Ok -Method GET -Path ("/api/v1/projects/{0}/periods" -f $projectId)).Json }
         $own = Resolve-Hse400WorkDocument -ProjectCode $Code -Year $ProjectYear -Documents $known
         if ($null -ne $own) { $doc = $tplDocs | Where-Object { [string]$_.id -eq [string]$own } | Select-Object -First 1 }
     }

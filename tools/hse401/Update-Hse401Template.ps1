@@ -53,11 +53,10 @@ function Get-HseTemplateDiff {
     <# Різниця «опублікована структура (колонки таблиці) -> модель». Повертає список @{ Kind; Code; Field; From; To }.
        Kind: Retitle | DisplayFormat | RemoveColumn | HideColumn | Reorder | MissingColumn (помилка: у версії немає колонки моделі).
     Прибрана з моделі колонка (H_MPE): типово HideColumn (вже схована = виконано); RemoveColumn - лише з -DeleteRemoved. #>
-    param([Parameter(Mandatory)]$LiveColumns, [Parameter(Mandatory)]$ModelColumns, [switch]$DeleteRemoved, [AllowNull()][object[]]$LiveFormulas)
+    param([Parameter(Mandatory)]$LiveColumns, [Parameter(Mandatory)]$ModelColumns, [switch]$DeleteRemoved)
     $diff = New-Object System.Collections.Generic.List[object]
     $live = @{}; foreach ($lc in @($LiveColumns)) { $live[[string]$lc.code] = $lc }
-    # ✎ b14 N1: формули колонок (columnDefId -> вираз); без переліку формул (старі виклики) - формули не порівнюються.
-    $liveExpr = @{}; foreach ($f in @($LiveFormulas)) { if ($null -ne $f -and $null -ne $f.columnDefId) { $liveExpr[[string]$f.columnDefId] = [string]$f.expression } }
+    # ✎ b14 N1 (огляд H-1): формула колонки - ColumnDto.expression структури версії (TableDto не має списку formulas).
     $modelCodes = @($ModelColumns | ForEach-Object { $_.Code })
     foreach ($m in $ModelColumns) {
         if (-not $live.ContainsKey($m.Code)) { $diff.Add([pscustomobject]@{ Kind = 'MissingColumn'; Code = $m.Code; Field = ''; From = $null; To = $null }); continue }
@@ -71,8 +70,9 @@ function Get-HseTemplateDiff {
         $wantF = if ($m.DisplayFormat) { [string]$m.DisplayFormat } else { '' }
         $haveF = if ($l.displayFormat) { [string]$l.displayFormat } else { '' }
         if ($haveF -cne $wantF) { $diff.Add([pscustomobject]@{ Kind = 'DisplayFormat'; Code = $m.Code; Field = 'displayFormat'; From = $haveF; To = $wantF }) }
-        if ($null -ne $LiveFormulas -and $m.Expr -and $liveExpr.ContainsKey([string]$l.id) -and $liveExpr[[string]$l.id] -cne [string]$m.Expr) {
-            $diff.Add([pscustomobject]@{ Kind = 'Formula'; Code = $m.Code; Field = 'expression'; From = $liveExpr[[string]$l.id]; To = [string]$m.Expr })
+        $haveX = if ($l.PSObject.Properties['expression'] -and $l.expression) { [string]$l.expression } else { '' }
+        if ($l.PSObject.Properties['expression'] -and $m.Expr -and $haveX -cne [string]$m.Expr) {
+            $diff.Add([pscustomobject]@{ Kind = 'Formula'; Code = $m.Code; Field = 'expression'; From = $haveX; To = [string]$m.Expr })
         }
     }
     # колонки, яких у моделі більше немає (H_MPE): видалити (чернетка, м'яко) або сховати
@@ -169,7 +169,7 @@ function Get-TableOf($vid) {
     return $table
 }
 $liveTable = Get-TableOf $pubId
-$diff = @(Get-HseTemplateDiff -LiveColumns $liveTable.columns -ModelColumns $model -DeleteRemoved:$DeleteRemovedColumns -LiveFormulas $(if ($liveTable.PSObject.Properties['formulas']) { @($liveTable.formulas) } else { $null }))
+$diff = @(Get-HseTemplateDiff -LiveColumns $liveTable.columns -ModelColumns $model -DeleteRemoved:$DeleteRemovedColumns)
 if ($HideInsteadOfDelete) { Write-HseLog '  -HideInsteadOfDelete застаріло: приховування тепер типове, ключ нічого не змінює.' }
 
 # 2. документи проєкту і чи всі вже на останній версії (GET /documents/{id} віддає лише рядок templateVersion, напр. "1.0.0.3")
@@ -262,7 +262,7 @@ if ($diff.Count -gt 0) {
     }
     # перевірка чернетки ДО publish: структура = модель
     $draftTable = Get-TableOf $newVid
-    $left = @(Get-HseTemplateDiff -LiveColumns $draftTable.columns -ModelColumns $model -DeleteRemoved:$DeleteRemovedColumns -LiveFormulas $(if ($draftTable.PSObject.Properties['formulas']) { @($draftTable.formulas) } else { $null }))
+    $left = @(Get-HseTemplateDiff -LiveColumns $draftTable.columns -ModelColumns $model -DeleteRemoved:$DeleteRemovedColumns)
     if ($left.Count -gt 0) { throw ("Після змін чернетка id $newVid ще відрізняється від моделі: " + (($left | ForEach-Object { "$($_.Kind) $($_.Code)" }) -join '; ') + '. Publish не виконано.') }
     $p = Invoke-Hse POST "/api/v1/template-versions/$newVid/publish" @{ reason = "HSE401: оновлення з моделі ($((@($diff | ForEach-Object { $_.Kind }) | Sort-Object -Unique) -join ', '))" }
     if ($p.Status -notin 200, 201, 202, 204) { throw "publish -> $($p.Status) $(Get-EcrErrorCode $p) $($p.Text)" }

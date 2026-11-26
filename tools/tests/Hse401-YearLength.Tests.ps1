@@ -2,7 +2,8 @@
 # b14 document-move N1 (D-577, HSE401 v14): таблиця 775 у версії «рік + місячні колонки» - одна копія на рік (якір
 # 202601). [Period].Days там - 365 у річному HSE401_2026 і 31 у січні місячного LANDUI2026 (x11.8 після перенесення),
 # тому модель рахує довжину року з [Period].Year; оновлювач шаблону переносить зміну формули у нову версію (diff Formula).
-# Мутація (локально, 26.11): повернути [Period].Days у $days моделі - червоні перші два тести.
+# Мутації (локально, 26.11): повернути [Period].Days у $days моделі - червоні перші два тести; порівнювати lc.formulas замість
+# ColumnDto.expression (форма до огляду H-1) - червоний третій.
 Describe 'HSE401 v14 year length' {
     BeforeAll {
         $root = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') '..')).Path
@@ -25,22 +26,29 @@ Describe 'HSE401 v14 year length' {
         if ($year.Count -ne 9) { throw "очікувалось 9 формул з довжиною року, є $($year.Count): $(($year | ForEach-Object { $_.Code }) -join ', ')" }
     }
 
-    It 'оновлювач бачить змінену формулу як diff Formula, а без переліку формул - ні' {
-        $rate = @($model | Where-Object { $_.Code -eq 'H_RATE' })[0]
-        if ($null -eq $rate) { throw 'у моделі немає H_RATE' }
-        $live = @($model | ForEach-Object { [pscustomobject]@{ id = [Array]::IndexOf(@($model), $_) + 1; code = $_.Code; ordinal = [Array]::IndexOf(@($model), $_) + 1
-                headerL10n = [pscustomobject]@{ en = $_.En; ru = $_.Ru }; displayFormat = $_.DisplayFormat; isHidden = $false } })
-        $rateId = @($live | Where-Object { $_.code -eq 'H_RATE' })[0].id
-        $v13 = @([pscustomobject]@{ columnDefId = $rateId; expression = '[H_LIMIT_T] / IF([H_BASIS] = NULL, [Period].Days, [H_BASIS])' })
+    It 'оновлювач бачить змінену формулу в ColumnDto.expression (справжня форма структури, огляд H-1)' {
+        # Форма відповіді GET /template-versions/{id}/structure: TableDto.columns[] = ColumnDto { id, code, expression, ... };
+        # окремого списку formulas у TableDto НЕМАЄ - звіряємо зі знімком контракту.
+        $snap = [IO.File]::ReadAllText((Join-Path $root 'contracts/openapi.snapshot.json')) | ConvertFrom-Json
+        $schemas = $snap.components.schemas
+        if (-not $schemas.ColumnDto.properties.PSObject.Properties['expression']) { throw 'ColumnDto без expression - форма змінилась' }
+        if ($schemas.TableDto.properties.PSObject.Properties['formulas']) { throw 'TableDto отримав formulas - перегляньте Get-HseTemplateDiff' }
 
-        $diff = @(Get-HseTemplateDiff -LiveColumns $live -ModelColumns $model -LiveFormulas $v13)
+        $rate = @($model | Where-Object { $_.Code -eq 'H_RATE' })[0]
+        $i = 0
+        $live = @($model | ForEach-Object {
+                $i++
+                $expr = if ($_.Code -eq 'H_RATE') { '[H_LIMIT_T] / IF([H_BASIS] = NULL, [Period].Days, [H_BASIS])' } elseif ($_.Expr) { $_.Expr } else { $null }
+                [pscustomobject]@{ id = $i; code = $_.Code; ordinal = $i; dataType = [string]$_.Type; displayFormat = $_.DisplayFormat
+                    expression = $expr; headerL10n = [pscustomobject]@{ en = $_.En; ru = $_.Ru }; isHidden = $false }
+            })
+        $diff = @(Get-HseTemplateDiff -LiveColumns $live -ModelColumns $model)
         $formula = @($diff | Where-Object { $_.Kind -eq 'Formula' })
         if ($formula.Count -ne 1 -or $formula[0].Code -ne 'H_RATE' -or $formula[0].To -ne $rate.Expr) { throw "diff Formula: $($diff | Out-String)" }
 
-        $old = @(Get-HseTemplateDiff -LiveColumns $live -ModelColumns $model)
-        if (@($old | Where-Object { $_.Kind -eq 'Formula' }).Count) { throw 'без -LiveFormulas формули не мали порівнюватись' }
+        foreach ($c in $live) { if ($c.code -eq 'H_RATE') { $c.expression = $rate.Expr } }
+        if (@(Get-HseTemplateDiff -LiveColumns $live -ModelColumns $model | Where-Object { $_.Kind -eq 'Formula' }).Count) { throw 'v14 вже опубліковано - Formula diff має бути порожнім' }
     }
-
     It 'оновлювач переносить лише документ HSE401 і бере проєкт з -ProjectCode' {
         if ($src -notmatch '\[string\]\$ProjectCode') { throw 'немає параметра -ProjectCode' }
         if ($src -notmatch "Find-Hse401Document -ProjectCode \`$ProjectCode") { throw 'Find-Hse401Document без -ProjectCode' }

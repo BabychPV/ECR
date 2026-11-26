@@ -30,6 +30,28 @@ function Resolve-Hse400WorkDocument {
     return $null
 }
 
+function Get-Hse400YearDocuments {
+    <#
+      ✎ огляд M-2: документи HSE400 у формі для Resolve-Hse400WorkDocument. ProjectSummary року НЕ має - рік проєкту береться з
+      його періодів (найменший periodKey / 100), один запит на проєкт.
+      -Documents: items GET /documents?templateCode=HSE400 ({ id, projectId }); -Projects: items GET /projects ({ id, code });
+      -PeriodsOf: scriptblock projectId -> відповідь GET /projects/{id}/periods ({ periods: [{ periodKey }] }).
+    #>
+    param([AllowEmptyCollection()][object[]]$Documents = @(), [AllowEmptyCollection()][object[]]$Projects = @(), [Parameter(Mandatory)][scriptblock]$PeriodsOf)
+    $codes = @{}; foreach ($pr in $Projects) { $codes[[string]$pr.id] = [string]$pr.code }
+    $years = @{}
+    $out = @()
+    foreach ($d in $Documents) {
+        $prjKey = [string]$d.projectId
+        if (-not $years.ContainsKey($prjKey)) {
+            $keys = @(@((& $PeriodsOf $d.projectId).periods) | ForEach-Object { [int]$_.periodKey })
+            $years[$prjKey] = if ($keys.Count) { [int](($keys | Measure-Object -Minimum).Minimum / 100) } else { 0 }
+        }
+        $out += @{ Id = $d.id; ProjectCode = $codes[$prjKey]; Year = $years[$prjKey] }
+    }
+    return , $out
+}
+
 function Test-Hse400MayCreateProject {
     <# Новий річний проєкт будівник створює лише зі старим кодом HSE400_<рік> (scratch); LANDUI2026 та інші - лише наявні. #>
     param([Parameter(Mandatory)][string]$ProjectCode, [Parameter(Mandatory)][int]$Year)
