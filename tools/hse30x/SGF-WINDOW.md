@@ -38,6 +38,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\hse30x\Compare-SgFlari
 ```
 Exit 0 parity, 2 unexplained differences, 3 duplicate keys. Self-test: `Invoke-Pester tools\hse30x\SgFlaringParity.Tests.ps1`.
 
-## Open (human)
-- M3 (on hold): empty case T_C/Density/MW/Z → 0 (legacy NULL → "0"). Outputs that depend on T_C (legacy formulas, transitive):
+## M3 (decided by the human 26.11, D-580)
+- An empty case property that a formula reads is missing data: the row is rejected (`case_has_no_temperature`, …), never computed
+  at 0 °C; in parity these rows are the known difference `M3-noTemperature`. Outputs that depend on T_C (legacy formulas, transitive):
   `HSE30X/HSE300 × Int/Cont × SG_EC_Wzv`, `…_EC_Wist_Wzv`, `…_EC_Soot_tonn`, `…_EC_Soot_gsec` (16 formulas). Density/MW/Z: no formula.
