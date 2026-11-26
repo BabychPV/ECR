@@ -13,11 +13,23 @@ public interface IRowLockStore
     /// <param name="ct">Токен скасування.</param>
     public Task<RowLockTarget?> GetTargetAsync(long documentId, int periodKey, DateTime utcNow, CancellationToken ct);
 
-    /// <summary>Які з ключів — наявні (не видалені) рядки екземпляра таблиці документа за період.</summary>
+    /// <summary>
+    /// Живі рядки екземпляра таблиці документа за період ОДНИМ запитом: ключ → <c>TableRow.Id</c> (для номера рядка в
+    /// відмові <c>rowAlreadyLocked</c>: порядок зрізу — шаблон за <c>Ordinal</c>, далі за Id).
+    /// </summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="sheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
     /// <param name="tableDefId">Таблиця версії шаблону.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<KeyValuePair<string, long>>> LiveRowsAsync(
+        long documentId, int periodKey, long? sheetCopyId, int tableDefId, CancellationToken ct);
+
+    /// <summary>Які з ключів — наявні (не видалені) рядки екземпляра таблиці документа за період.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sheetCopyId">Копія аркуша.</param>
+    /// <param name="tableDefId">Таблиця шаблону.</param>
     /// <param name="rowKeys">Ключі рядків.</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlySet<string>> ExistingRowKeysAsync(

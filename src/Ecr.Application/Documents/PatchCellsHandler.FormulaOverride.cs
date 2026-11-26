@@ -106,7 +106,21 @@ public sealed partial class PatchCellsHandler
                 throw CalculatedCellRefusal();
             }
 
-            plan.Reasons[cell] = ValidReason(reasons.GetValueOrDefault(cell), cell.RowKey, column.Code);
+            try
+            {
+                plan.Reasons[cell] = ValidReason(reasons.GetValueOrDefault(cell), cell.RowKey, column.Code);
+            }
+            catch (BusinessRuleException refusal)
+            {
+                // ✎ integ-row-label-messages: рядок названо номером і підписом, не службовим ключем.
+                var named = NameRows(refusal, context.RowIds, context.Table.Rows, currentUser.Language);
+                if (ReferenceEquals(named, refusal))
+                {
+                    throw;
+                }
+
+                throw named;
+            }
             upserts.Add(upsert with { Value = upsert.Value with { IsCalculated = false } });
         }
 

@@ -72,6 +72,26 @@ public sealed class RowLockStore(EcrDbContext db) : IRowLockStore
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<KeyValuePair<string, long>>> LiveRowsAsync(
+        long documentId, int periodKey, long? sheetCopyId, int tableDefId, CancellationToken ct)
+    {
+        // ⛔ WR-05: предикат партиції (`PeriodKey`) першим — і в екземплярі, і в рядках.
+        var rows = await (
+                from t in db.TableInstances.AsNoTracking()
+                where t.PeriodKeyValue == periodKey
+                      && t.DocumentId == documentId
+                      && t.TableDefId == tableDefId
+                      && t.SheetCopyId == sheetCopyId
+                join r in db.TableRows.AsNoTracking() on t.Id equals r.TableInstanceId
+                where r.PeriodKeyValue == periodKey && !r.IsDeleted
+                select new { r.RowKeyValue, r.Id })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. rows.Select(r => new KeyValuePair<string, long>(r.RowKeyValue, r.Id))];
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlySet<string>> ExistingRowKeysAsync(
         long documentId, int periodKey, long? sheetCopyId, int tableDefId, IReadOnlyCollection<string> rowKeys,
         CancellationToken ct)

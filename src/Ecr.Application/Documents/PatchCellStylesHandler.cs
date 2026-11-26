@@ -82,6 +82,37 @@ public sealed class PatchCellStylesHandler(
     /// <summary>Скільки причин відмови повертається клієнту.</summary>
     private const int DeniedReasonsCap = 10;
 
+    /// <summary>
+    /// Відмова форми запиту, у якій названо рядок, — з номером і підписом рядка (як на екрані). Права й видимість — ті самі,
+    /// що в основному шляху (нерозкриття); анонім або рядка немає — без назв (текст каже «(added by a user)»).
+    /// </summary>
+    private async Task<BusinessRuleException> NameRowsOfRefusalAsync(
+        BusinessRuleException refusal, long documentId, TableInstanceRef instance, CancellationToken ct)
+    {
+        if (currentUser.UserId is not { } userId || Localization.RowKeyText.OpaqueKeysIn(refusal.Details) is not { Count: > 0 } keys)
+        {
+            return refusal;
+        }
+
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, "Document.View", ct).ConfigureAwait(false);
+        await DocumentVisibility
+            .RequireTableVisibleAsync(
+                access, profile, documentId, instance.TableInstanceId, instance.TableDefId, instance.PeriodKey, ct)
+            .ConfigureAwait(false);
+
+        var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
+        var live = await rowStore.GetRowIdsAsync(instance.TableInstanceId, new PeriodKey(instance.PeriodKey), ct).ConfigureAwait(false);
+
+        return RowDisplayNames.WithNames(
+            refusal,
+            RowDisplayNames.Of(
+                live,
+                snapshot.RowsByKey.Where(pair => pair.Key.TableDefId == instance.TableDefId).Select(pair => pair.Value),
+                keys,
+                currentUser.Language));
+    }
+
     /// <summary>Застосовує зміни оформлення до комірок екземпляра таблиці.</summary>
     /// <param name="documentId">Документ з маршруту.</param>
     /// <param name="instance">Екземпляр таблиці, уже розв'язаний контролером (нерозкриття).</param>
@@ -96,7 +127,21 @@ public sealed class PatchCellStylesHandler(
         ArgumentNullException.ThrowIfNull(request);
 
         // Форма запиту — до будь-якого читання бази (контролер перевіряє те саме раніше).
-        request.EnsureValid();
+        try
+        {
+            request.EnsureValid();
+        }
+        catch (BusinessRuleException refusal)
+        {
+            // ✎ integ-row-label-messages: рядок названо номером і підписом, не службовим ключем.
+            var named = await NameRowsOfRefusalAsync(refusal, documentId, instance, ct).ConfigureAwait(false);
+            if (ReferenceEquals(named, refusal))
+            {
+                throw;
+            }
+
+            throw named;
+        }
 
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
