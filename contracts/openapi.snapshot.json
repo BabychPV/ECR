@@ -29060,6 +29060,13 @@
           "singleDocumentPerProject": {
             "description": "`true` — один документ шаблону на проєкт; `false` — скільки завгодно.",
             "type": "boolean"
+          },
+          "yearEditWindow": {
+            "description": "✎ b14 (D-579): `true` — річні дані правляться у вікні «рік проєкту + зміщення»; `false` — за станом періоду;\n`null` (не передано) — без змін.",
+            "type": [
+              "null",
+              "boolean"
+            ]
           }
         },
         "required": [
@@ -32972,6 +32979,11 @@
           "singleDocumentPerProject": {
             "default": false,
             "description": "✎ B151: `true` — у проєкті щонайбільше один документ цього шаблону.",
+            "type": "boolean"
+          },
+          "yearEditWindow": {
+            "default": false,
+            "description": "✎ b14 (D-579): `true` — річні дані документів шаблону в місячному проєкті правляться у вікні «рік проєкту +\nзміщення», а не за станом місяця-якоря.",
             "type": "boolean"
           }
         },
@@ -78871,7 +78883,7 @@
     },
     "/api/v1/templates/{id}/document-policy": {
       "put": {
-        "description": "Увімкнення «один документ на проєкт», коли в якомусь проєкті документів шаблону вже кілька, —\n`409 ECR-TMPL-0409` (`singleDocumentDuplicates`) з переліком видимих дублікатів.",
+        "description": "Увімкнення «один документ на проєкт», коли в якомусь проєкті документів шаблону вже кілька, —\n`409 ECR-TMPL-0409` (`singleDocumentDuplicates`) з переліком видимих дублікатів.\n✎ b14 (D-579): `yearEditWindow` — «вікно редагування = рік проєкту + зміщення» (не передано — без змін).",
         "parameters": [
           {
             "in": "path",

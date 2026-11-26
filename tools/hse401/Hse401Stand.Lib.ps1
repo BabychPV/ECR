@@ -393,17 +393,19 @@ function Write-Hse401PlanSummary {
 }
 
 function Find-Hse401Document {
-    <# Проєкт HSE401_2026 і його документ (лише GET). $null - проєкту немає; documentId $null - документа немає. #>
+    <# Проєкт (типово HSE401_2026; після b14 - LANDUI2026) і його документ HSE401 (лише GET). $null - проєкту немає; documentId $null - документа немає. #>
     param([string]$ProjectCode = 'HSE401_2026')
     $prj = Get-HseItems (Invoke-HseOk GET '/api/v1/projects').Json | Where-Object { $_.code -eq $ProjectCode } | Select-Object -First 1
     if ($null -eq $prj) { return $null }
     $res = [ordered]@{ projectId = [int]$prj.id; documentId = $null; periodKey = $null; tableInstanceId = $null }
-    $docs = Get-HseItems (Invoke-HseOk GET "/api/v1/documents?limit=200&projectId=$($prj.id)").Json
-    $doc = $docs | Where-Object { $_.projectId -eq $prj.id } | Select-Object -First 1
+    # ✎ b14: у LANDUI2026 поруч документи Land - лише документ шаблону HSE401 (HSE401 - один на проєкт, B151).
+    $docs = Get-HseItems (Invoke-HseOk GET "/api/v1/documents?limit=200&projectId=$($prj.id)&templateCode=$($script:HseTemplateCode)").Json
+    $doc = $docs | Where-Object { $_.projectId -eq $prj.id -and (-not $_.PSObject.Properties['templateCode'] -or [string]$_.templateCode -eq $script:HseTemplateCode) } | Select-Object -First 1
     if ($null -eq $doc) { return $res }
     $res.documentId = [int]$doc.id
     $per = (Invoke-HseOk GET "/api/v1/projects/$($prj.id)/periods").Json
-    $res.periodKey = [int](@($per.periods) | Select-Object -First 1).periodKey
+    # якір року (найменший період проєкту): у місячному LANDUI2026 - 202601, де лежить уся таблиця 775 (D-474, b14 P2)
+    $res.periodKey = [int](@($per.periods) | Sort-Object { [int]$_.periodKey } | Select-Object -First 1).periodKey
     $tabs = (Invoke-HseOk GET "/api/v1/documents/$($doc.id)/tables?periodKey=$($res.periodKey)").Json
     $ti = @($tabs) | Where-Object { $_.tableCode -eq $script:HseTableCode } | Select-Object -First 1
     if ($null -ne $ti) { $res.tableInstanceId = [int]$ti.tableInstanceId }
