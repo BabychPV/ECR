@@ -149,8 +149,17 @@ export function columnOptions(
     names.set(column.columnDefId, columnOptionLabel(column));
   }
 
+  // ✎ AC-14: перелік з сервера вже згорнутий за родоводом (одна колонка — один пункт). Рядок журналу з Id старої версії
+  // шаблону (до переносу проєкту) мав би той самий підпис і подвоїв би пункт, тому рядок із підписом, що вже є серед
+  // пунктів сервера, нового пункту не додає.
+  const serverLabels = new Set(names.values());
   for (const item of items ?? []) {
-    if (documentId !== null && item.documentId === documentId && !names.has(item.columnDefId)) {
+    if (
+      documentId !== null &&
+      item.documentId === documentId &&
+      !names.has(item.columnDefId) &&
+      !serverLabels.has(columnOptionLabel(item))
+    ) {
       names.set(item.columnDefId, columnOptionLabel(item));
     }
   }
