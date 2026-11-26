@@ -16,6 +16,7 @@ const files = [
   'src/features/grid/GridKeyHint.tsx',
   'src/features/grid/DocumentGrid.tsx',
   'src/features/documents/inspector/cellProvenance.ts',
+  'src/features/documents/calcStatus/calcStatusModel.ts',
   'src/features/documents/inspector/DocumentInspector.tsx',
   'src/features/documents/notices/NoticeLine.tsx',
   'src/features/documents/calcStatus/CalcStatusChip.tsx',

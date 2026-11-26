@@ -1,59 +1,73 @@
-import { useEffect, type JSX } from 'react';
+import type { JSX } from 'react';
 import { Badge, Button, Group, Popover, Stack, Text, VisuallyHidden } from '@mantine/core';
-import { useQueryClient } from '@tanstack/react-query';
 import { formatDateTime, formatTime } from '@/shared/format/datetime';
 import { formatMonthName } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { badgeLook } from '@/shared/ui/StatusBadge';
 import { DisabledReason } from '@/features/common/DisabledReason';
-import { calcStatusOf, type CalcStatusSource, type CalcStatusView, type LocalRecalc } from './calcStatusModel';
+import { calcStatusOf, type CalcStatusView, type CardStaleness, type JobOrigin, type LocalRecalc, type LockedReason } from './calcStatusModel';
+import { useDocumentCalcStatus } from './useDocumentCalcStatus';
 
-/** Як часто перечитується картка, поки задача в черзі чи рахується (стан — із сервера, переживає перезавантаження). */
-export const CalcStatusPollMs = 3_000;
+export { CalcStatusPollMs } from './useDocumentCalcStatus';
 
 interface CalcStatusChipProps {
   readonly documentId: number;
   readonly periodKey: number;
-  readonly source: CalcStatusSource | undefined;
+  /** Запас із картки (до відповіді `calc-status`). */
+  readonly card: CardStaleness;
   readonly local: LocalRecalc;
   /** «Recalculate» / «Retry» — та сама дія, що в «More» і F9; `null` — ролі її не дано. */
   readonly recalculate: { readonly run: () => void; readonly loading: boolean; readonly blockedReason: string | null } | null;
 }
 
-function monthsText(view: CalcStatusView, reason: 'closed' | 'approved'): string | null {
-  const months = view.lockedMonths.filter((month) => month.reason === reason || (reason === 'closed' && month.reason === 'other'));
-  if (months.length === 0) return null;
-  const names = months.map((month) => formatMonthName(month.periodKey % 100).slice(0, 3)).join(', ');
+const short = (periodKey: number): string => formatMonthName(periodKey % 100).slice(0, 3);
 
-  return reason === 'closed' ? t('calcStatus.lockedMonths', { months: names }) : t('calcStatus.approvedMonths', { months: names });
+/** Довідка про застарілі місяці, яких перерахувати не можна (Q3) — ключі літералами. */
+function lockedNote(reason: LockedReason, months: string): string {
+  switch (reason) {
+    case 'approved':
+      return t('calcStatus.approvedMonths', { months });
+    case 'notOpen':
+      return t('calcStatus.notOpenMonths', { months });
+    case 'archived':
+      return t('calcStatus.archivedMonths', { months });
+    case 'closed':
+      return t('calcStatus.lockedMonths', { months });
+  }
+}
+
+function notesOf(view: CalcStatusView): string[] {
+  const reasons: LockedReason[] = ['closed', 'notOpen', 'approved', 'archived'];
+  return reasons.flatMap((reason) => {
+    const months = view.lockedMonths.filter((month) => month.reason === reason).map((month) => short(month.periodKey));
+    return months.length === 0 ? [] : [lockedNote(reason, months.join(', '))];
+  });
+}
+
+/** Хто поставив задачу: «· automatic», «· after a source change», «· scheduled», «· started by X». */
+function originText(origin: JobOrigin | null): string {
+  if (origin === null) return '';
+  if (origin.kind === 'auto') return ` · ${t('calcStatus.kind.auto')}`;
+  if (origin.kind === 'cascade') return ` · ${t('calcStatus.kind.cascade')}`;
+  if (origin.kind === 'scheduled') return ` · ${t('calcStatus.kind.scheduled')}`;
+  if (!origin.own && origin.by !== null) return ` · ${t('calcStatus.startedBy', { name: origin.by })}`;
+  return '';
 }
 
 /**
  * ✎ DOCUX L4 (§3.2 плану; рішення людини Q2, Q3, Q5): ОДИН чип розрахунку в рядку стану — «Calculated 14:02» /
- * «Results out of date · Recalculate» / «Queued · position 3» / «Recalculating · Mar (3 of 9)» / «Recalculation failed ·
- * Retry». Закриті / затверджені застарілі місяці — сіра довідка поруч, не попередження. Подробиці — ⓘ.
+ * «Results out of date · Recalculate» / «Queued · position 3» / «Recalculating · Mar (3 of 9) · automatic» /
+ * «Recalculation failed · Retry» (код і кореляція для підтримки — в ⓘ). Закриті / затверджені / не відкриті застарілі
+ * місяці — сіра довідка поруч, не попередження.
  *
- * ⚠ Поки задача в черзі чи рахується, картка перечитується кожні 3 с (стан — сервера, тож переживає перезавантаження і
- * показує чужі й нічні задачі, коли контракт L3 їх віддає).
+ * Стан — із сервера (`calc-status`): переживає перезавантаження, показує свої й чужі задачі, тихий автоперерахунок (Q2).
  */
-export function CalcStatusChip({ documentId, periodKey, source, local, recalculate }: CalcStatusChipProps): JSX.Element | null {
-  const queryClient = useQueryClient();
-  const view = calcStatusOf(source, local);
+export function CalcStatusChip({ documentId, periodKey, card, local, recalculate }: CalcStatusChipProps): JSX.Element | null {
+  const server = useDocumentCalcStatus(documentId, periodKey, local.queued || local.running);
+  const view = calcStatusOf(server, card, local);
   const { status } = view;
-  const active = status.kind === 'queued' || status.kind === 'running';
 
-  useEffect(() => {
-    if (!active) return undefined;
-    const timer = setInterval(() => {
-      void queryClient.invalidateQueries({ queryKey: ['document', documentId, periodKey], exact: true });
-    }, CalcStatusPollMs);
-
-    return () => clearInterval(timer);
-  }, [active, documentId, periodKey, queryClient]);
-
-  const closedNote = monthsText(view, 'closed');
-  const approvedNote = monthsText(view, 'approved');
-  const notes = [closedNote, approvedNote].filter((note): note is string => note !== null);
+  const notes = notesOf(view);
   if (status.kind === 'unknown' && notes.length === 0) return null;
 
   const tone =
@@ -66,19 +80,19 @@ export function CalcStatusChip({ documentId, periodKey, source, local, recalcula
       case 'stale':
         return `● ${t('calcStatus.stale')}`;
       case 'queued':
-        return `◷ ${status.position === null ? t('calcStatus.queuedNoPosition') : t('calcStatus.queued', { position: status.position })}`;
+        return `◷ ${status.position === null ? t('calcStatus.queuedNoPosition') : t('calcStatus.queued', { position: status.position })}${originText(status.origin)}`;
       case 'running':
         return `⟳ ${
           status.done === null || status.total === null
             ? t('calcStatus.runningNoStep')
             : t('calcStatus.running', {
-                month: status.periodKey === null ? '' : formatMonthName(status.periodKey % 100).slice(0, 3),
+                month: status.periodKey === null ? '' : short(status.periodKey),
                 done: status.done,
                 total: status.total,
               })
-        }`;
+        }${originText(status.origin)}`;
       case 'failed':
-        return `✕ ${t('calcStatus.failed')}`;
+        return `✕ ${t('calcStatus.failed')}${originText(status.origin)}`;
       case 'unknown':
         return null;
     }
@@ -144,4 +158,3 @@ export function CalcStatusChip({ documentId, periodKey, source, local, recalcula
     </Group>
   );
 }
-

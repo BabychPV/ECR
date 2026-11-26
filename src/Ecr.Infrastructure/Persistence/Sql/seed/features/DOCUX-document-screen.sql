@@ -111,8 +111,22 @@ SELECT v.[Key], v.Lang, v.Val
     (N'document.notices.review', N'kz', N'Қарау'),
     (N'document.notices.assignedToYou', N'ru', N'Назначено вам месяцев в этом документе: {count}'),
     (N'document.notices.assignedToYou', N'kz', N'Осы құжатта сізге тағайындалған айлар: {count}'),
-    (N'grid.needsInput.otherTables', N'ru', N'Ещё не открыто таблиц ниже: {count} — они проверяются при подаче'),
-    (N'grid.needsInput.otherTables', N'kz', N'Төмендегі {count} кесте әлі ашылмаған — олар тапсыру кезінде тексеріледі')
+    (N'grid.needsInput.otherTables', N'ru', N'Ещё не проверено таблиц: {count} — сервер проверит их при подаче'),
+    (N'grid.needsInput.otherTables', N'kz', N'{count} кесте әлі тексерілмеген — сервер оларды тапсыру кезінде тексереді'),
+    (N'calcStatus.notOpenMonths', N'ru', N'{months}: ещё не открыты — не пересчитываются'),
+    (N'calcStatus.notOpenMonths', N'kz', N'{months}: әлі ашылмаған — қайта есептелмейді'),
+    (N'calcStatus.archivedMonths', N'ru', N'{months}: в архиве — не пересчитываются'),
+    (N'calcStatus.archivedMonths', N'kz', N'{months}: мұрағатта — қайта есептелмейді'),
+    (N'calcStatus.kind.auto', N'ru', N'автоматически после правок'),
+    (N'calcStatus.kind.auto', N'kz', N'түзетулерден кейін автоматты түрде'),
+    (N'calcStatus.kind.cascade', N'ru', N'после изменения документа-источника'),
+    (N'calcStatus.kind.cascade', N'kz', N'дереккөз құжаты өзгергеннен кейін'),
+    (N'calcStatus.kind.scheduled', N'ru', N'по расписанию'),
+    (N'calcStatus.kind.scheduled', N'kz', N'кесте бойынша'),
+    (N'calcStatus.startedBy', N'ru', N'запустил(а) {name}'),
+    (N'calcStatus.startedBy', N'kz', N'{name} іске қосты'),
+    (N'workflow.recalculateLocked', N'ru', N'Здесь нечего пересчитывать: изменённые месяцы закрыты, ещё не открыты или в архиве. Чтобы пересчитать месяц, откройте его заново.'),
+    (N'workflow.recalculateLocked', N'kz', N'Мұнда қайта есептейтін ештеңе жоқ: өзгерген айлар жабық, әлі ашылмаған немесе мұрағатта. Айды қайта есептеу үшін оны қайта ашыңыз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -176,7 +190,14 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'document.notices.conflict', N'en', N'Someone else changed cells you edited — choose which values to keep', 1),
     (N'document.notices.review', N'en', N'Review', 1),
     (N'document.notices.assignedToYou', N'en', N'Months assigned to you on this document: {count}', 1),
-    (N'grid.needsInput.otherTables', N'en', N'{count} table(s) further down are not opened yet — they are checked when you submit', 1)
+    (N'grid.needsInput.otherTables', N'en', N'{count} table(s) not checked yet — the server checks them when you submit', 1),
+    (N'calcStatus.notOpenMonths', N'en', N'{months}: not open yet — not recalculated', 1),
+    (N'calcStatus.archivedMonths', N'en', N'{months}: archived — not recalculated', 1),
+    (N'calcStatus.kind.auto', N'en', N'automatic after your edits', 1),
+    (N'calcStatus.kind.cascade', N'en', N'after a source document changed', 1),
+    (N'calcStatus.kind.scheduled', N'en', N'scheduled', 1),
+    (N'calcStatus.startedBy', N'en', N'started by {name}', 1),
+    (N'workflow.recalculateLocked', N'en', N'Nothing here can be recalculated: the changed months are closed, not open yet or archived. Reopen a month to recalculate it.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

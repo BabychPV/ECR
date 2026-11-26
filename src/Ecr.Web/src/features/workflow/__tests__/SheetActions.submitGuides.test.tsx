@@ -152,3 +152,43 @@ describe('Submit guidance: річна розкладка й незмонтова
   });
 });
 
+describe('Submit guidance: відмова сервера через порожні входи (ECR-SUB-4221 validationBlocked)', () => {
+  it('сервер знайшов порожні входи, яких клієнт не бачив, — не тост, а перехід і «Cannot submit…»', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/api/v1/me')) return json(CurrentUser);
+        if (url.includes('/submit') && init?.method === 'POST') {
+          // Сервер знає й рядки, яких людина не правила: перелік після відмови їх приносить.
+          needs(2);
+          return new Response(
+            JSON.stringify({ status: 422, title: 't', errorCode: 'ECR-SUB-4221', messageKey: 'err.ECR-SUB-4221.validationBlocked', messages: [] }),
+            { status: 422, headers: { 'Content-Type': 'application/problem+json' } },
+          );
+        }
+        return json(null);
+      }),
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(['document', 1, 202601], { businessKey: 'DOC-1', createdAt: '2026-01-01T00:00:00Z', id: 1, nameL10n: null, projectId: 7, sheetCount: 1, sheetStates: { S1: 'Draft' } });
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <QueryClientProvider client={client}>
+            <NoticeLine />
+            <SheetActions documentId={1} sheetDefId={42} periodKey={202601} state="Draft" />
+          </QueryClientProvider>
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /workflow\.submitPeriod/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '⟦document.submit⟧' }));
+
+    const line = await screen.findByTestId('notice-cannot-submit', {}, { timeout: 5_000 });
+    expect(line.textContent).toContain('(count=2)');
+    expect(currentCellNavigation()).toMatchObject({ rowKey: 'r1' });
+  });
+});
+

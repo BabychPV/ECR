@@ -13,7 +13,8 @@ import type {
   SheetWorkflowRequest,
 } from '@/api/types';
 import { locksDataActions, type DocumentLock } from '@/features/documents/documentLock';
-import { recalcBlockOf } from './recalcAvailability';
+import { recalcBlockOf, serverEligibility } from './recalcAvailability';
+import { calcStatusKey, getCalcStatus } from '@/features/documents/calcStatus/useDocumentCalcStatus';
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { refreshSheetWorkflow } from './refreshSheetWorkflow';
 import { useStatusStale } from './statusStale';
@@ -55,6 +56,7 @@ import { t } from '@/shared/i18n';
 import { formatPeriodKey } from '@/shared/format';
 import { DisabledReason } from '@/features/common/DisabledReason';
 import { guardSubmitNeedsInput } from './submitGuide';
+import { isRequiredInputsRefusal, refreshAllRequiredInputs } from '@/features/grid/requiredInputsServer';
 
 /**
  * Причина невдалого перерахунку в тості — окремим чанком (`D-132`): з'являється лише на відмові
@@ -151,6 +153,8 @@ interface SheetActionsProps {
    * «аркуш «Викиди» не можна…», а не «аркуш 2». Не задано — текст сервера.
    */
   sheetName?: string | null | undefined;
+  /** ✎ DOCUX Q3: код аркуша — стани оригіналу й копій у картці (`sheetStates[КОД]`, `sheetStates[КОД#копія]`). */
+  sheetCode?: string | null | undefined;
 
   /**
    * Чому документ за цей період не змінити (`F-18`): архівний проєкт, закритий
@@ -689,6 +693,7 @@ export function useSheetActions({
   periodKey,
   state,
   sheetName = null,
+  sheetCode = null,
   lock = null,
   yearLayout = false,
   decideMonth = null,
@@ -784,6 +789,16 @@ export function useSheetActions({
     // питання, а не відмова, тож замість тосту — діалог із переліком.
     onError: (error, at) => {
       closeSubmitConfirm();
+      // ✎ DOCUX L9 (Q6): сервер відмовив через порожні обов'язкові входи — не тост, а перехід до першої комірки з поясненням
+      // (переліки таблиць перечитуються: сервер знає й рядки, яких людина не правила, і таблиці, яких ще не відкрито).
+      if (isRequiredInputsRefusal(error)) {
+        void refreshAllRequiredInputs(queryClient, documentId).then(() =>
+          window.setTimeout(() => {
+            if (!guardSubmitNeedsInput(yearLayout ? at.periodKey : null)) showSheetError(error, at.sheetName);
+          }, 0),
+        );
+        return;
+      }
       const pending = warningsToConfirm(error);
       if (pending === null) {
         setWarnings(null);
@@ -1440,36 +1455,40 @@ export function useSheetActions({
   // застосувала для лан 1-7.
   // ✎ 2026-10-02: перерахунок СВОГО документа — за читанням (сервер: `RecalculateDocumentHandler`),
   // а не за `Calculation.Recalculate` (те — проєктний/масовий перерахунок).
-  // ✎ AN-39/L8-12: сервер (`RecalculateDocumentHandler`) відмовляє, коли ХОЧ ОДИН аркуш
-  // періоду поданий чи затверджений, - кнопки, яка гарантовано дасть відмову, немає.
   // ✎ `UI-42`: на вузькому екрані документ лише для читання — перерахунок, що переписує
   // обчислені комірки, теж ні (макет: `Recalculate` вимкнений, коли `readOnlyReason()`).
   // ✎ RC14-B: поданий/затверджений СУСІДНІЙ аркуш не ховає кнопку чернеткового, а вимикає її з
   // причиною (`DisabledReason`) - раніше «Перерахувати» (і F9) мовчки зникала.
   const canRecalculate = !dataLocked && !narrow && can(me, 'Document.View');
-  // ✎ RC15-C: сервер пропускає подані/затверджені аркуші й перераховує решту; відмова (4221) - лише коли
-  // подані ВСІ, тож тільки тоді кнопка вимкнена.
-  // ✎ AN-77 / L8-12: клієнт завжди шле `sheetDefId`, а для цієї області сервер відмовляє, щойно поданий
-  // САМ цей аркуш (`RecalculateDocumentHandler`, ФВ-9.17), хай сусідні й у чернетці, - кнопка (і F9, і
-  // кнопка банера) вимкнена з причиною. «Усі подані» лишається для випадку, коли стан цього аркуша невідомий.
-  // ✎ DOCUX L1 (BUG-1, правило людини 07.11/16.11): сервер ПЕРЕРАХОВУЄ поданий аркуш і пропускає лише ЗАТВЕРДЖЕНИЙ
-  // (`RecalculateDocumentHandler`: «нічого рахувати» — лише коли затверджено оригінал і кожну копію). Тож вимкнена кнопка —
-  // лише над затвердженим аркушем. Річна розкладка не дивиться на стан якоря (січня): рік рахує відкриті місяці, а на
-  // «нічого рахувати» сервер відповідає поясненням (`recalc.nothingToRecalculate`), не відмовою.
+  // ✎ DOCUX L1 / ST-3 (підтверджено сервером 26.11): поданий аркуш перераховується (202 + задача); «нічого рахувати» —
+  // лише коли ЗАТВЕРДЖЕНО все в області (оригінал і кожна копія аркуша); річний документ не відмовляє через затверджений
+  // місяць. Вимкнена кнопка — лише тоді; рішення — `recalcBlockOf` (правда сервера з `calc-status`, коли вона є).
   // ✎ Q3 координатора: рішення — одна функція (`recalcAvailability.ts`); поле сервера «можна перерахувати» (контракт L3)
   // береться, щойно картка його віддає.
+  // ✎ Контракт doc-ux-server: «можна перерахувати» — із `calc-status` (`staleMonths[].recalculable / lockedReason`).
+  // Підписка без власного запиту: стан розрахунку читає чип (`CalcStatusChip`), тут — той самий кеш.
+  const calcStatus = useQuery({
+    queryKey: calcStatusKey(documentId, periodKey),
+    queryFn: () => getCalcStatus(documentId, periodKey),
+    enabled: false,
+  });
+  const eligibility = serverEligibility(Array.isArray(calcStatus.data?.staleMonths) ? calcStatus.data.staleMonths : undefined);
   const recalcBlock = recalcBlockOf({
     yearLayout,
     state,
+    sheetCode,
     sheetStates: summary?.sheetStates,
-    serverCanRecalculate: (summary as { canRecalculate?: boolean | null } | undefined)?.canRecalculate,
+    serverCanRecalculate: eligibility.canRecalculate,
+    serverLockedReason: eligibility.lockedReason,
   });
   const recalcBlockedReason =
     recalcBlock === 'sheetApproved'
       ? t('workflow.recalculateSheetApproved', { sheet: sheetName ?? String(sheetDefId) })
       : recalcBlock === 'allApproved'
         ? t('workflow.recalculateAllApproved', { period: formatPeriodKey(periodKey) || String(periodKey) })
-        : null;
+        : recalcBlock === 'locked'
+          ? t('workflow.recalculateLocked')
+          : null;
   const recalcBusy = recalculate.isPending || recalcRunning || settled.settling;
 
   /*

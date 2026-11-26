@@ -233,6 +233,8 @@ export function refreshStaleness(
   if (!becameStale) return;
 
   void queryClient.invalidateQueries({ queryKey: summaryKey, exact: true });
+  // ✎ DOCUX L4: чип стану розрахунку — «Out of date», далі тихий автоперерахунок (Q2) — опитування з `calc-status`.
+  void queryClient.invalidateQueries({ queryKey: [...summaryKey, 'calc-status'], exact: true });
   void queryClient.invalidateQueries({ queryKey: calculationResultsKey(documentId, periodKey), exact: true });
 }
 

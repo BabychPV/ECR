@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { recalcBlockOf } from '../recalcAvailability';
+import { recalcBlockOf, serverEligibility } from '../recalcAvailability';
 
 /**
  * ✎ Q3 координатора: рішення «можна перерахувати» — одна функція; поле сервера (контракт L3) має першість над правилом
@@ -18,4 +18,21 @@ describe('recalcBlockOf', () => {
     expect(recalcBlockOf({ yearLayout: true, state: 'Draft', sheetStates: {}, serverCanRecalculate: false })).toBe('sheetApproved');
     expect(recalcBlockOf({ yearLayout: false, state: 'Approved', sheetStates: {}, serverCanRecalculate: null })).toBe('sheetApproved');
   });
+
+  it('серверна відповідь calc-status: є місяць, який перерахується, — «можна»; лише закриті — «ні» з причиною; застарілих немає — правило', () => {
+    expect(serverEligibility([{ recalculable: false, lockedReason: 'closed' }, { recalculable: true, lockedReason: null }])).toEqual({ canRecalculate: true, lockedReason: null });
+    const closed = serverEligibility([{ recalculable: false, lockedReason: 'closed' }]);
+    expect(closed).toEqual({ canRecalculate: false, lockedReason: 'closed' });
+    expect(recalcBlockOf({ yearLayout: false, state: 'Draft', sheetStates: {}, serverCanRecalculate: closed.canRecalculate, serverLockedReason: closed.lockedReason })).toBe('locked');
+    expect(recalcBlockOf({ yearLayout: false, state: 'Draft', sheetStates: {}, serverCanRecalculate: false, serverLockedReason: 'approved' })).toBe('sheetApproved');
+    expect(serverEligibility([])).toEqual({ canRecalculate: null, lockedReason: null });
+    expect(serverEligibility(undefined)).toEqual({ canRecalculate: null, lockedReason: null });
+  });
+
+  it('ST-3: затверджений оригінал із копією-чернеткою — можна (сервер рахує копію); затверджено все — ні', () => {
+    expect(recalcBlockOf({ yearLayout: false, state: 'Approved', sheetCode: 'S1', sheetStates: { S1: 'Approved', 'S1#5': 'Draft', S2: 'Approved' } })).toBeNull();
+    expect(recalcBlockOf({ yearLayout: false, state: 'Draft', sheetCode: 'S1', sheetStates: { S1: 'Approved', 'S1#5': 'Approved', S2: 'Draft' } })).toBe('sheetApproved');
+    expect(recalcBlockOf({ yearLayout: false, state: 'Submitted', sheetCode: 'S1', sheetStates: { S1: 'Submitted', 'S1#5': 'Approved' } })).toBeNull();
+  });
 });
+
