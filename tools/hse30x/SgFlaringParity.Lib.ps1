@@ -41,9 +41,16 @@ function ConvertTo-SgEcrRows {
 
 function Find-SgDuplicates {
     <# Keys (Kind|Key|Column) that occur more than once - a parity run with duplicates must fail, not overwrite. #>
+    # Hashtable count, not Group-Object: Group-Object on tens of thousands of unique keys is pathologically slow in PowerShell 5.1.
     param([object[]]$Rows, [string]$Side)
-    @($Rows | Group-Object { "$($_.Kind)|$($_.Key)|$($_.Column)" } | Where-Object Count -gt 1 |
-        ForEach-Object { "$Side duplicate: $($_.Name) x$($_.Count)" })
+    $counts = New-Object 'System.Collections.Generic.Dictionary[string,int]'
+    foreach ($r in $Rows) {
+        $k = "$($r.Kind)|$($r.Key)|$($r.Column)"
+        $n = 0
+        [void]$counts.TryGetValue($k, [ref]$n)
+        $counts[$k] = $n + 1
+    }
+    @($counts.GetEnumerator() | Where-Object { $_.Value -gt 1 } | ForEach-Object { "$Side duplicate: $($_.Key) x$($_.Value)" })
 }
 
 function Compare-SgParity {
