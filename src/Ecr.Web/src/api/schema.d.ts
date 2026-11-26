@@ -2706,6 +2706,112 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/data-sources/test-connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Перевіряє з'єднання з НЕЗБЕРЕЖЕНИХ значень форми (P-1126-SRCCRED §13.1). Право `Integration.Manage`.
+         * @description ⚠ Нічого не зберігає. Лише `PiSqlClient` і `Sql` (інакше `422 dataSourceTestTransport`); та сама
+         *     валідація адреси, що при збереженні. Пароль — з тіла; збережений підставляється лише за `sourceId` при тій
+         *     самій цілі й логіні, інакше `422 dataSourcePasswordReentryRequired`. Не більше 5 на хвилину на користувача
+         *     (`429 tooManySourceTests`); після 3 відмов входу поспіль ціль на паузі 15 хв (`429 sourceTestTargetPaused`).
+         *     Відповідь — як у `POST …/{id}/test`: лише категорія; у журналі безпеки — без адреси й пароля.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["TestDataSourceConnectionRequest"];
+                    "application/json": components["schemas"]["TestDataSourceConnectionRequest"];
+                    "text/json": components["schemas"]["TestDataSourceConnectionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataSourceTestResult"];
+                        "text/json": components["schemas"]["DataSourceTestResult"];
+                        "text/plain": components["schemas"]["DataSourceTestResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Too Many Requests */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/data-sources/{id}": {
         parameters: {
             query?: never;
@@ -35033,6 +35139,9 @@ export interface components {
             code: string;
             /** Format: int32 */
             collectionSchedules: number;
+            /** Format: date-time */
+            credentialsRejectedAt: null | string;
+            credentialsState: components["schemas"]["SourceCredentialsState"];
             endpoint: string;
             hasPassword: boolean;
             hasSecret: boolean;
@@ -45652,6 +45761,11 @@ export interface components {
             items: components["schemas"]["SourceCatalogItem"][];
             nextCursor: null | string;
         };
+        /**
+         * @description Стан облікових даних джерела для значка в переліку (P-1126-SRCCRED, R-03) — без розшифрування пароля.
+         * @enum {unknown}
+         */
+        SourceCredentialsState: "Ok" | "Rejected" | "Unreadable";
         /** @description Сутність збору у відповіді на заведення чи прив'язку. */
         SourceEntityDto: {
             /** @description Код у джерелі. */
@@ -47445,6 +47559,35 @@ export interface components {
             isGreen: boolean;
             /** @description Розбіжності; порожньо, якщо тест зелений. */
             mismatches: components["schemas"]["TestCaseMismatch"][];
+        };
+        /** @description Тіло перевірки з'єднання з НЕЗБЕРЕЖЕНИХ значень форми (`POST /api/v1/data-sources/test-connection`,
+         *     P-1126-SRCCRED §13.1). Нічого не зберігає. */
+        TestDataSourceConnectionRequest: {
+            /** @description Як входити: `Windows` або `UserPassword`. */
+            authMode?: components["schemas"]["SourceAuthMode"];
+            /** @description Каталог або база джерела. */
+            catalog?: null | string;
+            /** @description Рядок з'єднання — без облікових даних (та сама валідація, що при збереженні). */
+            endpoint: null | string;
+            /**
+             * Format: password
+             * @description ⛔ Лише запис: пароль з форми; не зберігається, не повертається, не пишеться в журнал.
+             */
+            password?: null | string;
+            /** @description Причина; обов'язкова, потрапляє в журнал безпеки. */
+            reason?: null | string;
+            /** @description Запасна адреса; `null` — немає. */
+            secondaryEndpoint?: null | string;
+            /**
+             * Format: int32
+             * @description Джерело, чий збережений пароль можна підставити, — лише коли ціль (транспорт, адреси, логін) не змінилася;
+             *     `null` — нове з'єднання.
+             */
+            sourceId: null | number;
+            /** @description Транспорт: з тіла перевіряються лише `PiSqlClient` і `Sql`. */
+            transport: components["schemas"]["ExternalTransport"];
+            /** @description Логін за `UserPassword`. */
+            userName?: null | string;
         };
         /** @description Тіло перевірки з'єднання. */
         TestDataSourceRequest: {
