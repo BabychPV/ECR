@@ -1,4 +1,4 @@
-﻿# b14 document-move (D-577): composition of the move / pre-image / reverse SQL. ONE place that builds the text
+﻿# b14 document-move (D-579): composition of the move / pre-image / reverse SQL. ONE place that builds the text
 # executed by Move-Document.ps1; tests/Ecr.Infrastructure.Tests/Persistence/DocumentMoveSqlTests.cs mirrors it
 # (same markers, same substitution) and DocumentMove-Lib Pester tests pin it.
 
@@ -69,11 +69,13 @@ function New-MoveScript {
         [Parameter(Mandatory = $true)][string]$CorrelationId,
         [string]$Reason,
         [Parameter(Mandatory = $true)][int]$UserId,
-        [switch]$AllowLive
+        [switch]$AllowLive,
+        [string]$PreImage,
+        [int]$LockTimeoutMs = 60000
     )
 
     $header = @"
-DECLARE @MvMode              varchar(10)    = '$Mode';
+DECLARE @MvMode             varchar(10)    = '$Mode';
 DECLARE @MvDocumentId        bigint         = $DocumentId;
 DECLARE @MvTargetProjectCode nvarchar(64)   = $(ConvertTo-SqlLiteral $TargetProjectCode);
 DECLARE @MvCorrelationId     nvarchar(64)   = $(ConvertTo-SqlLiteral $CorrelationId);
@@ -81,6 +83,8 @@ DECLARE @MvReason            nvarchar(1000) = $(ConvertTo-SqlLiteral $(if ([stri
 DECLARE @MvUserId            int            = $UserId;
 DECLARE @MvAllowLive         bit            = $(if ($AllowLive) { 1 } else { 0 });
 DECLARE @MvApplyToken        varchar(40)    = '$script:MoveApplyToken';
+DECLARE @MvPreImage          sysname        = $(ConvertTo-SqlLiteral $(if ([string]::IsNullOrWhiteSpace($PreImage)) { $null } else { $PreImage }));
+DECLARE @MvLockTimeout       int            = $LockTimeoutMs;
 "@
     $text = Set-ParamBlock $MoveSql $header
     $marker = '-- @@Q17@@'

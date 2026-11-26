@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    b14 document-move (D-577, P-1125-ONEPROJ): one-off move of documents into another project of the same year
+    b14 document-move (D-579, P-1125-ONEPROJ): one-off move of documents into another project of the same year
     (live: HSE400 98 and HSE401 93 -> LANDUI2026). Modes: PreImage | Preview | Apply | Reverse.
 
 .DESCRIPTION
@@ -35,7 +35,8 @@ param(
     [string]$TargetProject = 'LANDUI2026',
     [Parameter(Mandatory = $true)][string]$CorrelationId,
     [string]$Reason,
-    [int]$UserId = 0,
+    # review M-5: the acting SystemAdministrator (sec.User.Id) - mandatory, checked in the SQL
+    [Parameter(Mandatory = $true)][int]$UserId,
     [switch]$AllowLive,
     [switch]$ReversePreview,
     [string]$ConfirmBackup,
@@ -50,6 +51,9 @@ try { Add-Type -AssemblyName System.Data } catch { }
 
 Assert-MoveDatabase $Database
 Assert-CorrelationId $CorrelationId
+$writes = $Mode -eq 'Apply' -or ($Mode -eq 'Reverse' -and -not $ReversePreview)
+# guard BEFORE any connection (the SQL refuses as well, 51804/51833)
+if ($writes -and $Database -ieq 'EcrLandUi' -and -not $AllowLive) { throw 'Move: EcrLandUi is live; writing needs -AllowLive (separate human word).' }
 $preImage = Get-PreImageDatabaseName $CorrelationId
 $connectionString = "Server=$Server;Database=$Database;Integrated Security=true;TrustServerCertificate=true;Application Name=ECR-DocumentMove"
 
@@ -91,17 +95,14 @@ function Save-DataSet($ds, [string]$tag) {
 if ((Invoke-MoveScalar "SELECT CASE WHEN OBJECT_ID(N'doc.TableInstance', N'U') IS NULL THEN 0 ELSE 1 END") -ne 1) {
     throw "Move: database '$Database' is not an ECR database."
 }
-if ($UserId -le 0) {
-    $UserId = [int](Invoke-MoveScalar "SELECT MIN(u.Id) FROM sec.[User] u")
-}
-
-$writes = $Mode -eq 'Apply' -or ($Mode -eq 'Reverse' -and -not $ReversePreview)
 if ($writes) {
-    if ($Database -ieq 'EcrLandUi' -and -not $AllowLive) { throw 'Move: EcrLandUi is live; writing needs -AllowLive (separate human word).' }
     if ([string]::IsNullOrWhiteSpace($ConfirmBackup)) { throw 'Move: -ConfirmBackup <.bak taken in this window> is required for writes.' }
     $bak = $ConfirmBackup.Replace("'", "''")
-    [void](Invoke-MoveSql "RESTORE VERIFYONLY FROM DISK = N'$bak'")
-    $hdr = (Invoke-MoveSql "RESTORE HEADERONLY FROM DISK = N'$bak'").Tables[0].Rows[0]
+    # review L-2: the LATEST FULL backup set of the file (BackupType 1), verified at its own position
+    $sets = @((Invoke-MoveSql "RESTORE HEADERONLY FROM DISK = N'$bak'").Tables[0].Rows | Where-Object { [int]$_['BackupType'] -eq 1 })
+    if (-not $sets.Count) { throw 'Move: the backup file has no FULL backup set.' }
+    $hdr = $sets | Sort-Object { [datetime]$_['BackupFinishDate'] } | Select-Object -Last 1
+    [void](Invoke-MoveSql ("RESTORE VERIFYONLY FROM DISK = N'$bak' WITH FILE = {0}" -f [int]$hdr['Position']))
     if ([string]$hdr['DatabaseName'] -ine $Database) { throw "Move: the backup belongs to '$($hdr['DatabaseName'])', not '$Database'." }
     if (((Get-Date) - [datetime]$hdr['BackupFinishDate']).TotalHours -gt $BackupMaxAgeHours) { throw 'Move: the backup is older than -BackupMaxAgeHours.' }
 }
@@ -109,6 +110,12 @@ if ($Mode -eq 'Apply') {
     if ([string]::IsNullOrWhiteSpace($Reason) -or $Reason.Trim().Length -lt 10) { throw 'Move: Apply needs -Reason (at least 10 characters).' }
     if ($null -eq (Invoke-MoveScalar "SELECT DB_ID(N'$preImage')") -or (Invoke-MoveScalar "SELECT DB_ID(N'$preImage')") -is [DBNull]) {
         throw "Move: pre-image $preImage not found - run -Mode PreImage first (window step W-2)."
+    }
+    # review M-1: the pre-image holds every document and is fresh (the SQL then compares cells and runs with it)
+    foreach ($d in $Documents) {
+        $age = Invoke-MoveScalar ("SELECT DATEDIFF(minute, CreatedAt, SYSUTCDATETIME()) FROM [{0}].dbo.Manifest WHERE DocumentId = {1}" -f $preImage, $d)
+        if ($null -eq $age -or $age -is [DBNull]) { throw "Move: document $d is not in pre-image $preImage." }
+        if ([int]$age -gt $BackupMaxAgeHours * 60) { throw "Move: pre-image $preImage is older than -BackupMaxAgeHours - export a new one." }
     }
 }
 
@@ -132,7 +139,7 @@ foreach ($document in $Documents) {
     }
     else {
         $sql = New-MoveScript -MoveSql $moveSql -Q17Sql $q17Sql -Mode $Mode -DocumentId $document -TargetProjectCode $TargetProject `
-            -CorrelationId $CorrelationId -Reason $Reason -UserId $UserId -AllowLive:$AllowLive
+            -CorrelationId $CorrelationId -Reason $Reason -UserId $UserId -AllowLive:$AllowLive -PreImage $(if ($Mode -eq 'Apply') { $preImage } else { $null })
         Save-DataSet (Invoke-MoveSql $sql) "move-$Mode-$document"
     }
 }

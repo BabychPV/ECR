@@ -1,5 +1,5 @@
 /*
-  b14 document-move (D-577, design M6 + review B3): put ONE moved document back exactly as in its pre-image
+  b14 document-move (D-579, design M6 + review B3): put ONE moved document back exactly as in its pre-image
   (Export-PreImage.sql, side database EcrMovePre_<CorrelationId>). Possible only while the source project exists
   (before the purge, window step W-10). Run ONLY through Move-Document.ps1 -Mode Reverse. One transaction:
 
@@ -9,8 +9,9 @@
        (IDENTITY_INSERT) and children; surviving pre-image runs get their pre-image ProjectId and Status back;
     3. instances / rows / cells / styles created after the move (owner instances 202602..202611, mirror rows) are
        deleted; cells and styles of the pre-image rows are replaced by the pre-image; row attributes restored;
-    4. doc.DocumentPeriodReopen rows created after the move are deleted (wf.ApprovalState / ApprovalEvent are NOT
-       touched - reported as approvalsSinceMove; the window has none for 93/98);
+    4. doc.DocumentPeriodReopen rows created after the move are deleted; doc.CellFormulaOverride is restored like cells;
+       approvals, row locks, edit assignments, permit parts/segments, discussions, source links and row windows are NOT
+       restored - Reverse REFUSES (51839) when any of them changed since the pre-image (Manifest.SideRows, review M-7);
     5. pre-image calc.FormulaError re-inserted; doc.Document ProjectId / TemplateId back to the pre-image;
     6. checks against dbo.Manifest of the pre-image (cells, cell checksum, runs, results; projectMismatch 0) - any
        difference aborts; aud.SecurityEvent DocumentMoveReversed; report;
@@ -71,6 +72,49 @@ EXEC sp_executesql @sql, N'@d bigint', @d = @RvDocumentId;
 BEGIN TRAN;
 SELECT @n = NULL FROM doc.Document WITH (UPDLOCK, HOLDLOCK) WHERE Id = @RvDocumentId;
 
+-- review M-1: the product's edit locks, as in Move-Document.sql (structure, then sheet x copy x period ascending)
+DECLARE @RvLock nvarchar(255), @RvRc int;
+SET @RvLock = CONCAT(N'ecr:doc-structure:', @RvDocumentId);
+EXEC @RvRc = sp_getapplock @Resource = @RvLock, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 60000;
+IF @RvRc < 0 THROW 51819, 'Reverse: the document structure is busy (sp_getapplock).', 1;
+DECLARE lk CURSOR LOCAL FAST_FORWARD FOR
+    SELECT DISTINCT CONCAT(N'ecr:sheet-edit:', @RvDocumentId, N':', td.SheetDefId, N':', ti.PeriodKey,
+                           CASE WHEN ti.SheetCopyId IS NULL THEN N'' ELSE CONCAT(N':c', ti.SheetCopyId) END),
+           td.SheetDefId, ISNULL(ti.SheetCopyId, 0), ti.PeriodKey
+    FROM doc.TableInstance ti JOIN cfg.TableDef td ON td.Id = ti.TableDefId WHERE ti.DocumentId = @RvDocumentId
+    ORDER BY td.SheetDefId, ISNULL(ti.SheetCopyId, 0), ti.PeriodKey;
+DECLARE @RvS int, @RvC bigint, @RvK int;
+OPEN lk; FETCH NEXT FROM lk INTO @RvLock, @RvS, @RvC, @RvK;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    EXEC @RvRc = sp_getapplock @Resource = @RvLock, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 60000;
+    IF @RvRc < 0 BEGIN SET @RvMsg = CONCAT(N'Reverse: sheet lock busy: ', @RvLock); THROW 51819, @RvMsg, 1; END;
+    FETCH NEXT FROM lk INTO @RvLock, @RvS, @RvC, @RvK;
+END;
+CLOSE lk; DEALLOCATE lk;
+
+-- review M-7: rows Reverse does not restore (locks, assignments, permit parts/segments, discussions, source links, row
+-- windows, approvals) must be exactly as in the pre-image; any change since the move -> refuse (decide by hand / RESTORE)
+DECLARE @SideNow nvarchar(400) = CONCAT(
+    (SELECT COUNT(*) FROM doc.RowLock WHERE DocumentId = @RvDocumentId), N'|',
+    (SELECT COUNT(*) FROM doc.EditAssignment WHERE DocumentId = @RvDocumentId), N'|',
+    (SELECT COUNT(*) FROM doc.CellPermitPart WHERE DocumentId = @RvDocumentId), N'|',
+    (SELECT COUNT(*) FROM doc.PermitSegment WHERE DocumentId = @RvDocumentId), N'|',
+    (SELECT COUNT(*) FROM doc.TableDiscussion WHERE DocumentId = @RvDocumentId), N'|',
+    (SELECT COUNT(*) FROM ext.SourceEventLink l JOIN doc.TableInstance i ON i.PeriodKey = l.PeriodKey AND i.Id = l.TableInstanceId WHERE i.DocumentId = @RvDocumentId), N'|',
+    (SELECT COUNT(*) FROM ext.RowWindowValue w JOIN doc.TableInstance i ON i.PeriodKey = w.PeriodKey AND i.Id = w.TableInstanceId WHERE i.DocumentId = @RvDocumentId), N'|',
+    (SELECT COUNT(*) FROM wf.ApprovalState WHERE DocumentId = @RvDocumentId), N'|',
+    (SELECT COUNT(*) FROM wf.ApprovalEvent WHERE DocumentId = @RvDocumentId));
+DECLARE @SidePre nvarchar(400);
+SET @sql = N'SELECT @s = SideRows FROM ' + @P + N'Manifest WHERE DocumentId = @d;';
+EXEC sp_executesql @sql, N'@d bigint, @s nvarchar(400) OUTPUT', @d = @RvDocumentId, @s = @SidePre OUTPUT;
+IF ISNULL(@SidePre, N'?') <> @SideNow
+BEGIN
+    SET @RvMsg = CONCAT(N'Reverse refused: approvals, locks, assignments, permit parts, discussions, source links or row windows of the document changed since the pre-image (',
+                        @SidePre, N' -> ', @SideNow, N'). Decide by hand or RESTORE (separate human word).');
+    THROW 51839, @RvMsg, 1;
+END;
+
 -- 1. formula errors of the document (re-inserted from the pre-image in step 5)
 DELETE FROM calc.FormulaError WHERE DocumentId = @RvDocumentId;
 
@@ -106,6 +150,7 @@ DECLARE @PostRow TABLE (PeriodKey int, Id bigint, PRIMARY KEY (PeriodKey, Id));
 INSERT @PostRow SELECT r.PeriodKey, r.Id FROM doc.TableRow r JOIN doc.TableInstance i ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
 WHERE i.DocumentId = @RvDocumentId AND NOT EXISTS (SELECT 1 FROM #RvRow x WHERE x.PeriodKey = r.PeriodKey AND x.Id = r.Id);
 
+DELETE o FROM doc.CellFormulaOverride o JOIN doc.TableInstance i ON i.PeriodKey = o.PeriodKey AND i.Id = o.TableInstanceId WHERE i.DocumentId = @RvDocumentId;
 DELETE cs FROM doc.CellStyle cs JOIN @PostRow x ON x.PeriodKey = cs.PeriodKey AND x.Id = cs.TableRowId;
 DELETE cv FROM doc.CellValue cv JOIN @PostRow x ON x.PeriodKey = cv.PeriodKey AND x.Id = cv.TableRowId;
 DELETE cs FROM doc.CellStyle cs JOIN #RvRow x ON x.PeriodKey = cs.PeriodKey AND x.Id = cs.TableRowId;
@@ -126,6 +171,7 @@ INSERT @Plan (Tgt, Pre, KeyJoin, HasIdentity) VALUES
     (N'doc.TableRow',      N'doc_TableRow',      N't.PeriodKey = p.PeriodKey AND t.Id = p.Id', 0),
     (N'doc.CellValue',     N'doc_CellValue',     N't.PeriodKey = p.PeriodKey AND t.TableRowId = p.TableRowId AND t.ColumnDefId = p.ColumnDefId', 0),
     (N'doc.CellStyle',     N'doc_CellStyle',     N't.PeriodKey = p.PeriodKey AND t.TableRowId = p.TableRowId AND t.ColumnDefId = p.ColumnDefId', 0),
+    (N'doc.CellFormulaOverride', N'doc_CellFormulaOverride', N't.PeriodKey = p.PeriodKey AND t.TableRowId = p.TableRowId AND t.ColumnDefId = p.ColumnDefId', 0),
     (N'calc.FormulaError', N'calc_FormulaError', N't.Id = p.Id', 1);
 
 -- column names of the pre-image tables (sys.columns of THAT database; OBJECT_ID with a 3-part name)
@@ -147,7 +193,7 @@ BEGIN
         + CASE WHEN @pre IN (N'calc_CalculationRun', N'calc_FormulaError', N'doc_TableInstance') THEN N' AND p.DocumentId = @d'
                WHEN @pre LIKE N'calc[_]%' THEN N' AND p.CalculationRunId IN (SELECT Id FROM #RvRun)'
                WHEN @pre = N'doc_TableRow' THEN N' AND EXISTS (SELECT 1 FROM #RvRow x WHERE x.PeriodKey = p.PeriodKey AND x.Id = p.Id)'
-               WHEN @pre IN (N'doc_CellValue', N'doc_CellStyle') THEN N' AND EXISTS (SELECT 1 FROM #RvRow x WHERE x.PeriodKey = p.PeriodKey AND x.Id = p.TableRowId)'
+               WHEN @pre IN (N'doc_CellValue', N'doc_CellStyle', N'doc_CellFormulaOverride') THEN N' AND EXISTS (SELECT 1 FROM #RvRow x WHERE x.PeriodKey = p.PeriodKey AND x.Id = p.TableRowId)'
                ELSE N'' END
         + N'; SET @n = @@ROWCOUNT;'
         + CASE WHEN @ident = 1 THEN N' SET IDENTITY_INSERT ' + @tgt + N' OFF;' ELSE N'' END;

@@ -1,5 +1,5 @@
 /*
-  b14 document-move (D-577, design M6/B3): pre-image of the documents to move, BEFORE Move-Document -Mode Apply.
+  b14 document-move (D-579, design M6/B3): pre-image of the documents to move, BEFORE Move-Document -Mode Apply.
   Creates the side database @PiDatabase (EcrMovePre_<CorrelationId>) on the same instance and copies, for the listed
   documents, everything Reverse-Move.sql needs to put them back byte-equal:
     doc.Document, doc.TableInstance, doc.TableRow, doc.CellValue, doc.CellStyle (all periods),
@@ -56,7 +56,9 @@ INSERT @t (Src, Dst, Filter) VALUES
     (N'calc.FormulaError',        N'calc_FormulaError',        N'DocumentId IN (' + @list + N')'),
     (N'doc.DocumentPeriodReopen', N'doc_DocumentPeriodReopen', N'DocumentId IN (' + @list + N')'),
     (N'wf.ApprovalState',         N'wf_ApprovalState',         N'DocumentId IN (' + @list + N')'),
-    (N'wf.ApprovalEvent',         N'wf_ApprovalEvent',         N'DocumentId IN (' + @list + N')');
+    (N'wf.ApprovalEvent',         N'wf_ApprovalEvent',         N'DocumentId IN (' + @list + N')'),
+    -- review M-7: row-keyed manual values are restored by Reverse like cells
+    (N'doc.CellFormulaOverride',  N'doc_CellFormulaOverride',  N'EXISTS (SELECT 1 FROM doc.TableInstance i WHERE i.PeriodKey = s.PeriodKey AND i.Id = s.TableInstanceId AND i.DocumentId IN (' + @list + N'))');
 
 -- consistency: the window stops the worker and users first (W-2), so plain READ COMMITTED copies are stable;
 -- a cross-database SNAPSHOT transaction is not used (the side database does not allow snapshot isolation).
@@ -82,7 +84,19 @@ SET @sql = N'SELECT d.DocumentId, SourceDatabase = DB_NAME(), CorrelationId = @c
                 FROM doc.CellValue cv JOIN doc.TableRow r ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId
                 JOIN doc.TableInstance i ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId WHERE i.DocumentId = d.DocumentId),
        Runs = (SELECT COUNT(*) FROM calc.CalculationRun WHERE DocumentId = d.DocumentId),
-       Results = (SELECT COUNT(*) FROM calc.CalculationResult x JOIN calc.CalculationRun r ON r.Id = x.CalculationRunId WHERE r.DocumentId = d.DocumentId)
+       Results = (SELECT COUNT(*) FROM calc.CalculationResult x JOIN calc.CalculationRun r ON r.Id = x.CalculationRunId WHERE r.DocumentId = d.DocumentId),
+       RunIds = (SELECT STRING_AGG(CAST(Id AS nvarchar(max)), N'','') WITHIN GROUP (ORDER BY Id) FROM calc.CalculationRun WHERE DocumentId = d.DocumentId),
+       -- review M-7: side tables Reverse does NOT restore - it refuses when any of these counts changed since the pre-image
+       SideRows = CONCAT(
+           (SELECT COUNT(*) FROM doc.RowLock WHERE DocumentId = d.DocumentId), N''|'',
+           (SELECT COUNT(*) FROM doc.EditAssignment WHERE DocumentId = d.DocumentId), N''|'',
+           (SELECT COUNT(*) FROM doc.CellPermitPart WHERE DocumentId = d.DocumentId), N''|'',
+           (SELECT COUNT(*) FROM doc.PermitSegment WHERE DocumentId = d.DocumentId), N''|'',
+           (SELECT COUNT(*) FROM doc.TableDiscussion WHERE DocumentId = d.DocumentId), N''|'',
+           (SELECT COUNT(*) FROM ext.SourceEventLink l JOIN doc.TableInstance i ON i.PeriodKey = l.PeriodKey AND i.Id = l.TableInstanceId WHERE i.DocumentId = d.DocumentId), N''|'',
+           (SELECT COUNT(*) FROM ext.RowWindowValue w JOIN doc.TableInstance i ON i.PeriodKey = w.PeriodKey AND i.Id = w.TableInstanceId WHERE i.DocumentId = d.DocumentId), N''|'',
+           (SELECT COUNT(*) FROM wf.ApprovalState WHERE DocumentId = d.DocumentId), N''|'',
+           (SELECT COUNT(*) FROM wf.ApprovalEvent WHERE DocumentId = d.DocumentId))
 INTO ' + QUOTENAME(@PiDatabase) + N'.dbo.Manifest
 FROM (SELECT CAST(value AS bigint) AS DocumentId FROM STRING_SPLIT(@l, N'','')) d
 JOIN doc.Document doc ON doc.Id = d.DocumentId;';

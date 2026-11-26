@@ -18,21 +18,36 @@ using Xunit;
 namespace Ecr.Infrastructure.Tests.Persistence;
 
 /// <summary>
-/// b14 document-move T1 (D-577): <c>tools/document-move</c> на справжньому SQL Server на синтетичному відтворенні фактів
+/// b14 document-move T1 (D-579): <c>tools/document-move</c> на справжньому SQL Server на синтетичному відтворенні фактів
 /// дизайну §0: місячний LANDUI (січень–вересень закриті, жовтень Grace, листопад Open, грудень Scheduled) з документом
 /// Land і прив'язаним шаблоном HSE400; річний HSE400_2026 з документом «рік + місячні колонки», де ВСІ місяці лежать в
 /// одному екземплярі 202601, і актуальним прогоном з F_ на ньому. Текст скрипта складає та сама бібліотека, що й
 /// обгортка (<c>DocumentMove.Lib.ps1</c> через PowerShell) — одне джерело.
 /// </summary>
 /// <remarks>
-/// МУТАЦІЯ (локально, 26.11): у Move-Document.sql не переключати calc.CalculationRun документа — червоні «Apply…»
+/// МУТАЦІЇ (локально, 26.11): у Move-Document.sql не переключати calc.CalculationRun документа — червоні «Apply…»
 /// (projectMismatch → 51814) і «Паритет…» (F_ зникають з читання складу).
 /// </remarks>
 [Collection("SqlServer")]
 [Trait(TestCategories.Category, TestCategories.Integration)]
 [Trait("Finding", "b14-document-move-T1")]
-public sealed class DocumentMoveSqlTests(SqlServerFixture sql)
+public sealed class DocumentMoveSqlTests(SqlServerFixture sql) : IAsyncLifetime
 {
+    /// <summary>Бокові бази pre-image цього тесту — прибираються в <see cref="DisposeAsync"/>.</summary>
+    private readonly HashSet<string> _preImages = [];
+
+    /// <inheritdoc />
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    /// <inheritdoc />
+    public async Task DisposeAsync()
+    {
+        foreach (var db in _preImages)
+        {
+            await ExecAsync($"IF DB_ID(N'{db}') IS NOT NULL BEGIN ALTER DATABASE [{db}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{db}]; END", master: true);
+        }
+    }
+
     private const int Jan = 202601;
     private static readonly DateTime Now = new(2026, 11, 26, 10, 0, 0, DateTimeKind.Utc);
 
@@ -109,6 +124,11 @@ public sealed class DocumentMoveSqlTests(SqlServerFixture sql)
     [InlineData("archived")]
     [InlineData("jobsRunning")]
     [InlineData("projectRuns")]
+    [InlineData("archivedStatus")]
+    [InlineData("versionMismatchOwner")]
+    [InlineData("otherYear")]
+    [InlineData("templateNotInTarget")]
+    [InlineData("columnRenames")]
     public async Task Відмова_нічого_не_змінює(string blocker)
     {
         var w = await ArrangeAsync();
@@ -119,7 +139,7 @@ public sealed class DocumentMoveSqlTests(SqlServerFixture sql)
             var error = await Assert.ThrowsAsync<SqlException>(() => MoveAsync(w, "Apply", target: blocker == "sameProject" ? w.SourceCode : null));
 
             Assert.Equal(51810, error.Number);
-            Assert.Contains(blocker, error.Message, StringComparison.Ordinal);
+            Assert.Contains(blocker.Replace("Status", string.Empty, StringComparison.Ordinal).Replace("Owner", string.Empty, StringComparison.Ordinal), error.Message, StringComparison.Ordinal);
             Assert.Equal(before, await StateAsync(w));
         }
         finally
@@ -141,6 +161,44 @@ public sealed class DocumentMoveSqlTests(SqlServerFixture sql)
 
         Assert.Equal(51811, error.Number);
         Assert.Equal(before, await StateAsync(w));
+    }
+
+    [Fact]
+    public async Task Невласна_копія_що_відрізняється_від_власника_відмовляє()
+    {
+        // Власник березня є, але його рядок видалено: Q-17 туди не пише, а січнева копія M3 лишилась би — 51812.
+        var w = await ArrangeAsync();
+        await ExtraInstanceAsync(w, 202603, w.MonthColumns[0], 1m);
+        await ExecAsync($"UPDATE r SET IsDeleted = 1 FROM doc.TableRow r JOIN doc.TableInstance i ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId WHERE i.DocumentId = {w.DocumentId} AND r.PeriodKey = 202603;");
+        var before = await StateAsync(w);
+
+        Assert.Equal(51812, (await Assert.ThrowsAsync<SqlException>(() => MoveAsync(w, "Apply"))).Number);
+        Assert.Equal(before, await StateAsync(w));
+    }
+
+    [Fact]
+    public async Task Apply_відмовляє_коли_документ_змінився_після_pre_image_або_зайнятий_правкою()
+    {
+        // Огляд M-1: (a) переноситься лише стан pre-image; (b) замки продукту (SheetEditGate) — ті самі імена.
+        var w = await ArrangeAsync();
+        await PreImageAsync(w);
+        await ExecAsync($"UPDATE doc.CellValue SET ValueNumeric = ValueNumeric + 1 WHERE PeriodKey = {Jan} AND TableRowId = {w.Rows[0]} AND ColumnDefId = {w.MonthColumns[1]};");
+        Assert.Equal(51816, (await Assert.ThrowsAsync<SqlException>(() => MoveAsync(w, "Apply"))).Number);
+
+        var busy = await ArrangeAsync();
+        await PreImageAsync(busy);
+        await using var holder = new SqlConnection(sql.ConnectionString);
+        await holder.OpenAsync();
+        await using var tx = (SqlTransaction)await holder.BeginTransactionAsync();
+        await using (var cmd = holder.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = $"EXEC sp_getapplock @Resource = N'{SheetEditGate.StructureResourceOf(busy.DocumentId)}', @LockMode = 'Shared', @LockOwner = 'Transaction';";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        Assert.Equal(51819, (await Assert.ThrowsAsync<SqlException>(() => MoveAsync(busy, "Apply", lockTimeoutMs: 500))).Number);
+        await tx.RollbackAsync();
     }
 
     [Fact]
@@ -180,9 +238,11 @@ public sealed class DocumentMoveSqlTests(SqlServerFixture sql)
         var preImage = $"EcrMovePre_{w.Correlation}";
         try
         {
-            var manifest = await RunAsync(await ComposeAsync("PreImage", w));
+            var manifest = await PreImageAsync(w);
             Assert.Equal(w.DocumentId, Convert.ToInt64(manifest.Tables[0].Rows[0]["DocumentId"], CultureInfo.InvariantCulture));
             var before = await StateAsync(w);
+            var statusBefore = await RunStatusAsync(w);
+            var compositionBefore = await CompositionAsync(w);
 
             await MoveAsync(w, "Apply");
 
@@ -199,6 +259,18 @@ public sealed class DocumentMoveSqlTests(SqlServerFixture sql)
             Assert.Equal(1, Convert.ToInt32(reverse["RestoredRuns"], CultureInfo.InvariantCulture));
             Assert.Equal(1, Convert.ToInt32(reverse["DeletedReopens"], CultureInfo.InvariantCulture));
             Assert.Equal(before, await StateAsync(w));
+            Assert.Equal(statusBefore, await RunStatusAsync(w));            // огляд M-7: статус прогону
+            Assert.Equal(compositionBefore, await CompositionAsync(w));     // і склад, який читає Land
+
+            // Після Reverse документ знову переноситься; погодження після перенесення — Reverse відмовляє (51839).
+            await MoveAsync(w, "Apply");
+            await using (var db = Db())
+            {
+                db.ApprovalStates.Add(new Ecr.Domain.Entities.Workflow.ApprovalState(w.DocumentId, w.SheetDefId, 202611));
+                await db.SaveChangesAsync();
+            }
+
+            Assert.Equal(51839, (await Assert.ThrowsAsync<SqlException>(async () => await RunAsync(await ComposeAsync("Reverse", w)))).Number);
         }
         finally
         {
@@ -246,6 +318,8 @@ public sealed class DocumentMoveSqlTests(SqlServerFixture sql)
             UPDATE cfg.TemplateVersion SET Layout = {(int)TemplateLayout.YearWithMonthColumns} WHERE Id = {doc.TemplateVersionId};
             UPDATE cfg.Template SET SingleDocumentPerProject = 1 WHERE Id = {doc.TemplateId};
             UPDATE itg.JobProgress SET State = N'Failed' WHERE State IN (N'Queued', N'Running');
+            IF NOT EXISTS (SELECT 1 FROM sec.RoleAssignment ra JOIN sec.Role r ON r.Id = ra.RoleId WHERE ra.UserId = 1 AND r.Code = N'SystemAdministrator' AND ra.ScopeJson IS NULL AND (ra.ValidTo IS NULL OR ra.ValidTo > SYSUTCDATETIME()))
+                INSERT sec.RoleAssignment (RoleId, UserId) SELECT Id, 1 FROM sec.Role WHERE Code = N'SystemAdministrator';
             """);
 
         // F_-рядок у шаблоні (розрахунковий рядок HSE400; значень у комірках немає — лише результати прогону).
@@ -384,6 +458,28 @@ public sealed class DocumentMoveSqlTests(SqlServerFixture sql)
                 break;
             }
 
+            case "archivedStatus":   // огляд M-3: ProjectStatus.Archived = 4
+                await ExecAsync($"UPDATE doc.Project SET Status = {(int)ProjectStatus.Archived} WHERE Id = {w.SourceProjectId};");
+                break;
+            case "versionMismatchOwner":   // огляд M-4: інша версія лише з 202603 (період-власник, якого ще немає)
+            {
+                await using var db = Db();
+                var other = new TemplateVersion(w.TemplateId, $"9.9.8.{w.Correlation[^4..]}", 1, Now);
+                db.TemplateVersions.Add(other);
+                await db.SaveChangesAsync();
+                await ExecAsync($"INSERT doc.ProjectTemplateVersion (ProjectId, FromPeriodKey, TemplateVersionId, TemplateId) VALUES ({w.TargetProjectId}, {Jan}, (SELECT CurrentTemplateVersionId FROM doc.ProjectTemplate WHERE ProjectId = {w.TargetProjectId} AND TemplateId = {w.TemplateId}), {w.TemplateId}), ({w.TargetProjectId}, 202603, {other.Id}, {w.TemplateId});");
+                break;
+            }
+
+            case "otherYear":
+                await ExecAsync($"UPDATE doc.Project SET PeriodStart = '2027-01-01', PeriodEnd = '2027-12-31' WHERE Id = {w.TargetProjectId};");
+                break;
+            case "templateNotInTarget":
+                await ExecAsync($"DELETE FROM doc.ProjectTemplate WHERE ProjectId = {w.TargetProjectId} AND TemplateId = {w.TemplateId};");
+                break;
+            case "columnRenames":
+                await ExecAsync($"INSERT cfg.ColumnRename (FromColumnDefId, ToColumnDefId, IsLegacyGlobal) VALUES ({w.MonthColumns[0]}, {w.MonthColumns[1]}, 0); INSERT cfg.ColumnRenameProject (FromColumnDefId, ToColumnDefId, ProjectId) VALUES ({w.MonthColumns[0]}, {w.MonthColumns[1]}, {w.SourceProjectId});");
+                break;
             case "archived":
                 await ExecAsync($"UPDATE doc.Project SET IsArchiving = 1 WHERE Id = {w.SourceProjectId};");
                 break;
@@ -468,6 +564,9 @@ public sealed class DocumentMoveSqlTests(SqlServerFixture sql)
         }
     }
 
+    private Task<long> RunStatusAsync(World w)
+        => ScalarAsync($"SELECT ISNULL(SUM(CAST(CHECKSUM(Id, ProjectId, Status) AS bigint)), 0) FROM calc.CalculationRun WHERE DocumentId = {w.DocumentId}");
+
     private Task<long> LandChecksumAsync(World w)
         => ScalarAsync($"SELECT ISNULL(SUM(CAST(CHECKSUM(r.PeriodKey, r.SourceRowKey, r.OutputCode, r.Value) AS bigint)), 0) + 1000000 * COUNT(*) FROM calc.CalculationResult r JOIN calc.CalculationRun ru ON ru.Id = r.CalculationRunId WHERE ru.DocumentId = {w.LandDocumentId} AND ru.Status = N'Current'");
 
@@ -511,11 +610,25 @@ public sealed class DocumentMoveSqlTests(SqlServerFixture sql)
 
     // ─────────────────────────────── запуск ───────────────────────────────
 
-    private async Task<DataSet> MoveAsync(World w, string mode, string? target = null, string reason = "b14 test: one project (human 25.11)")
-        => await RunAsync(await ComposeAsync(mode, w, target, reason));
+    private async Task<DataSet> MoveAsync(World w, string mode, string? target = null, string reason = "b14 test: one project (human 25.11)", int lockTimeoutMs = 60000)
+    {
+        // Apply переносить лише стан pre-image (огляд M-1): бокова база — раз на світ тесту.
+        if (mode == "Apply" && !_preImages.Contains($"EcrMovePre_{w.Correlation}"))
+        {
+            await PreImageAsync(w);
+        }
+
+        return await RunAsync(await ComposeAsync(mode, w, target, reason, lockTimeoutMs));
+    }
+
+    private async Task<DataSet> PreImageAsync(World w)
+    {
+        _preImages.Add($"EcrMovePre_{w.Correlation}");
+        return await RunAsync(await ComposeAsync("PreImage", w));
+    }
 
     /// <summary>Текст скрипта — з <c>DocumentMove.Lib.ps1</c> (те саме складання, що й у <c>Move-Document.ps1</c>).</summary>
-    private static async Task<string> ComposeAsync(string mode, World w, string? target = null, string reason = "b14 test: one project (human 25.11)")
+    private static async Task<string> ComposeAsync(string mode, World w, string? target = null, string reason = "b14 test: one project (human 25.11)", int lockTimeoutMs = 60000)
     {
         var dir = Directory.CreateTempSubdirectory("ecr-move-");
         try
@@ -525,7 +638,7 @@ public sealed class DocumentMoveSqlTests(SqlServerFixture sql)
             {
                 "PreImage" => $"New-PreImageScript ([IO.File]::ReadAllText('{ToolPath("Export-PreImage.sql")}')) '{w.Correlation}' @({w.DocumentId}) $null",
                 "Reverse" or "ReversePreview" => $"New-ReverseScript -ReverseSql ([IO.File]::ReadAllText('{ToolPath("Reverse-Move.sql")}')) -Mode {(mode == "Reverse" ? "Apply" : "Preview")} -DocumentId {w.DocumentId} -CorrelationId '{w.Correlation}' -UserId 1",
-                _ => $"New-MoveScript -MoveSql ([IO.File]::ReadAllText('{ToolPath("Move-Document.sql")}')) -Q17Sql ([IO.File]::ReadAllText('{Q17Path()}')) -Mode {mode} -DocumentId {w.DocumentId} -TargetProjectCode '{target ?? w.TargetCode}' -CorrelationId '{w.Correlation}' -Reason '{reason}' -UserId 1",
+                _ => $"New-MoveScript -MoveSql ([IO.File]::ReadAllText('{ToolPath("Move-Document.sql")}')) -Q17Sql ([IO.File]::ReadAllText('{Q17Path()}')) -Mode {mode} -DocumentId {w.DocumentId} -TargetProjectCode '{target ?? w.TargetCode}' -CorrelationId '{w.Correlation}' -Reason '{reason}' -UserId 1 -LockTimeoutMs {lockTimeoutMs}{(mode == "Apply" ? $" -PreImage 'EcrMovePre_{w.Correlation}'" : string.Empty)}",
             };
             var script = Path.Combine(dir.FullName, "compose.ps1");
             await File.WriteAllTextAsync(script, $". '{ToolPath("DocumentMove.Lib.ps1")}'\n[IO.File]::WriteAllText('{output}', ({call}))\n");

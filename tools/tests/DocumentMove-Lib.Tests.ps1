@@ -1,5 +1,5 @@
 ﻿# tools/tests/DocumentMove-Lib.Tests.ps1
-# b14 document-move T1 (D-577): складання SQL перенесення в DocumentMove.Lib.ps1 - запобіжники бази, CorrelationId,
+# b14 document-move T1 (D-579): складання SQL перенесення в DocumentMove.Lib.ps1 - запобіжники бази, CorrelationId,
 # підстановка блоку параметрів і тексту Q-17 (Apply, системне перенесення в закриті місяці, жетон обгортки).
 # Справжній прогін SQL - tests/Ecr.Infrastructure.Tests/Persistence/DocumentMoveSqlTests.cs (ця сама бібліотека).
 Describe 'DocumentMove library' {
@@ -60,5 +60,18 @@ Describe 'DocumentMove library' {
             $bytes = [IO.File]::ReadAllBytes((Join-Path $root "tools/document-move/$f"))
             if (@($bytes | Where-Object { $_ -gt 127 }).Count -gt 0) { throw "$f містить не-ASCII" }
         }
+    }
+    It 'огляд L-1/51804: запис у live EcrLandUi без -AllowLive відмовляє ДО підключення' {
+        $script = Join-Path $root 'tools/document-move/Move-Document.ps1'
+        $msg = Get-Rejection { & $script -Server 'no-such-server-b14' -Database 'EcrLandUi' -Mode Apply -Documents 98 -CorrelationId 'b14move-1' -UserId 3 -Reason 'b14: one project LANDUI2026' }
+        if ($msg -notlike '*AllowLive*') { throw "очікувалась відмова -AllowLive до підключення: $msg" }
+    }
+
+    It 'огляд M-1: Apply передає pre-image і тайм-аут замків у SQL' {
+        $text = New-MoveScript -MoveSql $moveSql -Q17Sql $q17Sql -Mode Apply -DocumentId 98 -TargetProjectCode 'LANDUI2026' `
+            -CorrelationId 'b14move-1' -Reason 'b14: one project LANDUI2026' -UserId 3 -PreImage 'EcrMovePre_b14move-1' -LockTimeoutMs 500
+        if ($text -notmatch "@MvPreImage\s+sysname\s+= N'EcrMovePre_b14move-1'") { throw 'pre-image не передано' }
+        if ($text -notmatch '@MvLockTimeout\s+int\s+= 500') { throw 'тайм-аут замків не передано' }
+        if ($moveSql -notmatch "ecr:doc-structure:" -or $moveSql -notmatch "ecr:sheet-edit:") { throw 'немає замків продукту (SheetEditGate)' }
     }
 }

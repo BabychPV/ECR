@@ -1,5 +1,5 @@
 /*
-  b14 document-move (D-577, P-1125-ONEPROJ): move ONE document to another project of the same year.
+  b14 document-move (D-579, P-1125-ONEPROJ): move ONE document to another project of the same year.
   One-off, rehearsed, run ONLY through Move-Document.ps1 (it substitutes the parameter block below and the
   Q-17 placeholder, and supplies @MvApplyToken after all safeguards passed). One sqlcmd session, one transaction:
 
@@ -31,6 +31,8 @@ DECLARE @MvReason            nvarchar(1000) = NULL;
 DECLARE @MvUserId            int            = NULL;
 DECLARE @MvAllowLive         bit            = 0;           -- only Move-Document.ps1 -AllowLive raises it
 DECLARE @MvApplyToken        varchar(40)    = NULL;        -- only Move-Document.ps1 knows it
+DECLARE @MvPreImage          sysname        = NULL;        -- EcrMovePre_<CorrelationId>: Apply compares the document with it
+DECLARE @MvLockTimeout       int            = 60000;       -- ms for the product's edit locks (sp_getapplock)
 -- END PARAMS
 
 SET NOCOUNT ON;
@@ -46,6 +48,11 @@ IF @MvDocumentId IS NULL OR @MvTargetProjectCode IS NULL OR @MvUserId IS NULL OR
     THROW 51805, 'Move: @MvDocumentId, @MvTargetProjectCode, @MvUserId and @MvCorrelationId are required.', 1;
 IF @MvMode = 'Apply' AND LEN(LTRIM(RTRIM(ISNULL(@MvReason, N'')))) < 10
     THROW 51806, 'Move: Apply needs a reason (at least 10 characters).', 1;
+-- review M-5: the acting user must hold SystemAdministrator (the same role the purge e2e uses)
+IF NOT EXISTS (SELECT 1 FROM sec.RoleAssignment ra JOIN sec.Role r ON r.Id = ra.RoleId
+               WHERE ra.UserId = @MvUserId AND r.Code = N'SystemAdministrator' AND (ra.ValidTo IS NULL OR ra.ValidTo > SYSUTCDATETIME()))
+    THROW 51817, 'Move: @MvUserId must hold the SystemAdministrator role.', 1;
+IF @MvMode = 'Apply' AND @MvPreImage IS NULL THROW 51818, 'Move: Apply needs the pre-image (Export-PreImage first).', 1;
 
 DECLARE @MvSrc int, @MvTgt int, @MvTpl int, @MvKey nvarchar(200), @MvSrcKind tinyint, @MvTgtKind tinyint,
         @MvSrcCode nvarchar(64), @MvTplWasNull bit, @MvRuns int = 0, @MvMsg nvarchar(2000),
@@ -79,6 +86,52 @@ BEGIN TRAN;
 SELECT @MvMsg = NULL FROM doc.Project WITH (UPDLOCK, HOLDLOCK) WHERE Id IN (@MvSrc, @MvTgt);
 SELECT @MvMsg = NULL FROM doc.Document WITH (UPDLOCK, HOLDLOCK) WHERE Id = @MvDocumentId;
 
+-- review M-1: the product's own edit locks (SheetEditGate names): structure exclusive, then every sheet x copy x period
+-- of the document's instances and of the target year (owner periods created by the relocation), ascending.
+DECLARE @MvLock nvarchar(255), @MvRc int;
+SET @MvLock = CONCAT(N'ecr:doc-structure:', @MvDocumentId);
+EXEC @MvRc = sp_getapplock @Resource = @MvLock, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = @MvLockTimeout;
+IF @MvRc < 0 THROW 51819, 'Move: the document structure is busy (sp_getapplock).', 1;
+DECLARE lk CURSOR LOCAL FAST_FORWARD FOR
+    SELECT CONCAT(N'ecr:sheet-edit:', @MvDocumentId, N':', x.SheetDefId, N':', x.PeriodKey, CASE WHEN x.CopyId IS NULL THEN N'' ELSE CONCAT(N':c', x.CopyId) END)
+    FROM (SELECT td.SheetDefId, ti.SheetCopyId AS CopyId, ti.PeriodKey
+          FROM doc.TableInstance ti JOIN cfg.TableDef td ON td.Id = ti.TableDefId WHERE ti.DocumentId = @MvDocumentId
+          UNION
+          SELECT td.SheetDefId, CAST(NULL AS bigint), p.PeriodKey
+          FROM doc.TableInstance ti JOIN cfg.TableDef td ON td.Id = ti.TableDefId
+          JOIN doc.Period p ON p.ProjectId = @MvTgt AND p.PeriodKey / 100 = ti.PeriodKey / 100
+          WHERE ti.DocumentId = @MvDocumentId) x
+    ORDER BY x.SheetDefId, ISNULL(x.CopyId, 0), x.PeriodKey;
+OPEN lk; FETCH NEXT FROM lk INTO @MvLock;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    EXEC @MvRc = sp_getapplock @Resource = @MvLock, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = @MvLockTimeout;
+    IF @MvRc < 0 BEGIN SET @MvMsg = CONCAT(N'Move: sheet lock busy: ', @MvLock); THROW 51819, @MvMsg, 1; END;
+    FETCH NEXT FROM lk INTO @MvLock;
+END;
+CLOSE lk; DEALLOCATE lk;
+
+-- review M-1: Apply moves exactly the state of the pre-image (cell checksum and run ids as exported)
+IF @MvPreImage IS NOT NULL
+BEGIN
+    IF DB_ID(@MvPreImage) IS NULL OR @MvPreImage NOT LIKE N'EcrMovePre[_]%' OR @MvPreImage LIKE N'%[^A-Za-z0-9_-]%'
+        THROW 51816, 'Move: pre-image database not found.', 1;
+    DECLARE @MvPiCells int, @MvPiSum bigint, @MvPiRuns nvarchar(max), @MvPiSql nvarchar(max);
+    SET @MvPiSql = N'SELECT @c = Cells, @s = CellChecksum, @r = RunIds FROM ' + QUOTENAME(@MvPreImage) + N'.dbo.Manifest WHERE DocumentId = @d;';
+    EXEC sp_executesql @MvPiSql, N'@d bigint, @c int OUTPUT, @s bigint OUTPUT, @r nvarchar(max) OUTPUT',
+         @d = @MvDocumentId, @c = @MvPiCells OUTPUT, @s = @MvPiSum OUTPUT, @r = @MvPiRuns OUTPUT;
+    IF @MvPiCells IS NULL THROW 51816, 'Move: the document is not in the pre-image.', 1;
+    IF @MvPiCells <> (SELECT COUNT(*) FROM doc.CellValue cv JOIN doc.TableRow r ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId
+                      JOIN doc.TableInstance i ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId WHERE i.DocumentId = @MvDocumentId)
+       OR @MvPiSum <> (SELECT ISNULL(SUM(CAST(CHECKSUM(cv.PeriodKey, cv.TableRowId, cv.ColumnDefId, cv.ValueString, cv.ValueNumeric, cv.ValueDate,
+                              cv.ValueBool, cv.ValueRegistryEntryId, cv.ValueUnitId, cv.IsCalculated, cv.IsEmpty) AS bigint)), 0)
+                       FROM doc.CellValue cv JOIN doc.TableRow r ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId
+                       JOIN doc.TableInstance i ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId WHERE i.DocumentId = @MvDocumentId)
+       OR ISNULL(@MvPiRuns, N'') <> ISNULL((SELECT STRING_AGG(CAST(Id AS nvarchar(max)), N',') WITHIN GROUP (ORDER BY Id)
+                                            FROM calc.CalculationRun WHERE DocumentId = @MvDocumentId), N'')
+        THROW 51816, 'Move: the document changed since the pre-image (cells or runs) - export a new pre-image.', 1;
+END;
+
 -------------------------------------------------------------------------------------------------
 -- blockers
 -------------------------------------------------------------------------------------------------
@@ -90,7 +143,7 @@ FROM itg.JobProgress WHERE State IN (N'Queued', N'Running') HAVING COUNT(*) > 0;
 
 INSERT #MvBlock (Code, Detail)
 SELECT 'archived', CONCAT(N'project ', p.Code, N' status ', p.Status, N' archiving ', p.IsArchiving)
-FROM doc.Project p WHERE p.Id IN (@MvSrc, @MvTgt) AND (p.Status = 2 OR p.IsArchiving = 1);
+FROM doc.Project p WHERE p.Id IN (@MvSrc, @MvTgt) AND (p.Status = 4 OR p.IsArchiving = 1);   -- ProjectStatus.Archived = 4 (review M-3)
 IF EXISTS (SELECT 1 FROM arc.TableInstance WHERE DocumentId = @MvDocumentId)
     INSERT #MvBlock VALUES ('archived', N'document has archived instances (arc.TableInstance)');
 
@@ -108,7 +161,15 @@ IF NOT EXISTS (SELECT 1 FROM doc.ProjectTemplate pt WHERE pt.ProjectId = @MvTgt 
 INSERT #MvBlock (Code, Detail)
 SELECT 'versionMismatch', CONCAT(N'period ', k.PeriodKey, N': source v', doc.fn_TemplateVersionOf(@MvSrc, @MvTpl, k.PeriodKey),
                                  N' target v', ISNULL(CONVERT(nvarchar(20), doc.fn_TemplateVersionOf(@MvTgt, @MvTpl, k.PeriodKey)), N'none'))
-FROM (SELECT DISTINCT PeriodKey FROM doc.TableInstance WHERE DocumentId = @MvDocumentId) k
+FROM (SELECT DISTINCT PeriodKey FROM doc.TableInstance WHERE DocumentId = @MvDocumentId
+      UNION   -- review M-4: also the owner periods the relocation creates
+      SELECT DISTINCT (ti.PeriodKey / 100) * 100 + col.MonthNumber
+      FROM doc.TableInstance ti
+      JOIN cfg.TableDef td ON td.Id = ti.TableDefId AND td.LayoutKind = 0
+      JOIN doc.TableRow r ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId = ti.Id AND r.IsDeleted = 0
+      JOIN doc.CellValue cv ON cv.PeriodKey = r.PeriodKey AND cv.TableRowId = r.Id AND cv.IsEmpty = 0
+      JOIN cfg.ColumnDef col ON col.Id = cv.ColumnDefId AND col.IsMonthColumn = 1 AND col.MonthNumber BETWEEN 1 AND 12
+      WHERE ti.DocumentId = @MvDocumentId AND @MvTgtKind = 0) k
 WHERE ISNULL(doc.fn_TemplateVersionOf(@MvTgt, @MvTpl, k.PeriodKey), -1) <> ISNULL(doc.fn_TemplateVersionOf(@MvSrc, @MvTpl, k.PeriodKey), -2);
 
 IF EXISTS (SELECT 1 FROM cfg.Template t WHERE t.Id = @MvTpl AND t.SingleDocumentPerProject = 1)
@@ -314,7 +375,8 @@ DECLARE @MvDetails nvarchar(max) = (
            fromProjectId = @MvSrc, fromProjectCode = @MvSrcCode, toProjectId = @MvTgt, toProjectCode = @MvTargetProjectCode,
            reason = @MvReason, runsRekeyed = @MvRuns, q17CopiesWritten = @MvQ17Copies, q17WrittenToLocked = @MvQ17Locked,
            q17InstancesCreated = @MvQ17Inst, q17RowsCreated = @MvQ17Rows, nonOwnerCopiesRemoved = @MvRemoved,
-           cellsBefore = @MvCellsBefore, cellsAfter = @MvCellsAfter, correlationId = @MvCorrelationId
+           cellsBefore = @MvCellsBefore, cellsAfter = @MvCellsAfter, correlationId = @MvCorrelationId,
+           originalLogin = ORIGINAL_LOGIN()
     FOR JSON PATH, WITHOUT_ARRAY_WRAPPER);
 
 INSERT aud.SecurityEvent (ChangedAt, EventType, TargetUserId, TargetRoleId, DetailsJson, ChangedByUserId, CorrelationId)
@@ -329,17 +391,22 @@ SELECT MoveReport = @MvMode, DatabaseName = DB_NAME(), DocumentId = @MvDocumentI
        CellsBefore = @MvCellsBefore, CellsAfter = @MvCellsAfter, ChecksumBefore = @MvSumBefore, ChecksumAfter = @MvSumAfter,
        CorrelationId = @MvCorrelationId;
 
--- rights delta (M1): users with a project grant on the source and none on the target (lose) and the reverse (gain)
-;WITH g AS (
-    SELECT DISTINCT ra.UserId, rg.ResourceId AS ProjectId
+-- rights delta (M1, review L-4): effective project access = an allow grant and no deny grant on the project, through an
+-- active assignment; scoped assignments (ScopeJson) are listed separately - they apply only inside their scope.
+;WITH a AS (
+    SELECT ra.UserId, rg.ResourceId AS ProjectId, rg.IsDeny, CASE WHEN ra.ScopeJson IS NULL THEN 0 ELSE 1 END AS Scoped
     FROM sec.ResourceGrant rg
     JOIN sec.RoleAssignment ra ON ra.RoleId = rg.RoleId
-    WHERE rg.ResourceKind = 0 AND rg.IsDeny = 0 AND rg.Level > 0 AND rg.ResourceId IN (@MvSrc, @MvTgt)
-      AND ra.UserId IS NOT NULL AND (ra.ValidTo IS NULL OR ra.ValidTo > SYSUTCDATETIME()))
-SELECT RightsDelta = CASE WHEN s.UserId IS NOT NULL THEN 'lose' ELSE 'gain' END, UserId = COALESCE(s.UserId, t.UserId)
-FROM (SELECT UserId FROM g WHERE ProjectId = @MvSrc) s
-FULL JOIN (SELECT UserId FROM g WHERE ProjectId = @MvTgt) t ON t.UserId = s.UserId
+    WHERE rg.ResourceKind = 0 AND rg.ResourceId IN (@MvSrc, @MvTgt) AND ra.UserId IS NOT NULL
+      AND (rg.IsDeny = 1 OR rg.Level > 0) AND (ra.ValidTo IS NULL OR ra.ValidTo > SYSUTCDATETIME())),
+g AS (
+    SELECT UserId, ProjectId, MAX(Scoped) AS Scoped FROM a
+    WHERE IsDeny = 0 AND NOT EXISTS (SELECT 1 FROM a d WHERE d.IsDeny = 1 AND d.UserId = a.UserId AND d.ProjectId = a.ProjectId)
+    GROUP BY UserId, ProjectId)
+SELECT RightsDelta = CASE WHEN s.UserId IS NOT NULL THEN 'lose' ELSE 'gain' END, UserId = COALESCE(s.UserId, t.UserId),
+       ScopedAssignment = COALESCE(s.Scoped, t.Scoped)
+FROM (SELECT UserId, Scoped FROM g WHERE ProjectId = @MvSrc) s
+FULL JOIN (SELECT UserId, Scoped FROM g WHERE ProjectId = @MvTgt) t ON t.UserId = s.UserId
 WHERE s.UserId IS NULL OR t.UserId IS NULL
 ORDER BY 1, 2;
-
 IF @MvMode = 'Apply' COMMIT; ELSE ROLLBACK;

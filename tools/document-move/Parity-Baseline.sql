@@ -1,5 +1,5 @@
 /*
-  b14 document-move (D-577, design R2-4): parity set, READ-ONLY. Run before (W-2) and after (W-7, W-9) the move and diff
+  b14 document-move (D-579, design R2-4): parity set, READ-ONLY. Run before (W-2) and after (W-7, W-9) the move and diff
   the two outputs (Metric, Value); every line must match except the ones marked "changes by design".
     sqlcmd -S localhost -E -d <db> -i Parity-Baseline.sql -v Land=96 Land2=100 Hse400=98 Hse401=93 Year=2026 -W -s "|" -o before.txt
   The relocation itself changes WHERE doc 98 stores its month cells (owner periods), never the values: the
@@ -60,6 +60,21 @@ JOIN doc.CellValue cv ON cv.PeriodKey = r.PeriodKey AND cv.TableRowId = r.Id AND
 WHERE ti.DocumentId = @Hse401
 GROUP BY cv.IsCalculated;
 
+-- review H-1 / W-1: HSE401 v14 - formulas of the version doc 93 is on (period version of its project x template):
+-- withPeriodDays must be 0, withYearLength must be 9 (H_RATE, H_RQ1..4_T/H)
+DECLARE @V401 int = (SELECT doc.fn_TemplateVersionOf(d.ProjectId, COALESCE(d.TemplateId, v.TemplateId), @Year * 100 + 1)
+                     FROM doc.Document d JOIN doc.Project p ON p.Id = d.ProjectId JOIN cfg.TemplateVersion v ON v.Id = p.TemplateVersionId
+                     WHERE d.Id = @Hse401);
+INSERT @M (Metric, Value)
+SELECT N'hse401.version', CONCAT(@V401, N' ', (SELECT Version FROM cfg.TemplateVersion WHERE Id = @V401))
+UNION ALL
+SELECT N'hse401.formulas.withPeriodDays (must be 0)', CAST(COUNT(*) AS nvarchar(400))
+FROM cfg.FormulaDef f JOIN cfg.TableDef td ON td.Id = f.TableDefId JOIN cfg.SheetDef s ON s.Id = td.SheetDefId
+WHERE s.TemplateVersionId = @V401 AND f.IsDeleted = 0 AND f.Expression LIKE N'%[[]Period].Days%'
+UNION ALL
+SELECT N'hse401.formulas.withYearLength (must be 9)', CAST(COUNT(*) AS nvarchar(400))
+FROM cfg.FormulaDef f JOIN cfg.TableDef td ON td.Id = f.TableDefId JOIN cfg.SheetDef s ON s.Id = td.SheetDefId
+WHERE s.TemplateVersionId = @V401 AND f.IsDeleted = 0 AND f.Expression LIKE N'%[[]Period].Year [%] 4 = 0, 366, 365%';
 -- one non-GOLD HSE400 document with instances in the year (H6) - must be @Hse400 alone
 INSERT @M (Metric, Value)
 SELECT N'hse400.workDocumentsOfYear', STRING_AGG(CAST(x.Id AS nvarchar(20)), N',')
