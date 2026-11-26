@@ -352,7 +352,62 @@ public sealed class FlaringRegistryLockTests
             new Ecr.Application.Registries.Keys.RegistryKeyService(keys, _uow), flaring: Lock());
     }
 
+    // ───── SGF-flaring AC-5 (огляд b13, F1-5): прив'язка/відв'язка зовнішнього ключа — під запобіжником ─────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "SGF-FLARING-AC-5")]
+    public async Task Прив_язка_зовнішнього_ключа_FLARE_LOCATION__закритий_період__409_і_нічого_не_записано()
+    {
+        Locked(JanuaryClosed);
+        var keys = Substitute.For<IRegistryExternalKeyStore>();
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Bind(keys).HandleAsync(
+            "FLARE_LOCATION", new BindRegistryExternalKeyCommand(LocationEntryId, 1, "AF-ONSHORE-HP"), default));
+
+        Assert.Equal(GasCompositionRules.LockedKey, error.Details!["messageKey"]);
+        await keys.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
+        await _uow.DidNotReceiveWithAnyArgs().ExecuteInTransactionAsync(default!, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "SGF-FLARING-AC-5")]
+    public async Task Прив_язка_зовнішнього_ключа_FLARE_LOCATION__без_GasComposition_Edit__403()
+    {
+        Grant("Registry.EditData");
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(() => Bind(Substitute.For<IRegistryExternalKeyStore>()).HandleAsync(
+            "FLARE_LOCATION", new BindRegistryExternalKeyCommand(LocationEntryId, 1, "AF-ONSHORE-HP"), default));
+
+        Assert.Equal(GasCompositionPermissions.Edit, error.Details!["permission"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "SGF-FLARING-AC-5")]
+    public async Task Відв_язка_зовнішнього_ключа_FLARE_LOCATION__закритий_період__409__відкритий__знято()
+    {
+        var keys = Substitute.For<IRegistryExternalKeyStore>();
+        keys.FindAsync(77, Arg.Any<CancellationToken>()).Returns(new RegistryExternalKey(LocationEntryId, 1, "AF-ONSHORE-HP"));
+        InTransaction();
+
+        Locked(JanuaryClosed);
+        await Assert.ThrowsAsync<BusinessRuleException>(() => Unbind(keys).HandleAsync("FLARE_LOCATION", 77, default));
+        await keys.DidNotReceiveWithAnyArgs().RemoveAsync(default!, default);
+
+        Locked();
+        await Unbind(keys).HandleAsync("FLARE_LOCATION", 77, default);
+        await keys.ReceivedWithAnyArgs(1).RemoveAsync(default!, default);
+    }
+
     // ───── допоміжне ─────
+
+    private BindRegistryExternalKeyHandler Bind(IRegistryExternalKeyStore keys)
+        => new(_registries, keys, Substitute.For<IDataSourceStore>(), _uow, _audit, _access, _user, _clock, flaring: Lock());
+
+    private UnbindRegistryExternalKeyHandler Unbind(IRegistryExternalKeyStore keys)
+        => new(_registries, keys, _uow, _audit, _access, _user, _clock, flaring: Lock());
 
     private FlaringRegistryLock Lock() => new(_store, _access, _user);
 
