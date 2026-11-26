@@ -190,13 +190,69 @@ public sealed class AuditSecurityEventsTests(SqlServerFixture sql)
         var self = Assert.Single(authors, a => a.GetProperty("userId").GetInt32() == auditorId);
         Assert.Equal($"audse_ab_{_tag}", self.GetProperty("displayName").GetString());
 
-        // ⛔ R-A2/D-86: лише номер і ім'я — логін і SID не віддаються.
-        Assert.Equal(["displayName", "userId"], self.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        // ⛔ R-A2/D-86: номер, ім'я й поле логіна — для унікального імені порожнє (AC-7); SID і e-mail не віддаються.
+        Assert.Equal(
+            ["displayName", "login", "userId"], self.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(JsonValueKind.Null, self.GetProperty("login").ValueKind);
 
         // ⛔ Мутація: прибрати перевірку права в `AuthorsAsync` — стане 200 (перелік людей кожному).
         Assert.Equal(
             HttpStatusCode.Forbidden,
             (await stranger.GetAsync(new Uri("/api/v1/audit/authors", UriKind.Relative))).StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-5.24")]
+    public async Task Автори_з_однаковим_ім_ям_отримують_логін_а_унікальні_ні_за_тим_самим_правом()
+    {
+        // ✎ AC-7 (audit-filters-contract): однакові імена (тимчасові акаунти вікон) у «By user» розрізнялись лише «#id».
+        using var app = new EcrApiFactory(sql);
+        var (auditor, auditorId) = await LoginAsync(app, "ac", ["Security.ViewAudit"]);
+        var (manager, _) = await LoginAsync(app, "am", ["Security.ManageUsers"]);
+
+        var twin = $"Twin {_tag}";
+        var first = await AddUserAsync($"audtw1_{_tag}", twin);
+        var second = await AddUserAsync($"audtw2_{_tag}", twin);
+        var unique = await AddUserAsync($"audun_{_tag}", $"Unique {_tag}");
+
+        // Ім'я, що відрізняється лише регістром, — не збіг: клієнт розрізняє такі імена й без логіна.
+        var cased = await AddUserAsync($"audca_{_tag}", $"twin {_tag}");
+
+        var response = await auditor.GetAsync(new Uri("/api/v1/audit/authors", UriKind.Relative));
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {app.ErrorsText}");
+        var body = await response.Content.ReadAsStringAsync();
+        var authors = JsonDocument.Parse(body).RootElement.EnumerateArray()
+            .ToDictionary(a => a.GetProperty("userId").GetInt32());
+
+        // ⛔ Мутація: прибрати відсів за збігом у `WithLoginsOnCollision` (логін кожному) — унікальні отримають логін.
+        Assert.Equal($"audtw1_{_tag}", authors[first].GetProperty("login").GetString());
+        Assert.Equal($"audtw2_{_tag}", authors[second].GetProperty("login").GetString());
+        Assert.Equal(JsonValueKind.Null, authors[unique].GetProperty("login").ValueKind);
+        Assert.Equal(JsonValueKind.Null, authors[cased].GetProperty("login").ValueKind);
+        Assert.Equal(JsonValueKind.Null, authors[auditorId].GetProperty("login").ValueKind);
+        Assert.DoesNotContain($"audun_{_tag}", body, StringComparison.Ordinal);
+        Assert.DoesNotContain($"audca_{_tag}", body, StringComparison.Ordinal);
+
+        // Право не змінилося: без `Security.ViewAudit` — 403, і `Security.ManageUsers` його не замінює.
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            (await manager.GetAsync(new Uri("/api/v1/audit/authors", UriKind.Relative))).StatusCode);
+    }
+
+    /// <summary>Користувач без ролей (локальний — з паролем, <c>CK_User_Provider</c>) — лише ім'я й логін у переліку авторів.</summary>
+    private async Task<int> AddUserAsync(string login, string displayName)
+    {
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+
+        var user = new User(login, displayName, AuthProvider.Local);
+        user.SetPassword(new PasswordHasher().Hash(Password));
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        return user.Id;
     }
 
     private static string TypesUrl(DateTime from, DateTime to)

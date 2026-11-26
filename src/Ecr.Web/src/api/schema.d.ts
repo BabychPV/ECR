@@ -562,7 +562,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Автори для фільтра «By user» журналів аудиту (✎ P-1124-4): номер і ім'я, без логіна й SID. Право
+        /** Автори для фільтра «By user» журналів аудиту (✎ P-1124-4): номер і ім'я; логін — лише за збігу імені з іншим
+         *     автором (✎ AC-7), SID і e-mail — ніколи. Право
          *     `Security.ViewAudit` — те саме, що відкриває журнали; `GET /users` вимагає `Security.ManageUsers`. */
         get: {
             parameters: {
@@ -680,6 +681,88 @@ export interface paths {
                         "application/json": components["schemas"]["PagedResultOfCellChangeView"];
                         "text/json": components["schemas"]["PagedResultOfCellChangeView"];
                         "text/plain": components["schemas"]["PagedResultOfCellChangeView"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit/cells/columns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Колонки документа, які змінювали у вікні, — варіанти фільтра «Column» (✎ AC-8), незалежно від завантажених
+         *     сторінок журналу. Право, вікно, грант на документ і межі читання — як у `cells`.
+         * @description ⛔ Прихована читачу колонка (заборона колонки, таблиці чи аркуша) у переліку відсутня.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Початок вікна в UTC, включно. */
+                    from?: string;
+                    /** @description Кінець вікна в UTC, виключно. */
+                    to?: string;
+                    /** @description Документ; без нього — порожній перелік. */
+                    documentId?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CellChangeColumnView"][];
+                        "text/json": components["schemas"]["CellChangeColumnView"][];
+                        "text/plain": components["schemas"]["CellChangeColumnView"][];
                     };
                 };
                 /** @description Bad Request */
@@ -32516,10 +32599,15 @@ export interface components {
              */
             templateVersionId: number;
         };
-        /** @description ✎ P-1124-4: автор для фільтра «By user» журналів аудиту — номер і ім'я. ⛔ Не логін і не SID (R-A2, D-86). */
+        /** @description ✎ P-1124-4: автор для фільтра «By user» журналів аудиту — номер і ім'я. ⛔ Не SID і не e-mail (R-A2, D-86). */
         AuditAuthorView: {
             /** @description Ім'я; порожнє ім'я в записі — `null` (клієнт покаже «користувач #id»). */
             displayName: null | string;
+            /** @description ✎ AC-7 (audit-filters-contract, рішення координатора 26.11): логін (`sec.User.UserName`) — ЛИШЕ коли таке саме
+             *     непорожнє ім'я (точний збіг) має ще бодай один користувач переліку, щоб «By user» розрізнив однакові імена (тимчасові
+             *     акаунти вікон) логіном, а не «#id». Унікальне ім'я або без імені — `null`: логіни решти людей не віддаються.
+             *     Право — те саме, що відкриває перелік (`Security.ViewAudit`). */
+            login?: null | string;
             /**
              * Format: int32
              * @description Номер користувача — значення фільтра.
@@ -33283,6 +33371,24 @@ export interface components {
             since: string;
             source: null | components["schemas"]["FormulaErrorSourceDto"];
         };
+        /** @description ✎ AC-8: колонка, яку змінювали в документі у вікні, — варіант фільтра «Column» (незалежно від завантажених сторінок
+         *     журналу). Лише структура: значень тут немає. */
+        CellChangeColumnView: {
+            /** @description Код колонки; `null` — колонки вже немає. */
+            columnCode?: null | string;
+            /**
+             * Format: int32
+             * @description Колонка — значення фільтра.
+             */
+            columnDefId: number;
+            columnHeaderL10n?: null | components["schemas"]["LocalizedText"];
+            /** @description Код аркуша колонки. */
+            sheetCode?: null | string;
+            sheetNameL10n?: null | components["schemas"]["LocalizedText"];
+            /** @description Код таблиці колонки. */
+            tableCode?: null | string;
+            tableNameL10n?: null | components["schemas"]["LocalizedText"];
+        };
         /** @description Змінена комірка; значення — рядком (decimal без втрати знаків). Тип — як у зрізі подання
          *     (string? SubmissionPayloadCell.Type): `null` — число або текст, інакше
          *     `date|bool|ref|unit`. */
@@ -33399,6 +33505,13 @@ export interface components {
             /** @description Ключ рядка — щоб журнал читався без join. */
             rowKey: string;
             rowLabelL10n?: null | components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description ✎ AC-13: порядковий номер рядка на екрані (`doc.TableRow.Ordinal`, від 1) — щоб рядок, доданий людиною (без
+             *     мітки шаблону, ключ — GUID), читався «Row N». `null` — рядка вже немає в `doc.TableRow` (видалено фізично,
+             *     період в архіві).
+             */
+            rowOrdinal?: null | number;
             /** @description Код аркуша колонки (UI-38, C1); `null` — колонки вже немає. */
             sheetCode?: null | string;
             sheetNameL10n?: null | components["schemas"]["LocalizedText"];

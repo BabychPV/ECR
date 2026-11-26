@@ -123,6 +123,78 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
             log).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<CellChangeColumnView>> ReadChangedColumnsAsync(CellChangeFilter filter, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        // ✎ AC-8: той самий шлях, що й сторінка: десятки тисяч видимих Id документа Land спершу звужуються до колонок
+        // журналу вікна, далі — табличною змінною `@visibleSet` (audit-filters-live D1).
+        filter = await NarrowVisibleToWindowAsync(connection, filter, ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        var whereText = BuildCellChangeWhere(filter, command, after: null).ToString();
+
+        return await WithArchiveFallbackAsync(
+            async withArchive =>
+            {
+                command.CommandText = ChangedColumnsSql(whereText, withArchive);
+
+                var columns = new List<CellChangeColumnView>();
+                await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    columns.Add(new CellChangeColumnView(
+                        reader.GetInt32(0),
+                        StringOrNull(reader, 1),
+                        LocalizedOrNull(reader, 2),
+                        StringOrNull(reader, 3),
+                        LocalizedOrNull(reader, 4),
+                        StringOrNull(reader, 5),
+                        LocalizedOrNull(reader, 6)));
+                }
+
+                return (IReadOnlyList<CellChangeColumnView>)columns;
+            },
+            log).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ AC-8: різні колонки журналу за умовою <see cref="BuildCellChangeWhere"/> (гаряче + архів) з підписами структури.
+    /// </summary>
+    /// <param name="where">Умова — ОДНА для обох таблиць, разом із межами читання <c>@visibleSet</c>.</param>
+    /// <param name="withArchive"><c>false</c> — лише гарячий журнал.</param>
+    internal static string ChangedColumnsSql(string where, bool withArchive = true)
+    {
+        static string Named(string source)
+            => """
+               SELECT x.ColumnDefId, c.Code, c.HeaderL10n, sd.Code, sd.NameL10n, td.Code, td.NameL10n
+                 FROM (
+               """ + "\n" + source + "\n" + """
+                      ) AS x
+                 LEFT JOIN cfg.ColumnDef AS c ON c.Id = x.ColumnDefId
+                 LEFT JOIN cfg.TableDef AS td ON td.Id = c.TableDefId
+                 LEFT JOIN cfg.SheetDef AS sd ON sd.Id = td.SheetDefId
+                ORDER BY x.ColumnDefId;
+               """;
+
+        var hot = Named("SELECT DISTINCT ColumnDefId FROM aud.CellChange WHERE (" + where + ")");
+        if (!withArchive)
+        {
+            return WithVisiblePrelude(where, hot);
+        }
+
+        var archive = Named(
+            "SELECT ColumnDefId FROM aud.CellChange WHERE (" + where + ")\n"
+            + "UNION\n"
+            + "SELECT ColumnDefId FROM arc.AuditCellChange WHERE (" + where + ")");
+
+        return WithVisiblePrelude(where, WithArchiveProbe(hot, archive));
+    }
+
     /// <summary>Від скількох видимих колонок перелік спершу звужується до колонок, що змінювались у вікні документа.</summary>
     internal const int NarrowVisibleThreshold = 500;
 
@@ -223,7 +295,10 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                     StringOrNull(reader, 25),
 
                     // Масштаб колонки — щоб клієнт показав значення за правилом сітки (не менше Scale знаків, U-05).
-                    reader.IsDBNull(26) ? null : Convert.ToInt32(reader.GetValue(26), CultureInfo.InvariantCulture))));
+                    reader.IsDBNull(26) ? null : Convert.ToInt32(reader.GetValue(26), CultureInfo.InvariantCulture),
+
+                    // ✎ AC-13: номер рядка на екрані — для рядка без мітки шаблону («Row N» замість початку GUID).
+                    reader.IsDBNull(27) ? null : reader.GetInt32(27))));
         }
 
         return rows;
@@ -270,7 +345,7 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
 
     /// <summary>Колонки рядка журналу змін комірок, спільні для <c>aud.CellChange</c> і <c>arc.AuditCellChange</c>.</summary>
     private const string CellChangeColumns =
-        "Id, ChangedAt, PeriodKey, DocumentId, RowKey, ColumnDefId, OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, IsOutOfWindow, IsOverwrite, Reason";
+        "Id, ChangedAt, PeriodKey, DocumentId, RowKey, ColumnDefId, OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, IsOutOfWindow, IsOverwrite, Reason, TableRowId";
 
     /// <summary>
     /// Пробник архіву: чи є в <c>arc.AuditCellChange</c> бодай один рядок у вікні запиту.
@@ -419,11 +494,13 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                    a.OldValue, a.NewValue, a.ChangedByUserId, a.Origin, a.IsLateEdit,
                    u.DisplayName, d.BusinessKey, d.NameL10n, c.Code, c.HeaderL10n, c.DataType,
                    a.IsOutOfWindow, sd.Code, sd.NameL10n, td.Code, td.NameL10n, rd.LabelL10n,
-                   {fromArchive}, a.IsOverwrite, a.Reason, c.Scale
+                   {fromArchive}, a.IsOverwrite, a.Reason, c.Scale, tr.Ordinal
               FROM (
                     {pageSource}
                    ) AS a
               LEFT JOIN sec.[User] AS u ON u.Id = a.ChangedByUserId
+              LEFT JOIN doc.TableRow AS tr
+                     ON tr.PeriodKey = a.PeriodKey AND tr.Id = a.TableRowId AND tr.RowKey = a.RowKey
               LEFT JOIN doc.Document AS d ON d.Id = a.DocumentId
               LEFT JOIN cfg.ColumnDef AS c ON c.Id = a.ColumnDefId
               LEFT JOIN cfg.TableDef AS td ON td.Id = c.TableDefId
@@ -1273,18 +1350,44 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
 
         await using var command = connection.CreateCommand();
 
-        // ⛔ Лише номер і ім'я: логін і SID людині не показуються (R-A2, D-86).
-        command.CommandText = "SELECT Id, DisplayName FROM sec.[User] ORDER BY DisplayName, Id;";
+        // ⛔ Номер, ім'я й логін (SID і e-mail не читаються взагалі, R-A2, D-86); логін іде у відповідь ЛИШЕ за збігу
+        // імені (`WithLoginsOnCollision`, AC-7).
+        command.CommandText = "SELECT Id, DisplayName, UserName FROM sec.[User] ORDER BY DisplayName, Id;";
 
-        var authors = new List<AuditAuthorView>();
+        var rows = new List<(int Id, string? Name, string Login)>();
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var name = StringOrNull(reader, 1);
-            authors.Add(new AuditAuthorView(reader.GetInt32(0), string.IsNullOrWhiteSpace(name) ? null : name));
+            rows.Add((reader.GetInt32(0), string.IsNullOrWhiteSpace(name) ? null : name, reader.GetString(2)));
         }
 
-        return authors;
+        return WithLoginsOnCollision(rows);
+    }
+
+    /// <summary>
+    /// ✎ AC-7: логін — лише авторам, чиє непорожнє ім'я ТОЧНО (ординально, як порівнює клієнт) збігається з ім'ям
+    /// іншого автора переліку; решті — <c>null</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Рішення координатора 26.11 (огляд безпеки P-1124-4): логін потрібен лише, щоб розрізнити однакові імена в
+    /// «By user»; логіни людей з унікальним ім'ям тим самим правом не відкриваються. Збіг — ординальний, як у
+    /// <c>disambiguateNames</c> клієнта: «Ivan» і «ivan» розрізняються й самим ім'ям, тож логін не потрібен.
+    /// </remarks>
+    /// <param name="rows">Усі користувачі: номер, ім'я (порожнє — <c>null</c>), логін.</param>
+    internal static IReadOnlyList<AuditAuthorView> WithLoginsOnCollision(IReadOnlyList<(int Id, string? Name, string Login)> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        var duplicated = rows
+            .Where(r => r.Name is not null)
+            .GroupBy(r => r.Name!, StringComparer.Ordinal)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToHashSet(StringComparer.Ordinal);
+
+        return [.. rows.Select(r => new AuditAuthorView(
+            r.Id, r.Name, r.Name is not null && duplicated.Contains(r.Name) ? r.Login : null))];
     }
 
     /// <summary>

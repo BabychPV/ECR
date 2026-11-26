@@ -222,6 +222,24 @@ public sealed class AuditController(
     }
 
     /// <summary>
+    /// Колонки документа, які змінювали у вікні, — варіанти фільтра «Column» (✎ AC-8), незалежно від завантажених
+    /// сторінок журналу. Право, вікно, грант на документ і межі читання — як у <c>cells</c>.
+    /// </summary>
+    /// <remarks>⛔ Прихована читачу колонка (заборона колонки, таблиці чи аркуша) у переліку відсутня.</remarks>
+    /// <param name="from">Початок вікна в UTC, включно.</param>
+    /// <param name="to">Кінець вікна в UTC, виключно.</param>
+    /// <param name="documentId">Документ; без нього — порожній перелік.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("cells/columns")]
+    [ProducesResponseType<IReadOnlyList<Ecr.Application.Ports.CellChangeColumnView>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> CellsColumns(
+        [FromQuery] DateTime from, [FromQuery] DateTime to, [FromQuery] long? documentId, CancellationToken ct)
+        => Ok(await cellChanges.ChangedColumnsAsync(from, to, documentId, ct).ConfigureAwait(false));
+
+    /// <summary>
     /// Типи сутностей журналу структурних змін, що є у вікні, — варіанти фільтра «Entity type» (✎ P-1124-4). Право й
     /// вікно — як у <c>structure</c>.
     /// </summary>
@@ -254,7 +272,8 @@ public sealed class AuditController(
         => Ok(await securityEvents.EventTypesAsync(from, to, ct).ConfigureAwait(false));
 
     /// <summary>
-    /// Автори для фільтра «By user» журналів аудиту (✎ P-1124-4): номер і ім'я, без логіна й SID. Право
+    /// Автори для фільтра «By user» журналів аудиту (✎ P-1124-4): номер і ім'я; логін — лише за збігу імені з іншим
+    /// автором (✎ AC-7), SID і e-mail — ніколи. Право
     /// <c>Security.ViewAudit</c> — те саме, що відкриває журнали; <c>GET /users</c> вимагає <c>Security.ManageUsers</c>.
     /// </summary>
     /// <param name="ct">Токен скасування.</param>

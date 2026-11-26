@@ -123,7 +123,7 @@ public sealed class OutboundConnectionPolicyTests
         OwnDb("src/Ecr.Infrastructure/Jobs/SqlDistributedLock.cs", 1),           // QuartzJobAdapter, RegistrySyncJob: db.Database
         OwnDb("src/Ecr.Infrastructure/Localization/UiStringCatalogStore.cs", 11), // +1 PSS-29: ревізія читається окремо від зрізу (мемо 5 с)
         OwnDb("src/Ecr.Infrastructure/Persistence/ConsistencyIssueReader.cs", 2),
-        OwnDb("src/Ecr.Infrastructure/Persistence/AuditReader.cs", 14),        // +1: підсумок журналу (UI-38 C2); +3: підрахунок безпеки/погодження для стелі експорту, журнал погодження; +2 (P-1124-4): варіанти фільтрів (типи у вікні), автори
+        OwnDb("src/Ecr.Infrastructure/Persistence/AuditReader.cs", 15),        // +1: підсумок журналу (UI-38 C2); +3: підрахунок безпеки/погодження для стелі експорту, журнал погодження; +2 (P-1124-4): варіанти фільтрів (типи у вікні), автори; +1 (AC-8): змінені колонки документа
         OwnDb("src/Ecr.Infrastructure/Persistence/AuditReader.Lineage.cs", 1), // B49: значок поза вікном з родоводом колонки (база застосунку)
         OwnDb("src/Ecr.Infrastructure/Persistence/AuditWriter.cs", 1),
         OwnDb("src/Ecr.Infrastructure/Persistence/RowChangeAudit.cs", 1),      // журнал рядків: читання журналу аркуша
