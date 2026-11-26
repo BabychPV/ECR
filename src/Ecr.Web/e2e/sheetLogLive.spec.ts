@@ -151,9 +151,18 @@ test.describe('sheetLogLive: History = журнал аркуша на реаль
       expect(editedColumn, 'жодна з перших колонок рядка 0 не прийняла значення').not.toBe('');
 
       // ── 2. Подання (admin) і відхилення з причиною (reviewer) ───────────────────────────────
-      const submit = await admin.request.post(`/api/v1/documents/${DocumentId}/submit`, {
+      // ⚠ Правка вище ставить власний перерахунок документа; ворота b11 (ownRecalculationPending) свідомо відмовляють
+      // поданню, поки він живий — чекаємо його кінця, а не гонимося з воротами (як f4a8fbcb7 у серверних тестах).
+      let submit = await admin.request.post(`/api/v1/documents/${DocumentId}/submit`, {
         data: { sheetDefId, periodKey: Number(PeriodKey), acknowledgeWarnings: true },
       });
+      for (let attempt = 0; attempt < 60 && submit.status() === 422; attempt += 1) {
+        if (!(await submit.text()).includes('ownRecalculationPending')) break;
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        submit = await admin.request.post(`/api/v1/documents/${DocumentId}/submit`, {
+          data: { sheetDefId, periodKey: Number(PeriodKey), acknowledgeWarnings: true },
+        });
+      }
       expect(submit.status(), `submit: ${await submit.text()}`).toBe(204);
       const rejected = await reviewer.request.post(`/api/v1/documents/${DocumentId}/approve`, {
         data: { sheetDefId, periodKey: Number(PeriodKey), approved: false, reason: Reason },
