@@ -7146,6 +7146,9 @@
       "DataSourceView": {
         "description": "Джерело даних — рядок екрана конфігуратора (`BE-21`, ФВ-14.3).",
         "properties": {
+          "authMode": {
+            "$ref": "#/components/schemas/SourceAuthMode"
+          },
           "catalog": {
             "type": [
               "null",
@@ -7161,6 +7164,9 @@
           },
           "endpoint": {
             "type": "string"
+          },
+          "hasPassword": {
+            "type": "boolean"
           },
           "hasSecret": {
             "type": "boolean"
@@ -7197,6 +7203,12 @@
           },
           "transport": {
             "$ref": "#/components/schemas/ExternalTransport"
+          },
+          "userName": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         },
         "required": [
@@ -7212,7 +7224,10 @@
           "hasSecret",
           "sourceEntities",
           "collectionSchedules",
-          "rowVersion"
+          "rowVersion",
+          "authMode",
+          "userName",
+          "hasPassword"
         ],
         "type": "object"
       },
@@ -26625,12 +26640,28 @@
       "SaveDataSourceRequest": {
         "description": "Тіло створення і зміни джерела.",
         "properties": {
+          "authMode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SourceAuthMode",
+                "description": "Як джерело входить у систему (P-1126-SRCCRED): `Windows` — обліковий запис служби ECR, `UserPassword` —\nлогін і пароль нижче (лише `PiSqlClient` і `Sql`). `null` — не змінювати (клієнт, що не знає поля)."
+              }
+            ]
+          },
           "catalog": {
             "description": "Каталог або база джерела.",
             "type": [
               "null",
               "string"
             ]
+          },
+          "clearPassword": {
+            "default": false,
+            "description": "Стерти збережений пароль (як `clearPassword` у SMTP).",
+            "type": "boolean"
           },
           "code": {
             "description": "Код джерела; при зміні ігнорується.",
@@ -26674,6 +26705,15 @@
               "object"
             ]
           },
+          "password": {
+            "description": "⛔ Лише запис: пароль джерела. `null` або порожній — не змінювати. Шифрується перед записом і НЕ повертається\nніколи — у відповіді лише `hasPassword`.",
+            "format": "password",
+            "type": [
+              "null",
+              "string"
+            ],
+            "writeOnly": true
+          },
           "secondaryEndpoint": {
             "description": "Запасна адреса; `null` — немає.",
             "type": [
@@ -26683,14 +26723,23 @@
           },
           "secretConfirmation": {
             "description": "Повторно введений секрет джерела. Обов'язковий, лише коли в середовищі\nзаданий секрет під це джерело і адреса нова (створення або зміна\nтранспорту, основної чи запасної адреси); інакше ігнорується. Не\nзберігається й не повертається.",
+            "format": "password",
             "type": [
               "null",
               "string"
-            ]
+            ],
+            "writeOnly": true
           },
           "transport": {
             "$ref": "#/components/schemas/ExternalTransport",
             "description": "Транспорт: `PiWebApi`, `PiSqlClient`, `Sql`."
+          },
+          "userName": {
+            "description": "Логін джерела, 1..256 символів; `null` — не змінювати.",
+            "type": [
+              "null",
+              "string"
+            ]
           }
         },
         "required": [
@@ -29866,6 +29915,13 @@
           "to"
         ],
         "type": "object"
+      },
+      "SourceAuthMode": {
+        "description": "Як джерело входить у зовнішню систему (P-1126-SRCCRED). Числа лежать у базі — не перенумеровувати.",
+        "enum": [
+          "Windows",
+          "UserPassword"
+        ]
       },
       "SourceCatalogItem": {
         "description": "Позиція каталогу джерела: елемент або атрибут.",
