@@ -14,7 +14,7 @@ namespace Ecr.Api.Security;
 /// </remarks>
 /// <param name="configuration">Конфігурація застосунку.</param>
 public sealed class TableDiscussionPostRateLimitPolicy(IConfiguration configuration)
-    : UserPerMinuteRateLimitPolicy(configuration, PermitKey, DetailKey, DetailFallback, DefaultPermit)
+    : UserPerMinuteRateLimitPolicy(configuration, PermitKey, DetailKey, DetailFallback, DefaultPostPermit)
 {
     /// <summary>Ім'я політики для <c>[EnableRateLimiting]</c>.</summary>
     public const string PolicyName = "discussion-post";
@@ -23,7 +23,12 @@ public sealed class TableDiscussionPostRateLimitPolicy(IConfiguration configurat
     public const string PermitKey = "Security:RateLimit:DiscussionPostPermitPerMinute";
 
     /// <summary>Межа за хвилину на користувача, якщо конфігурація мовчить.</summary>
-    public const int DefaultPermit = 20;
+    /// <remarks>
+    /// ⚠ Ім'я унікальне навмисно (як <c>DocumentExportRateLimitPolicy.DefaultExportPermit</c>): сторож
+    /// <c>ConfigurationKeysTests</c> шукає константи за КОРОТКИМ іменем (перша виграє), а порядок файлів на Linux-раннері
+    /// не алфавітний — колишня однойменна константа (20) тут перекривала <c>SearchRateLimitPolicy.DefaultPermit</c> (30).
+    /// </remarks>
+    public const int DefaultPostPermit = 20;
 
     /// <summary>Ключ каталогу подробиці відмови (повним літералом — так його шукає сторож каталогу).</summary>
     public const string DetailKey = "err.ECR-REQ-0429.tooManyChatMessages";

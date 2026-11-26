@@ -3718,6 +3718,38 @@ public interface ISecretProvider
 }
 ```
 
+#### `IDataSourceCredentialResolver`
+
+✎ P-1126-SRCCRED: облікові дані джерела (логін і пароль для `PiSqlClient`/`Sql`). Пароль шифрується перед записом у
+`ext.DataSource.PasswordProtected` (DataProtection, призначення `Ecr.DataSource.Credential.v1`) і розшифровується
+ЛИШЕ в момент з'єднання адаптером чи перевіркою з'єднання — API не розшифровує ніколи. Поряд у тому самому файлі:
+`IDataSourceCredentialRejections` (мітка `CredentialsRejectedAt` після відмови входу збереженим паролем, лише для
+завантаженої версії рядка), `IConnectionPoolReset` (скидання пулів драйверів після заміни облікових даних; по
+реалізації на драйвер) і `IExternalConnectionProbe` (перевірка з'єднання з незбережених значень форми).
+
+```csharp
+public sealed record ResolvedCredentials(string UserName, SecretString Password);
+
+public interface IDataSourceCredentialResolver
+{
+    public byte[] Protect(SecretString password);
+    public ResolvedCredentials? Resolve(DataSource source);   // Windows → null; не читається → CredentialsUnreadableException
+}
+
+public interface IDataSourceCredentialRejections
+{
+    public Task ReportRejectedAsync(DataSource source, CancellationToken ct);
+}
+
+public interface IConnectionPoolReset { public void Reset(); }
+
+public interface IExternalConnectionProbe
+{
+    public ExternalTransport Transport { get; }
+    public Task ProbeAsync(DataSource spec, ResolvedCredentials? credentials, CancellationToken ct);
+}
+```
+
 #### `IEndpointNetwork`
 
 Мережеві відомості для політики адреси джерела PI Web API

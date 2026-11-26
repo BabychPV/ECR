@@ -26,9 +26,12 @@ public sealed class ContractIntegrityTests
     /// побудовою. Кожна фонова задача — окрема реалізація, і їх рівно стільки,
     /// скільки задач (архівація, збір, перевірка інваріантів, стан періодів,
     /// сповіщення, запас партицій, пошук осиротілих рядків).
+    ///
+    /// ✎ P-1126-SRCCRED: <c>IConnectionPoolReset</c> — по реалізації на кожен драйвер (SqlClient і ODBC), резолвиться
+    /// колекцією: після заміни пароля джерела скидаються пули ВСІХ драйверів процесу (R-20).
     /// </remarks>
     private static readonly string[] Plural =
-        ["IExternalDataSource", "ICalculationModule", "IBackgroundJob"];
+        ["IExternalDataSource", "ICalculationModule", "IBackgroundJob", "IConnectionPoolReset"];
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]

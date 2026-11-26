@@ -529,6 +529,11 @@ public sealed partial class EndpointCoverageTests
                 "err.ECR-REQ-0422.dataSourceEndpointSqlScheme", "err.ECR-REQ-0422.dataSourceEndpointSqlLinkLocal",
                 "err.ECR-REQ-0422.dataSourceEndpointSqlForbiddenOption",
                 "err.ECR-REQ-0422.dataSourceEndpointNotConnectionString", "err.ECR-REQ-0422.dataSourceFieldNotRead",
+
+                // P-1126-SRCCRED: облікові дані джерела — поле форми за ключем відмови і стан «ввести пароль заново».
+                "err.ECR-REQ-0422.dataSourcePasswordReentryRequired", "err.ECR-REQ-0422.dataSourceCredentialsInvalid",
+                "err.ECR-REQ-0422.dataSourcePasswordUnencrypted",
+                "err.ECR-INT-0502.credentialsRejected", "err.ECR-INT-0502.credentialsUnreadable",
             ],
             "messageKey сервера, але лише з FieldOfKey — інші сюди не доходять."),
 
