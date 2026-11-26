@@ -91,8 +91,14 @@ public sealed partial class SourceApprovalChangeTrigger(
     }
 
     /// <inheritdoc />
-    public async Task<int> RequestApprovedDependentsRecalculationAsync(
+    public Task<int> RequestApprovedDependentsRecalculationAsync(
         long documentId, int sheetDefId, int periodKey, ApprovedRecalculationOverride approvedOverride, CancellationToken ct)
+        => RequestApprovedDependentsRecalculationAsync(documentId, sheetDefId, periodKey, null, approvedOverride, ct);
+
+    /// <inheritdoc />
+    public async Task<int> RequestApprovedDependentsRecalculationAsync(
+        long documentId, int sheetDefId, int periodKey, IReadOnlyList<int>? cascadeMonths,
+        ApprovedRecalculationOverride approvedOverride, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(approvedOverride);
         var bindings = await ActiveBindingsAsync(ct, anyState: true).ConfigureAwait(false);
@@ -115,16 +121,23 @@ public sealed partial class SourceApprovalChangeTrigger(
                 select p.PeriodKind == PeriodKind.Monthly)
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
+        // ✎ Річне/квартальне джерело з місяцями, які показала оцінка впливу (людина підтверджувала саме їх), — задача на місяць.
+        IReadOnlyList<int?> months = monthly
+            ? [periodKey % 100]
+            : cascadeMonths is { Count: > 0 } known ? [.. known.Distinct().Order().Select(m => (int?)m)] : [null];
         foreach (var binding in matching)
         {
-            await EnqueueAsync(
-                    binding, periodKey / 100, monthly ? periodKey % 100 : null,
-                    string.Create(CultureInfo.InvariantCulture, $"source binding {binding.Id}: {periodKey} approved dependents (admin)"),
-                    approvedOverride.UserId, ct, approvedOverride)
-                .ConfigureAwait(false);
+            foreach (var month in months)
+            {
+                await EnqueueAsync(
+                        binding, periodKey / 100, month,
+                        string.Create(CultureInfo.InvariantCulture, $"source binding {binding.Id}: {periodKey} approved dependents (admin)"),
+                        approvedOverride.UserId, ct, approvedOverride)
+                    .ConfigureAwait(false);
+            }
         }
 
-        return matching.Count;
+        return matching.Count * months.Count;
     }
 
     /// <inheritdoc />

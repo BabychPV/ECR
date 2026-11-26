@@ -553,6 +553,10 @@ public sealed class DocumentsController(
     /// <param name="periodKey">Період.</param>
     /// <param name="action"><c>approve</c>, <c>reopen</c> чи <c>edit</c> (правка комірки джерела — лише відомості).</param>
     /// <param name="sheetCopyId">Копія аркуша; не <c>null</c> — впливу немає.</param>
+    /// <param name="months">
+    /// ✎ Для <c>edit</c> річного/квартального джерела — місяці (1–12) МІСЯЧНИХ колонок правки (<c>months=1&amp;months=3</c>):
+    /// каскад донесе лише їх, якщо доказ PERF-06b пройде; немає — увесь рік.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     [HttpGet("{id:long}/source-impact")]
     [ProducesResponseType<SourceImpactDto>(StatusCodes.Status200OK)]
@@ -560,8 +564,8 @@ public sealed class DocumentsController(
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<SourceImpactDto>> GetSourceImpact(
         long id, [FromQuery] int sheetDefId, [FromQuery] int periodKey, [FromQuery] string action,
-        [FromQuery] long? sheetCopyId, CancellationToken ct)
-        => Ok(await sourceImpact.HandleAsync(id, sheetDefId, periodKey, action, sheetCopyId, ct).ConfigureAwait(false));
+        [FromQuery] long? sheetCopyId, [FromQuery] int[]? months, CancellationToken ct)
+        => Ok(await sourceImpact.HandleAsync(id, sheetDefId, periodKey, action, sheetCopyId, ct, months).ConfigureAwait(false));
 
     /// <summary>
     /// B80 N5 (D-554, рішення людини 19.11): адміністратор явно просить перерахувати і ЗАТВЕРДЖЕНІ залежні документи-споживачі
@@ -582,7 +586,7 @@ public sealed class DocumentsController(
     {
         ArgumentNullException.ThrowIfNull(request);
         return Ok(await recalculateApprovedDependents
-            .HandleAsync(id, request.SheetDefId, request.PeriodKey, request.Hash, request.Reason, ct).ConfigureAwait(false));
+            .HandleAsync(id, request.SheetDefId, request.PeriodKey, request.Hash, request.Reason, ct, request.Months).ConfigureAwait(false));
     }
 
     private static Application.Ports.SourceImpactConfirmation? ToConfirmation(ConfirmedImpactRequest? request)
@@ -1079,7 +1083,8 @@ public sealed record ApproveSheetRequest(
 /// <param name="PeriodKey">Період аркуша.</param>
 /// <param name="Hash">Відбиток впливу (<c>GET …/source-impact?action=edit</c>).</param>
 /// <param name="Reason">Причина (обов'язкова).</param>
-public sealed record RecalculateApprovedDependentsRequest(int SheetDefId, int PeriodKey, string? Hash, string? Reason);
+/// <param name="Months">✎ Місяці правки, з якими людина бачила вплив (ті самі, що в <c>GET …/source-impact?months=</c>).</param>
+public sealed record RecalculateApprovedDependentsRequest(int SheetDefId, int PeriodKey, string? Hash, string? Reason, int[]? Months = null);
 
 /// <summary>B80 N5 (D-554): підтвердження впливу дії над документом-джерелом на залежні документи.</summary>
 /// <param name="Hash">Відбиток впливу з <c>GET …/source-impact</c> (<c>impactHash</c>); застарілий — <c>409 impactChanged</c>.</param>

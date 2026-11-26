@@ -18,10 +18,20 @@ namespace Ecr.Application.Workflow;
 /// <param name="Approved">Період затверджено (перерахунок його не чіпає, він застаріє).</param>
 /// <param name="WillRecalculate">Період буде перераховано (незатверджений).</param>
 /// <param name="Sheets">Аркуші залежного документа за період: які буде, а які не буде перераховано (затверджені пропускаються).</param>
-/// <param name="SkipReason">Чому не буде перераховано: <c>approved</c> — затверджений період перерахунок пропускає (D-493/D-510); інакше <c>null</c>.</param>
+/// <param name="SkipReason">
+/// Чому не буде перераховано: <c>approved</c> — затверджений період перерахунок пропускає (D-493/D-510); <c>dependentsOff</c> —
+/// зв'язка не перераховує залежних; <c>notWritable</c> — у період писати не можна; інакше <c>null</c>.
+/// </param>
+/// <param name="Reason">
+/// ✎ Чому період у переліку: <c>sourceMonth</c> — володіє зміненим місяцем джерела; <c>sourceYear</c> — зміну не звужено до
+/// місяців (<see cref="SourceImpactDto.WholeYearReason"/>); <c>readsYear</c> — шаблон читає джерело за рік; <c>crossMonth</c> —
+/// формули читають обчислені числа місяця <paramref name="ReadsPeriodKey"/>; <c>annualAnchor</c> — закритий якір року (річні
+/// значення); <c>readerPass</c> — методологія читає числа перерахованого місяця.
+/// </param>
+/// <param name="ReadsPeriodKey">Для <c>crossMonth</c> — місяць, числа якого читає період; інакше <c>null</c>.</param>
 public sealed record SourceImpactConsumerDto(
     string BindingCode, string TemplateCode, long DocumentId, string ProjectCode, string DocumentKey, int PeriodKey, bool Approved,
-    bool WillRecalculate, string? SkipReason, IReadOnlyList<SourceImpactSheetDto> Sheets);
+    bool WillRecalculate, string? SkipReason, IReadOnlyList<SourceImpactSheetDto> Sheets, string Reason, int? ReadsPeriodKey);
 
 /// <summary>Аркуш залежного періоду в оцінці впливу.</summary>
 /// <param name="SheetDefId">Аркуш.</param>
@@ -37,10 +47,14 @@ public sealed record SourceImpactSheetDto(int SheetDefId, string SheetCode, bool
 /// <param name="Blocked">Дію відхилить сервер (<c>Block</c> і є затверджені залежні).</param>
 /// <param name="ReasonRequired">Підтвердження потребує причини (<c>ConfirmWithReason</c>).</param>
 /// <param name="ImpactHash">Відбиток впливу: його клієнт повертає в <c>confirmedImpact.hash</c>.</param>
-/// <param name="SourceMonths">Зачеплені місяці джерела <c>yyyyMM</c>.</param>
+/// <param name="SourceMonths">Місяці джерела <c>yyyyMM</c>, які зміна донесе до каскаду (увесь рік — усі місяці року).</param>
 /// <param name="DependentCount">Усього залежних періодів.</param>
 /// <param name="ApprovedCount">З них затверджених.</param>
 /// <param name="CanRecalculateApproved">Викликач має право <c>Calculation.RecalculateApprovedDependents</c> (діалог показує галочку «й затверджені»).</param>
+/// <param name="WholeYearReason">
+/// ✎ Чому зміну джерела не звужено до місяців (каскад будить увесь рік споживачів): <c>periodApproval</c> |
+/// <c>editedMonthsUnknown</c> | <c>queueWithoutMonths</c> | <c>annualColumn</c> | <c>sourceSpreadsMonths</c>; <c>null</c> — звужено.
+/// </param>
 /// <param name="Consumers">УСІ залежні (метадані: документ, шаблон, період, статус; без даних комірок), не більше <see cref="GetSourceImpactHandler.MaxConsumers"/>; решту показує <c>DependentCount</c>.</param>
 public sealed record SourceImpactDto(
     string Action,
@@ -53,7 +67,8 @@ public sealed record SourceImpactDto(
     int DependentCount,
     int ApprovedCount,
     IReadOnlyList<SourceImpactConsumerDto> Consumers,
-    bool CanRecalculateApproved);
+    bool CanRecalculateApproved,
+    string? WholeYearReason);
 
 /// <summary>
 /// B80 N5 (D-554): <c>GET /documents/{id}/source-impact</c> — що зачепить затвердження чи повернення в роботу аркуша
@@ -83,8 +98,12 @@ public sealed class GetSourceImpactHandler(
     /// <param name="action"><c>approve</c> чи <c>reopen</c>.</param>
     /// <param name="sheetCopyId">Копія аркуша; не <c>null</c> — впливу немає (копія залежних не годує).</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="editedMonths">
+    /// ✎ Для <c>edit</c> річного/квартального джерела — місяці (1–12) МІСЯЧНИХ колонок правки; <c>null</c> — невідомо (увесь рік).
+    /// </param>
     public async Task<SourceImpactDto> HandleAsync(
-        long documentId, int sheetDefId, int periodKey, string action, long? sheetCopyId, CancellationToken ct)
+        long documentId, int sheetDefId, int periodKey, string action, long? sheetCopyId, CancellationToken ct,
+        IReadOnlyCollection<int>? editedMonths = null)
     {
         var change = action?.ToUpperInvariant() switch
         {
@@ -119,10 +138,13 @@ public sealed class GetSourceImpactHandler(
         if (sheetCopyId is not null
             || !await ActionChangesSourceAsync(documentId, sheetDefId, key, change, ct).ConfigureAwait(false))
         {
-            return new SourceImpactDto(name, nameof(DocumentSourcePolicy.None), false, false, false, string.Empty, [], 0, 0, [], canRecalculateApproved);
+            return new SourceImpactDto(
+                name, nameof(DocumentSourcePolicy.None), false, false, false, string.Empty, [], 0, 0, [], canRecalculateApproved, null);
         }
 
-        var impact = await assessor.AssessAsync(documentId, sheetDefId, periodKey, change, ct).ConfigureAwait(false);
+        var impact = await assessor
+            .AssessAsync(documentId, sheetDefId, periodKey, change, change == SourceApprovalChange.Edited ? editedMonths : null, ct)
+            .ConfigureAwait(false);
 
         // ✎ Рішення людини 19.11 (D-554): людина бачить УСІХ залежних, щоб розуміти, що станеться, — лише метадані
         // (документ, шаблон, період, статус), без даних комірок і без посилання на відкриття; права перегляду не питаємо.
@@ -130,8 +152,12 @@ public sealed class GetSourceImpactHandler(
             .Take(MaxConsumers)
             .Select(c => new SourceImpactConsumerDto(
                 c.BindingCode, c.TemplateCode, c.DocumentId, c.ProjectCode, c.DocumentKey, c.PeriodKey, c.Approved,
-                WillRecalculate: !c.Approved, SkipReason: c.Approved ? SkipReasonApproved : null,
-                Sheets: c.Sheets.Select(sh => new SourceImpactSheetDto(sh.SheetDefId, sh.SheetCode, sh.Approved, !sh.Approved)).ToList()))
+                WillRecalculate: c.WillRecalculate, SkipReason: c.SkipReason,
+                Sheets: c.Sheets
+                    .Select(sh => new SourceImpactSheetDto(sh.SheetDefId, sh.SheetCode, sh.Approved, c.WillRecalculate && !sh.Approved))
+                    .ToList(),
+                Reason: c.Reason,
+                ReadsPeriodKey: c.ReadsPeriodKey))
             .ToList();
 
         return new SourceImpactDto(
@@ -146,7 +172,8 @@ public sealed class GetSourceImpactHandler(
             impact.Consumers.Count,
             impact.ApprovedCount,
             visible,
-            canRecalculateApproved);
+            canRecalculateApproved,
+            impact.WholeYearReason);
     }
 
     private async Task<bool> ActionChangesSourceAsync(

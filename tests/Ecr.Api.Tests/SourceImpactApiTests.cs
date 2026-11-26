@@ -508,7 +508,10 @@ public sealed class SourceImpactApiTests(SqlServerFixture sql)
         Assert.Equal(1, impact.GetProperty("approvedCount").GetInt32());
         var seen = Assert.Single(impact.GetProperty("consumers").EnumerateArray());
         Assert.False(seen.GetProperty("approved").GetBoolean());
-        Assert.True(seen.GetProperty("willRecalculate").GetBoolean());
+        // ✎ D-581: вікно = план задачі. Другий аркуш не має таблиць у періоді, тож задача відмовляє періодом (кожен екземплярний
+        // скоуп — затверджений аркуш, RefusedPeriodsAsync): період не буде перераховано, причина — затверджене.
+        Assert.False(seen.GetProperty("willRecalculate").GetBoolean());
+        Assert.Equal("approved", seen.GetProperty("skipReason").GetString());
     }
 
     /// <summary>
@@ -543,8 +546,9 @@ public sealed class SourceImpactApiTests(SqlServerFixture sql)
             Assert.Equal(1, impact.GetProperty("approvedCount").GetInt32());
             var seen = Assert.Single(impact.GetProperty("consumers").EnumerateArray());
             Assert.False(seen.GetProperty("approved").GetBoolean());
-            Assert.True(seen.GetProperty("willRecalculate").GetBoolean());
-            Assert.Equal(JsonValueKind.Null, seen.GetProperty("skipReason").ValueKind);
+            // ✎ D-581: вікно = план задачі — другий аркуш без таблиць у періоді рахувати нічого, задача відмовляє періодом.
+            Assert.False(seen.GetProperty("willRecalculate").GetBoolean());
+            Assert.Equal("approved", seen.GetProperty("skipReason").GetString());
             var sheets = seen.GetProperty("sheets").EnumerateArray().ToList();
             Assert.Equal(2, sheets.Count);
             var approvedSheet = Assert.Single(sheets, x => x.GetProperty("approved").GetBoolean());
@@ -552,7 +556,7 @@ public sealed class SourceImpactApiTests(SqlServerFixture sql)
             Assert.False(approvedSheet.GetProperty("willRecalculate").GetBoolean());
             var draft = Assert.Single(sheets, x => !x.GetProperty("approved").GetBoolean());
             Assert.Equal(secondSheet, draft.GetProperty("sheetDefId").GetInt32());
-            Assert.True(draft.GetProperty("willRecalculate").GetBoolean());
+            Assert.False(draft.GetProperty("willRecalculate").GetBoolean());
         }
     }
 
