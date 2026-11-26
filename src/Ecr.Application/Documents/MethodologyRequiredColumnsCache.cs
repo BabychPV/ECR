@@ -24,7 +24,7 @@ namespace Ecr.Application.Documents;
 /// <list type="number">
 /// <item>
 /// <description>
-/// <see cref="RequiredColumnIdsAsync"/> — вміст <b>опублікованої</b> версії.
+/// <c>RequiredColumnIdsAsync</c> — вміст <b>опублікованої</b> версії.
 /// Інвалідації немає і не потрібно: опублікована версія незмінна за побудовою
 /// домену (<c>MethodologyVersion.RequireDraft</c>, <c>:569-578</c>; зміна — це
 /// клон і нове вікно дії, <c>ФВ-13.2</c>). Термін життя стоїть лише заради
@@ -151,6 +151,25 @@ public sealed class MethodologyRequiredColumnsCache(IMemoryCache? memory)
         Func<CancellationToken, Task<IReadOnlySet<int>>> load,
         CancellationToken ct)
         => GetOrAddAsync(VersionKey(publishedVersionId, templateVersionId), load, VersionLifetime, size: 1, ct);
+
+    /// <summary>
+    /// ✎ D-578: те саме з ТАБЛИЦЕЮ в ключі — набір містить і виведені вимоги (поля, які читає скрипт), а вони переводяться
+    /// на колонки за кодами саме цієї таблиці.
+    /// </summary>
+    /// <param name="publishedVersionId">Опублікована версія методології.</param>
+    /// <param name="templateVersionId">Версія шаблону документа.</param>
+    /// <param name="tableDefId">Таблиця.</param>
+    /// <param name="load">Читання, якщо в кеші немає.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlySet<int>> RequiredColumnIdsAsync(
+        int publishedVersionId,
+        int templateVersionId,
+        int tableDefId,
+        Func<CancellationToken, Task<IReadOnlySet<int>>> load,
+        CancellationToken ct)
+        => GetOrAddAsync(
+            string.Create(CultureInfo.InvariantCulture, $"mrc:cols:{publishedVersionId}:{templateVersionId}:{tableDefId}"),
+            load, VersionLifetime, size: 1, ct);
 
     private async Task<T> GetOrAddAsync<T>(
         string key,

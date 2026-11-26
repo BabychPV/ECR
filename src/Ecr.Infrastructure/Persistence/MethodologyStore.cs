@@ -991,6 +991,48 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<MethodologyReadFieldInfo>> GetReadFieldsOfVersionsAsync(
+        IReadOnlyCollection<int> methodologyVersionIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(methodologyVersionIds);
+        if (methodologyVersionIds.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = methodologyVersionIds.Distinct().ToList();
+        return await db.MethodologyReadFields
+            .AsNoTracking()
+            .Where(f => ids.Contains(f.MethodologyVersionId))
+            .OrderBy(f => f.MethodologyVersionId)
+            .ThenBy(f => f.FieldCode)
+            .Select(f => new MethodologyReadFieldInfo(f.MethodologyVersionId, f.FieldCode, f.OtherMonths))
+            .Take(MaxReadFields)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Стеля полів читання за один запит (версія читає десятки полів).</summary>
+    private const int MaxReadFields = 20_000;
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ColumnBindingInfo>> GetColumnBindingsOfTableAsync(int tableDefId, CancellationToken ct)
+    {
+        var rows = await db.CalculationBindings
+            .AsNoTracking()
+            .Where(b => b.IsActive && b.TableDefId == tableDefId)
+            .Join(db.Methodologies.AsNoTracking(), b => b.MethodologyId, m => m.Id,
+                (b, m) => new { b.MethodologyId, Code = m.Code, m.NameL10n, b.ColumnDefId, b.OutputCode })
+            .OrderBy(x => x.ColumnDefId)
+            .ThenBy(x => x.MethodologyId)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. rows.Select(r => new ColumnBindingInfo(r.MethodologyId, r.Code.ToString(), r.NameL10n, r.ColumnDefId, r.OutputCode))];
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<int>> GetMethodologyIdsBoundToTablesAsync(
         IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
     {

@@ -73,11 +73,17 @@ public interface IPermitBindingService
     /// <param name="view">Прив'язка.</param>
     /// <param name="plan">План з <see cref="PlanAsync"/>.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="actorUserId">
+    /// ✎ D-577 (L5, BUG-7): людина, що натиснула «Refresh from permit», — автор записів журналу (походження лишається
+    /// <c>Permit</c>, тож правило «остання зміна від дозволу» не змінюється). Без неї журнал писав системного користувача,
+    /// і сама людина на наступному опитуванні бачила «оновив інший користувач». <c>null</c> — системний автор, як доти.
+    /// </param>
     /// <remarks>
     /// ⚠ Кличеться ВСЕРЕДИНІ транзакції запису, під замком структури й аркуша (обробник перевірив права й стан).
     /// </remarks>
     public Task<PermitRefreshResult> RefreshAsync(
-        long documentId, PeriodKey periodKey, long tableInstanceId, PermitBindingView view, PermitBindingPlan plan, CancellationToken ct);
+        long documentId, PeriodKey periodKey, long tableInstanceId, PermitBindingView view, PermitBindingPlan plan, CancellationToken ct,
+        int? actorUserId = null);
 }
 
 /// <summary>Підсумок оновлення екземпляра з дозволу.</summary>

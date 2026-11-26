@@ -54,6 +54,19 @@ public interface ICalculationTrigger
     public Task<string?> RequestAsync(long documentId, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>
+    /// ✎ D-577 (Q2, рішення людини 26.11: «автоперерахунок методологій після правок — так, тихо»): те саме, що
+    /// <see cref="RequestAsync(long, PeriodKey, CancellationToken)"/>, після ПРАВКИ людини, з відкладенням (вікно злиття
+    /// сплеску правок). Ціль — та сама <c>-auto</c>: одна задача в черзі на документ і період, хоч би скільки правок.
+    /// </summary>
+    /// <param name="documentId">Документ правки.</param>
+    /// <param name="periodKey">Період правки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ідентифікатор задачі; <c>null</c> — у період писати не можна (закритий, не відкритий, архів, затверджено все).</returns>
+    /// <remarks>Типова реалізація (тестові заглушки) — нічого не ставить.</remarks>
+    public Task<string?> RequestAfterEditAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+        => Task.FromResult<string?>(null);
+
+    /// <summary>
     /// ✎ PERF-06b (<c>D-572</c>): те саме, що <see cref="RequestAsync(long, PeriodKey, CancellationToken)"/>, для власного
     /// перерахунку РІЧНОГО/КВАРТАЛЬНОГО документа-джерела після правки — з місяцями правки, які прогін донесе до каскаду
     /// споживачів (злиття постановок — об'єднанням; постановка без місяців — увесь рік).

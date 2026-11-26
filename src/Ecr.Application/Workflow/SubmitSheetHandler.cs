@@ -94,7 +94,11 @@ public sealed class SubmitSheetHandler(
 
     // ✎ F5: місяць споживача, що ще чекає каскаду від зміни джерела (HSE400, D-566), не подається. `null` (тестові
     // фабрики) — перевірки немає.
-    ISourceCascadePendingGate? cascadeGate = null)
+    ISourceCascadePendingGate? cascadeGate = null,
+
+    // ✎ D-577 (Q6, рішення людини 26.11): порожній обов'язковий вхід методології рівня Block блокує подання. `null`
+    // (тестові фабрики) — перевірки немає, як доти.
+    Documents.RequiredInputs.RequiredInputsScanner? requiredInputs = null)
 {
     /// <summary>✎ C-5: дефолти колонок версії для незаповнених комірок (02b §6.3), як у «Перевірити».</summary>
     private readonly Recalculation.ColumnDefaultValues columnDefaults = new(metadata, registries);
@@ -669,6 +673,38 @@ public sealed class SubmitSheetHandler(
         {
             blocking.AddRange(Validation.FormulaErrorIssues.Messages(
                 formulaErrorCells, snapshot.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id), currentUser.Language));
+        }
+
+        // ✎ D-577 (Q6; BUG-9 UX-огляду): обов'язкові входи методологій — по ВСІХ рядках аркуша, з введеним значенням чи
+        // наперед заданих (Q4), а не лише по рядках, які правили (ворота PATCH). Блокує рівень Block — заведений методологом
+        // і ВИВЕДЕНИЙ з полів, які читає скрипт (D-578; виняток методолога Optional/Warn знімає);
+        // попередження входів — у «Перевірити» й переліку при відкритті, не діалог підтвердження подання. Без прив'язаних
+        // методологій — одне звернення на аркуш (пакетний пошук прив'язок), зрізи не читаються.
+        if (requiredInputs is not null && tables.Count > 0
+            && (await methodologies.GetMethodologyIdsBoundToTablesAsync([.. tables.Keys], ct).ConfigureAwait(false)).Count > 0)
+        {
+            foreach (var instance in instances.Where(i => tables.ContainsKey(i.TableDefId)))
+            {
+                var table = tables[instance.TableDefId];
+                var plan = await requiredInputs
+                    .PlanAsync(documentId, key.Value, templateVersionId, table, ct)
+                    .ConfigureAwait(false);
+                if (plan is null)
+                {
+                    continue;
+                }
+
+                var rowIds = rowIdsByInstance.TryGetValue(instance.TableInstanceId, out var known)
+                    ? known
+                    : await rowStore.GetRowIdsAsync(instance.TableInstanceId, key, ct).ConfigureAwait(false);
+                var cells = cellsByInstance.TryGetValue(instance.TableInstanceId, out var read)
+                    ? read
+                    : await cellStore.ReadSliceAsync(instance.TableInstanceId, key, ct).ConfigureAwait(false);
+                rowIdsByTable.TryAdd(table.Id, rowIds);
+                blocking.AddRange(Documents.RequiredInputs.RequiredInputsScanner
+                    .Scan(plan, table, snapshot.ColumnsById, cells, rowIds, currentUser.Language)
+                    .Where(m => m.Severity == ValidationSeverity.Error));
+            }
         }
 
         if (blocking.Count > 0)

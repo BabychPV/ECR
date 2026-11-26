@@ -1,5 +1,6 @@
 // tests/Ecr.Application.Tests/Documents/RequiredByMethodologyColumnTests.cs
 using Ecr.Application.Documents;
+using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
@@ -159,6 +160,35 @@ public sealed class RequiredByMethodologyColumnTests
 
         Assert.True(slice.Columns.Single(c => c.Code == "Category").IsRequiredByMethodology);
         Assert.False(slice.Columns.Single(c => c.Code == "Volume").IsRequiredByMethodology);
+    }
+
+    /// <summary>
+    /// ✎ D-577 (інспектор комірки): «Read by» — методологія, що вимагає колонку (обов'язковий вхід), «Calculated by» —
+    /// прив'язка колонки-виходу з кодом кроку. Рівень колонки, з прив'язок і чинної версії — без трасування.
+    /// </summary>
+    /// <remarks>
+    /// Мутація (локально): у <c>GetTableSliceHandler.ColumnMethodologiesAsync</c> повертати порожні словники — тест червоніє.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "D-577")]
+    public async Task D577_колонка_знає_хто_її_читає_і_хто_пише()
+    {
+        WithMethodology();
+        _methodologies.GetVersionLabelsAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+                      .Returns(ci => Task.FromResult<IReadOnlyDictionary<int, MethodologyVersionLabel>>(
+                          ((IReadOnlyCollection<int>)ci[0]).ToDictionary(
+                              id => id, id => new MethodologyVersionLabel(id, "ECW_TEST", "1.0", Text("Water emissions")))));
+        _methodologies.GetColumnBindingsOfTableAsync(3, Arg.Any<CancellationToken>())
+                      .Returns(Task.FromResult<IReadOnlyList<ColumnBindingInfo>>(
+                          [new ColumnBindingInfo(MethodologyId, "ECW_TEST", Text("Water emissions"), VolumeId, "E_CO2")]));
+
+        var slice = await Handler().HandleAsync(Document, TableInstance, Profile(), "en", CancellationToken.None);
+
+        var reader = Assert.Single(slice.Columns.Single(c => c.Code == "Category").ReadBy!);
+        Assert.Equal(new ColumnMethodologyDto("ECW_TEST", "Water emissions", null, true), reader);
+        var writer = Assert.Single(slice.Columns.Single(c => c.Code == "Volume").CalculatedBy!);
+        Assert.Equal(new ColumnMethodologyDto("ECW_TEST", "Water emissions", "E_CO2", false), writer);
+        Assert.Null(slice.Columns.Single(c => c.Code == "Volume").ReadBy);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
