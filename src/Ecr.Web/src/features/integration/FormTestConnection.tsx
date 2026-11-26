@@ -2,13 +2,13 @@ import { useState, type JSX } from 'react';
 import { Alert, Button, Stack, Textarea } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { testConnectionFromBody, type TestConnectionBody } from './dataSourceApi';
 import { OutcomeBanner, outcomeOf } from './TestDataSourceModal';
 
-/** Ключі 429: ліміт проб на користувача й пауза цілі після відмов входу поспіль (літерали — для сторожа каталогу). */
-const TooManyTestsKey = 'err.ECR-REQ-0429.tooManySourceTests';
+/** Ключ 429 паузи цілі після відмов входу поспіль; у `t(...)` — літералами (сторож каталогу). */
 const TargetPausedKey = 'err.ECR-REQ-0429.sourceTestTargetPaused';
 
 /** `429` → текст з каталогу (ключ із відмови, інакше ліміт проб); `null` — відмова не про ліміт. */
@@ -16,7 +16,7 @@ function throttledText(error: unknown): string | null {
   if (!(error instanceof EcrApiError) || error.problem.status !== 429) return null;
   const key = error.problem.extensions2?.['messageKey'];
 
-  return t(key === TargetPausedKey ? TargetPausedKey : TooManyTestsKey);
+  return t(key === TargetPausedKey ? 'err.ECR-REQ-0429.sourceTestTargetPaused' : 'err.ECR-REQ-0429.tooManySourceTests');
 }
 
 /**
@@ -45,6 +45,8 @@ export function FormTestConnection({
     meta: { handled: true },
     mutationFn: (value: string) => testConnectionFromBody({ ...build(), reason: value }),
   });
+  // ФВ-14.26: спінер лише після порогу; повторний натиск закриває `disabled` одразу (проба — до чужої системи).
+  const testLoading = usePendingLoading(test.isPending);
 
   const trimmed = reason.trim();
 
@@ -72,8 +74,8 @@ export function FormTestConnection({
 
       <Button
         variant="default"
-        disabled={disabled || trimmed.length === 0}
-        loading={test.isPending}
+        disabled={disabled || trimmed.length === 0 || test.isPending}
+        loading={testLoading}
         onClick={() => test.mutate(trimmed)}
         data-form-test-run=""
       >

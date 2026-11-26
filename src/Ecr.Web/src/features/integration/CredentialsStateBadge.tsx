@@ -4,11 +4,6 @@ import { t } from '@/shared/i18n';
 import { badgeLook } from '@/shared/ui/StatusBadge';
 import type { DataSource } from './dataSourceApi';
 
-/** Ключ короткого підпису бейджа. */
-function badgeKeyOf(source: Pick<DataSource, 'credentialsState'>): string {
-  return source.credentialsState === 'Rejected' ? 'sources.credentialsRejectedBadge' : 'sources.credentialsUnreadableBadge';
-}
-
 /** Ключ полного тексту стану; `null` — облікові дані в порядку. */
 export function credentialsStateKeyOf(source: Pick<DataSource, 'credentialsState'>): string | null {
   if (source.credentialsState === 'Rejected') return 'sources.credentialsRejected';
@@ -26,7 +21,11 @@ export function CredentialsStateBadge({ source }: { readonly source: DataSource 
   const key = credentialsStateKeyOf(source);
   if (key === null) return null;
 
-  const look = badgeLook(source.credentialsState === 'Rejected' ? 'danger' : 'warning');
+  const rejected = source.credentialsState === 'Rejected';
+  const look = badgeLook(rejected ? 'danger' : 'warning');
+  // ⚠ Ключі — умовні вирази над ЛІТЕРАЛАМИ: сторож каталогу (EndpointCoverageTests) бачить їх із тексту.
+  const full = t(rejected ? 'sources.credentialsRejected' : 'sources.credentialsUnreadable');
+  const short = t(rejected ? 'sources.credentialsRejectedBadge' : 'sources.credentialsUnreadableBadge');
 
   return (
     <Badge
@@ -37,11 +36,11 @@ export function CredentialsStateBadge({ source }: { readonly source: DataSource 
       c={look.text}
       bg={look.bg}
       bd={`1px solid ${look.border}`}
-      title={t(key)}
-      aria-label={`${t(badgeKeyOf(source))}: ${t(key)}`}
+      title={full}
+      aria-label={`${short}: ${full}`}
       data-credentials-state-badge={source.credentialsState}
     >
-      {t(badgeKeyOf(source))}
+      {short}
     </Badge>
   );
 }

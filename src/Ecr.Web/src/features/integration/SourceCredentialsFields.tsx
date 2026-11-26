@@ -189,7 +189,7 @@ export function SourceCredentialsFields({
 
       {stateKey !== null && (
         <Alert color="statusError" data-credentials-state={stateKey}>
-          {t(CredentialsStateKeys[stateKey] ?? stateKey)}
+          {t(CredentialsStateKeys[stateKey] === 'sources.credentialsRejected' ? 'sources.credentialsRejected' : 'sources.credentialsUnreadable')}
         </Alert>
       )}
 

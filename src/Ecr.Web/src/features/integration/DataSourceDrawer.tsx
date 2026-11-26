@@ -245,7 +245,7 @@ export function DataSourceDrawer({
             {credentialsStateKeyOf(source) !== null && (
               <Alert color="statusError" mb="sm" data-credentials-state={source.credentialsState}>
                 <Stack gap="xs" align="flex-start">
-                  <Text size="sm">{t(credentialsStateKeyOf(source) ?? '')}</Text>
+                  <Text size="sm">{t(source.credentialsState === 'Rejected' ? 'sources.credentialsRejected' : 'sources.credentialsUnreadable')}</Text>
                   {canManage && (
                     <Button variant="default" size="xs" onClick={() => setEditing(true)} data-enter-password="">
                       {t('sources.changePassword')}
