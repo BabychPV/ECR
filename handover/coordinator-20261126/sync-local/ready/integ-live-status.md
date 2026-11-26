@@ -1,0 +1,22 @@
+# Лист готовності: lane/integ-live-status (LIVE-STATUS)
+
+- [x] Гілка / lane: `lane/integ-live-status`
+- [x] Пункт: дефект людини 02.11 — стан аркуша / банер / кнопки не оновлюються в іншого користувача після переходу погодження
+- [x] Хеш tip: `03871aa4b` (він же коміт контракту)
+- [x] База: `origin/main` e8bc97688
+- [x] Лінійна: merge-комітів 0
+- [x] Мутацій у кінчику немає
+- [x] Sql: ні (лише сирий SELECT у SheetChangeStore)
+- [x] EF-міграція: ні (ревізія — наявний rowversion `wf.ApprovalState`)
+- [x] Контракт: так — адитивно: `SheetChangesDto.sheetStatus`, `statusRevision`, `statusChanged`; відповідь `304`; перегенеровано останнім кроком, повторна генерація побайтно та сама
+- [x] shared/ui: ні
+- [x] package*.json / lock: ні
+- [x] CLAUDE.md / .github: ні
+- [x] Нові ключі UiString: ні; нові коди помилок: ні
+- [x] Тести: `SheetChangesApiTests.Кожен_перехід_погодження_міняє_маркер_ревізію_й_ETag_а_без_змін_304` (8 переходів: Submit, ApproveStep без зміни стану, Reject, Resubmit, Approve, Reopen, Submit, Recall; без змін — той самий ETag і 304); `SheetChangeMarkerTests` (третій сегмент, старий формат)
+- [x] Мутація-доказ: ревізія = стан (`CAST(Status)` замість `RowVersion`) → червоне на ApproveStep «перехід не змінив ETag»; відкочено
+- [x] Таймінгові тести: н/з
+- [ ] CI на lane: CI run 41442614303 — на момент листа ще в черзі (вердикт перевіряє координатор); Evidence 41442614235 — success; head 03871aa4b
+- [x] Перевірено локально: build Ecr.sln ☑  Architecture 1176/1176 ☑  Api SheetChanges 3/3 + OpenApiSnapshot ☑  Application 14/14 ☑  Infrastructure SheetChangeStore 2/2 ☑  tsc ☑  vitest liveRefresh 14/14 ☑
+- [x] Ризики: клієнт нових полів ще не читає (окрема UI-lane: при `statusChanged`/новому `statusRevision` перечитати стан аркуша, банер, кнопки). Клієнт не шле `If-None-Match`, тож `304` його не зачіпає. Маркер старого формату з уже відкритих вкладок читається (ревізія невідома → `statusChanged=false`, наступна відповідь дає новий маркер).
+- [x] Хто зводить: координатор/інтегратор

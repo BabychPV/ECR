@@ -1,0 +1,29 @@
+# Лист готовності: lane/integ-approve-record-race
+
+- [x] Гілка / lane: `lane/integ-approve-record-race`
+- [x] Пункт WORK-QUEUE (ID): — (флейк CI: run 41555543027 api-4, run 41557687171 api-1; доручення координатора)
+- [x] Хеш tip: `83e0138b6`
+- [x] База: `a9f12c230` (origin/lane/integ-an156 = main + регенерація докс + таймінги StartupSequence)
+- [x] Лінійна: merge-комітів 0
+- [x] Мутацій у кінчику немає
+- [x] Sql: ні
+- [x] EF-міграція: ні
+- [x] Контракт openapi.snapshot.json / schema.d.ts: ні (контракт не змінено; record-и не чіпано)
+- [x] shared/ui: ні
+- [x] package*.json / lock / Directory.Packages.props: ні
+- [x] CLAUDE.md / .github: ні
+- [x] Нові ключі UiString: ні
+- [x] Нові коди помилок: ні
+- [ ] Бюджет клієнта: н/з (лише сервер)
+- [x] Тести: `tests/Ecr.Api.Tests/Startup/MvcModelMetadataWarmupTests.cs` — (1) прогрів кешує `ModelMetadata._hashCode` і `_recordTypeConstructorDetailsCalculated` для кожного вузла графа параметрів усіх 403 дій (детерміновано, без БД); (2) свіжий `EcrApiFactory` прогрітий ДО першого запиту + 16 одночасних перших запитів approve/migrate-version/submit/reopen без 5xx, 3 ітерації.
+- [x] Мутація-доказ: `Warm` повертає одразу → обидва тести червоні (3371 непрогрітих вузлів; record-вузлів 0); відкат.
+- [x] Таймінгові тести: N/20 = 20/20
+- [x] CI на lane: run 41567780461 (CI) — success на 83e0138b6 (build/client/a11y×2/server-part ×10/windows/msi зелені; skipped: matrix.check, pr-source, lane-affected, lane-client, shuffle); run 41567780470 (Evidence) — success
+- [x] Перевірено локально: build ☑ Architecture ☑ (1185/1185) Api: Approval*/DocumentVersionMigration*/Startup ☑ (282/282)
+- [x] Ризики / відомі обмеження:
+  - Корінь — гонитва в ASP.NET Core: `ModelMetadata.GetHashCode()` кешує `int? _hashCode` без синхронізації (зонд: 506 розірваних хешів на 2×2 000 000), перший хеш параметра record — у `CalculateRecordTypeConstructorDetails` → хибний ключ у `_parameterMapping` → `DefaultComplexObjectValidationStrategy.Enumerator.MoveNext` кидає до рестарту.
+  - Частота без фіксу: HTTP-стрес локально 0 падінь; конкурентна валідація на свіжих метаданих 0/20 000 ітерацій (вікно — наносекунди; на 2-ядерному CI-раннері розширюється витісненням потоку). Тому доказ детермінований (стан метаданих після старту), а не «стрес до червоного».
+  - Тест читає приватні поля фреймворку відбиттям; при оновленні ASP.NET Core, якщо поля перейменують, тест впаде з прямою підказкою.
+  - Ціна старту: ~250 мс холодного обходу (3023 вузли, 232 record-и) — крок «6a прогрів метаданих MVC» у журналі.
+  - Розмір: 460 рядків (код ~200, тести ~210 з коментарями).
+- [ ] Хто зводить: координатор

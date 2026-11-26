@@ -1,0 +1,172 @@
+- [Схема БД](two-schema-sources.md) — міграції EF + сирі .sql
+- [Рішення 05.10](human-decisions-0510-l116-csrf-t207.md) — L1-16, L5-12, CSRF, messageKey
+- [smoke і e2e](smoke-and-e2e.md) — запуск; [[smoke-finds-what-tests-cannot]], [[e2e-grep-by-spec-file-name]]
+- [Шляхи інструментів](toolchain-paths.md) — git у VS, gh, SDK, тести без Docker
+- [Правила розробки](dev-rules.md) — план до коду; [[report-format]]
+- [Сабагенти](subagent-use-by-judgement-1030.md) — за судженням; [[human-models-back-opus-1116]], [[orchestrator-only]]
+- [Бюджет машини](machine-load-budget.md) — ≤4 важкі .NET; [[classifier-denies-build-under-load]]
+- [Rebase і merge-коміти](rebase-drops-merge-commits.md) — ручне зведення лише merge
+- [Автономний режим](autonomous-mode.md) — [[human-no-stopping-1102]], [[human-keep-awake-1105]]
+- [Каденція мержу](merge-cadence.md) — main раз на тиждень; [[merge-rc-myself-rule]]
+- [Спільна тестова база](shared-test-db-pollution.md) — свої рядки в EcrTest_*
+- [Мова чату](chat-language-ukrainian.md) — українською, квізи теж ([[human-quiz-in-ukrainian-1113]]); листи англ. [[sessions-english-1028]]
+- [Саб-таски і запис](subagents-need-write-guard.md) — READ-ONLY не спрацював; [[subagent-self-caught-shared-tree-edit]]
+- [PowerShell і кирилиця](powershell-corrupts-cyrillic.md) — не пайпом; [[powershell-case-insensitive-vars]]
+- [Застаріла збірка](msbuild-stale-after-copy.md) — мутація після Copy-Item тестує стару DLL
+- [mockRejected хибнозелений](mockrejected-false-green.md)
+- [CLAUDE.md старіє](claude-md-entries-go-stale.md) — перевіряй git grep'ом
+- [jsdom повільний](slow-modal-test.md) — [[jsdom-getcomputedstyle-cost]], [[flaky-tests-lazy-import-warmup]], [[vi-mock-userevent-dynamic-import]]
+- [Livelock лише в dev](dev-only-render-livelock.md) — контроль на vite preview
+- [Гілка перемикається](worktree-branch-switches.md) — перевіряй гілку перед комітом
+- [Покрити вимогу](covering-an-exempt-requirement.md) — три файли, два сторожі
+- [Аудит сабагентами](audit-subagents-need-clean-tree-and-recheck.md) — [[auditor-confused-branch-name]]
+- [Та сама задача](parallel-agents-same-defect.md) — перевір worktree'ї перед стартом
+- [Сторожі по тексту](source-text-guards-are-brittle.md) — падають на коментарях
+- [Повний набір](full-suite-before-push.md) — [[rules-405-406-one-sha-own-architecture-run-1116]]
+- [ripgrep і NUL](ripgrep-skips-files-with-nul.md) — [[nul-byte-in-sql-file-silently-skips-batch]]
+- [Сторож сесії](session-watchdog-routine.md) — cron у сесії; CronList
+- [.NET і cd](dotnet-cwd-ignores-powershell-cd.md) — лише абсолютні шляхи
+- [Диски стендів](stand-data-lives-on-two-disks.md) — F: старі, H:\EcrData нові; [[customer-land-disk-ssd-1029]]
+- [Код помилки](registering-an-error-code.md) — 4 файли + арм middleware; [[fake-error-codes-in-fixtures]], [[agents-avoid-new-catalog-keys]]
+- [Stacked PR](stacked-pr-base-delete.md) — мерж батька закриває дочірній
+- [Unicode-escape](write-tool-decodes-unicode-escapes.md) — подвоюй скісну риску
+- [git stash спільний](git-stash-is-shared-across-worktrees.md)
+- [worktree remove](worktree-remove-follows-junctions.md) — спершу junction; [[worktree-cleanup-killed-active-agent]]
+- [npm audit 400](npm-audit-400-blames-your-lockfile.md) — насправді 503 npmjs
+- [Спільний scratchpad](scratchpad-shared-across-parallel-subagents.md) — commit-msg у worktree
+- [Агенти: ранній completed](agent-early-completion-is-often-just-planning.md) — [[agent-sleep-loop-after-task-done]]
+- [Локально ≠ CI](verify-ci-not-local-subagent-claims.md) — перевіряй gh
+- [walkthrough.ndjson](walk-ndjson-append-only.md) — лише останній прогін
+- [Ключі кешу React Query](react-query-split-cache-key-defect-class.md)
+- [Bootstrap-адмін](bootstrap-admin-is-not-a-superuser.md) — мінімальна роль, не баг
+- [Подвійний PATCH](dedup-inflight-patch-race.md) — Ctrl+V→Ctrl+S
+- [fetch і дерево](fetch-doesnt-update-local-tree.md) — merge --ff-only
+- [Обхід дозволів](cross-session-permission-laundering-blocked.md) — не делегуй відмову
+- [ADD PERIOD](ci-sql-clock-before-2026.md) — Msg 13542
+- [Хто бере задачу](ownership-ping-pong.md) — [[crossed-messages-ownership-pingpong]]
+- [Питання — координатору](questions-go-to-coordinator.md) — не AskUserQuestion
+- [«Подання» = Submit](term-podannya-is-submit.md) — View = «представлення»
+- [Координатор](coordinator-mandate.md) — [[coordinator-decides-autonomously]], [[human-coordinator-has-human-rights-1029]], [[human-manage-yourself-1110]]
+- [Пуш і lane](direct-push-since-0929.md) — лінійні; [[push-gate-on-merge-tree]]
+- [Коментар і рядок](comment-above-which-row.md) — звіряй предмет рішення
+- [Мутація безпеки](security-mutation-blocked-prove-red-before-fix.md) — червоне до фіксу
+- [Лише цільове](author-runs-targeted-only.md) — build+Architecture+вузькі тести
+- [COLL-секції сіду](seed-coll-sections-append-at-end.md) — в кінець блоку
+- [Черга HSE301](hse301-priority-eventframe.md) — EventFrame пріоритет
+- [EnqueueExclusive](enqueue-exclusive-supersedes.md) — автотригерам Coalesced
+- [Межа розміру](size-limit-per-commit-not-branch.md) — на коміт
+- [Роль «Розробка»](role-development-all-zones.md) — усі зони
+- [Ключі PiSqlClient](pisql-per-source-query-keys.md) — ключ джерела перекриває спільний
+- [RESUME](audit-resume-pointer.md) — .sync-local\RESUME-*.md; [[resume-after-restart-0930]]
+- [Таймінг-тести 20 разів](timing-tests-run-20-times-before-push.md) — N/20 у коміті
+- [Черга WORK-QUEUE](work-queue-cycle.md) — [[coordinator-queue-file]]
+- [Власний зрив](orchestrator-lapse-direct-edit.md) — правка доків напряму
+- [Дозволи 30.09–01.10](human-no-permission-questions-0110.md) — [[human-push-and-kill-permission-0930]]
+- [Я — тестувальник](coordinator-is-final-tester.md) — «P0/P1 немає» перед видачею
+- [Видача](stable-before-handout.md) — [[handout-waits-for-permits]], [[human-au7-msi-deferred-1110]]
+- [Прискорення](speedup-decisions-0510.md) — [[speed-rules-ci-process-1012]]
+- [Темп/бюджет (історія)](human-max-speed-reset-1111.md)
+- [Прохання людині](human-asks-separate-block.md) — блок «⚠ ПОТРІБНЕ ВІД ВАС»
+- [Самовдосконалення](self-improve-practices.md) — ретро раз на 2 год
+- [UI від макета](ui-follows-hybrid-mockup.md) — docs/design/hybrid
+- [UI: a11y і браузер](ui-change-needs-a11y-config-and-real-browser.md)
+- [honesty-guard і Skip](honesty-guard-forbids-skip.md)
+- [Ліміт листів](cross-session-messaging-limit.md) — 10 → пауза; [[session-ids-1116]]
+- [Агент убив Ecr.Api](agent-killed-foreign-ecr-api.md) — лише за PID; [[scratch-api-port-owner-check]]
+- [Без force](no-force-lease-in-agent-prompts.md) — lease теж force
+- [Зміна воріт](gate-policy-change-grep-tests-by-error-code.md) — grep коду по tests/
+- [Квізи 10.10–06.11](human-quiz-answers-1011.md) — [[human-quiz-answers-1104]], [[human-quiz-q1-q7-1106]]
+- [Ночі автономно](overnight-autonomy-1110.md) — [[overnight-autonomy-1113]], [[overnight-autonomy-1112]], [[overnight-autonomy-1116]] (RESTORE лише словом)
+- [Reopen за словом](human-reopen-sep-w15u-1113.md) — [[human-reopen-sheet-1013]]
+- [Рішення 18–26.10](human-words-1021-workflow-access.md) — [[human-words-1018-window11-v2]], [[human-no-snapshot-delete-1026]], [[human-delta-pass-decision-1026]]
+- [Економія токенів](token-saving-loop.md) — [[human-token-economy-1103]], [[human-moderate-token-economy-1103]], [[token-usage-analysis-loop-1101]]
+- [Перф — максимально](human-performance-max-1028.md) — [[human-perf-large-load-1110]]
+- [Результати методологій](human-calc-results-retention-1028.md) — [[human-calc-results-all-months-1111]]
+- [Вікна live автономно](human-live-windows-autonomous-1029.md) — [[human-standing-live-window-word-1029]], [[human-w15m-restore-fallback-1109]], [[human-w15m-after-all-fixes-1109]]
+- [WINDOW-ACTIVE](window-active-marker.md) — [[relay-quiet-yourself-1113]], [[stop-scratch-before-live-window]]
+- [Вікна W15o–W15v](w15v-window-1114.md) — [[w15u-window-1113]], [[w15u-toolkit-lessons-1113]], [[w15t-window-1113]], [[w15s-window-1112]], [[human-slow-for-w15v-1114]], [[human-w15v-slow-down-1114]], [[human-limit-98-economy-handover-1114]]
+- [⛔ Перезапуск live з W15u](live-restart-w15u-hse400-flag-1114.md) — restart-w15u.ps1 + прапор; [[live-must-start-detached-1116]]
+- [Чистка live 10.11](live-cleanup-1110-classifier-split.md) — [[human-live-doc-cleanup-1110]]
+- [Ретро 11–13.11](retro-rules-1111.md) — [[retro-rules-365-368-1113]], [[retro-rules-374-375-1113]]
+- [NAE + пермiти](human-nae-permit-import-1029.md) — [[human-permit-validity-vs-data-months-1108]]
+- [Рішення 26–29.10](human-table-chat-1029.md) — [[human-q17-month-source-1026]], [[human-rpt-stable-views-1029]]
+- [Вікно доступу лише на введення](human-access-window-edit-only-1113.md) — B100
+- [Гранти БД](human-db-grants-in-install-guide-1102.md) — GRANT в install-guide
+- [Аркуші-копії](human-repeatable-sheets-1103.md) — [[human-sheetname-formula-1109]]
+- [Descriptor.Code = версія](methodology-descriptor-code-is-version.md) — брати MethodologyId
+- [Сід у листі готовності](ready-letter-lists-seed.md) — [[f13-ready-payload-line-1111]]
+- [HSE401 шаблон](human-hse401-template-1104.md) — [[human-no-hse401loader-mentions-1105]], [[human-hse401-cred-file-standing-1105]], [[human-stage-uat-1106]], [[human-flare-ef-schedule-1106]]
+- [Перерахунок 07.11](human-recalc-skip-approved-only-1107.md) — пропускати лише погоджені
+- [Періоди й шаблони](human-period-concept-1107.md) — [[human-template-yearly-vs-monthly-1110]]
+- [Акаунти: 17.11 дозволено](no-accounts-or-rights-even-scratch-1108.md) — test-/f13-, випадковий пароль; права людей — словом
+- [Якість 08.11](human-quality-acceptance-rules-1108.md) — приймання, бекап, свіже око
+- [Projects + UI-тест 08.11](human-projects-page-and-live-ui-test-1108.md)
+- [Акаунт live UI](live-ui-pass-account-1110.md) — [[live-ui-credentials]]
+- [FLERT 11.11](human-flert-owner-1111.md) — ECR read-only копія
+- [Аудит 2026-11](human-audit-2611-on-hold-1111.md) — [[audit-2026-11-on-hold-1111]]
+- [⛔ Один план, нове — вниз](human-single-plan-append-order-1112.md) — .sync-local\PLAN.md
+- [⛔ Правила 401/410/411](rule-401-mutate-every-branch-before-ready-1116.md) — [[rules-410-411-mutation-build-ok-local-e2e-1116]], [[rule-410-mutation-counts-only-if-builds-1116]]
+- [⛔ Правила 405/406/413](rules-405-406-one-sha-own-architecture-run-1116.md) — [[rule-413-behaviour-questions-before-code-1116]]
+- [⛔ Правила 414–418](rules-414-415-probe-and-hourly-rebase-1116.md) — [[rules-416-418-1116]], [[retro-416-418-f13-checks-1116]], [[never-build-in-h-ecr-1116]]
+- [⛔ Land = РІЧНИЙ шаблон](land-template-is-yearly.md) — копії по місяцях = дефект
+- [⛔ Стан у файлі аудиту](human-mark-fixed-in-audit-file-1113.md) — 00-PLAN §7 з SHA
+- [⛔ План завжди актуальний](human-plan-files-always-current-1113.md) — статус у той самий хід
+- [⛔ Проєкт = рік + об'єкт](human-project-multi-template-1113.md) — B74
+- [⛔ Вікно на стенд ≤1/добу](human-stand-cadence-daily-1113.md) — [[human-stand-update-when-batch-ready-1116]]
+- [Рішення 12–13.11 дрібні](human-category1-blank-liquid-fuel-q-1113.md) — [[human-consistency-snapshot-1112]], [[human-formula-error-blocks-approve-1112]]
+- [Захист залежних розрахунків](human-dependency-guards-1113.md) — B79/B80; [[human-b79-quiz-anchor-crosssheet-1116]]
+- [HSE400/HSE401](human-hse400-monthly-hse401-no-workflow-1113.md) — [[human-hse400-template-1111]], [[human-land-branch-gating-1111]]
+- [Архів незмінний](human-archive-immutable-1113.md) — B69
+- [Пачки виправлень 12.11](human-batch-fixes-per-session-1112.md) — 3–6 в одну integ-lane
+- [Land під рік 12.11](human-land-rebuild-year-1112.md) — D-474
+- [Пачка аудиту на стенд](human-handover-batch-to-stand-1112.md) — одним вікном + UI-прохід
+- [F13 і CI](f13-grep-exception-message-leak-1113.md) — [[full-ci-on-final-tip-1110]]
+- [⛔ Перерахунок усіх, крім погоджених](human-recalc-all-but-approved-1116.md) — B79, B80
+- [⛔ Координацію передано 14.11](handover-to-other-claude-1114.md) — 16.11 повернуто
+- [Пентест B141](human-pentest-b141-1116.md) — NTLM за замовчуванням заборонено
+- [⛔ Land лише з погодженого HSE400](human-land-reads-approved-hse400-only-1116.md) — B80
+- [Чужий worktree до пушу](preread-worktree-may-show-mutation-1116.md) — знахідки лише на SHA
+- [⛔ Моделі 16.11: Opus](human-models-back-opus-1116.md) — opus код, sonnet доки, haiku пошук
+- [⛔ Повна потужність без боргів](human-full-power-no-debts-1116.md)
+- [Документів на шаблон](human-docs-per-template-config-1116.md) — B151
+- [⛔ Токени оптимально 17.11](human-token-hygiene-compact-1117.md) — ≥40 % → RESUME + /compact
+- [⛔ Економія після вікна](human-economy-after-w15w-1117.md) — ≤1 сабагент
+- [Reopen doc 96 для Land](human-reopen-for-land-year-move-1117.md)
+- [⛔ Важкі прогони — на пачках](human-heavy-runs-on-batches-1117.md) — integ-batch
+- [B157/B155 так](human-b157-b155-yes-1117.md)
+- [⛔ W15w → 18.11](human-w15w-evening-1117.md) — одне вікно з усіма змінами; [[au-w15w-w15x-plan-1117]]
+- [⛔ Стенд 17.11](human-stand-tomorrow-speed-up-1116.md)
+- [⛔ B155 ролі апрувера](human-b155-approver-roles-1116.md) — варіант C
+- [Скрипт мутацій і слот](mutation-script-reads-originals-under-slot.md)
+- [⛔ Швидкі lane + пачки](aa-fast-lanes-batch-ci-1117.md) — [[pe-fast-lanes-batch-ci-1117]]
+- [⛔ Правила 430/431](aa-rules-430-431-1117.md) — шапка READY; D-NEW
+- [⛔ Правила 428/429](aa-rules-428-429-1117.md) — PRIORITY.md + ACK; шлях × тест × мутація
+- [⛔ Правила 424/425](aa-rules-424-425-1117.md) — [[au-retro-424-425-1117]]
+- [⛔ Правило 423](aa-rule-423-assert-test-count-1117.md) — Total ≥ 1; [[au-rule-423-test-count-proof-1117]]
+- [⛔ Правило 422](aa-rule-422-shared-memory-1117.md) — чужі файли лише ✎; [[au-rule-422-shared-memory-1117]]
+- [Методології — інший Claude 18.11](human-methodology-rethink-other-claude-1118.md) — не лізти без узгодження
+- [⛔ AN чек-лист READY](an-ready-checklist-1118.md)
+- [⛔ Вікно Land 18.11 ввечері](human-land-window-evening-1118.md) — W15x
+- [⛔ W15x RESTORE лише при збої Land](au-w15x-restore-word-1118.md) — P-0118-14
+- [⛔ Toolkit shift before next window](au-toolkit-shift-before-next-window-1118.md)
+- [B26 обʼєм 7b](human-b26-volume-column-7b-1118.md) — ✎ замінено P-0118-24/25/27: V з рядка S3_9 + статус D-425
+- [Питання «звідки дані» — спершу скан таблиці](pe-scan-table-before-data-source-question-1118.md) — P-0118-28
+- [⛔ Авто-залежності + екран 18.11](human-auto-dependencies-screen-1118.md) — система сама визначає залежності з формул (AST), рахує по порядку; адмін — екран перегляду + перемикач режиму; B176
+- [⛔ Повна швидкість до 98 % 18.11](human-full-speed-until-98-1118.md) — на 98 % тижневого: пуш WIP, RESUME, передача справ
+- [⛔ Lesson 457: A→B end-to-end + default flags 18.11](au-lesson-457-end-to-end-a-affects-b-1118.md) — in F13/postcheck: a real edit of A on a copy → B without manual steps; check appsettings/live-env flags (B80 N1 → B179)
+- [⛔ Хандовер на 99 % 19.11](human-handover-at-99-1119.md) — стоп усіх сесій, пуш, HANDOVER-<сесія>; я зводжу HANDOVER-ALL-1119.md для іншого Claude
+- [⛔ БД ECR не видаляти 22.11](never-drop-ecr-database-1122.md) — ніколи не дропати ECR/EcrLandUi/FLERT/EcrLegacyProd; чистка баз лише білим списком
+- [⛔ TRACKING.md завжди 22.11](human-tracking-md-always-1122.md) — .sync-local\TRACKING.md: зроблено/в роботі/далі; оновлювати щоходу; прискоритись
+- [⛔ Правила роботи 22.11](human-work-rules-tokens-models-batches-stand-1122.md) — токени оптимально; модель за складністю; пачки; сам перевіряю на стенді з доказами; без побічних проблем і боргів
+- [⛔ Скіл ecr-subtask-gates 23.11](human-skill-ecr-subtask-gates-1123.md) — повний цикл E0–E10; використовувати завжди, без нагадування
+- [⛔ Методології без втрат 24.11](human-ms-lossless-transition-1124.md) — лише Script; формульні версії конвертувати з паритетом, не ховати
+- [⛔ b12 = усе в роботі 24.11](human-b12-all-in-progress-1124.md) — на стенд усі поточні зміни; що не встигає — таблиця до вікна
+- [⛔ rpt.Report* прибрати, SSRS-дані лишити 24.11](human-rpt-snapshots-drop-ssrs-data-1124.md) — доказ «не потрібні» перед DROP; розрахунки/методології — у rpt-видах
+- [⛔ SSD C:/G:/H:, HDD D:/E:/F: 24.11](disks-ssd-vs-hdd-1124.md) — копії й scratch-бази на C:\ecr-wt, C:\EcrData; HDD лише бекапи
+- [⛔ GO вікно b12 вночі 24.11](human-b12-overnight-window-go-1124.md) — після готовності всього; не 02:15/03:30; зранку звіт + UI-прохід
+- [⛔ Склад газів редагується в ECR 24.11](human-gas-composition-in-ecr-1124.md) — перенос з FLERT з версіями, пункт меню; у b12 (вікно чекає)
+- [⛔ LAND_UI ~200 документів у проєкті 25.11](human-land-ui-200-docs-1125.md) — не «один документ»; перф і UI — на масштаб 200
+- [⛔ SG-факели на складі газу 25.11](human-sg-flaring-decisions-1125.md) — усі три разом, PI AF події, EOR виправити, дефолти
+- [⛔ Один проєкт на live 25.11](human-one-project-live-1125.md) — LANDUI2026: Land 96, HSE400 98, HSE401 93, тест 100; решту видалити
+- [⛔ 99 %: HANDOVER + скіл + git 25.11](human-handover-at-99-skill-transfer-1125.md) — повний хадовер, інструкція перенесення скіла на інший ПК, пуш гілки handover/* (без секретів)
+- [⛔ Джерела: Windows І логін/пароль 26.11](human-source-credentials-both-1126.md) — integ-source-credentials R3; пароль зашифровано, не в адресі
