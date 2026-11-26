@@ -1041,7 +1041,6 @@ export function DocumentPage(): JSX.Element {
             </Suspense>
           ),
         },
-    [issuePanels, tables.data, session.data, documentId, openUnmatchedRow, openHse400, openSource, narrow],
   );
 
   /*
@@ -1204,6 +1203,15 @@ export function DocumentPage(): JSX.Element {
                   stateOverride={sheetYearState}
                 />
                 <DocumentSaveState readOnly={gridReadOnly} periodKey={periodKey} />
+                {/* ✎ DOCUX L8 (№9): копія на місяць — «Reopened until …» чипом у рядку стану (рік — `ReopenedMonthsChip` у шапці). */}
+                {yearLayout ? null : periodReopen.banner}
+                {/* PM-11 → ✎ DOCUX L8 (№11): «з дозволу» — чип у рядку стану (одна таблиця — чип і «Refresh»; кілька — перелік
+                    у спливаючому вікні). Чанк вантажиться лише коли така таблиця є; додаткових запитів немає. */}
+                {active.tables.some((table) => table.permitBinding != null) && (
+                  <Suspense fallback={null}>
+                    <PermitRefreshStrip documentId={documentId} periodKey={periodKey} tables={active.tables} readOnly={readOnly} />
+                  </Suspense>
+                )}
                 {/* ✎ D-446: застарілість не визначена — частину документа читачеві закрито (те саме, що в рядку переліку). */}
                 {document.resultsStaleUndetermined === 'PartiallyHidden' && <StaleResultsUndeterminedMark />}
               </>
@@ -1234,7 +1242,6 @@ export function DocumentPage(): JSX.Element {
 
       {/* ✎ L7c → b14 doc-notices-compact: «рік» — відкриті місяці року лише чипом у шапці (банер-список прибрано);
           копія на місяць — банер свого місяця, як було (у ньому причина й хто відкрив). */}
-      {yearLayout ? null : periodReopen.banner}
       {periodReopen.dialog}
 
       {/* EA-5b: передача місяця - «Місяць передано вам», «Заповнено», коментар повернення. Права комірок рішає сервер. */}
@@ -1242,13 +1249,6 @@ export function DocumentPage(): JSX.Element {
         <ExecutorStrip documentId={documentId} periodKey={periodKey} />
       </Suspense>
 
-      {/* PM-11: таблиці активного аркуша, що читають дозвіл (permitBinding у відповіді …/tables), — позначка і
-          «Оновити з дозволу». Чанк вантажиться лише коли така таблиця є; додаткових запитів немає. */}
-      {active !== undefined && active.tables.some((table) => table.permitBinding != null) && (
-        <Suspense fallback={null}>
-          <PermitRefreshStrip documentId={documentId} periodKey={periodKey} tables={active.tables} readOnly={readOnly} />
-        </Suspense>
-      )}
 
       {/* `UI-42`: чому тут нічого не змінити на телефоні — тим самим місцем, що й інші блокування.
           Аркуш і так закритий (банер вище) — другий банер не потрібен. */}

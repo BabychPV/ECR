@@ -1,3 +1,4 @@
+import { NoticeSlot } from '@/features/documents/notices/NoticeSlot';
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
@@ -113,7 +114,9 @@ export function useSheetLiveRefresh({ documentId, periodKey, tables }: SheetLive
   const change = changes.change;
   const banner = (
     <div className="ecr-live-host" role="status" aria-live="polite" aria-atomic="true" data-testid="sheet-live-host">
+      {/* ✎ DOCUX L7 (пріоритет 7): чужий перехід стану й чужа зміна — у рядку повідомлень сторінки, не банерами. */}
       {status.notice !== null && (
+        <NoticeSlot id={`live-status:${String(sheetDefId)}`} priority={7} tone="info" text={statusBannerText(status.notice)} onDismiss={status.dismiss} testId="notice-live-status">
         <div className="ecr-live-banner" data-testid="sheet-status-banner" data-live-status={status.notice.state}>
           <span className="ecr-live-banner-text">{statusBannerText(status.notice)}</span>
           <button
@@ -125,8 +128,17 @@ export function useSheetLiveRefresh({ documentId, periodKey, tables }: SheetLive
             {t('common.close')}
           </button>
         </div>
+        </NoticeSlot>
       )}
       {change !== null && (
+        <NoticeSlot
+          id={`live-change:${String(sheetDefId)}`}
+          priority={7}
+          tone="info"
+          text={bannerText(change)}
+          actions={[{ label, run: () => void run(change.tables.keys()), keys: 'Shift+F5', testId: 'notice-live-refresh' }]}
+          testId="notice-live-change"
+        >
         <div className="ecr-live-banner" data-testid="sheet-live-banner" data-live-tables={[...change.tables.keys()].join(',')}>
           <span className="ecr-live-banner-text">{bannerText(change)}</span>
           <button
@@ -139,6 +151,7 @@ export function useSheetLiveRefresh({ documentId, periodKey, tables }: SheetLive
             {label}
           </button>
         </div>
+        </NoticeSlot>
       )}
     </div>
   );

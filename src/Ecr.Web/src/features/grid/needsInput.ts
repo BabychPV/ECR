@@ -37,6 +37,8 @@ export interface NeedsInputCell {
   readonly rowIndex: number;
   /** Індекс колонки даних у зрізі. */
   readonly columnIndex: number;
+  /** ✎ DOCUX L9: місяць-власник колонки (річна розкладка); `null`/немає — колонка без місяця. */
+  readonly ownerPeriodKey?: number | null;
 }
 
 /** Колонка зрізу — лише те, що потрібно моделі. */

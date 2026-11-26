@@ -1,3 +1,4 @@
+import { NoticeSlot } from '@/features/documents/notices/NoticeSlot';
 import { useEffect, useState, type JSX } from 'react';
 import { Stack, Text } from '@mantine/core';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
@@ -148,11 +149,47 @@ export function RestoreEditsBanner({ documentId, userId }: RestoreEditsBannerPro
     }
   }
 
-  if (lost === null) return outcomeBanner(outcome, () => setOutcome(null));
+  // ✎ DOCUX L7: підсумок відновлення — у рядку повідомлень (перелік конфліктів — у Status).
+  if (lost === null) {
+    if (outcome === null) return <></>;
+    return (
+      <NoticeSlot
+        id="restore-edits-result"
+        priority={1}
+        tone={outcome.conflicts.length === 0 ? 'info' : 'warning'}
+        text={t('document.restoreEdits.applied', { count: outcome.applied })}
+        onDismiss={() => setOutcome(null)}
+        testId="notice-restore-result"
+      >
+        {outcomeBanner(outcome, () => setOutcome(null))}
+      </NoticeSlot>
+    );
+  }
 
   const stored = restorableCount(lost);
+  const discard = (): void => {
+    if (userId !== undefined) clearLostEdits(userId);
+    setLost(null);
+  };
+  const restore = (): void => {
+    if (userId === undefined || busy) return;
+    void apply(lost, userId);
+  };
 
+  // ✎ DOCUX L7 (пріоритет 1): правки, що загинули з сесією, — рішення людини потрібне до роботи (`blocking`).
   return (
+    <NoticeSlot
+      id="restore-edits"
+      priority={1}
+      blocking
+      tone="warning"
+      text={t('document.restoreEdits.text', { count: stored })}
+      actions={[
+        { label: t('document.restoreEdits.apply'), run: restore, testId: 'notice-restore-apply' },
+        { label: t('document.restoreEdits.discard'), run: discard },
+      ]}
+      testId="notice-restore-edits"
+    >
     <Banner
       tone="warning"
       testId="restore-edits"
@@ -193,6 +230,7 @@ export function RestoreEditsBanner({ documentId, userId }: RestoreEditsBannerPro
         },
       ]}
     />
+    </NoticeSlot>
   );
 }
 

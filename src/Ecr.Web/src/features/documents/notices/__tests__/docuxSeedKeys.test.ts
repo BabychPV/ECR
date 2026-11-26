@@ -21,9 +21,10 @@ const files = [
   'src/features/documents/calcStatus/CalcStatusChip.tsx',
   'src/features/workflow/submitGuide.tsx',
   'src/features/workflow/SheetActions.tsx',
+  'src/features/editAssignments/ExecutorStrip.tsx',
 ];
 const Docux =
-  /'((?:grid\.needsInput|grid\.legend|grid\.columnRequiredSomeRows|grid\.keys\.nextRequired|calcStatus|inspector\.info\.(?:calculatedBy|calculatedByStep|readBy|readByRequired)|inspector\.tabStatus|document\.notices\.(?:lineLabel|more|none|goToNext|notSavedRequired|cannotSubmitRequired)|workflow\.recalculate(?:Sheet|All)Approved)[A-Za-z0-9.]*)'/g;
+  /'((?:grid\.needsInput|grid\.legend|grid\.columnRequiredSomeRows|grid\.keys\.nextRequired|calcStatus|inspector\.info\.(?:calculatedBy|calculatedByStep|readBy|readByRequired)|inspector\.tabStatus|document\.notices\.(?:lineLabel|more|none|goToNext|notSavedRequired|cannotSubmitRequired|conflict|review|assignedToYou)|workflow\.recalculate(?:Sheet|All)Approved)[A-Za-z0-9.]*)'/g;
 
 const used = new Set<string>();
 for (const file of files) {

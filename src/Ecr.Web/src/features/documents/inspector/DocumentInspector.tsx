@@ -54,6 +54,7 @@ import { SheetLog, type InspectorSheet, type SheetLogTarget } from './SheetLog';
 import './inspector.css';
 import { provenanceLines, useCellProvenance } from './cellProvenance';
 import { NoticeList, useNoticeCount } from '../notices/NoticeLine';
+import { useStatusRequests } from '../notices/useOpenStatus';
 
 export type { InspectorSheet, SheetLogTarget } from './SheetLog';
 
@@ -201,6 +202,11 @@ export function DocumentInspector({
     focusTabOnOpen.current = takeFocus;
     setPanel(next);
   };
+
+  // ✎ DOCUX L7: «Details / Review» повідомлення (рядок над сіткою) відкриває вкладку Status.
+  const openStatusRef = useRef(() => open('status'));
+  openStatusRef.current = () => open('status');
+  useStatusRequests(useCallback(() => openStatusRef.current(), []));
 
   const close = (refocus: boolean): void => {
     setPanel(null);

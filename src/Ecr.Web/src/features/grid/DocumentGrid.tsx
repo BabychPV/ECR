@@ -144,10 +144,11 @@ import { GridAriaPlugin } from './gridAria';
 import { attachStickyGroupLabels, withHeaderGroups } from './headerGroups';
 import { installTruncationTooltip } from './truncationTooltip';
 import { mergePatchNotices, PatchNoticesAlert, type PatchNotice } from './patchNotices';
-import { dedupeRequiredInputs } from './requiredInputsAlert';
+import { dedupeRequiredInputs, RequiredInputsBlockedAlert } from './requiredInputsAlert';
 import { needsInputByColumn, needsInputCells, needsInputMaps, type NeedsInputCell } from './needsInput';
 import { clearNeedsInput, installNeedsInputKeys, publishNeedsInput, stepNeedsInput, useNeedsInputEmphasis } from './needsInputStore';
-import { usePublishNotice } from '@/features/documents/notices/noticeStore';
+import { useNoticeHost } from '@/features/documents/notices/noticeStore';
+import { useOpenStatus } from '@/features/documents/notices/useOpenStatus';
 import { NoticeRow } from '@/features/documents/notices/NoticeRow';
 import { NeedsInputCounter } from './NeedsInputCounter';
 import { calculationIssuesKey, calculationIssuesYearKey, getCalculationIssues } from '@/features/calculationIssues/api';
@@ -1568,7 +1569,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // ✎ DOCUX L7/L9 (замість банера №24 «Cannot save: N required column(s) missing»): рядок повідомлень — «Not saved: N
   // required cells empty · Go to next (F8)»; знімається, щойно ці комірки заповнено.
   const blockedLive = needsCells.filter((cell) => rejectedKeys.has(cellKey(cell.rowKey, cell.columnCode))).length;
-  usePublishNotice(
+  const blockedHosted = useNoticeHost(
     `required-blocked:${String(tableInstanceId)}:${String(periodKey)}`,
     blockedLive === 0
       ? null
@@ -1583,13 +1584,20 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             />
           ),
         },
-    [blockedLive],
   );
   const needsByColumn = useMemo(() => needsInputByColumn(needsCells), [needsCells]);
   const labeledForNeeds = data !== undefined && hasRowLabels(data);
   useEffect(() => {
-    publishNeedsInput({ tableInstanceId, tableDefId, periodKey, order: tableInstanceId, labelOffset: labeledForNeeds ? 1 : 0, cells: needsCells });
-  }, [needsCells, tableInstanceId, tableDefId, periodKey, labeledForNeeds]);
+    publishNeedsInput({
+      tableInstanceId,
+      tableDefId,
+      periodKey,
+      order: tableInstanceId,
+      labelOffset: labeledForNeeds ? 1 : 0,
+      // ✎ DOCUX L9: місяць колонки — щоб «Submit: квітень» рахував лише свої порожні комірки.
+      cells: needsCells.map((cell) => ({ ...cell, ownerPeriodKey: columnMonths.get(cell.columnCode)?.periodKey ?? null })),
+    });
+  }, [needsCells, tableInstanceId, tableDefId, periodKey, labeledForNeeds, columnMonths]);
   useEffect(() => () => clearNeedsInput(tableInstanceId, periodKey), [tableInstanceId, periodKey]);
   useEffect(() => installNeedsInputKeys(), []);
   const needsHeader = useMemo(
@@ -2995,6 +3003,176 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // ✎ D9: грант не дозволяє правити жодну вхідну комірку — «Add row» вимкнена з причиною.
   const addRowDenial = useMemo(() => (data === undefined ? null : addRowDenialOf(data)), [data]);
 
+  /*
+   * ✎ DOCUX L7: повідомлення сітки — у рядку повідомлень сторінки (один рядок над сітками) і повністю — у вкладці Status
+   * інспектора. Збій збереження й конфлікт зупиняють наступну дію — `blocking` (у рядку завжди видимі) + позначки комірок.
+   * Без рядка (сітка поза сторінкою документа) — блоки на місці, як і раніше.
+   */
+  const openStatus = useOpenStatus();
+  const tableKey = `${String(tableInstanceId)}:${String(periodKey)}`;
+  const saveErrorBlock = saveErrorText !== null ? (
+        // ⛔ Q-30x (High): ЄДИНЕ місце, де сказано, ЧОМУ не збереглося.
+        // Текст — рівно той, що назвав сервер (ФВ-14.24): код розрізняє
+        // причини, текст — людині.
+        //
+        // ✎ `U-17`: заголовок більше не відсилає «див. помилку вище» — та
+        // помилка і є цей самий блок, а над ним лишилася тільки коротка
+        // позначка в рядку кнопок. Одна відмова — одне повідомлення.
+        <Alert color="statusError" title={t('grid.saveError')} role="alert">
+          <Text size="sm">{saveErrorText}</Text>
+          {saveError !== null && splitRefusal !== null && tableDefId !== undefined && (
+            // ✎ (j) j3: the refusal names the month cells; each opens its split.
+            <Group gap="xs" mt="xs" data-testid="save-error-split">
+              {splitRefusal.cells.map((cell) => (
+                <Button
+                  key={`${cell.rowKey}:${cell.columnCode}`}
+                  size="xs"
+                  variant="subtle"
+                  onClick={() =>
+                    requestCellSplit({ documentId, periodKey, tableInstanceId, tableDefId, sheetCopyId, rowKey: cell.rowKey, columnCode: cell.columnCode })
+                  }
+                >
+                  {t('permits.split.action', {
+                    column: data?.columns.find((column) => column.code === cell.columnCode)?.header ?? cell.columnCode,
+                  })}
+                </Button>
+              ))}
+            </Group>
+          )}
+          {saveError !== null && saveErrorReasons.length > 0 && (
+            // ✎ D2: правило, що відхилило запис, — з посиланням на комірку (колонка · рядок).
+            <Stack gap="xs" mt="xs" data-testid="save-error-reasons">
+              {saveErrorReasons.slice(0, SaveErrorReasonsLimit).map((reason) => {
+                const header =
+                  data?.columns.find((column) => column.code === reason.columnCode)?.header ?? reason.columnCode;
+                // ✎ Живий прохід 10.11: рядок без підпису (динамічний) — «row N», а не шістнадцятковий ключ.
+                const known = reason.rowKey.length > 0 && data?.rows.some((candidate) => candidate.rowKey === reason.rowKey);
+                const place = known ? `${header} · ${rowDisplayName(data, reason.rowKey)}` : header;
+
+                return (
+                  <Text size="sm" key={`${reason.rowKey}:${reason.columnCode}:${reason.message}`}>
+                    {`${place}: ${reason.message}`}
+                  </Text>
+                );
+              })}
+              {saveErrorReasons.length > SaveErrorReasonsLimit && <Text size="sm">…</Text>}
+            </Stack>
+          )}
+        </Alert>
+  ) : null;
+  const saveErrorHosted = useNoticeHost(
+    `save-error:${tableKey}`,
+    saveErrorBlock === null
+      ? null
+      : {
+          priority: 2,
+          blocking: true,
+          render: () => (
+            <NoticeRow
+              tone="error"
+              text={`${t('grid.saveError')}: ${saveErrorText ?? ''}`}
+              testId="notice-save-error"
+              actions={[
+                ...(pending.size > 0 ? [{ label: t('grid.retrySave', { count: pending.size }), run: () => void save([...pending.values()]) }] : []),
+                { label: t('document.notices.details'), run: openStatus },
+              ]}
+            />
+          ),
+          renderFull: () => saveErrorBlock,
+        },
+  );
+  const roundedBlock = rounded.length > 0 && roundedNoticeOpen ? (
+        // ⛔ Повідомлення, а не діалог підтвердження (ФВ-9.16c). Діалог на
+        // кожну вставку з Excel закривали б не читаючи — і правило «мовчки
+        // округлювати не можна ніде» перестало б працювати саме там, де воно
+        // потрібне найбільше.
+        <Alert
+          color="violet"
+          title={t('grid.roundedTitle', { count: rounded.length })}
+          withCloseButton
+          closeButtonLabel={t('common.close')}
+          onClose={() => setRoundedNoticeOpen(false)}
+          data-testid="grid-rounded-notice"
+        >
+          <Group gap="sm">
+            <Text size="sm">{t('grid.roundedHint')}</Text>
+            <Button variant="subtle" onClick={() => setShowRounded(true)}>
+              {t('grid.roundedShow')}
+            </Button>
+          </Group>
+        </Alert>
+  ) : null;
+  const roundedHosted = useNoticeHost(
+    `rounded:${tableKey}`,
+    roundedBlock === null
+      ? null
+      : {
+          priority: 8,
+          render: () => (
+            <NoticeRow
+              tone="info"
+              text={t('grid.roundedTitle', { count: rounded.length })}
+              testId="notice-rounded"
+              actions={[{ label: t('grid.roundedShow'), run: () => setShowRounded(true) }]}
+              onDismiss={() => setRoundedNoticeOpen(false)}
+            />
+          ),
+        },
+  );
+  const conflictBlock = shownConflict !== null && data !== undefined ? (
+        // ⛔ «Перезаписати мовчки» не є опцією: людина бачить своє і чуже
+        // значення поруч, чия правка і коли, — і вирішує сама (`B-09`).
+        <ConflictPanel
+          conflict={shownConflict}
+          rowLabel={(rowKey) => {
+            const row = data.rows.find((candidate) => candidate.rowKey === rowKey);
+
+            return row === undefined ? rowKey : rowLabelOf(row);
+          }}
+          columnHeader={(code) => data.columns.find((column) => column.code === code)?.header ?? code}
+          busy={isPending}
+          onKeepMine={() => void keepMine()}
+          onDiscardMine={discardMine}
+        />
+  ) : null;
+  const conflictHosted = useNoticeHost(
+    `conflict:${tableKey}`,
+    conflictBlock === null
+      ? null
+      : {
+          priority: 3,
+          blocking: true,
+          render: () => (
+            <NoticeRow
+              tone="error"
+              text={t('document.notices.conflict')}
+              testId="notice-conflict"
+              actions={[{ label: t('document.notices.review'), run: openStatus, testId: 'notice-conflict-review' }]}
+            />
+          ),
+          renderFull: () => conflictBlock,
+        },
+  );
+  const patchBlock = <PatchNoticesAlert notices={patchNotices} onDismiss={() => setPatchNotices([])} />;
+  const patchHosted = useNoticeHost(
+    `patch-notices:${tableKey}`,
+    patchNotices.length === 0
+      ? null
+      : {
+          priority: 8,
+          render: () => (
+            <NoticeRow
+              tone={patchNotices.some((notice) => notice.severity === 'Warning') ? 'warning' : 'info'}
+              text={t('grid.patchNoticesTitle', { count: patchNotices.length })}
+              testId="notice-patch"
+              actions={[{ label: t('document.notices.details'), run: openStatus }]}
+              onDismiss={() => setPatchNotices([])}
+            />
+          ),
+          renderFull: () => patchBlock,
+        },
+  );
+
   return (
     /*
      * ⛔ Чотири стани і тут (`ФВ-14.21`). Раніше зріз мав два: «вантажиться» і
@@ -3275,102 +3453,21 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         )}
       </Group>
 
-      {saveErrorText !== null && (
-        // ⛔ Q-30x (High): ЄДИНЕ місце, де сказано, ЧОМУ не збереглося.
-        // Текст — рівно той, що назвав сервер (ФВ-14.24): код розрізняє
-        // причини, текст — людині.
-        //
-        // ✎ `U-17`: заголовок більше не відсилає «див. помилку вище» — та
-        // помилка і є цей самий блок, а над ним лишилася тільки коротка
-        // позначка в рядку кнопок. Одна відмова — одне повідомлення.
-        <Alert color="statusError" title={t('grid.saveError')} role="alert">
-          <Text size="sm">{saveErrorText}</Text>
-          {saveError !== null && splitRefusal !== null && tableDefId !== undefined && (
-            // ✎ (j) j3: the refusal names the month cells; each opens its split.
-            <Group gap="xs" mt="xs" data-testid="save-error-split">
-              {splitRefusal.cells.map((cell) => (
-                <Button
-                  key={`${cell.rowKey}:${cell.columnCode}`}
-                  size="xs"
-                  variant="subtle"
-                  onClick={() =>
-                    requestCellSplit({ documentId, periodKey, tableInstanceId, tableDefId, sheetCopyId, rowKey: cell.rowKey, columnCode: cell.columnCode })
-                  }
-                >
-                  {t('permits.split.action', {
-                    column: data?.columns.find((column) => column.code === cell.columnCode)?.header ?? cell.columnCode,
-                  })}
-                </Button>
-              ))}
-            </Group>
-          )}
-          {saveError !== null && saveErrorReasons.length > 0 && (
-            // ✎ D2: правило, що відхилило запис, — з посиланням на комірку (колонка · рядок).
-            <Stack gap="xs" mt="xs" data-testid="save-error-reasons">
-              {saveErrorReasons.slice(0, SaveErrorReasonsLimit).map((reason) => {
-                const header =
-                  data?.columns.find((column) => column.code === reason.columnCode)?.header ?? reason.columnCode;
-                // ✎ Живий прохід 10.11: рядок без підпису (динамічний) — «row N», а не шістнадцятковий ключ.
-                const known = reason.rowKey.length > 0 && data?.rows.some((candidate) => candidate.rowKey === reason.rowKey);
-                const place = known ? `${header} · ${rowDisplayName(data, reason.rowKey)}` : header;
+      {!saveErrorHosted && saveErrorBlock}
 
-                return (
-                  <Text size="sm" key={`${reason.rowKey}:${reason.columnCode}:${reason.message}`}>
-                    {`${place}: ${reason.message}`}
-                  </Text>
-                );
-              })}
-              {saveErrorReasons.length > SaveErrorReasonsLimit && <Text size="sm">…</Text>}
-            </Stack>
-          )}
-        </Alert>
-      )}
+      {!roundedHosted && roundedBlock}
 
-      {rounded.length > 0 && roundedNoticeOpen && (
-        // ⛔ Повідомлення, а не діалог підтвердження (ФВ-9.16c). Діалог на
-        // кожну вставку з Excel закривали б не читаючи — і правило «мовчки
-        // округлювати не можна ніде» перестало б працювати саме там, де воно
-        // потрібне найбільше.
-        <Alert
-          color="violet"
-          title={t('grid.roundedTitle', { count: rounded.length })}
-          withCloseButton
-          closeButtonLabel={t('common.close')}
-          onClose={() => setRoundedNoticeOpen(false)}
-          data-testid="grid-rounded-notice"
-        >
-          <Group gap="sm">
-            <Text size="sm">{t('grid.roundedHint')}</Text>
-            <Button variant="subtle" onClick={() => setShowRounded(true)}>
-              {t('grid.roundedShow')}
-            </Button>
-          </Group>
-        </Alert>
-      )}
-
-      {shownConflict !== null && data !== undefined && (
-        // ⛔ «Перезаписати мовчки» не є опцією: людина бачить своє і чуже
-        // значення поруч, чия правка і коли, — і вирішує сама (`B-09`).
-        <ConflictPanel
-          conflict={shownConflict}
-          rowLabel={(rowKey) => {
-            const row = data.rows.find((candidate) => candidate.rowKey === rowKey);
-
-            return row === undefined ? rowKey : rowLabelOf(row);
-          }}
-          columnHeader={(code) => data.columns.find((column) => column.code === code)?.header ?? code}
-          busy={isPending}
-          onKeepMine={() => void keepMine()}
-          onDiscardMine={discardMine}
-        />
-      )}
+      {!conflictHosted && conflictBlock}
 
       {/* ⛔ Директива «обов'язкові вхідні колонки методології»: Block — батч ВІДХИЛЕНО (ECR-CALC-0437),
           комірки лишаються dirty, перелік розгорнуто. Warn (запис ПРОЙШОВ) — кнопкою в рядку інструментів вище
           (`RequiredInputsSummary`, ✎ 25.11: не штовхає сітку під час введення). */}
       {/* ✎ DOCUX L7: Block (запис відхилено) — у рядку повідомлень над сіткою (`required-blocked`), комірки — з рамкою 2 px. */}
+      {!blockedHosted && (
+        <RequiredInputsBlockedAlert cells={requiredInputBlocked} columns={data?.columns ?? []} rows={data?.rows ?? []} />
+      )}
 
-      <PatchNoticesAlert notices={patchNotices} onDismiss={() => setPatchNotices([])} />
+      {!patchHosted && patchBlock}
 
       {/* ⛔ `UI-08`: рядок формули НАД сіткою — там, де він стоїть в Excel і
           де око шукає «що в комірці, на якій я стою». Під сіткою його

@@ -1,3 +1,4 @@
+import { NoticeSlot } from '@/features/documents/notices/NoticeSlot';
 import { useState, type JSX } from 'react';
 import { Alert, Anchor, Badge, Button, Group, List, Stack, Text } from '@mantine/core';
 import type { DocumentTableDto } from '@/api/types';
@@ -58,6 +59,19 @@ export function HeaderSplitBanner({ documentId, periodKey, tables, readOnly, onR
   return (
     <>
       {pending.length > 0 && (
+        // ✎ DOCUX L7 (пріоритет 5): «потрібен поділ рядків» — у рядку повідомлень; перелік рядків — у Status.
+        <NoticeSlot
+          id="header-split"
+          priority={5}
+          tone="warning"
+          text={t('permits.header.bannerSplitTitle', {
+            month: monthLabel,
+            rowCount: formatCount(rowCount, 'permits.headerRows'),
+            date: after === undefined ? '' : dottedDate(after.dayFrom),
+          })}
+          actions={readOnly ? [] : [{ label: t('permits.header.splitAll'), run: () => setSplitting(pending) }]}
+          testId="notice-header-split"
+        >
         <Alert
           color="statusWarning"
           variant="light"
@@ -134,6 +148,7 @@ export function HeaderSplitBanner({ documentId, periodKey, tables, readOnly, onR
             )}
           </Stack>
         </Alert>
+        </NoticeSlot>
       )}
       {splitting !== null && (
         <HeaderSplitDialog documentId={documentId} periodKey={periodKey} lines={splitting} slices={slices} onClose={() => setSplitting(null)} />

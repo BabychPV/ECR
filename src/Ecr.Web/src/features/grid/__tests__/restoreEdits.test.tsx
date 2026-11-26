@@ -293,12 +293,13 @@ describe('відновлення незбережених правок післ�
 
       await documentShown();
 
-      const banner = await screen.findByTestId('restore-edits', {}, { timeout: SettleTimeout });
+      // ✎ DOCUX L7: на сторінці документа пропозиція — у рядку повідомлень (рішення потрібне — завжди видима).
+      const banner = await screen.findByTestId('notice-restore-edits', {}, { timeout: SettleTimeout });
       expect(banner.textContent).toContain('⟦document.restoreEdits.text (count=3)⟧');
 
       fireEvent.click(screen.getByRole('button', { name: '⟦document.restoreEdits.apply⟧' }));
 
-      await screen.findByTestId('restore-edits-result', {}, { timeout: SettleTimeout });
+      await screen.findByTestId('notice-restore-result', {}, { timeout: SettleTimeout });
 
       /*
        * ⛔ Головне твердження: правка стала звичайною незбереженою зміною
@@ -314,8 +315,10 @@ describe('відновлення незбережених правок післ�
         restored[0]?.edits.map((edit) => `${edit.rowKey}.${edit.columnCode}=${String(edit.value)}`).sort(),
       ).toEqual(['r1.A=5', 'r2.B=6']);
 
-      // ⛔ Конфліктну правку НЕ застосовано мовчки: її названо на екрані.
-      const conflicts = screen.getAllByTestId('restore-edits-conflict');
+      // ⛔ Конфліктну правку НЕ застосовано мовчки: її названо на екрані — повним переліком у вкладці Status
+      // (✎ DOCUX L7: «Details» підсумку в рядку повідомлень).
+      fireEvent.click(screen.getByRole('button', { name: '⟦document.notices.details⟧' }));
+      const conflicts = await screen.findAllByTestId('restore-edits-conflict', {}, { timeout: SettleTimeout });
       expect(conflicts).toHaveLength(1);
       expect(conflicts[0]?.textContent).toContain('r3');
 
@@ -349,7 +352,7 @@ describe('відновлення незбережених правок післ�
       show(`/documents/${String(DocumentId)}`);
       await documentShown();
 
-      expect(screen.queryByTestId('restore-edits')).toBeNull();
+      expect(screen.queryByTestId('notice-restore-edits')).toBeNull();
       expect(pendingSlices()).toHaveLength(0);
     },
     SlowEnvTimeout,
@@ -366,11 +369,11 @@ describe('відновлення незбережених правок післ�
       show(`/documents/${String(DocumentId)}`);
       await documentShown();
 
-      await screen.findByTestId('restore-edits', {}, { timeout: SettleTimeout });
+      await screen.findByTestId('notice-restore-edits', {}, { timeout: SettleTimeout });
       fireEvent.click(screen.getByRole('button', { name: '⟦document.restoreEdits.discard⟧' }));
 
       await waitFor(() => {
-        expect(screen.queryByTestId('restore-edits')).toBeNull();
+        expect(screen.queryByTestId('notice-restore-edits')).toBeNull();
       });
 
       // ⛔ Відхилення — це відмова від правок, а не відкладання: у сховищі
@@ -393,7 +396,7 @@ describe('відновлення незбережених правок післ�
       show(`/documents/${String(DocumentId)}`);
       await documentShown();
 
-      expect(screen.queryByTestId('restore-edits')).toBeNull();
+      expect(screen.queryByTestId('notice-restore-edits')).toBeNull();
       expect(pendingSlices()).toHaveLength(0);
 
       // ⚠ І слід власника на місці: чужий сеанс його не витратив.

@@ -8,6 +8,9 @@ import { DefaultLanguage, setLanguage } from '@/shared/i18n';
 import { cancelAutosave } from '../autosave';
 import { resetPending } from '../pendingStore';
 import { DocumentGrid } from '../DocumentGrid';
+import { MemoryRouter } from 'react-router-dom';
+import { NoticeLine } from '@/features/documents/notices/NoticeLine';
+import { resetNotices } from '@/features/documents/notices/noticeStore';
 
 /**
  * `decimal` приходить РЯДКОМ (коміт `e470777a`) — шлях цілком: відповідь
@@ -183,11 +186,13 @@ function mockServer(): void {
   );
 }
 
-function show(): void {
+function show(withNoticeLine = false): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
     <MantineProvider>
+      <MemoryRouter>
+      {withNoticeLine && <NoticeLine />}
       <QueryClientProvider client={client}>
         <DocumentGrid
           documentId={1}
@@ -199,6 +204,7 @@ function show(): void {
           maxDynamicRows={null}
         />
       </QueryClientProvider>
+      </MemoryRouter>
     </MantineProvider>,
   );
 }
@@ -429,4 +435,21 @@ describe('В: вставка шле на сервер РІВНО той рядо
     fireEvent.paste(stub, clipboard('1\t2.555\n'));
     expect(await screen.findByTestId('grid-rounded-notice')).toBeTruthy();
   });
+
+  it('DOCUX L7: на сторінці (є рядок повідомлень) «Rounded» — у рядку над сіткою з «Show the list» і хрестиком, не банером у сітці', async () => {
+    mockServer();
+    show(true);
+
+    const stub = await screen.findByTestId('revogrid-stub');
+    fireEvent.paste(stub, clipboard('1\t12.345\n'));
+    await waitFor(() => expect(patched).toHaveLength(1));
+
+    const row = await screen.findByTestId('notice-rounded');
+    expect(row.closest('[data-testid="document-notice-line"]')).not.toBeNull();
+    expect(screen.queryByTestId('grid-rounded-notice')).toBeNull();
+    fireEvent.click(row.querySelector('button[aria-label]') as HTMLElement);
+    await waitFor(() => expect(screen.queryByTestId('notice-rounded')).toBeNull());
+    resetNotices();
+  });
 });
+

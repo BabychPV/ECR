@@ -104,7 +104,15 @@ SELECT v.[Key], v.Lang, v.Val
     (N'calcStatus.lockedMonths', N'ru', N'{months}: закрыты — не пересчитываются'),
     (N'calcStatus.lockedMonths', N'kz', N'{months}: жабық — қайта есептелмейді'),
     (N'calcStatus.approvedMonths', N'ru', N'{months}: утверждены — показатели не пересчитываются'),
-    (N'calcStatus.approvedMonths', N'kz', N'{months}: бекітілген — көрсеткіштер қайта есептелмейді')
+    (N'calcStatus.approvedMonths', N'kz', N'{months}: бекітілген — көрсеткіштер қайта есептелмейді'),
+    (N'document.notices.conflict', N'ru', N'Другой пользователь изменил ячейки, которые вы правили, — выберите, какие значения оставить'),
+    (N'document.notices.conflict', N'kz', N'Басқа пайдаланушы сіз түзеткен ұяшықтарды өзгертті — қай мәндерді қалдыруды таңдаңыз'),
+    (N'document.notices.review', N'ru', N'Посмотреть'),
+    (N'document.notices.review', N'kz', N'Қарау'),
+    (N'document.notices.assignedToYou', N'ru', N'Назначено вам месяцев в этом документе: {count}'),
+    (N'document.notices.assignedToYou', N'kz', N'Осы құжатта сізге тағайындалған айлар: {count}'),
+    (N'grid.needsInput.otherTables', N'ru', N'Ещё не открыто таблиц ниже: {count} — они проверяются при подаче'),
+    (N'grid.needsInput.otherTables', N'kz', N'Төмендегі {count} кесте әлі ашылмаған — олар тапсыру кезінде тексеріледі')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -164,7 +172,11 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'calcStatus.failedHint', N'en', N'The last recalculation did not finish. Press Retry; if it fails again, send the code below to support.', 1),
     (N'calcStatus.retry', N'en', N'Retry', 1),
     (N'calcStatus.lockedMonths', N'en', N'{months}: closed — not recalculated', 1),
-    (N'calcStatus.approvedMonths', N'en', N'{months}: approved — figures are never recalculated', 1)
+    (N'calcStatus.approvedMonths', N'en', N'{months}: approved — figures are never recalculated', 1),
+    (N'document.notices.conflict', N'en', N'Someone else changed cells you edited — choose which values to keep', 1),
+    (N'document.notices.review', N'en', N'Review', 1),
+    (N'document.notices.assignedToYou', N'en', N'Months assigned to you on this document: {count}', 1),
+    (N'grid.needsInput.otherTables', N'en', N'{count} table(s) further down are not opened yet — they are checked when you submit', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO
