@@ -52,6 +52,14 @@ function connectionItems(source: DataSource): KeyValueItem[] {
     { label: t('sources.endpoint'), value: source.endpoint, mono: true },
     { label: t('sources.secondaryEndpoint'), value: source.secondaryEndpoint, mono: true },
     { label: t('sources.catalog'), value: source.catalog, mono: true },
+    // Для PiWebApi сервер віддає `Windows` без логіна — рядок «Authentication» мало що каже, тож лише для SQL-транспортів.
+    ...(source.transport === 'PiWebApi'
+      ? []
+      : [
+          { label: t('sources.authMode'), value: t(source.authMode === 'UserPassword' ? 'sources.authMode.UserPassword' : 'sources.authMode.Windows') },
+          { label: t('sources.userName'), value: source.userName, mono: true },
+          { label: t('sources.password'), value: source.hasPassword ? t('sources.passwordSet') : null },
+        ]),
     { label: t('sources.maxParallel'), value: formatNumber(source.maxParallel) },
     { label: t('sources.entities'), value: formatNumber(source.sourceEntities) },
     { label: t('sources.schedules'), value: formatNumber(source.collectionSchedules) },
@@ -268,6 +276,10 @@ export function DataSourceDrawer({
             sourceId={source.id}
             sourceName={dataSourceName(source)}
             onClose={() => setTesting(false)}
+            onEnterPassword={() => {
+              setTesting(false);
+              setEditing(true);
+            }}
           />
 
           {editing && (

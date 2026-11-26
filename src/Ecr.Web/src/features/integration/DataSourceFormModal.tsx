@@ -14,6 +14,15 @@ import {
   type SaveDataSourceBody,
 } from './dataSourceApi';
 import { DataSourcesQueryKey } from './dataSourcesKey';
+import { CredentialsStateKeys } from './credentialsStates';
+import { FormTestConnection } from './FormTestConnection';
+import {
+  credentialsDraftOf,
+  needsPasswordReentry,
+  SourceCredentialsFields,
+  supportsCredentials,
+  type CredentialsDraft,
+} from './SourceCredentialsFields';
 
 /** Транспорти, які знає сервер (`ExternalTransport`). */
 const Transports: readonly SaveDataSourceBody['transport'][] = ['PiWebApi', 'PiSqlClient', 'Sql'];
@@ -117,6 +126,8 @@ type FailedField =
   | 'secondaryEndpoint'
   | 'catalog'
   | 'secretConfirmation'
+  | 'userName'
+  | 'password'
   | 'confirmEndpointChange';
 
 /**
@@ -148,6 +159,9 @@ const FieldOfKey: Readonly<Record<string, FailedField>> = {
   'err.ECR-REQ-0422.dataSourceFieldNotRead': 'secondaryEndpoint',
   'err.ECR-REQ-0422.dataSourceCodeTaken': 'code',
   'err.ECR-REQ-0422.dataSourceSecretReentryRequired': 'secretConfirmation',
+  // P-1126-SRCCRED: адреса, транспорт чи логін змінились — пароль вводять заново, біля поля пароля.
+  'err.ECR-REQ-0422.dataSourcePasswordReentryRequired': 'password',
+  'err.ECR-REQ-0422.dataSourceCredentialsInvalid': 'userName',
   'err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed': 'confirmEndpointChange',
 };
 
@@ -178,8 +192,16 @@ export function fieldFailureOf(error: unknown): FieldFailure | null {
   return { field, text: t(key, typeof code === 'string' ? { code } : undefined) };
 }
 
+/** Відмова збереження «пароль не читається / відхилено» → ключ стану; `null` — відмова не про це. */
+function credentialsStateOf(error: unknown): string | null {
+  if (!(error instanceof EcrApiError)) return null;
+  const key = error.problem.extensions2?.['messageKey'];
+
+  return typeof key === 'string' && key in CredentialsStateKeys ? key : null;
+}
+
 /** Чернетка форми: рядки — як їх бачить людина, `null` лише в числі. */
-interface Draft {
+interface Draft extends CredentialsDraft {
   code: string;
   name: string;
   transport: SaveDataSourceBody['transport'];
@@ -206,7 +228,11 @@ function addressChanged(draft: Draft, source: DataSource | null): boolean {
 
 /** Правка адреси джерела БЕЗ секрету (Windows-автентифікація) потребує явного підтвердження. */
 export function needsEndpointConfirmation(draft: Draft, source: DataSource | null): boolean {
-  return source !== null && !source.hasSecret && addressChanged(draft, source);
+  // ⚠ Джерело з логіном і паролем (P-1126-SRCCRED) цього підтвердження не просить: зміна цілі там вимагає ввести
+  // пароль заново (`dataSourcePasswordReentryRequired`), а перехід на Windows — власного підтвердження.
+  return (
+    source !== null && source.authMode !== 'UserPassword' && !source.hasSecret && addressChanged(draft, source)
+  );
 }
 
 /**
@@ -240,6 +266,7 @@ function draftOf(source: DataSource | null): Draft {
     isActive: source?.isActive ?? true,
     secretConfirmation: '',
     confirmEndpointChange: false,
+    ...credentialsDraftOf(source),
   };
 }
 
@@ -255,6 +282,10 @@ function draftOf(source: DataSource | null): Draft {
 export function bodyOf(draft: Draft, base: DataSource | null): SaveDataSourceBody {
   const optional = (value: string): string | null => (value.trim().length === 0 ? null : value);
 
+  // ⚠ PiWebApi входу за логіном не має: джерело з логіном, що переїхало на PiWebApi, стає Windows (і пароль стирається).
+  const credentials = supportsCredentials(draft.transport);
+  const userPassword = credentials && draft.authMode === 'UserPassword';
+
   return {
     code: base?.code ?? draft.code,
     nameL10n: { ...(base?.nameL10n ?? {}), [language()]: draft.name },
@@ -268,6 +299,11 @@ export function bodyOf(draft: Draft, base: DataSource | null): SaveDataSourceBod
     secretConfirmation: draft.secretConfirmation.length === 0 ? null : draft.secretConfirmation,
     // `true` лише коли людина підтвердила й це правка (при створенні не потрібне).
     confirmEndpointChange: base !== null && draft.confirmEndpointChange,
+    authMode: credentials ? draft.authMode : base?.authMode === 'UserPassword' ? 'Windows' : null,
+    userName: userPassword ? draft.userName.trim() : null,
+    // ⛔ Лише введене ЦЬОГО разу; без пробілів по краях не обрізаємо — пароль може їх мати.
+    password: userPassword && draft.password.length > 0 ? draft.password : null,
+    clearPassword: draft.clearPassword || (!credentials && base?.authMode === 'UserPassword'),
   };
 }
 
@@ -342,6 +378,9 @@ function DataSourceForm({
   // про секрет-«Negotiate», клієнт — лише `hasSecret`.
   const [endpointAsked, setEndpointAsked] = useState(false);
 
+  // ⚠ Сервер попросив пароль заново (422 reentry, «не читається»/«відхилено»): поле лишається відкритим.
+  const [passwordAsked, setPasswordAsked] = useState(false);
+
   const save = useMutation({
     mutationFn: (body: SaveDataSourceBody) =>
       source === null ? createDataSource(body) : updateDataSource(source.id, body, rowVersion),
@@ -354,11 +393,16 @@ function DataSourceForm({
       const failed = fieldFailureOf(error)?.field;
       if (failed === 'secretConfirmation') setSecretAsked(true);
       if (failed === 'confirmEndpointChange') setEndpointAsked(true);
+      if (failed === 'password' || credentialsStateOf(error) !== null) setPasswordAsked(true);
     },
   });
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]): void => {
     setDraft((current) => ({ ...current, [key]: value }));
+  };
+
+  const patch = (changes: Partial<CredentialsDraft>): void => {
+    setDraft((current) => ({ ...current, ...changes }));
   };
 
   const onField = fieldFailureOf(save.error);
@@ -379,7 +423,15 @@ function DataSourceForm({
   const confirmNeeded = needsEndpointConfirmation(draft, source);
   const confirmShown = confirmNeeded || endpointAsked;
 
+  const userPassword = supportsCredentials(draft.transport) && draft.authMode === 'UserPassword';
+  const storedPassword = source !== null && source.authMode === 'UserPassword' && source.hasPassword;
+  const stateKey = credentialsStateOf(save.error);
+  const passwordNeeded =
+    userPassword &&
+    (!storedPassword || needsPasswordReentry(draft, source) || passwordAsked || stateKey !== null || draft.changingPassword);
+
   const incomplete =
+    (userPassword && (draft.userName.trim().length === 0 || (passwordNeeded && draft.password.length === 0))) ||
     draft.name.trim().length === 0 ||
     draft.endpoint.trim().length === 0 ||
     (source === null && draft.code.trim().length === 0) ||
@@ -510,6 +562,38 @@ function DataSourceForm({
           autoComplete="off"
           spellCheck={false}
           data-field="catalog"
+        />
+      )}
+
+      {supportsCredentials(draft.transport) && (
+        <SourceCredentialsFields
+          source={source}
+          draft={draft}
+          passwordRequired={passwordNeeded}
+          passwordError={onField?.field === 'password' ? onField.text : undefined}
+          userNameError={onField?.field === 'userName' ? onField.text : undefined}
+          stateKey={stateKey}
+          onChange={patch}
+        />
+      )}
+
+      {supportsCredentials(draft.transport) && (
+        <FormTestConnection
+          disabled={draft.endpoint.trim().length === 0 || (userPassword && draft.userName.trim().length === 0)}
+          onEnterPassword={() => patch({ changingPassword: true })}
+          build={() => {
+            const body = bodyOf(draft, source);
+            return {
+              ...(source === null ? {} : { sourceId: source.id }),
+              transport: body.transport,
+              endpoint: draft.endpoint,
+              secondaryEndpoint: body.secondaryEndpoint ?? null,
+              catalog: body.catalog ?? null,
+              authMode: body.authMode ?? 'Windows',
+              userName: body.userName ?? null,
+              password: body.password ?? null,
+            };
+          }}
         />
       )}
 

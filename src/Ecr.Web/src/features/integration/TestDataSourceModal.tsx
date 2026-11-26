@@ -6,6 +6,7 @@ import { formatCount } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { problemText } from '@/shared/ui/problemText';
+import { CredentialsStateKeys } from './credentialsStates';
 import { testDataSource, type DataSourceTestResult } from './dataSourceApi';
 
 /**
@@ -20,7 +21,7 @@ import { testDataSource, type DataSourceTestResult } from './dataSourceApi';
  */
 export type TestOutcome =
   | { readonly kind: 'ok'; readonly entities: number; readonly note: string | null }
-  | { readonly kind: 'failed'; readonly reason: string | null }
+  | { readonly kind: 'failed'; readonly reason: string | null; readonly key: string | null }
   | { readonly kind: 'running'; readonly detail: string | null };
 
 /** Причина, коли сервер не назвав ключа: та сама, що в категорії `other`. */
@@ -45,7 +46,7 @@ export function outcomeOf(result: DataSourceTestResult): TestOutcome {
 
   return result.ok
     ? { kind: 'ok', entities: result.entities, note: text }
-    : { kind: 'failed', reason: text };
+    : { kind: 'failed', reason: text, key: named.length > 0 ? named : null };
 }
 
 /**
@@ -83,11 +84,14 @@ export function TestDataSourceModal({
   sourceId,
   sourceName,
   onClose,
+  onEnterPassword,
 }: {
   readonly opened: boolean;
   readonly sourceId: number;
   readonly sourceName: string;
   readonly onClose: () => void;
+  /** Для «пароль не читається / відхилено»: відкрити правку з'єднання, щоб ввести пароль заново. */
+  readonly onEnterPassword?: (() => void) | undefined;
 }): JSX.Element {
   const [reason, setReason] = useState('');
 
@@ -128,7 +132,7 @@ export function TestDataSourceModal({
           autosize
         />
 
-        {outcome !== null && <OutcomeBanner outcome={outcome} />}
+        {outcome !== null && <OutcomeBanner outcome={outcome} onEnterPassword={onEnterPassword} />}
 
         {failure !== null && <ErrorAlert error={failure} />}
 
@@ -165,7 +169,13 @@ export function TestDataSourceModal({
  * збою запиту (`ErrorAlert`) не роль, а `data-test-outcome` і відсутність
  * коду кореляції.
  */
-function OutcomeBanner({ outcome }: { readonly outcome: TestOutcome }): JSX.Element {
+export function OutcomeBanner({
+  outcome,
+  onEnterPassword,
+}: {
+  readonly outcome: TestOutcome;
+  readonly onEnterPassword?: (() => void) | undefined;
+}): JSX.Element {
   switch (outcome.kind) {
     case 'ok':
       return (
@@ -180,6 +190,12 @@ function OutcomeBanner({ outcome }: { readonly outcome: TestOutcome }): JSX.Elem
           {/* `D15-06`: причини немає — немає й порожнього рядка. */}
           {outcome.reason !== null && outcome.reason.length > 0 && (
             <Text size="sm">{outcome.reason}</Text>
+          )}
+          {/* Єдина дія при «не читається / відхилено» — ввести пароль заново. */}
+          {onEnterPassword !== undefined && outcome.key !== null && outcome.key in CredentialsStateKeys && (
+            <Button variant="default" size="xs" mt="xs" onClick={onEnterPassword} data-enter-password="">
+              {t('sources.changePassword')}
+            </Button>
           )}
         </Alert>
       );

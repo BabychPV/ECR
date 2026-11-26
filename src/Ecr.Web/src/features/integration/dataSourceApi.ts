@@ -81,3 +81,35 @@ export function testDataSource(id: number, reason: string): Promise<DataSourceTe
     body: JSON.stringify({ reason }),
   });
 }
+
+/**
+ * Тіло «Test connection» з НЕЗБЕРЕЖЕНОЇ форми (DESIGN-source-credentials §13.1).
+ *
+ * TODO(P-1126-SRCCRED порція 3): ендпоінт `POST /api/v1/data-sources/test-connection` ще не в контракті
+ * (приходить із серверною порцією 3) — тип локальний, за §13.1. Після оновлення `schema.d.ts` замінити на
+ * `components['schemas'][...]` і прибрати цей тип.
+ *
+ * ⛔ `password` — лише те, що людина ввела в формі; збережений пароль сервер бере за `sourceId` при незмінній цілі.
+ */
+export interface TestConnectionBody {
+  readonly sourceId?: number;
+  readonly transport: SaveDataSourceBody['transport'];
+  readonly endpoint: string;
+  readonly secondaryEndpoint: string | null;
+  readonly catalog: string | null;
+  readonly authMode: 'Windows' | 'UserPassword';
+  readonly userName: string | null;
+  readonly password: string | null;
+  readonly reason: string;
+}
+
+/**
+ * Перевіряє з'єднання за значеннями форми, нічого не зберігаючи. Відповідь — та сама, що в `testDataSource`
+ * (категорія відмови, не текст винятку). `429` — ліміт проб; відмова входу з тіла не ставить «відхилено».
+ */
+export function testConnectionFromBody(body: TestConnectionBody): Promise<DataSourceTestResult> {
+  return apiFetch<DataSourceTestResult>('/api/v1/data-sources/test-connection', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
