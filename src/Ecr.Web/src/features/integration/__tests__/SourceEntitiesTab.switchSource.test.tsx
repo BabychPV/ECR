@@ -26,6 +26,8 @@ function connection(id: number, code: string): DataSource {
     hasSecret: false,
     authMode: 'Windows',
     hasPassword: false,
+    credentialsState: 'Ok',
+    credentialsRejectedAt: null,
     userName: null,
     id,
     isActive: true,

@@ -66,6 +66,8 @@ const Base = {
   authMode: 'Windows',
   userName: null,
   hasPassword: false,
+  credentialsState: 'Ok',
+  credentialsRejectedAt: null,
 } as unknown as DataSource;
 
 /** Збережене джерело з логіном і паролем; `password` у даних сервера — навмисна пастка для мутації. */
@@ -247,6 +249,8 @@ describe('Облікові дані джерела у формі', () => {
 
     fireEvent.click(screen.getByLabelText(/sources\.transport⟧/));
     fireEvent.click(screen.getByRole('option', { name: 'PiWebApi' }));
+    // Режим після збереження — Windows, а транспорт змінився: потрібне підтвердження зміни адреси.
+    fireEvent.click(document.querySelector('input[data-field="confirmEndpointChange"]') as HTMLElement);
     fireEvent.click(saveButton('⟦common.save⟧'));
     await waitFor(() => expect(calls).toHaveLength(1));
 
@@ -303,5 +307,51 @@ describe('Облікові дані джерела у формі', () => {
     open({ ...Base, transport: 'PiWebApi', endpoint: 'https://pi.example.local/piwebapi' } as unknown as DataSource);
 
     expect(screen.queryByRole('button', { name: '⟦sources.testConnection⟧' })).toBeNull();
+  });
+  it('credentialsState Rejected з сервера: стан видно одразу, пароль просять заново', () => {
+    serve();
+    open({ ...Stored, credentialsState: 'Rejected', credentialsRejectedAt: '2026-11-26T10:00:00Z' } as unknown as DataSource);
+
+    expect(screen.getByText('⟦sources.credentialsRejected⟧')).toBeTruthy();
+    expect(passwordInput().value).toBe('');
+    expect(saveButton('⟦common.save⟧').disabled).toBe(true);
+  });
+
+  it('429 при Test connection: ліміт проб і пауза цілі показують власні тексти біля кнопки', async () => {
+    const throttled = (key: string): Response =>
+      json({ title: 'Too many', status: 429, errorCode: 'ECR-REQ-0429', correlationId: 'c-3', messageKey: key }, 429);
+
+    serve(() => throttled('err.ECR-REQ-0429.tooManySourceTests'));
+    open(Stored);
+    type(screen.getByLabelText(/sources\.testReason⟧/), 'check');
+    fireEvent.click(screen.getByRole('button', { name: '⟦sources.testConnection⟧' }));
+    expect(await screen.findByText('⟦err.ECR-REQ-0429.tooManySourceTests⟧')).toBeTruthy();
+
+    serve(() => throttled('err.ECR-REQ-0429.sourceTestTargetPaused'));
+    fireEvent.click(screen.getByRole('button', { name: '⟦sources.testConnection⟧' }));
+    expect(await screen.findByText('⟦err.ECR-REQ-0429.sourceTestTargetPaused⟧')).toBeTruthy();
+  });
+
+  it('підтвердження зміни адреси: потрібне, коли режим після збереження Windows, і не потрібне при UserPassword', () => {
+    serve();
+    open(Base);
+    type(screen.getByLabelText(/sources\.endpoint⟧/), 'Driver={PI SQL Client};AF Server=moved.example.local');
+    expect(document.querySelector('[data-field="confirmEndpointChange"]')).not.toBeNull();
+
+    // Windows → UserPassword з новою адресою: пароль, а не підтвердження.
+    pick('⟦sources.authMode.UserPassword⟧');
+    expect(document.querySelector('[data-field="confirmEndpointChange"]')).toBeNull();
+  });
+
+  it('UserPassword → Windows з новою адресою: потрібні і підтвердження переходу, і підтвердження адреси', async () => {
+    serve();
+    open(Stored);
+    type(screen.getByLabelText(/sources\.endpoint⟧/), 'Driver={PI SQL Client};AF Server=moved.example.local');
+    expect(document.querySelector('[data-field="confirmEndpointChange"]')).toBeNull();
+
+    pick('⟦sources.authMode.Windows⟧');
+    fireEvent.click(screen.getByTestId('confirm-verb'));
+    await waitFor(() => expect(document.querySelector('[data-field="confirmEndpointChange"]')).not.toBeNull());
+    expect(saveButton('⟦common.save⟧').disabled).toBe(true);
   });
 });

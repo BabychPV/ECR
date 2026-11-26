@@ -22,6 +22,8 @@ const Connection = {
   hasSecret: false,
   authMode: 'Windows',
   hasPassword: false,
+  credentialsState: 'Ok',
+  credentialsRejectedAt: null,
   userName: null,
   id: 7,
   isActive: true,
