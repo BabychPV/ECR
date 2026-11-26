@@ -1,5 +1,6 @@
 // src/Ecr.Infrastructure/Jobs/RecalculationJob.Forecast.cs
 using Ecr.Application.Errors;
+using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Jobs;
 
@@ -51,6 +52,18 @@ internal interface ISourceCascadePlanner
     /// <param name="documentId">Документ-джерело.</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<bool> SourceKeepsMonthsAsync(long documentId, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ D-581 (огляд H2): для політики зв'язки D-554 — які періоди документа за рік (БУДЬ-ЯКОГО стану, з екземплярами) читають,
+    /// транзитивно, обчислені числа періодів <c>Seeds</c> (те саме правило міжмісячних читань, що в плані каскаду). Затверджений
+    /// чи закритий такий читач каскадом не перераховується — і застаріє. Пакетом: звернень на виклик — сталі (екземпляри, проєкти,
+    /// якорі) плюс одне на НАБІР версій шаблону.
+    /// </summary>
+    /// <param name="groups">Документ, рік і періоди, чиї числа змінюються.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Читач (документ, період) → найраніший період, який він читає.</returns>
+    public Task<IReadOnlyDictionary<(long DocumentId, int PeriodKey), int>> StaleReadersAsync(
+        IReadOnlyCollection<(long DocumentId, int Year, IReadOnlyCollection<int> Seeds)> groups, CancellationToken ct);
 }
 
 /// <summary>Прогноз каскаду (<see cref="ISourceCascadePlanner"/>).</summary>
@@ -129,4 +142,65 @@ public sealed partial class RecalculationJob : ISourceCascadePlanner
     /// <inheritdoc />
     Task<bool> ISourceCascadePlanner.SourceKeepsMonthsAsync(long documentId, CancellationToken ct)
         => SourceKeepsMonthsAsync(documentId, ct);
+
+    /// <inheritdoc />
+    async Task<IReadOnlyDictionary<(long DocumentId, int PeriodKey), int>> ISourceCascadePlanner.StaleReadersAsync(
+        IReadOnlyCollection<(long DocumentId, int Year, IReadOnlyCollection<int> Seeds)> groups, CancellationToken ct)
+    {
+        var result = new Dictionary<(long DocumentId, int PeriodKey), int>();
+        if (groups.Count == 0)
+        {
+            return result;
+        }
+
+        var documentIds = groups.Select(g => g.DocumentId).Distinct().ToList();
+        var instances = await (
+                from i in db.TableInstances.AsNoTracking()
+                where documentIds.Contains(i.DocumentId) && i.SheetCopyId == null
+                join t in db.TableDefs.AsNoTracking() on i.TableDefId equals t.Id
+                join sh in db.SheetDefs.AsNoTracking() on t.SheetDefId equals sh.Id
+                select new { i.DocumentId, i.PeriodKeyValue, sh.TemplateVersionId })
+            .Distinct()
+            .ToListAsync(ct).ConfigureAwait(false);
+        var projects = await db.Documents.AsNoTracking()
+            .Where(d => documentIds.Contains(d.Id))
+            .Select(d => new { d.Id, d.ProjectId })
+            .ToDictionaryAsync(d => d.Id, d => d.ProjectId, ct).ConfigureAwait(false);
+        var projectIds = projects.Values.Distinct().Where(id => !_yearAnchors.ContainsKey(id)).ToList();
+        if (projectIds.Count > 0)
+        {
+            foreach (var project in (await db.Periods.AsNoTracking()
+                         .Where(p => projectIds.Contains(p.ProjectId))
+                         .Select(p => new { p.ProjectId, p.PeriodKeyValue })
+                         .ToListAsync(ct).ConfigureAwait(false))
+                     .GroupBy(p => p.ProjectId))
+            {
+                _yearAnchors[project.Key] = project.GroupBy(p => p.PeriodKeyValue / 100).ToDictionary(g => g.Key, g => g.Min(p => p.PeriodKeyValue));
+            }
+        }
+
+        var byDocument = instances.ToLookup(i => i.DocumentId);
+        foreach (var (documentId, year, seeds) in groups)
+        {
+            var versions = byDocument[documentId].Select(i => i.TemplateVersionId).Distinct().ToList();
+            Func<int, int, bool> reads = versions.Count > CrossReadVersionLimit
+                ? static (owner, reader) => reader > owner
+                : BuildReads(
+                    await CrossReadRulesAsync(versions, ct).ConfigureAwait(false),
+                    projects.TryGetValue(documentId, out var projectId) && _yearAnchors.TryGetValue(projectId, out var anchors) ? anchors : new Dictionary<int, int>());
+            var candidates = byDocument[documentId].Select(i => i.PeriodKeyValue).Where(p => p / 100 == year).Distinct().Order().ToList();
+            var sources = seeds.ToHashSet();
+            foreach (var reader in candidates.Where(p => !sources.Contains(p)))
+            {
+                // За зростанням: кожен пізніший бачить уже доданих раніших — транзитивно за один прохід (читач завжди пізніший).
+                if (sources.Where(owner => owner < reader).Order().FirstOrDefault(owner => reads(owner, reader)) is var owner and > 0)
+                {
+                    result[(documentId, reader)] = owner;
+                    sources.Add(reader);
+                }
+            }
+        }
+
+        return result;
+    }
 }
