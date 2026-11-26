@@ -642,36 +642,9 @@ public sealed partial class SqlDataSource(
         }
         catch (SqlException ex)
         {
-            // ⛔ Відмова в автентифікації відділяється від недоступності
-            // (`H-20`). Без цього неправильний пароль службового запису
-            // виглядав би як тимчасово недоступна база — тобто збір ішов би в
-            // наздоганяння і рапортував успіх.
-            if (IsAuthenticationFailure(ex))
-            {
-                // ⛔ R-03: перша ж відмова збереженим паролем ставить мітку — далі збір не стукає в джерело.
-                if (stored && resolved is not null && rejections is not null)
-                {
-                    await rejections.ReportRejectedAsync(source.Id, CancellationToken.None).ConfigureAwait(false);
-                }
-
-                throw new SourceAuthenticationException(
-                    AuthenticationRefused,
-                    $"SQL-джерело {source.Code} не приймає облікові дані (помилка SQL Server {ex.Number}, кореляція {LogConnectFailure(source.Code, ex, known)}); подробиці — в журналі сервера.",
-                    new Dictionary<string, object?>
-                    {
-                        ["messageKey"] = "err.ECR-INT-0502.credentialsRefused",
-                        ["dataSource"] = source.Code,
-                    });
-            }
-
-            throw new BusinessRuleException(
-                SourceUnavailable,
-                $"SQL-джерело {source.Code} не з'єднується (помилка SQL Server {ex.Number}, кореляція {LogConnectFailure(source.Code, ex, known)}); подробиці — в журналі сервера.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-INT-0503.connectFailed",
-                    ["dataSource"] = source.Code,
-                });
+            throw await FailOpenAsync(
+                source, stored, resolved is not null, [.. ex.Errors.Cast<SqlError>().Select(e => e.Number)], ex.Number, ex, known)
+                .ConfigureAwait(false);
         }
         finally
         {
@@ -682,21 +655,66 @@ public sealed partial class SqlDataSource(
         }
     }
 
-    /// <summary>«Login failed for user» і «not associated with a trusted connection».</summary>
+    /// <summary>
+    /// Виняток, яким завершується невдале відкриття (шов для тестів: <see cref="SqlException"/> ззовні збірки не
+    /// створити). Відмова входу збереженим паролем ставить мітку (R-03, L2, L10).
+    /// </summary>
+    internal async Task<Exception> FailOpenAsync(
+        Domain.Entities.External.DataSource source, bool stored, bool userPassword, IReadOnlyList<int> numbers,
+        int number, Exception raw, string?[] known)
+    {
+        // ⛔ Відмова в автентифікації відділяється від недоступності (`H-20`): без цього неправильний пароль виглядав
+        // би як тимчасово недоступна база — збір ішов би в наздоганяння і рапортував успіх.
+        if (numbers.Any(IsAuthenticationNumber))
+        {
+            if (stored && userPassword)
+            {
+                await SourceCredentialRejection.ReportAsync(rejections, source, log).ConfigureAwait(false);
+            }
+
+            return new SourceAuthenticationException(
+                AuthenticationRefused,
+                $"SQL-джерело {source.Code} не приймає облікові дані (помилка SQL Server {number}, кореляція {LogConnectFailure(source.Code, raw, number, known)}); подробиці — в журналі сервера.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0502.credentialsRefused",
+                    ["dataSource"] = source.Code,
+                });
+        }
+
+        return new BusinessRuleException(
+            SourceUnavailable,
+            $"SQL-джерело {source.Code} не з'єднується (помилка SQL Server {number}, кореляція {LogConnectFailure(source.Code, raw, number, known)}); подробиці — в журналі сервера.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-INT-0503.connectFailed",
+                ["dataSource"] = source.Code,
+            });
+    }
+
+    /// <summary>
+    /// Відмови входу: «Login failed» (18456), «not associated with a trusted connection» (18452), обліковий запис
+    /// вимкнено (18470), заблоковано (18486), пароль протерміновано (18487), треба змінити (18488) — H2.
+    /// </summary>
     /// <remarks>
     /// ⚠ Номер помилки, а не текст: текст залежить від мови сервера, і пошук
-    /// підрядка розсипався б на першій же машині з іншою локаллю.
+    /// підрядка розсипався б на першій же машині з іншою локаллю. ⛔ Усі шість — не транзитивні: повтор лише
+    /// наближав би блокування облікового запису.
     /// </remarks>
-    private static readonly int[] AuthenticationErrors = [18456, 18452];
+    private static readonly int[] AuthenticationErrors = [18456, 18452, 18470, 18486, 18487, 18488];
+
+    /// <summary>Чи номер помилки SQL Server — відмова входу.</summary>
+    /// <param name="number">Номер помилки.</param>
+    internal static bool IsAuthenticationNumber(int number) => Array.IndexOf(AuthenticationErrors, number) >= 0;
 
     /// <summary>Пише повний виняток у журнал сервера і повертає кореляцію для тексту помилки.</summary>
     /// <remarks>⛔ R-02: у журнал — <see cref="SafeLogException"/>, а не сам виняток (текст драйвера, <c>Errors[]</c>).</remarks>
-    private string LogConnectFailure(string sourceCode, SqlException error, string?[] secrets)
+    private string LogConnectFailure(string sourceCode, Exception error, int number, string?[] secrets)
     {
         var correlationId = SafeErrorText.NewCorrelationId();
         LogConnectFailed(
-            log, sourceCode, error.Number, correlationId,
-            SafeLogException.Of(error, error.Number.ToString(System.Globalization.CultureInfo.InvariantCulture), secrets));
+            log, sourceCode, number, correlationId,
+            SafeLogException.Of(error, number.ToString(System.Globalization.CultureInfo.InvariantCulture), secrets));
         return correlationId;
     }
 
@@ -718,15 +736,17 @@ public sealed partial class SqlDataSource(
     private string LogQueryFailure(string sourceCode, SqlException error)
     {
         var correlationId = SafeErrorText.NewCorrelationId();
-        LogQueryFailed(log, sourceCode, error.Number, correlationId, error);
+        LogQueryFailed(
+            log, sourceCode, error.Number, correlationId,
+            SafeLogException.Of(error, error.Number.ToString(System.Globalization.CultureInfo.InvariantCulture)));
         return correlationId;
     }
 
     [LoggerMessage(
         Level = LogLevel.Warning,
-        Message = "SqlDataSource: запит каталогу джерела {SourceCode} не виконався (помилка SQL Server {ErrorNumber}); кореляція {CorrelationId}.")]
+        Message = "SqlDataSource: запит каталогу джерела {SourceCode} не виконався (помилка SQL Server {ErrorNumber}); кореляція {CorrelationId}: {Error}.")]
     private static partial void LogQueryFailed(
-        ILogger logger, string sourceCode, int errorNumber, string correlationId, Exception exception);
+        ILogger logger, string sourceCode, int errorNumber, string correlationId, SafeLogException error);
 
     [LoggerMessage(
         Level = LogLevel.Warning,
@@ -740,7 +760,7 @@ public sealed partial class SqlDataSource(
     {
         foreach (SqlError item in error.Errors)
         {
-            if (Array.IndexOf(AuthenticationErrors, item.Number) >= 0)
+            if (IsAuthenticationNumber(item.Number))
             {
                 return true;
             }

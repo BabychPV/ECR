@@ -101,3 +101,71 @@ public sealed class DataSourceCredentialResolverTests
         }
     }
 }
+
+/// <summary>
+/// Мітка відмови в базі (огляд L3): ставиться лише рядку ТІЄЇ версії, яку завантажив прогін, — заміна пароля посеред
+/// прогону мітки не отримує.
+/// </summary>
+/// <remarks>Мутація: прибрати <c>s.RowVersion == version</c> з умови — тест червоніє.</remarks>
+[Collection("SqlServer")]
+public sealed class DataSourceCredentialRejectionsTests(Ecr.TestKit.SqlServerFixture sql)
+{
+    [Fact]
+    [Trait(Ecr.TestKit.TestCategories.Category, Ecr.TestKit.TestCategories.Integration)]
+    public async Task Мітка_ставиться_лише_рядку_завантаженої_версії()
+    {
+        var code = "REJ_" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+        int id;
+        await using (var db = sql.CreateContext())
+        {
+            var source = new DataSource(
+                EcrCode.Create(code), new LocalizedText(new Dictionary<string, string> { ["en"] = "R" }),
+                ExternalTransport.Sql, "Server=db", "DataSource." + code);
+            source.ReplaceCredentials(SourceAuthMode.UserPassword, "reader", [1, 2, 3]);
+            db.DataSources.Add(source);
+            await db.SaveChangesAsync();
+            id = source.Id;
+        }
+
+        // Прогін завантажив джерело…
+        DataSource loaded;
+        await using (var db = sql.CreateContext())
+        {
+            loaded = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(
+                db.DataSources.Where(s => s.Id == id));
+        }
+
+        // … а людина тим часом замінила пароль.
+        await using (var db = sql.CreateContext())
+        {
+            var fresh = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(
+                db.DataSources.Where(s => s.Id == id));
+            fresh.ReplaceCredentials(SourceAuthMode.UserPassword, "reader", [4, 5, 6]);
+            await db.SaveChangesAsync();
+        }
+
+        await using (var db = sql.CreateContext())
+        {
+            await new DataSourceCredentialRejections(db, new Ecr.TestKit.TestClock(DateTime.UtcNow)).ReportRejectedAsync(loaded, default);
+        }
+
+        await using (var db = sql.CreateContext())
+        {
+            var after = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(
+                db.DataSources.Where(s => s.Id == id));
+            Assert.Null(after.CredentialsRejectedAt);
+
+            // Поточна версія — мітка ставиться.
+            await new DataSourceCredentialRejections(db, new Ecr.TestKit.TestClock(DateTime.UtcNow)).ReportRejectedAsync(after, default);
+        }
+
+        await using (var db = sql.CreateContext())
+        {
+            var marked = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(
+                db.DataSources.Where(s => s.Id == id));
+            Assert.NotNull(marked.CredentialsRejectedAt);
+            db.DataSources.Remove(marked);
+            await db.SaveChangesAsync();
+        }
+    }
+}

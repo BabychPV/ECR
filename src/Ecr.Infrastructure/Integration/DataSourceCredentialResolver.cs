@@ -69,12 +69,17 @@ public sealed class DataSourceCredentialRejections(Persistence.EcrDbContext db, 
     : IDataSourceCredentialRejections
 {
     /// <inheritdoc />
-    public async Task ReportRejectedAsync(int dataSourceId, CancellationToken ct)
+    public async Task ReportRejectedAsync(DataSource source, CancellationToken ct)
     {
-        var now = clock.UtcNow;
+        ArgumentNullException.ThrowIfNull(source);
 
+        var now = clock.UtcNow;
+        var id = source.Id;
+        var version = source.RowVersion;
+
+        // ⛔ L3: і версія рядка — пароль, замінений поки прогін ішов, мітки не отримує.
         await db.DataSources
-            .Where(s => s.Id == dataSourceId && s.AuthMode == SourceAuthMode.UserPassword)
+            .Where(s => s.Id == id && s.RowVersion == version && s.AuthMode == SourceAuthMode.UserPassword)
             .ExecuteUpdateAsync(setters => setters.SetProperty(s => s.CredentialsRejectedAt, now), ct)
             .ConfigureAwait(false);
     }

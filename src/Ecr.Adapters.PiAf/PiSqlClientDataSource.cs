@@ -1242,7 +1242,7 @@ public sealed partial class PiSqlClientDataSource(
     private static readonly HashSet<string> SignInAliases = new(StringComparer.Ordinal)
     {
         "uid", "user", "userid", "username", "pwd", "password",
-        "trusted_connection", "trustedconnection", "integratedsecurity", "persistsecurityinfo",
+        "trusted_connection", "trustedconnection", "integratedsecurity", "persistsecurityinfo", "authentication",
     };
 
     /// <summary>
@@ -1307,49 +1307,20 @@ public sealed partial class PiSqlClientDataSource(
             // провалює весь інтервал з першої ж спроби. Відмова в
             // автентифікації (SQLSTATE 28000) лишається НЕ транзитивною:
             // `IsTransientOdbcFailure` навмисно повертає для неї `false`.
+            // ⛔ H2: з логіном і паролем повторюється лише ТРАНСПОРТНА відмова (OpenFailure.Transport) — невідомий
+            // SQLSTATE може бути відмовою входу, і кожен повтор наближав би блокування облікового запису.
             await RetryAsync(
                 async () => { await connection.OpenAsync(ct).ConfigureAwait(false); return true; },
-                IsTransientOdbcFailure,
+                resolved is null
+                    ? IsTransientOdbcFailure
+                    : e => e is OdbcException o && ClassifyOpenFailure(StatesOf(o), userPassword: true) == OpenFailure.Transport,
                 ct).ConfigureAwait(false);
             opened = true;
             return connection;
         }
         catch (OdbcException ex)
         {
-            // ⛔ Відмова в автентифікації відділяється від недоступності
-            // (`H-20`): драйвер повідомляє її SQLSTATE 28000 («invalid
-            // authorization specification»). Без цього розділення неправильний
-            // пароль службового запису виглядав би як тимчасово недоступний
-            // RTQP — тобто збір ішов би в наздоганяння і рапортував успіх.
-            if (IsAuthenticationFailure(ex))
-            {
-                // ⛔ R-03: перша ж відмова збереженим паролем ставить мітку — далі збір не стукає в джерело.
-                if (stored && resolved is not null && rejections is not null)
-                {
-                    await rejections.ReportRejectedAsync(source.Id, CancellationToken.None).ConfigureAwait(false);
-                }
-
-                throw new SourceAuthenticationException(
-                    AuthenticationRefused,
-                    $"PI SQL Client не приймає облікові дані джерела {source.Code} (SQLSTATE {SqlStateOf(ex)}, кореляція {LogConnectFailure(source.Code, ex, known)}); подробиці — в журналі сервера.",
-                    new Dictionary<string, object?>
-                    {
-                        // Той самий ключ, що SqlDataSource.cs: той самий факт
-                        // («службові облікові дані відмовлено»).
-                        ["messageKey"] = "err.ECR-INT-0502.credentialsRefused",
-                        ["dataSource"] = source.Code,
-                    });
-            }
-
-            throw new BusinessRuleException(
-                SourceUnavailable,
-                $"PI SQL Client не з'єднується з {source.Code} (SQLSTATE {SqlStateOf(ex)}, кореляція {LogConnectFailure(source.Code, ex, known)}); подробиці — в журналі сервера.",
-                new Dictionary<string, object?>
-                {
-                    // Той самий ключ, що SqlDataSource.cs: той самий факт («не з'єднується»).
-                    ["messageKey"] = "err.ECR-INT-0503.connectFailed",
-                    ["dataSource"] = source.Code,
-                });
+            throw await FailOpenAsync(source, stored, resolved is not null, StatesOf(ex), ex, known).ConfigureAwait(false);
         }
         finally
         {
@@ -1358,6 +1329,93 @@ public sealed partial class PiSqlClientDataSource(
                 await connection.DisposeAsync().ConfigureAwait(false);
             }
         }
+    }
+
+    /// <summary>Чим є відмова відкриття з'єднання.</summary>
+    internal enum OpenFailure
+    {
+        /// <summary>Відмова входу (SQLSTATE 28000).</summary>
+        Authentication,
+
+        /// <summary>Мережа / таймаут: повторюється, перемикає на запасну адресу.</summary>
+        Transport,
+
+        /// <summary>Інше за логіном і паролем: не повторюється й не перемикає (H2).</summary>
+        Other,
+    }
+
+    /// <summary>
+    /// SQLSTATE, які з логіном і паролем вважаються ТРАНСПОРТНИМИ (H2): <c>08S01</c> (обрив зв'язку), <c>08001</c>
+    /// (клієнт не встановив з'єднання — мережа/ім'я), <c>HYT00</c> (таймаут), <c>HYT01</c> (таймаут з'єднання).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Який SQLSTATE PI SQL Client повертає на НЕПРАВИЛЬНИЙ пароль, перевіряється на AC-0 і записується в лист
+    /// готовності: якщо не 28000 — додати його до <see cref="AuthenticationSqlState"/>-гілки.
+    /// </remarks>
+    internal static readonly IReadOnlySet<string> TransportSqlStates =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "08S01", "08001", "HYT00", "HYT01" };
+
+    /// <summary>
+    /// Класифікує відмову відкриття за SQLSTATE: 28000 — вхід; за Windows усе інше — транспорт (як до змін); за
+    /// логіном і паролем транспорт — лише <see cref="TransportSqlStates"/>, решта — <see cref="OpenFailure.Other"/>.
+    /// </summary>
+    /// <param name="states">SQLSTATE усіх помилок драйвера.</param>
+    /// <param name="userPassword">Чи з'єднання з логіном і паролем.</param>
+    internal static OpenFailure ClassifyOpenFailure(IReadOnlyList<string> states, bool userPassword)
+    {
+        if (states.Any(s => string.Equals(s, AuthenticationSqlState, StringComparison.Ordinal)))
+        {
+            return OpenFailure.Authentication;
+        }
+
+        return !userPassword || states.Any(TransportSqlStates.Contains) ? OpenFailure.Transport : OpenFailure.Other;
+    }
+
+    private static IReadOnlyList<string> StatesOf(OdbcException error)
+        => [.. error.Errors.Cast<OdbcError>().Select(e => e.SQLState ?? string.Empty)];
+
+    /// <summary>
+    /// Виняток, яким завершується невдале відкриття (шов для тестів: <see cref="OdbcException"/> ззовні збірки не
+    /// створити). Відмова входу збереженим паролем ставить мітку (R-03, L2, L10).
+    /// </summary>
+    internal async Task<Exception> FailOpenAsync(
+        Domain.Entities.External.DataSource source, bool stored, bool userPassword, IReadOnlyList<string> states,
+        Exception raw, string?[] known)
+    {
+        var state = states.Count > 0 ? states[0] : "unknown";
+        var failure = ClassifyOpenFailure(states, userPassword);
+
+        // ⛔ Відмова в автентифікації відділяється від недоступності (`H-20`): без цього неправильний пароль виглядав
+        // би як тимчасово недоступний RTQP — збір ішов би в наздоганяння і рапортував успіх.
+        if (failure == OpenFailure.Authentication)
+        {
+            if (stored && userPassword)
+            {
+                await SourceCredentialRejection.ReportAsync(rejections, source, log).ConfigureAwait(false);
+            }
+
+            return new SourceAuthenticationException(
+                AuthenticationRefused,
+                $"PI SQL Client не приймає облікові дані джерела {source.Code} (SQLSTATE {state}, кореляція {LogConnectFailure(source.Code, raw, state, known)}); подробиці — в журналі сервера.",
+                new Dictionary<string, object?>
+                {
+                    // Той самий ключ, що SqlDataSource.cs: той самий факт («облікові дані відмовлено»).
+                    ["messageKey"] = "err.ECR-INT-0502.credentialsRefused",
+                    ["dataSource"] = source.Code,
+                });
+        }
+
+        return new BusinessRuleException(
+            SourceUnavailable,
+            $"PI SQL Client не з'єднується з {source.Code} (SQLSTATE {state}, кореляція {LogConnectFailure(source.Code, raw, state, known)}); подробиці — в журналі сервера.",
+            new Dictionary<string, object?>
+            {
+                // `connectFailed` — те, на чому перемикається запасна адреса; `connectFailedNoRetry` — ні (H2).
+                ["messageKey"] = failure == OpenFailure.Transport
+                    ? "err.ECR-INT-0503.connectFailed"
+                    : "err.ECR-INT-0503.connectFailedNoRetry",
+                ["dataSource"] = source.Code,
+            });
     }
 
     /// <summary>SQLSTATE відмови в автентифікації — «invalid authorization specification».</summary>
@@ -1377,10 +1435,10 @@ public sealed partial class PiSqlClientDataSource(
     /// ⛔ R-02: у журнал — <see cref="SafeLogException"/> (тип, SQLSTATE, скрабоване повідомлення), а не сам виняток:
     /// текст драйвера й <c>Errors[]</c> могли б процитувати рядок з'єднання з паролем.
     /// </remarks>
-    private string LogConnectFailure(string sourceCode, OdbcException error, string?[] secrets)
+    private string LogConnectFailure(string sourceCode, Exception error, string sqlState, string?[] secrets)
     {
         var correlationId = SafeErrorText.NewCorrelationId();
-        LogConnectFailed(log, sourceCode, SqlStateOf(error), correlationId, SafeLogException.Of(error, SqlStateOf(error), secrets));
+        LogConnectFailed(log, sourceCode, sqlState, correlationId, SafeLogException.Of(error, sqlState, secrets));
         return correlationId;
     }
 

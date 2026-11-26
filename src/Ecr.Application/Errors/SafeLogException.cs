@@ -38,9 +38,16 @@ public sealed partial record SafeLogException(string Type, string? Code, string 
     {
         var result = text ?? string.Empty;
 
-        foreach (var secret in (secrets ?? []).Where(s => !string.IsNullOrEmpty(s)).OrderByDescending(s => s!.Length))
+        // ⛔ L4: і ті форми, у яких секрет стоїть у рядку з'єднання ODBC — у фігурних дужках, `}` подвоєна.
+        var forms = (secrets ?? [])
+            .Where(s => !string.IsNullOrEmpty(s))
+            .SelectMany(s => new[] { "{" + s!.Replace("}", "}}", StringComparison.Ordinal) + "}", s.Replace("}", "}}", StringComparison.Ordinal), s })
+            .Distinct(StringComparer.Ordinal)
+            .OrderByDescending(s => s.Length);
+
+        foreach (var secret in forms)
         {
-            result = result.Replace(secret!, Mask, StringComparison.Ordinal);
+            result = result.Replace(secret, Mask, StringComparison.Ordinal);
         }
 
         return CredentialPair().Replace(result, m => m.Groups[1].Value + "=" + Mask);

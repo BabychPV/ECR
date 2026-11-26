@@ -72,10 +72,13 @@ public sealed class CredentialsRejectedException(string code)
 /// <summary>Позначає відмову автентифікації збереженим паролем (<c>CredentialsRejectedAt</c>, R-03).</summary>
 public interface IDataSourceCredentialRejections
 {
-    /// <summary>Ставить мітку відмови джерелу в режимі UserPassword.</summary>
-    /// <param name="dataSourceId">Джерело.</param>
+    /// <summary>
+    /// Ставить мітку відмови джерелу в режимі UserPassword — лише якщо рядок ТОЙ САМИЙ, що завантажив прогін (L3):
+    /// прогін у польоті не позначає щойно замінений пароль.
+    /// </summary>
+    /// <param name="source">Джерело, яким відкривали з'єднання (його <c>Id</c> і <c>RowVersion</c>).</param>
     /// <param name="ct">Скасування.</param>
-    public Task ReportRejectedAsync(int dataSourceId, CancellationToken ct);
+    public Task ReportRejectedAsync(DataSource source, CancellationToken ct);
 }
 
 /// <summary>
