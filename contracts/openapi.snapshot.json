@@ -7162,6 +7162,16 @@
             "format": "int32",
             "type": "integer"
           },
+          "credentialsRejectedAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "credentialsState": {
+            "$ref": "#/components/schemas/SourceCredentialsState"
+          },
           "endpoint": {
             "type": "string"
           },
@@ -7227,7 +7237,9 @@
           "rowVersion",
           "authMode",
           "userName",
-          "hasPassword"
+          "hasPassword",
+          "credentialsState",
+          "credentialsRejectedAt"
         ],
         "type": "object"
       },
@@ -29995,6 +30007,14 @@
         ],
         "type": "object"
       },
+      "SourceCredentialsState": {
+        "description": "Стан облікових даних джерела для значка в переліку (P-1126-SRCCRED, R-03) — без розшифрування пароля.",
+        "enum": [
+          "Ok",
+          "Rejected",
+          "Unreadable"
+        ]
+      },
       "SourceEntityDto": {
         "description": "Сутність збору у відповіді на заведення чи прив'язку.",
         "properties": {
@@ -33678,6 +33698,77 @@
           "code",
           "isGreen",
           "mismatches"
+        ],
+        "type": "object"
+      },
+      "TestDataSourceConnectionRequest": {
+        "description": "Тіло перевірки з'єднання з НЕЗБЕРЕЖЕНИХ значень форми (`POST /api/v1/data-sources/test-connection`,\nP-1126-SRCCRED §13.1). Нічого не зберігає.",
+        "properties": {
+          "authMode": {
+            "$ref": "#/components/schemas/SourceAuthMode",
+            "description": "Як входити: `Windows` або `UserPassword`."
+          },
+          "catalog": {
+            "description": "Каталог або база джерела.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "endpoint": {
+            "description": "Рядок з'єднання — без облікових даних (та сама валідація, що при збереженні).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "password": {
+            "description": "⛔ Лише запис: пароль з форми; не зберігається, не повертається, не пишеться в журнал.",
+            "format": "password",
+            "type": [
+              "null",
+              "string"
+            ],
+            "writeOnly": true
+          },
+          "reason": {
+            "description": "Причина; обов'язкова, потрапляє в журнал безпеки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "secondaryEndpoint": {
+            "description": "Запасна адреса; `null` — немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sourceId": {
+            "description": "Джерело, чий збережений пароль можна підставити, — лише коли ціль (транспорт, адреси, логін) не змінилася;\n`null` — нове з'єднання.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "transport": {
+            "$ref": "#/components/schemas/ExternalTransport",
+            "description": "Транспорт: з тіла перевіряються лише `PiSqlClient` і `Sql`."
+          },
+          "userName": {
+            "description": "Логін за `UserPassword`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "sourceId",
+          "transport",
+          "endpoint"
         ],
         "type": "object"
       },
@@ -39552,6 +39643,157 @@
           }
         },
         "summary": "Заводить джерело. Право `Integration.Manage`.",
+        "tags": [
+          "DataSources"
+        ]
+      }
+    },
+    "/api/v1/data-sources/test-connection": {
+      "post": {
+        "description": "⚠ Нічого не зберігає. Лише `PiSqlClient` і `Sql` (інакше `422 dataSourceTestTransport`); та сама\nвалідація адреси, що при збереженні. Пароль — з тіла; збережений підставляється лише за `sourceId` при тій\nсамій цілі й логіні, інакше `422 dataSourcePasswordReentryRequired`. Не більше 5 на хвилину на користувача\n(`429 tooManySourceTests`); після 3 відмов входу поспіль ціль на паузі 15 хв (`429 sourceTestTargetPaused`).\nВідповідь — як у `POST …/{id}/test`: лише категорія; у журналі безпеки — без адреси й пароля.",
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestDataSourceConnectionRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestDataSourceConnectionRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestDataSourceConnectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataSourceTestResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataSourceTestResult"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataSourceTestResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          }
+        },
+        "summary": "Перевіряє з'єднання з НЕЗБЕРЕЖЕНИХ значень форми (P-1126-SRCCRED §13.1). Право `Integration.Manage`.",
         "tags": [
           "DataSources"
         ]
