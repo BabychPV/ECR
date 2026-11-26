@@ -513,6 +513,8 @@ public static class DependencyInjection
             sp.GetRequiredService<EcrDbContext>(), sp.GetRequiredService<Jobs.SourceBindingGateCache>(),
             sp.GetRequiredService<IDependencyGraphProvider>())); // F5: Submit/Approve споживача — не поки місяць чекає каскаду джерела (і ланок до нього)
         services.AddScoped<ISourceImpactAssessor, SourceImpactAssessor>(); // B80 N5 (D-554): вплив Approve/Reopen джерела на залежні + підтвердження
+        services.AddSingleton<Jobs.BoundTablesCache>();   // D-577 (Q2): прив'язані таблиці в пам'яті (TTL 60 с)
+        services.AddScoped<Jobs.EditAutoRecalculation>(); // D-577 (Q2): автоперерахунок методологій після правки
         services.AddScoped<IFormulaRecalculationJob, Jobs.FormulaRecalculationJob>();
         // WW-03: постановка перерахунку в періоди-читачі (міжперіодні посилання).
         services.AddScoped<Jobs.CrossPeriodFanOut>();
