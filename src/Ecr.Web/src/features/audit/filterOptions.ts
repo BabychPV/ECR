@@ -21,6 +21,15 @@ export interface FilterOption {
   readonly label: string;
 }
 
+/**
+ * ✎ audit-filters-followup AC-11: підпис пункту, який людина щойно ОБРАЛА зі списку. Журнал після вибору
+ * перезавантажується з новим фільтром, і сторінок з цим пунктом на мить немає — поле показувало б #id (живий прохід
+ * 26.11: «#110545» на секунду). Мітка обраного пункту лишається, доки він обраний.
+ */
+export function pickedLabel(picked: FilterOption | null, selected: number): string | null {
+  return picked !== null && picked.value === String(selected) && picked.label.length > 0 ? picked.label : null;
+}
+
 /** Підпис документа так, як його видно в «Documents»: назва · код; без назви — код. */
 export function documentOptionLabel(name: string, businessKey: string | null | undefined): string {
   const key = businessKey ?? '';
@@ -36,6 +45,7 @@ export function useDocumentOptions(
   search: string,
   seen: readonly CellChange[] | undefined,
   selected: number | null,
+  picked: FilterOption | null = null,
 ): FilterOption[] {
   // Підписи, які вже траплялися: обраний документ лишається з назвою, навіть коли пошук (текст поля = підпис) його
   // більше не повертає.
@@ -69,12 +79,12 @@ export function useDocumentOptions(
     }
 
     const shown = new Map(names);
-    if (selected !== null && !shown.has(selected)) shown.set(selected, `#${String(selected)}`);
+    if (selected !== null && !shown.has(selected)) shown.set(selected, pickedLabel(picked, selected) ?? `#${String(selected)}`);
 
     return [...shown.entries()]
       .sort((a, b) => a[1].localeCompare(b[1]))
       .map(([id, label]) => ({ value: String(id), label }));
-  }, [seen, found.data, selected]);
+  }, [seen, found.data, selected, picked]);
 }
 
 /** Підпис колонки: аркуш / таблиця / заголовок (код) — код колонки (`M10`) повторюється в кожній таблиці. */
@@ -96,6 +106,7 @@ export function columnOptions(
   items: readonly CellChange[] | undefined,
   documentId: number | null,
   selected: number | null,
+  picked: FilterOption | null = null,
 ): FilterOption[] {
   const names = new Map<number, string>();
 
@@ -105,7 +116,7 @@ export function columnOptions(
     }
   }
 
-  if (selected !== null && !names.has(selected)) names.set(selected, `#${String(selected)}`);
+  if (selected !== null && !names.has(selected)) names.set(selected, pickedLabel(picked, selected) ?? `#${String(selected)}`);
 
   return [...names.entries()]
     .sort((a, b) => a[1].localeCompare(b[1]))

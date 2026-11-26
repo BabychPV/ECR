@@ -6,7 +6,7 @@ import { isHumanCellChange } from '@/features/audit/api';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 import { can, useSession } from '@/shared/session/useSession';
-import { disambiguateNames } from '@/features/audit/filterOptions';
+import { disambiguateNames, pickedLabel, type FilterOption } from '@/features/audit/filterOptions';
 
 /** Автор для фільтра «By user» (`GET /api/v1/audit/authors`, ✎ P-1124-4): номер і ім'я, без логіна й SID. */
 type AuditAuthor = components['schemas']['AuditAuthorView'];
@@ -66,6 +66,7 @@ export function cellAuthorHint(row: AuthoredRow & { readonly origin: string; rea
 export function useAuthorOptions(
   items: readonly AuthoredRow[] | undefined,
   selected: number | null,
+  picked: FilterOption | null = null,
 ): { value: string; label: string; disabled?: boolean }[] {
   const session = useSession();
   // ⛔ PSS-19c: усі користувачі (`allUsersQuery`), а не перші 200 мовчки — 201-й автор не мав імені у фільтрі.
@@ -122,7 +123,8 @@ export function useAuthorOptions(
     }
 
     if (selected !== null && !names.has(selected)) {
-      names.set(selected, authorName({ changedByUserId: selected }));
+      // ✎ AC-11: щойно обраного автора не показуємо як «User #id», поки перелік/журнал перезавантажуються.
+      names.set(selected, pickedLabel(picked, selected) ?? authorName({ changedByUserId: selected }));
     }
 
     // audit-filters-live D4: однакові імена (тимчасові акаунти вікон) розрізняються логіном, без нього — номером.
@@ -142,5 +144,5 @@ export function useAuthorOptions(
         ? []
         : [{ value: '__list-truncated__', label: t('common.shownSoFar', { shown: users.data.items.length }), disabled: true }]),
     ];
-  }, [seen, authors.data, users.data, selected]);
+  }, [seen, authors.data, users.data, selected, picked]);
 }

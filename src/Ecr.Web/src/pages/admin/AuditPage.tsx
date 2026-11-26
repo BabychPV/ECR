@@ -10,7 +10,7 @@ import {
 } from '@mantine/core';
 import type { CellChangePage } from '@/api/types';
 import { useAuthorOptions } from '@/features/audit/authorOptions';
-import { columnOptions, useDocumentOptions } from '@/features/audit/filterOptions';
+import { columnOptions, useDocumentOptions, type FilterOption } from '@/features/audit/filterOptions';
 import { CellChangesTable, originLabel } from '@/features/audit/CellChangesTable';
 import { AuditExportButton } from '@/features/audit/AuditExportButton';
 import { useAuditSort } from '@/features/audit/auditSort';
@@ -205,9 +205,15 @@ export function AuditPage(): JSX.Element {
    */
   const single = isSingleCell(applied);
 
-  const authorOptions = useAuthorOptions(cellPage?.items, author);
-  const documentOptions = useDocumentOptions(appliedDocumentSearch, cellPage?.items, documentId);
-  const columnChoices = columnOptions(cellPage?.items, documentId, columnDefId);
+  // ✎ AC-11: підписи щойно обраних пунктів — поле не показує «#id», поки журнал перезавантажується з новим фільтром.
+  const [picked, setPicked] = useState<Record<'document' | 'column' | 'author', FilterOption | null>>({
+    document: null,
+    column: null,
+    author: null,
+  });
+  const authorOptions = useAuthorOptions(cellPage?.items, author, picked.author);
+  const documentOptions = useDocumentOptions(appliedDocumentSearch, cellPage?.items, documentId, picked.document);
+  const columnChoices = columnOptions(cellPage?.items, documentId, columnDefId, picked.column);
 
   return (
     <>
@@ -256,30 +262,7 @@ export function AuditPage(): JSX.Element {
                 }}
               />
             </Suspense>
-            {/* audit-filters-live D2: документ — ВИБОРОМ за назвою/кодом (як у «Documents»), у адресі — Id. Набраний
-                текст лише шукає: «P1-V9-0001» більше не стає документом 190001. */}
-            <Select
-              size="xs"
-              miw={220}
-              searchable
-              clearable
-              // ⚠ На вкладці структурних змін документа немає: мертвий фільтр
-              // читався б як «за цим документом змін не було».
-              display={other ? 'none' : undefined}
-              label={t('audit.document')}
-              // ⚠ `U-21`: пояснення лишається для читалки, а видиме — під рядом
-              // фільтрів (`FilterHints`); інакше воно зсуває ряд шапки.
-              description={t('audit.documentHint')}
-              styles={readerOnlyDescription}
-              nothingFoundMessage={t('audit.filterNothing')}
-              data={documentOptions}
-              searchValue={documentSearch}
-              onSearchChange={setDocumentSearch}
-              value={documentId === null ? null : String(documentId)}
-              onChange={(value) => {
-                setDocumentId(value === null ? null : Number(value));
-              }}
-            />
+
             {/* ✎ audit-filters-live AC-9 (рішення людини 26.11): «Clear filters» — у шапці, на КОЖНІЙ вкладці, і знімає
                 ВСЕ разом: документ, дати (назад до типового вікна), адресу комірки, походження, автора, «Late» і фільтри
                 вкладок (тип сутності, тип події, дія, автор). Вкладка й порядок лишаються.
@@ -338,6 +321,30 @@ export function AuditPage(): JSX.Element {
       {/* ⚠ Фільтри ОКРЕМИМ рядком, а не в шапці: їх шість, і в шапці вони
           витіснили б заголовок за край на ноутбучній ширині. */}
       <FilterRow mb="xs" data-audit-filter-row="cells">
+        {/* ✎ audit-filters-followup AC-10 (людина 26.11, UI-прохід): «перенеси це поле сюди, це логічно» — «Document»
+            ПЕРШИМ у рядку фільтрів комірки: «Row key» і «Column» залежать від нього. Лише на вкладці комірок (на інших
+            документа немає — мертвий фільтр читався б як «за цим документом змін не було»).
+            audit-filters-live D2: документ — ВИБОРОМ за назвою/кодом (як у «Documents»), у адресі — Id. Набраний
+            текст лише шукає: «P1-V9-0001» більше не стає документом 190001. */}
+        <Select
+          size="xs"
+          miw={220}
+          searchable
+          clearable
+          label={t('audit.document')}
+          // ⚠ `U-21`: пояснення лишається для читалки, а видиме — під рядом фільтрів (`FilterHints`).
+          description={t('audit.documentHint')}
+          styles={readerOnlyDescription}
+          nothingFoundMessage={t('audit.filterNothing')}
+          data={documentOptions}
+          searchValue={documentSearch}
+          onSearchChange={setDocumentSearch}
+          value={documentId === null ? null : String(documentId)}
+          onChange={(value, option) => {
+            setPicked((previous) => ({ ...previous, document: value === null ? null : option }));
+            setDocumentId(value === null ? null : Number(value));
+          }}
+        />
         {/* ⛔ `R-18`: автор — ВИБОРОМ за іменем (`useAuthorOptions`), а не
             номером `UserId`, якого людина не знає. */}
         <Select
@@ -352,7 +359,8 @@ export function AuditPage(): JSX.Element {
           nothingFoundMessage={t('audit.filterNothing')}
           data={authorOptions}
           value={author === null ? null : String(author)}
-          onChange={(value) => {
+          onChange={(value, option) => {
+            setPicked((previous) => ({ ...previous, author: value === null ? null : option }));
             setAuthor(value === null ? null : Number(value));
           }}
         />
@@ -396,7 +404,8 @@ export function AuditPage(): JSX.Element {
           nothingFoundMessage={t('audit.filterNothing')}
           data={columnChoices}
           value={columnDefId === null ? null : String(columnDefId)}
-          onChange={(value) => {
+          onChange={(value, option) => {
+            setPicked((previous) => ({ ...previous, column: value === null ? null : option }));
             setColumnDefId(value === null ? null : Number(value));
           }}
         />
