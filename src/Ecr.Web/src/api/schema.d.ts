@@ -35028,11 +35028,13 @@ export interface components {
         };
         /** @description Джерело даних — рядок екрана конфігуратора (`BE-21`, ФВ-14.3). */
         DataSourceView: {
+            authMode: components["schemas"]["SourceAuthMode"];
             catalog: null | string;
             code: string;
             /** Format: int32 */
             collectionSchedules: number;
             endpoint: string;
+            hasPassword: boolean;
             hasSecret: boolean;
             /** Format: int32 */
             id: number;
@@ -35047,6 +35049,7 @@ export interface components {
             /** Format: int32 */
             sourceEntities: number;
             transport: components["schemas"]["ExternalTransport"];
+            userName: null | string;
         };
         /**
          * @description Вид елемента похідного списку аргументів.
@@ -44185,8 +44188,14 @@ export interface components {
         };
         /** @description Тіло створення і зміни джерела. */
         SaveDataSourceRequest: {
+            authMode?: null | components["schemas"]["SourceAuthMode"];
             /** @description Каталог або база джерела. */
             catalog?: null | string;
+            /**
+             * @description Стерти збережений пароль (як `clearPassword` у SMTP).
+             * @default false
+             */
+            clearPassword: boolean;
             /** @description Код джерела; при зміні ігнорується. */
             code: null | string;
             /**
@@ -44213,15 +44222,26 @@ export interface components {
             nameL10n: null | {
                 [key: string]: string;
             };
+            /**
+             * Format: password
+             * @description ⛔ Лише запис: пароль джерела. `null` або порожній — не змінювати. Шифрується перед записом і НЕ повертається
+             *     ніколи — у відповіді лише `hasPassword`.
+             */
+            password?: null | string;
             /** @description Запасна адреса; `null` — немає. */
             secondaryEndpoint?: null | string;
-            /** @description Повторно введений секрет джерела. Обов'язковий, лише коли в середовищі
+            /**
+             * Format: password
+             * @description Повторно введений секрет джерела. Обов'язковий, лише коли в середовищі
              *     заданий секрет під це джерело і адреса нова (створення або зміна
              *     транспорту, основної чи запасної адреси); інакше ігнорується. Не
-             *     зберігається й не повертається. */
+             *     зберігається й не повертається.
+             */
             secretConfirmation?: null | string;
             /** @description Транспорт: `PiWebApi`, `PiSqlClient`, `Sql`. */
             transport: components["schemas"]["ExternalTransport"];
+            /** @description Логін джерела, 1..256 символів; `null` — не змінювати. */
+            userName?: null | string;
         };
         /** @description Тіло створення/зміни набору. */
         SaveEditorSetRequest: {
@@ -45607,6 +45627,11 @@ export interface components {
             /** @description Адреса, на яку слати пробний лист. */
             to: null | string;
         };
+        /**
+         * @description Як джерело входить у зовнішню систему (P-1126-SRCCRED). Числа лежать у базі — не перенумеровувати.
+         * @enum {unknown}
+         */
+        SourceAuthMode: "Windows" | "UserPassword";
         /** @description Позиція каталогу джерела: елемент або атрибут. */
         SourceCatalogItem: {
             /** @description Ім'я в джерелі. */
