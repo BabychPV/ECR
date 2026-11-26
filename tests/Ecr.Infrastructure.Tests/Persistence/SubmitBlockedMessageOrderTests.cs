@@ -102,6 +102,83 @@ public sealed class SubmitBlockedMessageOrderTests(SqlServerFixture sql)
             + $"Очікувано:\n  {string.Join("\n  ", expected)}\nФактично:\n  {string.Join("\n  ", actual)}");
     }
 
+    /// <summary>
+    /// ✎ D-577 (Q6, рішення людини 26.11; BUG-9): порожній обов'язковий вхід методології рівня Block блокує подання — і в
+    /// рядку, якого ніхто не правив після появи вимоги (ворота PATCH його не бачили). Порожній запасний рядок — ні (Q4).
+    /// </summary>
+    /// <remarks>
+    /// Мутація (локально, не комітити): у <c>SubmitSheetHandler</c> прибрати блок D-577 (Q6) — тест червоніє (подання
+    /// проходить без 422). Без сканера (<c>requiredInputs = null</c>) — те саме: перевірка лише за наявності порту.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-577")]
+    public async Task Q6_порожній_вхід_методології_Block_блокує_подання_порожній_запасний_рядок_ні()
+    {
+        var arranged = await ArrangeAsync();
+        var doc = arranged with
+        {
+            Tables = [.. arranged.Tables.Select(t => t with { Columns = [.. t.Columns.Select(c => c with { Required = false })] })],
+        };
+        var first = doc.Tables.Single(t => t.TableDefId == doc.Document.TableDefId);
+        var started = first.Rows.OrderBy(r => r.Id).First();
+        var inputColumn = first.Columns.OrderBy(c => c.Ordinal).First();
+        var requiredColumn = first.Columns.OrderBy(c => c.Ordinal).Skip(1).First();
+
+        await using (var db = CreateContext())
+        {
+            await new NormalizedCellStore(db).ApplyAsync(
+                new CellChangeSet(
+                    doc.Document.TableInstanceId,
+                    [new CellRecord(new CellAddress(doc.PeriodKey, started.Id, inputColumn.Id), first.TableDefId, new CellValueData { ValueNumeric = 5m })],
+                    [], [], UserId, IsLateEdit: false),
+                CancellationToken.None);
+        }
+
+        await using var context = CreateContext();
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            BuildSubmit(context, doc, RequiredInputs(first.TableDefId, requiredColumn.Id))
+                .HandleAsync(doc.DocumentId, doc.SheetDefId, doc.PeriodKey.Value, CancellationToken.None));
+
+        Assert.Equal("err.ECR-SUB-4221.validationBlocked", error.Details?["messageKey"]);
+        var messages = Assert.IsAssignableFrom<System.Collections.IEnumerable>(error.Details?["messages"]).Cast<object>().ToList();
+        var only = Assert.Single(messages);
+        var type = only.GetType();
+        Assert.Equal("ECR-CALC-0437", (string?)type.GetProperty("RuleCode")!.GetValue(only));
+        Assert.Equal(started.Key, (string?)type.GetProperty("RowKey")!.GetValue(only));
+        Assert.Equal(requiredColumn.Code, (string?)type.GetProperty("ColumnCode")!.GetValue(only));
+    }
+
+    /// <summary>Сканер вимог над методологією з однією вимогою Block на <paramref name="columnId"/> таблиці <paramref name="tableDefId"/>.</summary>
+    private static Ecr.Application.Documents.RequiredInputs.RequiredInputsScanner RequiredInputs(int tableDefId, int columnId)
+    {
+        const int MethodologyId = 4_577;
+        var at = new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc);
+        var version = new Ecr.Domain.Entities.Calculations.MethodologyVersion(
+            MethodologyId, "1.0", CalculationLevel.Configuration, 1, at);
+        IReadOnlyList<Ecr.Domain.Entities.Calculations.MethodologyRule> rules = [version.AddRule(EcrCode.Create("all"), "{}", 100)];
+        var required = version.AddRequiredInput(columnId, RequiredInputSeverity.Block, hint: null);
+        version.Publish(publishedByUserId: 2, "q6", new DateOnly(2026, 1, 1), testsPassed: true, at);
+
+        var store = Substitute.For<IMethodologyStore>();
+        store.GetMethodologyIdsBoundToTableAsync(tableDefId, Arg.Any<CancellationToken>()).Returns(new List<int> { MethodologyId });
+        store.GetMethodologyIdsBoundToTablesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+             .Returns(new List<int> { MethodologyId });
+        store.GetPublishedVersionsOfAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+             .Returns(new List<Ecr.Domain.Entities.Calculations.MethodologyVersion> { version });
+        store.GetRulesOfVersionsAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>()).Returns(rules);
+        store.GetRequiredInputsOfVersionsAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+             .Returns(new List<Ecr.Domain.Entities.Calculations.MethodologyRequiredInput> { required });
+        store.GetVersionLabelsAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+             .Returns(new Dictionary<int, MethodologyVersionLabel> { [version.Id] = new(version.Id, "Q6_TEST", "1.0") });
+
+        var periods = Substitute.For<IPeriodStore>();
+        periods.FindPeriodBoundsAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+               .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
+        return new Ecr.Application.Documents.RequiredInputs.RequiredInputsScanner(store, periods);
+    }
+
     /// <summary>Подає аркуш і повертає (RowKey, ColumnCode) повідомлень із тіла 422 у їхньому порядку.</summary>
     private async Task<List<(string? RowKey, string? ColumnCode)>> BlockedMessagesAsync(Scenario doc)
     {
@@ -197,7 +274,8 @@ public sealed class SubmitBlockedMessageOrderTests(SqlServerFixture sql)
         return new Scenario(doc, tables);
     }
 
-    private static SubmitSheetHandler BuildSubmit(EcrDbContext db, Scenario doc)
+    private static SubmitSheetHandler BuildSubmit(
+        EcrDbContext db, Scenario doc, Ecr.Application.Documents.RequiredInputs.RequiredInputsScanner? requiredInputs = null)
     {
         var bulk = new BulkCellLoader(db.Database.GetConnectionString()!, 1000);
         var clock = new FixedClock(new DateTime(2026, 2, 1, 9, 0, 0, DateTimeKind.Utc));
@@ -244,7 +322,8 @@ public sealed class SubmitBlockedMessageOrderTests(SqlServerFixture sql)
             methodologies,
             new TemplateVersionStore(db),
             new RegistryStore(db),
-            new AuditWriter(db));
+            new AuditWriter(db),
+            requiredInputs: requiredInputs);
     }
 
     /// <summary>Перерахунок аркуша на реальних сховищах (формул у знімку немає).</summary>
