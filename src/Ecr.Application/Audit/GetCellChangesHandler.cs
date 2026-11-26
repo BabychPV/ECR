@@ -102,7 +102,8 @@ public sealed class GetCellChangesHandler(
         // UI-38 (P3): сума по вікну лічиться ЛИШЕ на першій сторінці (курсора немає); далі `TotalCount` — `null`,
         // а порт підрахунку не викликається: кожна наступна сторінка не повторює агрегат по всьому вікну.
         var firstPage = page.Cursor is null;
-        var (readable, empty) = await AuthorizeAsync(filter, page, ct).ConfigureAwait(false);
+        var (readable, empty, authorized) = await AuthorizeAsync(filter, page, ct).ConfigureAwait(false);
+        filter = authorized;
         if (empty)
         {
             return new PagedResult<CellChangeView>([], null, firstPage ? 0 : null);
@@ -156,7 +157,8 @@ public sealed class GetCellChangesHandler(
         ArgumentNullException.ThrowIfNull(filter);
 
         filter = Normalize(filter);
-        var (readable, empty) = await AuthorizeAsync(filter, page: null, ct).ConfigureAwait(false);
+        var (readable, empty, authorized) = await AuthorizeAsync(filter, page: null, ct).ConfigureAwait(false);
+        filter = authorized;
         if (empty)
         {
             return new CellChangeSummaryView(0, 0, 0, 0);
@@ -196,7 +198,8 @@ public sealed class GetCellChangesHandler(
         DateTime from, DateTime to, long? documentId, CancellationToken ct)
     {
         var filter = new CellChangeFilter(from, to, documentId);
-        var (readable, empty) = await AuthorizeAsync(filter, page: null, ct).ConfigureAwait(false);
+        var (readable, empty, authorized) = await AuthorizeAsync(filter, page: null, ct).ConfigureAwait(false);
+        filter = authorized;
         if (empty || readable is null)
         {
             return [];
@@ -530,7 +533,7 @@ public sealed class GetCellChangesHandler(
     /// Право, вікно й доступ до документа; повертає межі читання документа (<c>null</c> — наскрізний
     /// журнал без <c>documentId</c>) і ознаку «порожньо» (колонка адреси прихована).
     /// </summary>
-    private async Task<(DocumentReadScope? Readable, bool Empty)> AuthorizeAsync(
+    private async Task<(DocumentReadScope? Readable, bool Empty, CellChangeFilter Filter)> AuthorizeAsync(
         CellChangeFilter filter, CursorRequest? page, CancellationToken ct)
     {
         var userId = currentUser.UserId
@@ -671,14 +674,35 @@ public sealed class GetCellChangesHandler(
             // колонка існує й щось приховано.
             var readable = await access.ReadScopeAsync(profile, id, ct).ConfigureAwait(false);
 
-            return filter.ColumnDefId is { } column && !readable.CanReadColumn(column)
-                ? (null, true)
-                : (readable, false);
+            if (filter.ColumnDefId is { } column && !readable.CanReadColumn(column))
+            {
+                // ✎ AC-14: Id колонки до переносу проєкту (закладка, старий пункт) — це та сама колонка поточної версії.
+                // Читач її бачить, лише якщо БАЧИТЬ колонку поточної версії того самого родоводу; Id поза родоводом
+                // видимих колонок і закрита колонка — як і раніше «порожньо».
+                var current = await ResolveCurrentColumnAsync(readable, column, filter.DocumentId, ct).ConfigureAwait(false);
+                return current is { } resolved
+                    ? (readable, false, filter with { ColumnDefId = resolved })
+                    : (null, true, filter);
+            }
+
+            return (readable, false, filter);
         }
 
         // ⚠ Без `documentId` — наскрізний журнал для `Security.ViewAudit` поза
         // межами проєктів (рішення людини, Q-177); межі читання S6 тут не
         // застосовуються так само, як не застосовується грант на проєкт.
-        return (null, false);
+        return (null, false, filter);
+    }
+
+    /// <summary>Колонка поточної версії документа, яку читач бачить і яка в родоводі <paramref name="column"/>; інакше <c>null</c>.</summary>
+    private async Task<int?> ResolveCurrentColumnAsync(DocumentReadScope readable, int column, long? documentId, CancellationToken ct)
+    {
+        if (columns is null)
+        {
+            return null;
+        }
+
+        var lineage = (await columns.LineageAsync([column], documentId, ct).ConfigureAwait(false)).GetValueOrDefault(column);
+        return lineage?.Where(id => id != column && readable.CanReadColumn(id)).Cast<int?>().FirstOrDefault();
     }
 }
