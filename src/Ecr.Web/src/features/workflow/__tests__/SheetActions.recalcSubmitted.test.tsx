@@ -8,10 +8,10 @@ import { SheetActions } from '../SheetActions';
 import { testTheme } from '@/test/render';
 
 /**
- * âœŽ DOCUX L1 (BUG-1, Ð¿Ñ€Ð°Ð²Ð¸Ð»Ð¾ Ð»ÑŽÐ´Ð¸Ð½Ð¸ 07.11/16.11): ÑÐµÑ€Ð²ÐµÑ€ (`RecalculateDocumentHandler`) ÐŸÐ•Ð Ð•Ð ÐÐ¥ÐžÐ’Ð£Ð„ Ð¿Ð¾Ð´Ð°Ð½Ð¸Ð¹ Ð°Ñ€ÐºÑƒÑˆ Ñ–
- * Ð¿Ñ€Ð¾Ð¿ÑƒÑÐºÐ°Ñ” Ð»Ð¸ÑˆÐµ Ð—ÐÐ¢Ð’Ð•Ð Ð”Ð–Ð•ÐÐ˜Ð™. Ð¢Ð¾Ð¶ Â«RecalculateÂ» Ð²Ð¸Ð¼ÐºÐ½ÐµÐ½Ð° Ð· Ð¿Ñ€Ð¸Ñ‡Ð¸Ð½Ð¾ÑŽ Ñ‚Ñ–Ð»ÑŒÐºÐ¸ Ð½Ð°Ð´ Ð·Ð°Ñ‚Ð²ÐµÑ€Ð´Ð¶ÐµÐ½Ð¸Ð¼ Ð°Ñ€ÐºÑƒÑˆÐµÐ¼ (Ð°Ð±Ð¾ ÐºÐ¾Ð»Ð¸
- * Ð·Ð°Ñ‚Ð²ÐµÑ€Ð´Ð¶ÐµÐ½Ð¾ Ð²ÑÐµ); Ð¿Ð¾Ð´Ð°Ð½Ð¸Ð¹ Ð°Ñ€ÐºÑƒÑˆ â€” ÐºÐ½Ð¾Ð¿ÐºÐ° Ð°ÐºÑ‚Ð¸Ð²Ð½Ð°, Ð·Ð°Ð¿Ð¸Ñ‚ Ñ–Ð´Ðµ. Ð Ñ–Ñ‡Ð½Ð° Ñ€Ð¾Ð·ÐºÐ»Ð°Ð´ÐºÐ° Ð½Ðµ Ð´Ð¸Ð²Ð¸Ñ‚ÑŒÑÑ Ð½Ð° ÑÑ‚Ð°Ð½ ÑÐºÐ¾Ñ€Ñ.
- * Ð‘ÐµÐ· Ñ„Ñ–ÐºÑÑƒ Ñ‡ÐµÑ€Ð²Ð¾Ð½Ñ–: Ð¿Ð¾Ð´Ð°Ð½Ð¸Ð¹ Ð°Ñ€ÐºÑƒÑˆ Ð´Ð°Ð²Ð°Ð² `aria-disabled` Ñ– Â«Return it for edits firstÂ».
+ * ✎ DOCUX L1 (BUG-1, правило людини 07.11/16.11): сервер (`RecalculateDocumentHandler`) ПЕРЕРАХОВУЄ поданий аркуш і
+ * пропускає лише ЗАТВЕРДЖЕНИЙ. Тож «Recalculate» вимкнена з причиною тільки над затвердженим аркушем (або коли
+ * затверджено все); поданий аркуш — кнопка активна, запит іде. Річна розкладка не дивиться на стан якоря.
+ * Без фіксу червоні: поданий аркуш давав `aria-disabled` і «Return it for edits first».
  */
 function summary(sheetStates: Record<string, string>): DocumentSummary {
   return {
@@ -66,14 +66,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('SheetActions: Recalculate Ñ– ÑÑ‚Ð°Ð½ Ð°Ñ€ÐºÑƒÑˆÐ° (DOCUX L1, BUG-1)', () => {
-  it('ÑƒÑÑ– Ð°Ñ€ÐºÑƒÑˆÑ– Ñ‡ÐµÑ€Ð½ÐµÑ‚ÐºÐ¸ - ÐºÐ½Ð¾Ð¿ÐºÐ° Ñ” (ÐºÐ¾Ð½Ñ‚Ñ€Ð¾Ð»ÑŒ)', async () => {
+describe('SheetActions: Recalculate і стан аркуша (DOCUX L1, BUG-1)', () => {
+  it('усі аркуші чернетки - кнопка є (контроль)', async () => {
     render1({ S1: 'Draft', S2: 'Draft' });
 
     expect(await screen.findByRole('button', { name: /recalculate/i })).toBeTruthy();
   });
 
-  it('L1-1: Ñ†ÐµÐ¹ Ð°Ñ€ÐºÑƒÑˆ Submitted - ÐºÐ½Ð¾Ð¿ÐºÐ° Ð°ÐºÑ‚Ð¸Ð²Ð½Ð°, ÐºÐ»Ñ–Ðº ÑˆÐ»Ðµ Ð·Ð°Ð¿Ð¸Ñ‚ (ÑÐµÑ€Ð²ÐµÑ€ Ð¿Ð¾Ð´Ð°Ð½Ñ– Ð¿ÐµÑ€ÐµÑ€Ð°Ñ…Ð¾Ð²ÑƒÑ”)', async () => {
+  it('L1-1: цей аркуш Submitted - кнопка активна, клік шле запит (сервер подані перераховує)', async () => {
     render1({ S1: 'Draft', S2: 'Submitted' }, 'Submitted');
 
     const button = await screen.findByRole('button', { name: /recalculate/i });
@@ -84,7 +84,7 @@ describe('SheetActions: Recalculate Ñ– ÑÑ‚Ð°Ð½ Ð°Ñ€ÐºÑƒÑ�
     await waitFor(() => expect(recalcPosts()).toBe(1));
   });
 
-  it('ÑƒÑÑ– Ð°Ñ€ÐºÑƒÑˆÑ– Submitted - ÐºÐ½Ð¾Ð¿ÐºÐ° Ð°ÐºÑ‚Ð¸Ð²Ð½Ð° (Ð¿Ð¾Ð´Ð°Ð½Ñ– Ð½Ðµ Ð±Ð»Ð¾ÐºÑƒÑŽÑ‚ÑŒ)', async () => {
+  it('усі аркуші Submitted - кнопка активна (подані не блокують)', async () => {
     render1({ S1: 'Submitted', S2: 'Submitted' }, 'Submitted');
 
     const button = await screen.findByRole('button', { name: /recalculate/i });
@@ -92,7 +92,7 @@ describe('SheetActions: Recalculate Ñ– ÑÑ‚Ð°Ð½ Ð°Ñ€ÐºÑƒÑ�
     expect(button.getAttribute('aria-disabled')).not.toBe('true');
   });
 
-  it('Ñ†ÐµÐ¹ Ð°Ñ€ÐºÑƒÑˆ Approved - ÐºÐ½Ð¾Ð¿ÐºÐ° aria-disabled Ð· Ð¿Ñ€Ð¸Ñ‡Ð¸Ð½Ð¾ÑŽ Ð¿Ñ€Ð¾ Ð—ÐÐ¢Ð’Ð•Ð Ð”Ð–Ð•ÐÐ˜Ð™, ÐºÐ»Ñ–Ðº Ñ– F9 Ð½Ðµ ÑˆÐ»ÑŽÑ‚ÑŒ Ð·Ð°Ð¿Ð¸Ñ‚', async () => {
+  it('цей аркуш Approved - кнопка aria-disabled з причиною про ЗАТВЕРДЖЕНИЙ, клік і F9 не шлють запит', async () => {
     render1({ S1: 'Draft', S2: 'Approved' }, 'Approved');
 
     const button = await screen.findByRole('button', { name: /recalculate/i });
@@ -109,14 +109,14 @@ describe('SheetActions: Recalculate Ñ– ÑÑ‚Ð°Ð½ Ð°Ñ€ÐºÑƒÑ�
     expect(recalcPosts()).toBe(0);
   });
 
-  it('ÑƒÑÑ– Ð°Ñ€ÐºÑƒÑˆÑ– Approved (ÑÑ‚Ð°Ð½ Ñ†ÑŒÐ¾Ð³Ð¾ Ð½ÐµÐ²Ñ–Ð´Ð¾Ð¼Ð¸Ð¹) - ÐºÐ½Ð¾Ð¿ÐºÐ° aria-disabled', async () => {
+  it('усі аркуші Approved (стан цього невідомий) - кнопка aria-disabled', async () => {
     render1({ S1: 'Approved', S2: 'Approved' }, '');
 
     const button = await screen.findByRole('button', { name: /recalculate/i });
     await waitFor(() => expect(button.getAttribute('aria-disabled')).toBe('true'));
   });
 
-  it('L1-2: Ñ€Ñ–Ñ‡Ð½Ð° Ñ€Ð¾Ð·ÐºÐ»Ð°Ð´ÐºÐ°, ÑÐºÑ–Ñ€ Approved - ÐºÐ½Ð¾Ð¿ÐºÐ° Ñ– F9 Ð°ÐºÑ‚Ð¸Ð²Ð½Ñ– (Ñ€Ñ–Ðº Ñ€Ð°Ñ…ÑƒÑ” Ð²Ñ–Ð´ÐºÑ€Ð¸Ñ‚Ñ– Ð¼Ñ–ÑÑÑ†Ñ–)', async () => {
+  it('L1-2: річна розкладка, якір Approved - кнопка і F9 активні (рік рахує відкриті місяці)', async () => {
     render1({ S1: 'Approved' }, 'Approved', true);
 
     const button = await screen.findByRole('button', { name: /recalculate/i });
