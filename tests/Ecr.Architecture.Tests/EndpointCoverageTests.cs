@@ -1392,6 +1392,11 @@ public sealed partial class EndpointCoverageTests
         // звіт про порушення без жодної участі клієнта застосунку.
         "POST /api/v1/csp-report",
 
+        // ✎ D-577 (UX-огляд екрана документа): серверні лани L3/L6 — споживачі (чип стану розрахунку L4, модель «потрібне
+        // значення» L2) у клієнтській лані doc-ux. ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик.
+        "GET /api/v1/documents/{p}/calc-status",
+        "GET /api/v1/documents/{p}/tables/{p}/required-inputs",
+
         // RPT-STABLE Part B: шкала версій шаблону проєкту — контракт для діалогу переносу «з місяця» (Permites).
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/documents` (діалог переносу версії).
         "GET /api/v1/projects/{p}/template-versions",
