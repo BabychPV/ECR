@@ -773,6 +773,26 @@ output ECW_NOx : t = row.Land_FuelConsumption * ef / 1000000 * share;
 довідників `REG…`, працюють в обох режимах. Умовні конструкції `if` та `in` — не функції: вони
 пишуться як `? :` та `x in (…)`.
 
+**Поле рядка довідника — `ROW.<поле>`** (D-577). В умові `REGONE`/`REGCOUNT` і в
+умові та виразі `REGSUM`/`REGAVG`/`REGMIN`/`REGMAX` (з другого аргументу)
+`ROW.<поле>` — поле запису, який перебирає функція; `ROW.<посилання>.<поле>` —
+поле запису, на який той посилається. Ліворуч — `ROW`, праворуч — будь-який
+вираз скрипта (змінна, `row.X`):
+
+```ecr
+rows from INT_SG_EVENTS;
+var stream = REGONE("STREAM", ROW.LEGACY_ID == row.GAS_COMPOSITION_ID);
+var gas_case = REGFIND("STREAM_CASE", stream, row.STREAM_TYPE);
+output H2S : one = REGSUM("GAS_COMPOSITION", ROW.CASE == gas_case && ROW.COMPONENT == REGFIND("COMPONENT", "H2S"), ROW.MOL_PCT);
+```
+
+- Жоден запис не підійшов — `REGSUM` дає `0`, `REGCOUNT` — `0` (так стара система
+  читала відсутній компонент складу: «порожньо → 0»). `REGONE` без запису — `#N/A`.
+- Умова `ROW.<посилання> == <вираз без ROW>` першою частиною — швидкий пошук за
+  індексом; інакше функція перебирає всі записи довідника (довго на великих).
+- Поза цими функціями `ROW` — помилка `rowOutsideRegistryFunction`. Колонка
+  поточного рядка документа — як і раніше `row.X` (мала літера).
+
 Невідома функція — `unknownFunction`; якщо ви лише помилились у регістрі,
 повідомлення підкаже правильне написання. Функції довідників для звичайної
 методології потрібні рідко: більшість задач розв'язують `const`-таблицями.
@@ -843,6 +863,7 @@ output ECW_Fuel : t = big + root + sign;
 |---|---|---|
 | `duplicateName` | The name '…' is already used | ім'я зайняте (регістр не враховується); у блоці — повторює зовнішнє ім'я; вихід двічі |
 | `unknownName` | Unknown name '…' | помилка в імені або величину не оголошено; змінна блоку поза блоком; невідома властивість `period` |
+| `rowOutsideRegistryFunction` | 'ROW.<field>' is available only inside the condition or expression of REGONE, … | `ROW.<поле>` — лише в умові/виразі `REGONE`/`REG…` (розділ 17); колонка документа — `row.X` |
 | `forwardReference` | '…' is used before its declaration | `var`/`output` читається вище свого оголошення: перенесіть вище |
 | `unknownFunction` | Unknown function '…' | перевірте ім'я й **регістр** (`Pow`, `Round`…), перелік — розділ 17 |
 | `argumentCount` | Function '…' takes N argument(s), got M | поправте кількість аргументів |

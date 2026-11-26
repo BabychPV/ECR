@@ -711,3 +711,24 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
 OPTION (RECOMPILE);
 GO
 -- MS:methodology-script ── кінець секції ──
+
+-- MS:methodology-script ── (SGF-flaring D-577: ROW.<поле> лише в REG*) ru/kz: власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'script.rowOutsideRegistryFunction', N'ru', N'ROW.<поле> можно писать только в условии или выражении REGONE, REGSUM, REGAVG, REGMIN, REGMAX или REGCOUNT.'),
+    (N'script.rowOutsideRegistryFunction', N'kz', N'ROW.<өріс> тек REGONE, REGSUM, REGAVG, REGMIN, REGMAX немесе REGCOUNT шартында не өрнегінде жазылады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- MS:methodology-script ── кінець секції ──
+
+-- MS:methodology-script ── en-порція (SGF-flaring D-577) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'script.rowOutsideRegistryFunction', N'en', N'ROW.<field> can be used only in the condition or expression of REGONE, REGSUM, REGAVG, REGMIN, REGMAX or REGCOUNT.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- MS:methodology-script ── кінець секції ──

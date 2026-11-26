@@ -73,6 +73,16 @@ internal sealed class ScriptBinder
     private RegistryAsOfSyntax? registryAsOfSyntax;
     private bool hasRegistryAsOf;
     private bool inFunction;
+
+    // ✎ D-577 SGF-flaring (людина 26.11, варіант A): глибина області рядка довідника — аргументи умови/виразу REGONE і
+    // агрегатів REG*; лише тут `ROW.<поле>` (RowFieldNode, як у діалекті формул).
+    private int registryRowDepth;
+
+    /// <summary>Функції довідників, аргументи яких із другого — область рядка <c>ROW</c> (FEATURE-REGISTRY-TABLES §5.4).</summary>
+    private static readonly HashSet<string> RegistryRowScopeFunctions = new(StringComparer.Ordinal)
+    {
+        "REGONE", "REGSUM", "REGAVG", "REGMIN", "REGMAX", "REGCOUNT",
+    };
     private string? currentFunction;
     private string? foreachVar;
     private bool skipAllowed;
@@ -1256,7 +1266,9 @@ internal sealed class ScriptBinder
 
     private AstNode LowerCall(CallExpr call)
     {
-        var args = call.Args.Select(Lower).ToList();
+        var args = RegistryRowScopeFunctions.Contains(call.Name)
+            ? [.. call.Args.Select((a, i) => i == 0 ? Lower(a) : LowerInRegistryRow(a))]
+            : call.Args.Select(Lower).ToList();
         var name = call.Name;
 
         if (functionSyntax.TryGetValue(name, out var user))
@@ -1580,6 +1592,49 @@ internal sealed class ScriptBinder
         }
     }
 
+    private AstNode LowerInRegistryRow(Expr e)
+    {
+        registryRowDepth++;
+        try
+        {
+            return Lower(e);
+        }
+        finally
+        {
+            registryRowDepth--;
+        }
+    }
+
+    /// <summary>
+    /// ✎ D-577 SGF-flaring: <c>ROW.&lt;поле&gt;{.&lt;поле&gt;}</c> — поле рядка довідника в умові/виразі <c>REGONE</c>/<c>REG*</c>.
+    /// Поза такою областю — <c>rowOutsideRegistryFunction</c>. Локальне ім'я <c>ROW</c> скрипта має перевагу.
+    /// </summary>
+    private bool TryLowerRegistryRow(string name, List<Accessor> accessors, ScriptSpan span, out AstNode node)
+    {
+        node = Null();
+        if (!string.Equals(name, "ROW", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (registryRowDepth == 0)
+        {
+            Report(ScriptDiagnosticCodes.RowOutsideRegistryFunction, span,
+                "'ROW.<field>' is available only inside the condition or expression of REGONE, REGSUM, REGAVG, REGMIN, REGMAX or REGCOUNT.",
+                ("name", "ROW"));
+            return true;
+        }
+
+        if (accessors.Any(a => a.Member is null))
+        {
+            Report(ScriptDiagnosticCodes.UnknownName, span, "'ROW' takes field names only: ROW.FIELD or ROW.LOOKUP.FIELD.", ("name", "ROW"));
+            return true;
+        }
+
+        node = At(new RowFieldNode([.. accessors.Select(a => a.Member!)]), span);
+        return true;
+    }
+
     private bool TryLowerNamedPostfix(NameExpr n, List<Accessor> accessors, ScriptSpan span, out AstNode node)
     {
         node = Null();
@@ -1614,6 +1669,11 @@ internal sealed class ScriptBinder
         {
             node = At(new SymbolReferenceNode(SymbolKind.Formula, name), n.Span);
             ReportExtraAccess(accessors, 0);
+            return true;
+        }
+
+        if (TryLowerRegistryRow(name, accessors, span, out node))
+        {
             return true;
         }
 
