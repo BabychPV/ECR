@@ -139,7 +139,7 @@ public static class ScriptDiagnosticCodes
     /// <summary><c>registry as of</c> у скрипті, що не читає жодного довідника (разом з імпортами).</summary>
     public const string RegistryAsOfWithoutRegistries = "registryAsOfWithoutRegistries";
 
-    /// <summary>✎ D-577: <c>ROW.&lt;поле&gt;</c> поза умовою/виразом <c>REGONE</c>/<c>REGSUM</c>/<c>REGAVG</c>/<c>REGMIN</c>/<c>REGMAX</c>/<c>REGCOUNT</c>.</summary>
+    /// <summary>✎ D-580: <c>ROW.&lt;поле&gt;</c> поза умовою/виразом <c>REGONE</c>/<c>REGSUM</c>/<c>REGAVG</c>/<c>REGMIN</c>/<c>REGMAX</c>/<c>REGCOUNT</c>.</summary>
     public const string RowOutsideRegistryFunction = "rowOutsideRegistryFunction";
 
     // §13.7

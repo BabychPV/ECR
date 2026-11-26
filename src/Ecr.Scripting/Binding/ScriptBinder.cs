@@ -74,7 +74,7 @@ internal sealed class ScriptBinder
     private bool hasRegistryAsOf;
     private bool inFunction;
 
-    // ✎ D-577 SGF-flaring (людина 26.11, варіант A): глибина області рядка довідника — аргументи умови/виразу REGONE і
+    // ✎ D-580 SGF-flaring (людина 26.11, варіант A): глибина області рядка довідника — аргументи умови/виразу REGONE і
     // агрегатів REG*; лише тут `ROW.<поле>` (RowFieldNode, як у діалекті формул).
     private int registryRowDepth;
 
@@ -1606,7 +1606,7 @@ internal sealed class ScriptBinder
     }
 
     /// <summary>
-    /// ✎ D-577 SGF-flaring: <c>ROW.&lt;поле&gt;{.&lt;поле&gt;}</c> — поле рядка довідника в умові/виразі <c>REGONE</c>/<c>REG*</c>.
+    /// ✎ D-580 SGF-flaring: <c>ROW.&lt;поле&gt;{.&lt;поле&gt;}</c> — поле рядка довідника в умові/виразі <c>REGONE</c>/<c>REG*</c>.
     /// Поза такою областю — <c>rowOutsideRegistryFunction</c>. Локальне ім'я <c>ROW</c> скрипта має перевагу.
     /// </summary>
     private bool TryLowerRegistryRow(string name, List<Accessor> accessors, ScriptSpan span, out AstNode node)

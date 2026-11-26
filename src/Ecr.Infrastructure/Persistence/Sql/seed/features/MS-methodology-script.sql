@@ -712,7 +712,7 @@ OPTION (RECOMPILE);
 GO
 -- MS:methodology-script ── кінець секції ──
 
--- MS:methodology-script ── (SGF-flaring D-577: ROW.<поле> лише в REG*) ru/kz: власна порція ──
+-- MS:methodology-script ── (SGF-flaring D-580: ROW.<поле> лише в REG*) ru/kz: власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -723,7 +723,7 @@ OPTION (RECOMPILE);
 GO
 -- MS:methodology-script ── кінець секції ──
 
--- MS:methodology-script ── en-порція (SGF-flaring D-577) ──
+-- MS:methodology-script ── en-порція (SGF-flaring D-580) ──
 INSERT INTO #UiEn ([Key], Lang, Val, Scope)
 SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES

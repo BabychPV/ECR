@@ -7,14 +7,14 @@ using Xunit;
 namespace Ecr.Scripting.Tests;
 
 /// <summary>
-/// ✎ D-577 (SGF-flaring, рішення людини 26.11, варіант A): <c>ROW.&lt;поле&gt;</c> у скрипті — лише в умові/виразі
+/// ✎ D-580 (SGF-flaring, рішення людини 26.11, варіант A): <c>ROW.&lt;поле&gt;</c> у скрипті — лише в умові/виразі
 /// <c>REGONE</c>/<c>REGSUM</c>/<c>REGAVG</c>/<c>REGMIN</c>/<c>REGMAX</c>/<c>REGCOUNT</c>, тим самим вузлом, що в діалекті формул.
 /// </summary>
 public sealed class RegistryRowFieldCompileTests
 {
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "SGF-FLARING-D577")]
+    [Trait("Requirement", "SGF-FLARING-D580")]
     public void ROW_у_REGSUM_лягає_у_поле_рядка_довідника_як_у_формулах()
     {
         var printed = T.Expr(
@@ -34,7 +34,7 @@ public sealed class RegistryRowFieldCompileTests
     [InlineData("REGMIN(\"STREAM\", true, ROW.LEGACY_ID)")]
     [InlineData("REGMAX(\"STREAM\", true, ROW.LEGACY_ID)")]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "SGF-FLARING-D577")]
+    [Trait("Requirement", "SGF-FLARING-D580")]
     public void ROW_дозволено_в_усіх_функціях_області_рядка_і_довідник_у_RegistryCodes(string expr)
     {
         var c = T.WithRows("var x = " + expr + ";\n", NumericMode.Legacy);
@@ -50,7 +50,7 @@ public sealed class RegistryRowFieldCompileTests
     [InlineData("var x = REGSUM(ROW.CODE, true, 1);")]
     [InlineData("var x = Abs(ROW.LEGACY_ID);")]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "SGF-FLARING-D577")]
+    [Trait("Requirement", "SGF-FLARING-D580")]
     public void ROW_поза_умовою_чи_виразом_REG__помилка_rowOutsideRegistryFunction(string body)
     {
         var c = T.WithRows(body + "\n", NumericMode.Legacy);
@@ -63,7 +63,7 @@ public sealed class RegistryRowFieldCompileTests
     /// <summary>Мала літера — як і раніше колонка рядка документа, не довідника.</summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "SGF-FLARING-D577")]
+    [Trait("Requirement", "SGF-FLARING-D580")]
     public void row_мала_літера_лишається_колонкою_документа()
     {
         var c = T.WithRows("var x = REGSUM(\"STREAM\", ROW.LEGACY_ID == row.ID, ROW.LEGACY_ID);\n", NumericMode.Legacy);
