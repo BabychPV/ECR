@@ -692,6 +692,7 @@ public static class DependencyInjection
         // RT-22; HSE400: склад газу LAND_HSE400_COMPOSITION за прапором читається з документа, а не з довідника.
         services.AddScoped<RegistrySnapshotLoader>();
         services.AddSingleton<Hse400CompositionCache>(); // PERF-11
+        services.AddScoped<IYearEditWindowFacts, YearEditWindowFacts>(); // b14 D-579: вікно року — правка й перерахунок
         services.AddScoped<IRegistrySnapshotLoader>(sp => new Hse400CompositionSnapshotLoader(
             sp.GetRequiredService<RegistrySnapshotLoader>(),
             sp.GetRequiredService<EcrDbContext>(),

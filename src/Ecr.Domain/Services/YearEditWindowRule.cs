@@ -4,7 +4,7 @@ using Ecr.Domain.Enums;
 namespace Ecr.Domain.Services;
 
 /// <summary>
-/// ✎ b14 document-move (рішення людини 25.11, квіз 2 п.2; D-577): «вікно редагування = рік проєкту + зміщення» — стан
+/// ✎ b14 document-move (рішення людини 25.11, квіз 2 п.2; D-579): «вікно редагування = рік проєкту + зміщення» — стан
 /// річних даних шаблону з прапорцем <c>cfg.Template.YearEditWindow</c> (HSE401) у місячному проєкті.
 /// </summary>
 /// <remarks>
@@ -17,32 +17,27 @@ namespace Ecr.Domain.Services;
 /// вже дозволена.
 /// </para>
 /// <para>
-/// До початку року — <see cref="PeriodState.Scheduled"/> (правка ще не відкрита, як у календарі проєкту); рік —
-/// <see cref="PeriodState.Open"/>; після 31.12 і до кінця зміщення — <see cref="PeriodState.Grace"/> (пізня правка,
+/// До початку року й увесь рік — <see cref="PeriodState.Open"/> (рішення людини 26.11: «просто таблиця, яку заповнюють»);
+/// після 31.12 і до кінця зміщення — <see cref="PeriodState.Grace"/> (пізня правка,
 /// як в усього року в цьому вікні, D-204); далі — <see cref="PeriodState.Closed"/>. Архівований чи той, що
 /// архівується, проєкт відхиляють окремі правила (<c>EditRules</c>: <c>ProjectArchived</c>, <c>ArchivingInProgress</c>).
 /// </para>
 /// </remarks>
 public static class YearEditWindowRule
 {
-    /// <summary>Стан річних даних на момент <paramref name="nowUtc"/>.</summary>
+    /// <summary>Стан річних даних року <paramref name="year"/> на момент <paramref name="nowUtc"/>.</summary>
     /// <param name="nowUtc">Момент рішення (UTC).</param>
-    /// <param name="projectStart"><c>Project.PeriodStart</c> (01.01).</param>
-    /// <param name="projectEnd"><c>Project.PeriodEnd</c> (31.12).</param>
+    /// <param name="year">Рік ЕКЗЕМПЛЯРА (огляд L-5: не весь проміжок проєкту) — 01.01…31.12 цього року.</param>
     /// <param name="yearGraceOffsetDays"><c>Project.YearGraceOffsetDays</c> — «зміщення».</param>
     /// <param name="siteTimeZone">Пояс майданчика проєкту.</param>
-    /// <returns>Стан, яким правило правки читає річні дані.</returns>
-    public static PeriodState State(
-        DateTime nowUtc, DateOnly projectStart, DateOnly projectEnd, int yearGraceOffsetDays, TimeZoneInfo siteTimeZone)
+    /// <returns>Стан, яким правило правки й перерахунку читає річні дані.</returns>
+    public static PeriodState State(DateTime nowUtc, int year, int yearGraceOffsetDays, TimeZoneInfo siteTimeZone)
     {
         ArgumentNullException.ThrowIfNull(siteTimeZone);
 
-        var startUtc = Period.UtcBounds(projectStart, projectStart, siteTimeZone).StartUtc;
-        if (nowUtc < startUtc)
-        {
-            return PeriodState.Scheduled;
-        }
-
+        // ✎ 26.11, людина: «HSE401 — це файл без апрува та надсилання, просто таблиця, яку заповнюють, плюс наявний
+        // функціонал» — до початку року дані теж правляться (Open), закриває лише кінець року + зміщення.
+        var projectEnd = new DateOnly(year, 12, 31);
         var window = YearGraceWindow.For(projectEnd, yearGraceOffsetDays, siteTimeZone);
         if (nowUtc < window.YearEndUtc)
         {

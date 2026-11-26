@@ -3399,7 +3399,13 @@ public sealed partial class RecalculationJob(
                     s.State, reopened.Contains((request.DocumentId, s.PeriodKeyValue))))
                 .ToList();
 
-            if (Ecr.Application.Security.AnnualPeriodRule.AnchorWritesAnnualTargets(Domain.Enums.PeriodState.Closed, effective))
+            // ✎ b14 (D-579, огляд H-2): шаблон із «вікном року» — той самий стан вікна, що й правка (YearEditWindowFacts):
+            // правку в Grace прийнято — перерахунок якоря її не відхиляє; вікно закрите — відмова, хоч би місяць був відкритий.
+            var yearWindow = await Security.YearEditWindowFacts.StateAsync(db, request.DocumentId, year, clock.UtcNow, ct)
+                .ConfigureAwait(false);
+            if (yearWindow is { } windowState
+                    ? windowState is Domain.Enums.PeriodState.Open or Domain.Enums.PeriodState.Grace
+                    : Ecr.Application.Security.AnnualPeriodRule.AnchorWritesAnnualTargets(Domain.Enums.PeriodState.Closed, effective))
             {
                 result[anchor] = [.. yearStates.Select(s => s.PeriodKeyValue).Order()];
             }

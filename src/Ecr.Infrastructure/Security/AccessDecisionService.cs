@@ -2482,7 +2482,7 @@ public sealed class AccessDecisionService(
 
                         annual = (shared with
                         {
-                            // ✎ b14 (D-577): шаблон з «вікном року» — стан річних даних від меж року проєкту + зміщення,
+                            // ✎ b14 (D-579): шаблон з «вікном року» — стан річних даних від меж року проєкту + зміщення,
                             // а не агрегат місяців (людина 25.11: HSE401 правиться до архівації року).
                             PeriodState = calendar.YearWindowState ?? AnnualPeriodRule.AggregateState(periodStates),
                             SheetStatus = AnnualPeriodRule.AggregateStatus(sheetStatuses),
@@ -2696,7 +2696,7 @@ public sealed class AccessDecisionService(
     /// <param name="Year">Рік періоду екземпляра.</param>
     /// <param name="States">Місяць (<c>Period.Sequence</c>) → ефективний стан; місяця без рядка періоду немає.</param>
     /// <param name="YearWindowState">
-    /// ✎ b14 (D-577): шаблон документа з «вікном року» — стан річних даних (<see cref="Domain.Services.YearEditWindowRule"/>);
+    /// ✎ b14 (D-579): шаблон документа з «вікном року» — стан річних даних (<see cref="Domain.Services.YearEditWindowRule"/>);
     /// <c>null</c> — шаблон без вікна, діє агрегат місяців.
     /// </param>
     private sealed record MonthEnvironment(
@@ -2717,7 +2717,7 @@ public sealed class AccessDecisionService(
     {
         var now = clock.UtcNow;
         var yearFirst = instancePeriod.Year * 100;
-        var periodKeyValue = instancePeriod.Value;
+        var anchorKey = yearFirst + 1;
         var project = await (
                 from d in db.Documents.AsNoTracking()
                 where d.Id == documentId
@@ -2727,17 +2727,17 @@ public sealed class AccessDecisionService(
                     p.Id,
                     p.Status,
                     p.PeriodKind,
-                    p.PeriodStart,
                     p.PeriodEnd,
                     p.YearGraceOffsetDays,
                     p.TimeZoneId,
 
-                    // ✎ b14 (D-577): прапорець «вікно року» шаблону документа (без шаблону — шаблон версії ПЕРІОДУ проєкту,
-                    // doc.fn_VersionOf; чинну версію проєкту тут не читаємо — RPT-STABLE Part B).
+                    // ✎ b14 (D-579): прапорець «вікно року» шаблону документа — тим самим запитом (без зайвого звернення на
+                    // шляху Land); рішення — спільний YearEditWindowFacts.Decide (те саме бере перерахунок).
+                    // ⚠ Та сама вибірка, що YearEditWindowFacts.StateAsync (шаблон без TemplateId — через версію якоря).
                     YearEditWindow = db.Templates.Any(t => t.YearEditWindow
                         && (t.Id == d.TemplateId
                             || (d.TemplateId == null
-                                && db.TemplateVersions.Any(v => v.Id == EcrDbContext.VersionOf(d.ProjectId, periodKeyValue)
+                                && db.TemplateVersions.Any(v => v.Id == EcrDbContext.VersionOf(d.ProjectId, anchorKey)
                                                                 && v.TemplateId == t.Id)))),
 
                     // Приймальна 08.11 (i): місяці року, відкриті лише для ЦЬОГО документа, — тим самим запитом.
@@ -2776,12 +2776,9 @@ public sealed class AccessDecisionService(
                 effective, project.Reopened.Contains(row.PeriodKeyValue));
         }
 
-        // ⚠ Як і стани місяців вище: за датою — лише для активного проєкту; чернетка лишається на збереженому агрегаті.
-        var yearWindow = project.YearEditWindow && project.Status == ProjectStatus.Active
-            ? Domain.Services.YearEditWindowRule.State(
-                now, project.PeriodStart, project.PeriodEnd, project.YearGraceOffsetDays,
-                SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo())
-            : (PeriodState?)null;
+        // ✎ b14 (D-579, огляд H-2): вікно року — тим самим помічником, що й перерахунок (RecalculationJob, кнопка).
+        var yearWindow = YearEditWindowFacts.Decide(
+            project.YearEditWindow, project.Status, project.PeriodKind, project.YearGraceOffsetDays, project.TimeZoneId, instancePeriod.Year, now);
 
         return new MonthEnvironment(instancePeriod.Year, states, yearWindow);
     }

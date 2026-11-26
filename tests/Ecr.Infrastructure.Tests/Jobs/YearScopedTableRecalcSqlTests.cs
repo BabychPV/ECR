@@ -26,7 +26,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// (HSE401 v14) дає те саме, що в річному проєкті (365), а <c>[Period].Days</c> (v13) — 31 (N1, ×11.8).
 /// </summary>
 /// <remarks>
-/// МУТАЦІЇ (локально, 26.11): база 4980a1837 (роутер не вважає таблицю «річною») — червоний «Закритий_якір…»: річна
+/// МУТАЦІЇ (локально, 26.11): (H-2) у RecalculationJob.AnnualOnlyAnchorsAsync не брати YearEditWindowFacts — червоний «Вікно_року_в_Grace…»; база 4980a1837 (роутер не вважає таблицю «річною») — червоний «Закритий_якір…»: річна
 /// ціль якоря не рахується, TOT лишається −1.
 /// </remarks>
 [Collection("SqlServer")]
@@ -82,8 +82,34 @@ public sealed class YearScopedTableRecalcSqlTests(SqlServerFixture sql)
         }
     }
 
-    // ─────────────────────────────── допоміжне ───────────────────────────────
+    [Fact]
+    [Trait("Finding", "b14-document-move-H2")]
+    public async Task Вікно_року_в_Grace_перераховує_закритий_якір_коли_закриті_всі_місяці()
+    {
+        // Огляд H-2: правку HSE401 у Grace вікна року прийнято (AccessDecisionService) — перерахунок того самого якоря не
+        // відхиляється, хоч агрегат місяців (усі Closed) його б відхилив. Вікно після року + зміщення — відмова.
+        var w = await ArrangeAsync(novOpen: false);
+        try
+        {
+            await ExecuteAsync($"UPDATE doc.Project SET Status = {(int)ProjectStatus.Active} WHERE Id = {w.Doc.ProjectId}; UPDATE cfg.Template SET YearEditWindow = 1 WHERE Id = {w.Doc.TemplateId};");
+            await SetCellAsync(w, w.Input, Input, calculated: false);
+            await SetCellAsync(w, w.Total, -1m, calculated: true);
 
+            await RunJobAsync(w, Jan, new DateTime(2027, 1, 10, 12, 0, 0, DateTimeKind.Utc));
+            Assert.Equal(2 * Input, await PhysicalAsync(w, w.Total));
+
+            await SetCellAsync(w, w.Total, -1m, calculated: true);
+            await Assert.ThrowsAnyAsync<Exception>(() => RunJobAsync(w, Jan, new DateTime(2027, 3, 1, 12, 0, 0, DateTimeKind.Utc)));
+            Assert.Equal(-1m, await PhysicalAsync(w, w.Total));
+        }
+        finally
+        {
+            await ExecuteAsync($"UPDATE doc.Project SET Status = {(int)ProjectStatus.Draft} WHERE Id = {w.Doc.ProjectId}; UPDATE cfg.Template SET YearEditWindow = 0 WHERE Id = {w.Doc.TemplateId};");
+            await CleanupAsync(w);
+        }
+    }
+
+    // ─────────────────────────────── допоміжне ───────────────────────────────
     private sealed record World(TestDocumentBuilder Builder, TestDocument Doc, int Input, int Total, int Days, int YearLen, IMetadataCache Metadata);
 
     private async Task<World> ArrangeAsync(bool novOpen)
@@ -126,7 +152,7 @@ public sealed class YearScopedTableRecalcSqlTests(SqlServerFixture sql)
         return world with { Metadata = Metadata(world) };
     }
 
-    private async Task RunJobAsync(World w, int periodKey)
+    private async Task RunJobAsync(World w, int periodKey, DateTime? jobNow = null)
     {
         await using var db = w.Builder.CreateContext();
         var registry = Substitute.For<ITemplateLayoutRegistry>();
@@ -136,7 +162,7 @@ public sealed class YearScopedTableRecalcSqlTests(SqlServerFixture sql)
         var router = new MonthColumnRouter(db, new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build(), registry);
         var store = new MonthRoutedCellStore(new NormalizedCellStore(db), router, w.Metadata, db);
 
-        var job = new RecalculationJob(db, new NoBindingsRunner(), RunHandler(), Formulas(db, w, store, router), new TestClock(Now));
+        var job = new RecalculationJob(db, new NoBindingsRunner(), RunHandler(), Formulas(db, w, store, router), new TestClock(jobNow ?? Now));
         await job.ExecuteAsync(
             new RecalculationRequest(w.Doc.ProjectId, w.Doc.DocumentId, periodKey, TriggeredByUserId: null),
             new CapturingJobProgress(),
