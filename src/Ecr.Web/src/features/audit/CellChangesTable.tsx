@@ -68,6 +68,22 @@ function columnText(change: CellChange): string {
   return code ?? t('audit.columnGone', { id: change.columnDefId });
 }
 
+/** Ключ рядка, доданого користувачем: GUID без дефісів (32 hex) — людині нічого не каже. */
+const OpaqueRowKey = /^[0-9a-f]{24,}$/i;
+
+/**
+ * ✎ audit-filters-followup AC-12: рядок комірки для людини. Джерело мітки — `cfg.RowDef.LabelL10n` фіксованого рядка
+ * шаблону (`rowLabelL10n` рядка журналу); у динамічного (доданого людиною) рядка мітки немає ніде, а його ключ —
+ * GUID. Тоді «Row» + початок ключа (повний — у підказці), а не 32 символи. Короткі коди («LTD-A02») — як були.
+ */
+export function rowText(change: Pick<CellChange, 'rowKey' | 'rowLabelL10n'>): string {
+  const label = localized(change.rowLabelL10n);
+  if (label.length > 0) return label;
+  if (OpaqueRowKey.test(change.rowKey)) return `${t('grid.rowLabelHeader')} ${change.rowKey.slice(0, 8)}…`;
+
+  return change.rowKey;
+}
+
 /** Походження зміни: піктограма + слово макета (`ORIGIN_LABEL`/`ORIGIN_ICON`). */
 const OriginIcons: Readonly<Record<string, string>> = {
   UserEdit: 'M4 20l4-1L19 8l-3-3L5 16z',
@@ -312,8 +328,8 @@ export const CellChangesTable = memo(function CellChangesTable({
               {/* Макет: верхній рядок — комірка, нижній — документ (там «· sheet › table»: серверу
                   бракує назв аркуша/таблиці, TODO-контракт BE-16 у листі UI-38). */}
               <TwoLine
-                title={`#${String(change.documentId)} · #${String(change.columnDefId)}`}
-                primary={`${change.rowKey} · ${columnText(change)}`}
+                title={`#${String(change.documentId)} · ${change.rowKey} · #${String(change.columnDefId)}`}
+                primary={`${rowText(change)} · ${columnText(change)}`}
                 secondary={
                   <>
                     <span>{documentText(change)}</span>
