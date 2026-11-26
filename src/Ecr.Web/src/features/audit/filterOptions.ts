@@ -41,7 +41,9 @@ export function useDocumentOptions(
   // більше не повертає.
   const known = useRef(new Map<number, string>());
   const typed = search.trim();
-  const q = [...known.current.values()].includes(typed) ? '' : typed;
+  // ⚠ Без пошуку — лише коли в полі підпис ОБРАНОГО документа (Mantine ставить його в поле після вибору); той самий
+  // текст, набраний до вибору (документ без назви: підпис = код), шукає (e2e стенда 26.11).
+  const q = selected !== null && known.current.get(selected) === typed ? '' : typed;
   const found = useQuery({
     queryKey: ['audit-document-options', q],
     queryFn: () => {
