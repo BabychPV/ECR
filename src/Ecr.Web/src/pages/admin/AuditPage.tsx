@@ -280,6 +280,36 @@ export function AuditPage(): JSX.Element {
                 setDocumentId(value === null ? null : Number(value));
               }}
             />
+            {/* ✎ audit-filters-live AC-9 (рішення людини 26.11): «Clear filters» — у шапці, на КОЖНІЙ вкладці, і знімає
+                ВСЕ разом: документ, дати (назад до типового вікна), адресу комірки, походження, автора, «Late» і фільтри
+                вкладок (тип сутності, тип події, дія, автор). Вкладка й порядок лишаються.
+                ⛔ ОДИН перехід на всі параметри: два синхронні `setSearchParams` в одному тіку гублять обидві зміни
+                (`useUrlParamsSetter`). */}
+            <FilterInline>
+              <Button
+                variant="subtle"
+                data-audit-clear-filters=""
+                onClick={() => {
+                  setDocumentSearch('');
+                  setParams({
+                    from: null,
+                    to: null,
+                    documentId: null,
+                    rowKey: null,
+                    columnDefId: null,
+                    author: null,
+                    origin: null,
+                    lateOnly: null,
+                    entityType: null,
+                    eventType: null,
+                    action: null,
+                    changedBy: null,
+                  });
+                }}
+              >
+                {t('audit.reset')}
+              </Button>
+            </FilterInline>
           </FilterRow>
         }
       />
@@ -403,26 +433,6 @@ export function AuditPage(): JSX.Element {
             }}
           >
             {t('audit.archiveWindow')}
-          </Button>
-        </FilterInline>
-        <FilterInline>
-          <Button
-            variant="subtle"
-            onClick={() => {
-              // ⛔ ОДИН перехід на п'ять параметрів, а не п'ять викликів
-              // `useUrlState` підряд: два синхронні `setSearchParams` в одному
-              // тіку гублять ОБИДВІ зміни, а не лише другу (див. коментар до
-              // `useUrlParamsSetter`). П'ять поспіль не скинули б нічого.
-              setParams({
-                rowKey: null,
-                columnDefId: null,
-                author: null,
-                origin: null,
-                lateOnly: null,
-              });
-            }}
-          >
-            {t('audit.reset')}
           </Button>
         </FilterInline>
       </FilterRow>

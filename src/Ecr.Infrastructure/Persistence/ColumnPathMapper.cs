@@ -121,10 +121,15 @@ public sealed class ColumnPathMapper(EcrDbContext db) : IColumnPathMapper
     /// <c>UQ_TableDef (SheetDefId, Code)</c>, <c>UQ_ColumnDef (TableDefId, Code)</c>, <c>IX_ColumnRename_To</c>,
     /// версії шаблону — за <c>(TemplateId, Version)</c>. Розмір виходу — колонки × версії шаблону.
     /// </remarks>
-    private const string LineageSql = $"""
+    // ✎ audit-filters-live D1: Id розбираються ОДИН раз у табличну змінну з PK — оцінка кардинальності OPENJSON (50 рядків)
+    // давала план, що на документі Land (15 147 видимих колонок × 8+ версій шаблону = 125 263 рядки виходу) займав 1,7 с
+    // на копії live; зі змінною — 0,8–1,0 с. ⚠ SqlQueryRaw без подальшої композиції LINQ — пакет іде як є.
+    internal const string LineageSql = $"""
+        DECLARE @src TABLE (Id int NOT NULL PRIMARY KEY);
+        INSERT INTO @src (Id) SELECT DISTINCT CAST([value] AS int) FROM OPENJSON(@ids);
         SELECT c.Id AS SourceId, c2.Id AS LinkedId, r.FromColumnDefId AS RenamedFromId
-          FROM OPENJSON(@ids) AS j
-          JOIN cfg.ColumnDef AS c ON c.Id = CAST(j.[value] AS int)
+          FROM @src AS j
+          JOIN cfg.ColumnDef AS c ON c.Id = j.Id
           JOIN cfg.TableDef AS t ON t.Id = c.TableDefId
           JOIN cfg.SheetDef AS s ON s.Id = t.SheetDefId
           JOIN cfg.TemplateVersion AS v ON v.Id = s.TemplateVersionId
@@ -135,6 +140,17 @@ public sealed class ColumnPathMapper(EcrDbContext db) : IColumnPathMapper
           LEFT JOIN cfg.ColumnRename AS r ON r.ToColumnDefId = c2.Id
                AND {RenameInScope}
         """;
+
+    /// <summary>Від скількох Id родовід рахується хеш-з'єднаннями (документ Land), а не пошуками за індексами.</summary>
+    internal const int HashJoinThreshold = 1_000;
+
+    /// <summary>
+    /// ✎ audit-filters-live D1: текст запиту родоводу для <paramref name="count"/> Id. Понад <see cref="HashJoinThreshold"/> —
+    /// <c>OPTION (HASH JOIN)</c>: копія live, документ 96 (15 147 Id → 125 263 рядки) — 0,52 с проти 1,03 с вкладених циклів.
+    /// Малий перелік (інспектор однієї комірки) лишається пошуками — хеш читав би довідники цілком.
+    /// </summary>
+    internal static string LineageSqlFor(int count)
+        => count > HashJoinThreshold ? LineageSql + "\nOPTION (HASH JOIN)" : LineageSql;
 
     /// <inheritdoc />
     /// <remarks>
@@ -159,7 +175,7 @@ public sealed class ColumnPathMapper(EcrDbContext db) : IColumnPathMapper
         {
             var json = "[" + string.Join(",", frontier.Keys.Select(v => v.ToString(CultureInfo.InvariantCulture))) + "]";
             var rows = await db.Database
-                .SqlQueryRaw<LineageRow>(LineageSql, IdsParameter(json), ProjectParameter(projectId))
+                .SqlQueryRaw<LineageRow>(LineageSqlFor(frontier.Count), IdsParameter(json), ProjectParameter(projectId))
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
 

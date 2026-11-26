@@ -59,6 +59,24 @@ test.describe('Аудит комірок: Document/Column вибором на р
     expect(wrong, 'набраний ключ не мав ставати номером документа').toEqual([]);
   });
 
+  // ✎ AC-9 (рішення людини 26.11): «Clear filters» знімає все разом і є на кожній вкладці.
+  test('Clear filters: знімає документ, дати й решту фільтрів на кожній вкладці', async ({ page }) => {
+    await signIn(page);
+    await page.goto(`/admin/audit?from=2026-11-01&to=2026-11-10&documentId=${DocumentId}&rowKey=R1&origin=UserEdit&lateOnly=true`);
+    await page.locator('[data-audit-clear-filters]').click();
+    await expect(page).toHaveURL(/\/admin\/audit$/u);
+
+    for (const [view, filters] of [
+      ['structure', 'entityType=TableDef'],
+      ['security', 'eventType=LoginFailed'],
+      ['workflow', 'action=Approve'],
+    ] as const) {
+      await page.goto(`/admin/audit?view=${view}&from=2026-11-01&to=2026-11-10&${filters}&changedBy=1`);
+      await page.locator('[data-audit-clear-filters]').click();
+      await expect(page).toHaveURL(new RegExp(`/admin/audit\\?view=${view}$`, 'u'));
+    }
+  });
+
   test('Column: набраний «M10» не стає колонкою 10', async ({ page }) => {
     await signIn(page);
     await page.goto(`/admin/audit?documentId=${DocumentId}`);
