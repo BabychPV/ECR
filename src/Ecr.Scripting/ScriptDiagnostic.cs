@@ -142,6 +142,9 @@ public static class ScriptDiagnosticCodes
     /// <summary>✎ D-580: <c>ROW.&lt;поле&gt;</c> поза умовою/виразом <c>REGONE</c>/<c>REGSUM</c>/<c>REGAVG</c>/<c>REGMIN</c>/<c>REGMAX</c>/<c>REGCOUNT</c>.</summary>
     public const string RowOutsideRegistryFunction = "rowOutsideRegistryFunction";
 
+    /// <summary>✎ D-580 / огляд M5: <c>ROW.&lt;поле&gt;</c> в REG* — поля немає в довіднику або проміжний сегмент не <c>Lookup</c> (перевірка середовища).</summary>
+    public const string RegistryFieldUnknown = "registryFieldUnknown";
+
     // §13.7
     public const string TableColumnOutsideAggregate = "tableColumnOutsideAggregate";
     public const string AggregateNeedsTable = "aggregateNeedsTable";

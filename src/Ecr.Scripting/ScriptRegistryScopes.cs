@@ -68,7 +68,9 @@ public static class ScriptRegistryScopes
         return result;
     }
 
-    private static IEnumerable<AstNode> Roots(CompiledScript script)
+    /// <summary>Корені виразів скрипта (речення registry as of, оператори, функції, агрегати) — для обходів перевірок.</summary>
+    /// <param name="script">Скрипт.</param>
+    public static IEnumerable<AstNode> Roots(CompiledScript script)
     {
         if (script.RegistryAsOf is { } asOf)
         {
