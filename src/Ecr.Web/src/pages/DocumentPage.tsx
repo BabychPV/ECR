@@ -74,6 +74,8 @@ import { parseChatKey } from '@/features/tableChat/chatKey';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { registerHeldEditRevealer, useSettledAction } from '@/features/grid/settleEdits';
+import { NoticeLine } from '@/features/documents/notices/NoticeLine';
+import { usePublishNotice } from '@/features/documents/notices/noticeStore';
 
 /**
  * Панелі нижче — за `import()`, а не статичним імпортом (`D-132`).
@@ -1016,6 +1018,32 @@ export function DocumentPage(): JSX.Element {
       </Stack>
     ) : null;
 
+  // ✎ DOCUX L7: смуга «Calculation: rows not included…» — у рядку повідомлень (пріоритет 6), а не окремим блоком.
+  usePublishNotice(
+    'calc-issues',
+    issuePanels.length === 0
+      ? null
+      : {
+          priority: 6,
+          render: () => (
+            <Suspense fallback={<div style={{ height: 32 }} aria-hidden="true" />}>
+              <CalculationIssuesStrip
+                userId={session.data?.userId}
+                documentId={can(session.data, 'Calculation.View') ? documentId : undefined}
+                memoryDocumentId={documentId}
+                months={issuePanels}
+                tables={tables.data ?? []}
+                onOpenCell={openUnmatchedRow}
+                onOpenHse400={openHse400}
+                onOpenSource={openSource}
+                narrow={narrow}
+              />
+            </Suspense>
+          ),
+        },
+    [issuePanels, tables.data, session.data, documentId, openUnmatchedRow, openHse400, openSource, narrow],
+  );
+
   /*
    * D10 (a11y): документа немає (`404`, напр. `ECR-DOC-0404`) — службова сторінка з заголовком
    * сторінки, як `/404` (`NotFoundPage`), а не голий `ErrorAlert` без жодного heading. «Повторити»
@@ -1188,21 +1216,9 @@ export function DocumentPage(): JSX.Element {
           ✎ b14 doc-notices-compact: усі місяці (W15z M4: «рік» — кожен місяць із проблемами) — ОДНА смуга в рядок,
           згорнута; «Details» — матриця «причина × місяць», панелі місяців — у її «Technical details». Поки чанк
           вантажиться, місце тримає коробка висоти смуги (сітка не стрибає). */}
-      {issuePanels.length > 0 && (
-        <Suspense fallback={<div style={{ height: 32 }} aria-hidden="true" />}>
-          <CalculationIssuesStrip
-            userId={session.data?.userId}
-            documentId={can(session.data, 'Calculation.View') ? documentId : undefined}
-            memoryDocumentId={documentId}
-            months={issuePanels}
-            tables={tables.data ?? []}
-            onOpenCell={openUnmatchedRow}
-            onOpenHse400={openHse400}
-            onOpenSource={openSource}
-            narrow={narrow}
-          />
-        </Suspense>
-      )}
+      {/* ✎ DOCUX L7: над сіткою — ОДИН рядок повідомлень (найважливіше + «+N more» → вкладка Status інспектора). Смуга
+          проблем розрахунку — повідомлення пріоритету 6 (`calcIssuesNotice` вище). */}
+      <NoticeLine />
 
       {/* ✎ DOCUX Q5 (рішення людини 26.11): смуги «перерахунок проєкту» тут немає — вона на дошці документів; стан ЦЬОГО
           документа каже чип розрахунку в рядку стану. */}

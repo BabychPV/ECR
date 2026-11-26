@@ -144,9 +144,11 @@ import { GridAriaPlugin } from './gridAria';
 import { attachStickyGroupLabels, withHeaderGroups } from './headerGroups';
 import { installTruncationTooltip } from './truncationTooltip';
 import { mergePatchNotices, PatchNoticesAlert, type PatchNotice } from './patchNotices';
-import { dedupeRequiredInputs, RequiredInputsBlockedAlert } from './requiredInputsAlert';
+import { dedupeRequiredInputs } from './requiredInputsAlert';
 import { needsInputByColumn, needsInputCells, needsInputMaps, type NeedsInputCell } from './needsInput';
-import { clearNeedsInput, installNeedsInputKeys, publishNeedsInput } from './needsInputStore';
+import { clearNeedsInput, installNeedsInputKeys, publishNeedsInput, stepNeedsInput, useNeedsInputEmphasis } from './needsInputStore';
+import { usePublishNotice } from '@/features/documents/notices/noticeStore';
+import { NoticeRow } from '@/features/documents/notices/NoticeRow';
 import { NeedsInputCounter } from './NeedsInputCounter';
 import { calculationIssuesKey, calculationIssuesYearKey, getCalculationIssues } from '@/features/calculationIssues/api';
 // ⚠ Ключ комірки СХОВИЩА під власним іменем: у цьому файлі вже є `cellKey`
@@ -1553,7 +1555,36 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       },
     });
   }, [data, readOnly, rows, requiredInputBlocked, requiredInputWarnings, issuesMonth.data, issuesYear.data, sheetCopyId, flags]);
-  const needsMaps = useMemo(() => needsInputMaps(needsCells), [needsCells]);
+  // ✎ DOCUX L9: рамка 2 px — після спроби подати (усі порожні обов'язкові) і на комірках, через які збереження відхилено.
+  const emphasized = useNeedsInputEmphasis();
+  const rejectedKeys = useMemo(
+    () => new Set(requiredInputBlocked.map((cell) => cellKey(cell.rowKey, cell.columnCode))),
+    [requiredInputBlocked],
+  );
+  const needsMaps = useMemo(() => {
+    const keys = needsCells.map((cell) => cellKey(cell.rowKey, cell.columnCode));
+    return { ...needsInputMaps(needsCells), strong: new Set(keys.filter((key) => emphasized || rejectedKeys.has(key))) };
+  }, [needsCells, emphasized, rejectedKeys]);
+  // ✎ DOCUX L7/L9 (замість банера №24 «Cannot save: N required column(s) missing»): рядок повідомлень — «Not saved: N
+  // required cells empty · Go to next (F8)»; знімається, щойно ці комірки заповнено.
+  const blockedLive = needsCells.filter((cell) => rejectedKeys.has(cellKey(cell.rowKey, cell.columnCode))).length;
+  usePublishNotice(
+    `required-blocked:${String(tableInstanceId)}:${String(periodKey)}`,
+    blockedLive === 0
+      ? null
+      : {
+          priority: 4,
+          render: () => (
+            <NoticeRow
+              tone="error"
+              text={t('document.notices.notSavedRequired', { count: blockedLive })}
+              testId="notice-required-blocked"
+              actions={[{ label: t('document.notices.goToNext'), keys: 'F8', run: () => void stepNeedsInput(1), testId: 'notice-required-next' }]}
+            />
+          ),
+        },
+    [blockedLive],
+  );
   const needsByColumn = useMemo(() => needsInputByColumn(needsCells), [needsCells]);
   const labeledForNeeds = data !== undefined && hasRowLabels(data);
   useEffect(() => {
@@ -3337,7 +3368,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       {/* ⛔ Директива «обов'язкові вхідні колонки методології»: Block — батч ВІДХИЛЕНО (ECR-CALC-0437),
           комірки лишаються dirty, перелік розгорнуто. Warn (запис ПРОЙШОВ) — кнопкою в рядку інструментів вище
           (`RequiredInputsSummary`, ✎ 25.11: не штовхає сітку під час введення). */}
-      <RequiredInputsBlockedAlert cells={requiredInputBlocked} columns={data?.columns ?? []} rows={data?.rows ?? []} />
+      {/* ✎ DOCUX L7: Block (запис відхилено) — у рядку повідомлень над сіткою (`required-blocked`), комірки — з рамкою 2 px. */}
 
       <PatchNoticesAlert notices={patchNotices} onDismiss={() => setPatchNotices([])} />
 
@@ -3529,7 +3560,12 @@ export function gridColumns(
   readOnly: boolean,
   flags: LocalCellFlags,
   widths: Record<string, number>,
-  requiredInput: { blocked: ReadonlyMap<string, string>; warning: ReadonlyMap<string, string> },
+  requiredInput: {
+    blocked: ReadonlyMap<string, string>;
+    warning: ReadonlyMap<string, string>;
+    /** ✎ DOCUX L9: підсилена рамка (спроба подати / відхилене збереження). */
+    strong?: ReadonlySet<string>;
+  },
   saveErrorByCell: ReadonlyMap<string, string> = new Map(),
 
   // ⛔ Директива registry-lookup, PR A4: перелік записів на РЕЄСТР
@@ -3895,7 +3931,10 @@ export function gridColumns(
         // `ecr-cell-needs-input--block|--warn`); старий «!» 10 px прибрано. Модель уже лишила лише порожні редаговні комірки.
         const requiredInputMessage = requiredInput.blocked.get(key) ?? requiredInput.warning.get(key);
         const needsLevel = requiredInput.blocked.has(key) ? 'block' : requiredInput.warning.has(key) ? 'warn' : null;
-        const requiredInputClass = needsLevel === null ? null : `ecr-cell-needs-input ecr-cell-needs-input--${needsLevel}`;
+        const requiredInputClass =
+          needsLevel === null
+            ? null
+            : `ecr-cell-needs-input ecr-cell-needs-input--${needsLevel}${requiredInput.strong?.has(key) === true ? ' ecr-cell-needs-input--strong' : ''}`;
 
         // ⛔ Q-30x (High): той самий взірець маркера, що й обов'язкові вхідні
         // колонки вище — ДОДАЄТЬСЯ до класу стану, а не змагається з ним за

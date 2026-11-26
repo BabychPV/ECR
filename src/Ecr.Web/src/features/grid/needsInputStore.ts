@@ -28,6 +28,8 @@ export interface NeedsInputTable {
 }
 
 const tables = new Map<string, NeedsInputTable>();
+/** ✎ DOCUX L9: після спроби подати — рамка 2 px на всіх порожніх обов'язкових комірках (поки їх не заповнять). */
+let emphasized = false;
 const listeners = new Set<() => void>();
 let version = 0;
 
@@ -55,7 +57,24 @@ export function clearNeedsInput(tableInstanceId: number, periodKey: number): voi
 /** Для тестів: забути все. */
 export function resetNeedsInput(): void {
   tables.clear();
+  emphasized = false;
   notify();
+}
+
+/** Підсилити позначки (Submit спробували з порожніми обов'язковими); знімається, щойно їх не лишилось. */
+export function emphasizeNeedsInput(on: boolean): void {
+  if (emphasized === on) return;
+  emphasized = on;
+  notify();
+}
+
+function isEmphasized(): boolean {
+  return emphasized && allNeedsInput().length > 0;
+}
+
+/** Чи позначки підсилено (рамка 2 px), з підпискою. */
+export function useNeedsInputEmphasis(): boolean {
+  return useSyncExternalStore(subscribe, isEmphasized, isEmphasized);
 }
 
 function sameCells(a: NeedsInputTable, b: NeedsInputTable): boolean {

@@ -1,0 +1,75 @@
+/*
+ * ✎ DOCUX L7: рядок повідомлень над сіткою — рівно один рядок 32 px (сітка не стрибає), той самий вигляд, що смуга
+ * проблем розрахунку (`calcIssuesStrip.css`). Лише токени теми.
+ */
+.ecr-notice-line {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+  min-height: 32px;
+}
+
+.ecr-notice-line > .ecr-notice-top {
+  flex: 1;
+  min-width: 0;
+}
+
+.ecr-notice-row {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+  height: 32px;
+  padding-inline: var(--mantine-spacing-xs);
+  border-radius: var(--mantine-radius-sm);
+  border: 1px solid var(--mantine-color-brand-light-hover, var(--mantine-color-default-border));
+  background: var(--mantine-color-brand-light);
+  overflow: hidden;
+}
+
+.ecr-notice-row[data-tone='warning'] {
+  border-color: var(--mantine-color-statusWarning-light-hover, var(--mantine-color-default-border));
+  background: var(--mantine-color-statusWarning-light);
+}
+
+.ecr-notice-row[data-tone='error'] {
+  border-color: var(--mantine-color-statusError-light-hover, var(--mantine-color-default-border));
+  background: var(--mantine-color-statusError-light);
+}
+
+.ecr-notice-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mantine-color-white);
+  background: var(--mantine-color-brand-filled);
+}
+
+.ecr-notice-row[data-tone='warning'] .ecr-notice-icon {
+  /* Білий на жовтому не дає 4.5:1 — знак кольору тексту в рамці тону. */
+  background: transparent;
+  border: 2px solid var(--mantine-color-statusWarning-filled);
+  color: var(--mantine-color-text);
+}
+
+.ecr-notice-row[data-tone='error'] .ecr-notice-icon {
+  background: var(--mantine-color-statusError-filled);
+}
+
+.ecr-notice-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ecr-notice-list {
+  display: grid;
+  gap: var(--mantine-spacing-xs);
+}

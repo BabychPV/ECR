@@ -53,6 +53,7 @@ import { GrantOrder, meetsGrant, type GrantLevelName } from './grantLevels';
 import { t } from '@/shared/i18n';
 import { formatPeriodKey } from '@/shared/format';
 import { DisabledReason } from '@/features/common/DisabledReason';
+import { guardSubmitNeedsInput } from './submitGuide';
 
 /**
  * Причина невдалого перерахунку в тості — окремим чанком (`D-132`): з'являється лише на відмові
@@ -567,6 +568,10 @@ export interface SheetActionsModel {
         readonly runFull: (() => void) | null;
         /** «Queued: position N …» — лише коли сервер віддав позицію в черзі; інакше `null`. */
         readonly queueText: string | null;
+        /** ✎ DOCUX L4: власна задача цього екрана в черзі (ще не почалась). */
+        readonly queued: boolean;
+        /** ✎ DOCUX L4: власна задача цього екрана впала — чип «Recalculation failed · Retry» до наступного запуску. */
+        readonly failed: { readonly errorCode: string | null; readonly correlationId: string | null } | null;
       })
     | null;
   /**
@@ -1210,7 +1215,13 @@ export function useSheetActions({
       // заводиться — каталог живе в сіді БД, поза цим пакетом, — тому період
       // дописується до наявного рядка тим самим `·`, яким уже підписано
       // діалоги (`UserAccessEditor.tsx`).
-      showDone(`${t('workflow.recalcDone')} · ${String(recalc.periodKey)}`);
+      // ✎ DOCUX L4 (ST-7): «figures are up to date» — лише коли картка після перечитування справді не застаріла
+      // (правка під час прогону лишає результати застарілими — тоді про це каже чип, а не тост «актуально»).
+      const doneText = `${t('workflow.recalcDone')} · ${String(recalc.periodKey)}`;
+      const cardKey = ['document', recalc.documentId, recalc.periodKey] as const;
+      void queryClient.invalidateQueries({ queryKey: cardKey }).then(() => {
+        if (queryClient.getQueryData<{ resultsStale?: boolean | null }>(cardKey)?.resultsStale !== true) showDone(doneText);
+      });
 
       // ⚠ Сітка перечитується САМЕ тут: оновити її на постановці в чергу
       // означало б показати старі числа під написом «перераховано».
@@ -1227,10 +1238,6 @@ export function useSheetActions({
         documentId: recalc.documentId,
         periodKey: recalc.periodKey,
         sheetDefId: recalc.sheetDefId,
-      });
-
-      void queryClient.invalidateQueries({
-        queryKey: ['document', recalc.documentId, recalc.periodKey],
       });
 
       // Чіп «Needs recalculation (N)» у переліку документів читає зведення періоду.
@@ -1703,6 +1710,11 @@ export function useSheetActions({
               ? () => void settled.run(() => recalculate.mutateAsync({ ...here, full: true }))
               : null,
           queueText: recalcIsHere && outcome === 'running' && recalcJob.data?.state === 'Queued' ? queueText(recalcJob.data) : null,
+          queued: recalcIsHere && outcome === 'running' && recalcJob.data?.state === 'Queued',
+          failed:
+            recalcIsHere && (outcome === 'failed' || outcome === 'partial')
+              ? { errorCode: recalcJob.data?.errorCode ?? null, correlationId: recalcJob.data?.correlationId ?? null }
+              : null,
           // AN-28/L8-01: спершу зберегти набране; відмова збереження - дії немає.
           run: () =>
             recalcBlockedReason !== null ? showWarning(recalcBlockedReason) : settled.run(() => recalculate.mutateAsync(here)),
@@ -1724,6 +1736,8 @@ export function useSheetActions({
           blockedReason: submitBlockedReason,
           run: () => {
             if (confirmedPeriod === null || submitBlockedReason !== null) return;
+            // ✎ DOCUX L9 (Q6): порожні обов'язкові комірки — запиту немає, фокус на першу, пояснення в рядку повідомлень.
+            if (guardSubmitNeedsInput()) return;
             askedAt.current = { ...here, periodKey: confirmedPeriod };
             setAskedPeriod(confirmedPeriod);
             setAsking('submit');

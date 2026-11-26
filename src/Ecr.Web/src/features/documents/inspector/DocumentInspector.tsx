@@ -53,6 +53,7 @@ import { LockedRows } from './LockedRows';
 import { SheetLog, type InspectorSheet, type SheetLogTarget } from './SheetLog';
 import './inspector.css';
 import { provenanceLines, useCellProvenance } from './cellProvenance';
+import { NoticeList, useNoticeCount } from '../notices/NoticeLine';
 
 export type { InspectorSheet, SheetLogTarget } from './SheetLog';
 
@@ -94,9 +95,10 @@ const CellSourceSection = lazy(async () => ({
  * хрестик) повертає тому, хто відкривав (кнопка «K issues», «History»,
  * «Validate»); якщо того вже немає в DOM — на кнопку зауважень.
  */
-export type InspectorTab = 'issues' | 'history' | 'info';
+// ✎ DOCUX L7: `status` — усі повідомлення екрана документа (рядок над сіткою показує лише найважливіше).
+export type InspectorTab = 'issues' | 'history' | 'info' | 'status';
 
-const Tabs3: readonly InspectorTab[] = ['issues', 'history', 'info'];
+const Tabs3: readonly InspectorTab[] = ['issues', 'history', 'info', 'status'];
 
 /** Макет: на ≤ 1180px інспектор — шар поверх сітки й закривається після переходу. */
 const NarrowQuery = '(max-width: 1180px)';
@@ -157,6 +159,7 @@ export function DocumentInspector({
   checkedAt = null,
 }: DocumentInspectorProps): JSX.Element {
   const [panel, setPanel] = useUrlState(PanelParam);
+  const noticeCount = useNoticeCount();
   const [historyMode, setHistoryMode] = useState<HistoryMode>('sheet');
   const tab = asTab(panel);
   const opened = tab !== null;
@@ -398,6 +401,16 @@ export function DocumentInspector({
               </Tabs.Tab>
               <Tabs.Tab value="history">{t('inspector.tabHistory')}</Tabs.Tab>
               <Tabs.Tab value="info">{t('inspector.tabInfo')}</Tabs.Tab>
+              <Tabs.Tab value="status">
+                <Group gap="xs" wrap="nowrap">
+                  {t('inspector.tabStatus')}
+                  {noticeCount > 0 && (
+                    <Badge size="xs" variant="light" color="statusWarning" data-inspector-status-count="">
+                      {noticeCount}
+                    </Badge>
+                  )}
+                </Group>
+              </Tabs.Tab>
             </Tabs.List>
 
             <Tabs.Panel value="issues" className="ecr-insp-body">
@@ -430,6 +443,9 @@ export function DocumentInspector({
                 onModeChange={setHistoryMode}
                 onOpenCell={onOpenCell}
               />
+            </Tabs.Panel>
+            <Tabs.Panel value="status" className="ecr-insp-body" p="sm">
+              <NoticeList />
             </Tabs.Panel>
             <Tabs.Panel value="info" className="ecr-insp-body">
               <InfoTab
