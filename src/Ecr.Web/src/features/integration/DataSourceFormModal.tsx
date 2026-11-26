@@ -228,11 +228,11 @@ function addressChanged(draft: Draft, source: DataSource | null): boolean {
 
 /** Правка адреси джерела БЕЗ секрету (Windows-автентифікація) потребує явного підтвердження. */
 export function needsEndpointConfirmation(draft: Draft, source: DataSource | null): boolean {
-  // ⚠ Джерело з логіном і паролем (P-1126-SRCCRED) цього підтвердження не просить: зміна цілі там вимагає ввести
-  // пароль заново (`dataSourcePasswordReentryRequired`), а перехід на Windows — власного підтвердження.
-  return (
-    source !== null && source.authMode !== 'UserPassword' && !source.hasSecret && addressChanged(draft, source)
-  );
+  // ⚠ P-1126-SRCCRED: підтвердження потрібне, коли ПІСЛЯ збереження режим — Windows (зокрема UserPassword→Windows
+  // з новою адресою). Якщо режим лишається UserPassword, зміну цілі закриває повторне введення пароля.
+  const resultingWindows = !supportsCredentials(draft.transport) || draft.authMode === 'Windows';
+
+  return source !== null && resultingWindows && !source.hasSecret && addressChanged(draft, source);
 }
 
 /**
@@ -425,7 +425,13 @@ function DataSourceForm({
 
   const userPassword = supportsCredentials(draft.transport) && draft.authMode === 'UserPassword';
   const storedPassword = source !== null && source.authMode === 'UserPassword' && source.hasPassword;
-  const stateKey = credentialsStateOf(save.error);
+  const stateKey =
+    credentialsStateOf(save.error) ??
+    (source?.credentialsState === 'Rejected'
+      ? 'err.ECR-INT-0502.credentialsRejected'
+      : source?.credentialsState === 'Unreadable'
+        ? 'err.ECR-INT-0502.credentialsUnreadable'
+        : null);
   const passwordNeeded =
     userPassword &&
     (!storedPassword || needsPasswordReentry(draft, source) || passwordAsked || stateKey !== null || draft.changingPassword);
@@ -584,7 +590,7 @@ function DataSourceForm({
           build={() => {
             const body = bodyOf(draft, source);
             return {
-              ...(source === null ? {} : { sourceId: source.id }),
+              sourceId: source?.id ?? null,
               transport: body.transport,
               endpoint: draft.endpoint,
               secondaryEndpoint: body.secondaryEndpoint ?? null,

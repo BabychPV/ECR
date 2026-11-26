@@ -1,5 +1,5 @@
 import { Suspense, useId, useState, type JSX } from 'react';
-import { Badge, Button, Group, Loader, Stack, Tabs, Text } from '@mantine/core';
+import { Alert, Badge, Button, Group, Loader, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
@@ -10,6 +10,7 @@ import { DetailDrawer, useDetailPanel } from '@/shared/ui/DetailDrawer';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { KeyValue, type KeyValueItem } from '@/shared/ui/KeyValue';
 import { DataSourceFormModal, DataSourceScheduleTab, SourceEntitiesTab, SourceEventsTab } from './lazyDataSourceForm';
+import { CredentialsStateBadge, credentialsStateKeyOf } from './CredentialsStateBadge';
 import { TestDataSourceModal } from './TestDataSourceModal';
 import { hasDialogAbovePanel } from './nestedDialog';
 import { deleteDataSource, type DataSource } from './dataSourceApi';
@@ -168,11 +169,14 @@ export function DataSourceDrawer({
         title={dataSourceName(source)}
         subtitle={source.code}
         badge={
-          source.isActive ? undefined : (
-            <Badge variant="outline" color="gray">
-              {t('sources.inactive')}
-            </Badge>
-          )
+          <Group gap="xs" wrap="nowrap">
+            {source.isActive ? null : (
+              <Badge variant="outline" color="gray">
+                {t('sources.inactive')}
+              </Badge>
+            )}
+            <CredentialsStateBadge source={source} />
+          </Group>
         }
         closeLabel={t('sources.closeDetails')}
         // Esc верхнього діалогу закриває лише його — шторка лишається (див. `hasDialogAbovePanel`).
@@ -238,6 +242,18 @@ export function DataSourceDrawer({
           </Tabs.List>
 
           <Tabs.Panel value="connection" pt="sm">
+            {credentialsStateKeyOf(source) !== null && (
+              <Alert color="statusError" mb="sm" data-credentials-state={source.credentialsState}>
+                <Stack gap="xs" align="flex-start">
+                  <Text size="sm">{t(credentialsStateKeyOf(source) ?? '')}</Text>
+                  {canManage && (
+                    <Button variant="default" size="xs" onClick={() => setEditing(true)} data-enter-password="">
+                      {t('sources.changePassword')}
+                    </Button>
+                  )}
+                </Stack>
+              </Alert>
+            )}
             <KeyValue items={connectionItems(source)} />
           </Tabs.Panel>
 

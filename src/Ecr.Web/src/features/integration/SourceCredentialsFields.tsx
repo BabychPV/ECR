@@ -195,9 +195,9 @@ export function SourceCredentialsFields({
 
       <ConfirmModal
         opened={confirmingWindows}
-        title={t('sources.authMode.Windows')}
+        title={t('sources.switchToWindows')}
         text={t('sources.switchToWindowsConfirm')}
-        verb={t('sources.authMode.Windows')}
+        verb={t('sources.switchToWindows')}
         onClose={() => setConfirmingWindows(false)}
         onConfirm={() => {
           setConfirmingWindows(false);

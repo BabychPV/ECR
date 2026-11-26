@@ -1,10 +1,23 @@
 import { useState, type JSX } from 'react';
-import { Button, Stack, Textarea } from '@mantine/core';
+import { Alert, Button, Stack, Textarea } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
+import { EcrApiError } from '@/api/client';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { testConnectionFromBody, type TestConnectionBody } from './dataSourceApi';
 import { OutcomeBanner, outcomeOf } from './TestDataSourceModal';
+
+/** Ключі 429: ліміт проб на користувача й пауза цілі після відмов входу поспіль (літерали — для сторожа каталогу). */
+const TooManyTestsKey = 'err.ECR-REQ-0429.tooManySourceTests';
+const TargetPausedKey = 'err.ECR-REQ-0429.sourceTestTargetPaused';
+
+/** `429` → текст з каталогу (ключ із відмови, інакше ліміт проб); `null` — відмова не про ліміт. */
+function throttledText(error: unknown): string | null {
+  if (!(error instanceof EcrApiError) || error.problem.status !== 429) return null;
+  const key = error.problem.extensions2?.['messageKey'];
+
+  return t(key === TargetPausedKey ? TargetPausedKey : TooManyTestsKey);
+}
 
 /**
  * «Test connection» за значеннями НЕЗБЕРЕЖЕНОЇ форми (DESIGN §13.1): нічого не зберігає.
@@ -45,7 +58,14 @@ export function FormTestConnection({
 
       {test.data !== undefined && <OutcomeBanner outcome={outcomeOf(test.data)} onEnterPassword={onEnterPassword} />}
 
-      {test.error !== null && <ErrorAlert error={test.error} />}
+      {test.error !== null &&
+        (throttledText(test.error) === null ? (
+          <ErrorAlert error={test.error} />
+        ) : (
+          <Alert color="statusWarning" data-test-throttled="">
+            {throttledText(test.error)}
+          </Alert>
+        ))}
 
       <Button
         variant="default"

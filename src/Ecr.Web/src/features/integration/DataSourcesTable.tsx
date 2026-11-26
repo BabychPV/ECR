@@ -9,6 +9,7 @@ import { useUrlState } from '@/shared/ui/useUrlState';
 import { dataSourceName } from './dataSourceName';
 import { DataSourceFormModal } from './lazyDataSourceForm';
 import { listDataSources, type DataSource } from './dataSourceApi';
+import { CredentialsStateBadge } from './CredentialsStateBadge';
 import { DataSourcesQueryKey } from './dataSourcesKey';
 
 /**
@@ -134,14 +135,19 @@ export function DataSourcesTable(): JSX.Element {
             key: 'isActive',
             label: t('sources.state'),
             render: (source) =>
-              source.isActive ? (
-                <Badge variant="light" color="statusSuccess">
-                  {t('sources.active')}
-                </Badge>
-              ) : (
-                <Badge variant="outline" color="gray">
-                  {t('sources.inactive')}
-                </Badge>
+              (
+                <Group gap="xs" wrap="nowrap">
+                  {source.isActive ? (
+                    <Badge variant="light" color="statusSuccess">
+                      {t('sources.active')}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" color="gray">
+                      {t('sources.inactive')}
+                    </Badge>
+                  )}
+                  <CredentialsStateBadge source={source} />
+                </Group>
               ),
           },
           // Лічильники — числа за своєю природою, тож форматування розрядів
