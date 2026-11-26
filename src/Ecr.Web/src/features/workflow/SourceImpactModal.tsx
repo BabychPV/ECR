@@ -20,12 +20,25 @@ function periodState(c: SourceImpact['consumers'][number]): 'approved' | 'partia
   return c.sheets.some((s) => !s.willRecalculate) ? 'partial' : 'pending';
 }
 
-/** Ключ статусу періоду: затверджений чи «не буде перераховано» з іншої причини (`skipReason`). */
+/** Ключ статусу періоду: затверджений чи «не буде перераховано» з іншої причини (`skipReason`: закритий, зв'язка не перераховує, не можна писати). */
 function statusKey(c: SourceImpact['consumers'][number]): string {
   const state = periodState(c);
   if (state !== 'approved') return `sourceImpact.status.${state}`;
 
-  return c.skipReason === 'dependentsOff' || c.skipReason === 'notWritable' ? `sourceImpact.status.${c.skipReason}` : 'sourceImpact.status.approved';
+  return c.skipReason === 'closed' || c.skipReason === 'dependentsOff' || c.skipReason === 'notWritable'
+    ? `sourceImpact.status.${c.skipReason}`
+    : 'sourceImpact.status.approved';
+}
+
+/**
+ * ✎ Огляд L2: статус аркуша. Затверджений — «затверджено»; незатверджений у періоді, який НЕ перераховується (закритий,
+ * зв'язка вимкнена, частково затверджений період без чого рахувати), — причина періоду, а не хибне «затверджено».
+ */
+function sheetStatusKey(c: SourceImpact['consumers'][number], sheet: SourceImpact['consumers'][number]['sheets'][number]): string {
+  if (sheet.willRecalculate) return 'sourceImpact.status.pending';
+  if (sheet.approved || c.skipReason === null || c.skipReason === 'approved') return 'sourceImpact.status.approved';
+
+  return statusKey(c);
 }
 
 /**
@@ -147,7 +160,7 @@ export function SourceImpactModal({
                     <Group gap="xs" wrap="wrap" data-testid="source-impact-sheets">
                       {c.sheets.slice(0, MAX_SHEET_BADGES).map((sh) => (
                         <Badge key={sh.sheetDefId} size="xs" variant="outline" color={sh.willRecalculate ? 'statusInfo' : 'statusWarning'}>
-                          {sh.sheetCode} · {t(sh.willRecalculate ? 'sourceImpact.status.pending' : 'sourceImpact.status.approved')}
+                          {sh.sheetCode} · {t(sheetStatusKey(c, sh))}
                         </Badge>
                       ))}
                       {c.sheets.length > MAX_SHEET_BADGES ? (

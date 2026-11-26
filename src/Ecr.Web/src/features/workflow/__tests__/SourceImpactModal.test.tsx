@@ -47,6 +47,33 @@ function show(value: SourceImpact | null, onConfirm = vi.fn(), onClose = vi.fn()
 }
 
 describe('SourceImpactModal', () => {
+  it('✎ огляд L2: закритий період — «закрито»; незатверджений аркуш періоду, що НЕ перераховується, — причина періоду, а не «затверджено»', async () => {
+    const base = impact().consumers[1]!;
+    show(
+      impact({
+        consumers: [
+          { ...base, periodKey: 202601, approved: true, willRecalculate: false, skipReason: 'closed' },
+          {
+            ...base,
+            periodKey: 202602,
+            willRecalculate: false,
+            skipReason: 'dependentsOff',
+            sheets: [
+              { sheetDefId: 1, sheetCode: 'SH_APPROVED', approved: true, willRecalculate: false },
+              { sheetDefId: 2, sheetCode: 'SH_DRAFT', approved: false, willRecalculate: false },
+            ],
+          },
+        ],
+      }),
+    );
+
+    await screen.findByRole('dialog');
+    expect(screen.getAllByText('⟦sourceImpact.status.closed⟧')).toHaveLength(1);
+    const sheets = screen.getByTestId('source-impact-sheets').textContent ?? '';
+    expect(sheets).toContain('SH_APPROVED · ⟦sourceImpact.status.approved⟧');
+    expect(sheets).toContain('SH_DRAFT · ⟦sourceImpact.status.dependentsOff⟧');
+  });
+
   it('✎ кожен період каже, ЧОМУ він у переліку: власник зміненого місяця, міжмісячна формула (який місяць читає), увесь рік — з причиною', async () => {
     const base = impact().consumers[1]!;
     show(

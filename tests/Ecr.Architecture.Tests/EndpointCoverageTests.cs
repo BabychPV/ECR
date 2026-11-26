@@ -557,8 +557,11 @@ public sealed partial class EndpointCoverageTests
             "D-581: чому зміну джерела не звужено до місяців — WholeYear* сервера."),
         new("features/workflow/SourceImpactModal.tsx", "statusKey(c)", 1, "features/workflow/SourceImpactModal.tsx",
             ["sourceImpact.status.approved", "sourceImpact.status.partial", "sourceImpact.status.pending",
-             "sourceImpact.status.dependentsOff", "sourceImpact.status.notWritable"],
+             "sourceImpact.status.dependentsOff", "sourceImpact.status.notWritable", "sourceImpact.status.closed"],
             "D-581: статус періоду — стан аркушів і skipReason сервера."),
+        new("features/workflow/SourceImpactModal.tsx", "sheetStatusKey(c, sh)", 1, "features/workflow/SourceImpactModal.tsx",
+            ["sourceImpact.status.approved", "sourceImpact.status.pending"],
+            "D-581 (огляд L2): статус аркуша; інакше — статус періоду (statusKey)."),
 
         new("features/notifications/ChannelsPanel.tsx", "`notifications.kind.${channel.kind}`", 1,
             "features/notifications/ChannelsPanel.tsx",
