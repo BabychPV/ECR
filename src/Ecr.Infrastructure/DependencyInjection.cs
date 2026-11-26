@@ -699,7 +699,8 @@ public static class DependencyInjection
             // P-0118-31/33: лише біт зв'язки cfg.DocumentSourceBinding.ReadFromDocument (ключ виведено, не читається).
             enabled: null,
             // PERF-11: склад із документів HSE400 не перечитується кожним прогоном (відбиток входів, пам'ять процесу).
-            cache: sp.GetRequiredService<Hse400CompositionCache>()));
+            cache: sp.GetRequiredService<Hse400CompositionCache>(),
+            logger: sp.GetService<Microsoft.Extensions.Logging.ILogger<Hse400CompositionSnapshotLoader>>()));
 
         // PERMITS: types — типи дозволів над реєстрами (PM-03)
         services.AddScoped<IPermitTypeStore, PermitTypeStore>();
