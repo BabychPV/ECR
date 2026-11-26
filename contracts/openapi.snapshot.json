@@ -22007,6 +22007,17 @@
               "string"
             ]
           },
+          "months": {
+            "description": "✎ Місяці правки, з якими людина бачила вплив (ті самі, що в `GET …/source-impact?months=`).",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "periodKey": {
             "description": "Період аркуша.",
             "format": "int32",
@@ -31080,6 +31091,18 @@
             "description": "Код проєкту.",
             "type": "string"
           },
+          "readsPeriodKey": {
+            "description": "Для `crossMonth` — місяць, числа якого читає період; інакше `null`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "reason": {
+            "description": "✎ Чому період у переліку: `sourceMonth` — володіє зміненим місяцем джерела; `sourceYear` — зміну не звужено до\nмісяців (string? SourceImpactDto.WholeYearReason); `readsYear` — шаблон читає джерело за рік; `crossMonth` —\nформули читають обчислені числа місяця ReadsPeriodKey; `annualAnchor` — закритий якір року (річні\nзначення); `readerPass` — методологія читає числа перерахованого місяця.",
+            "type": "string"
+          },
           "sheets": {
             "description": "Аркуші залежного документа за період: які буде, а які не буде перераховано (затверджені пропускаються).",
             "items": {
@@ -31088,7 +31111,7 @@
             "type": "array"
           },
           "skipReason": {
-            "description": "Чому не буде перераховано: `approved` — затверджений період перерахунок пропускає (D-493/D-510); інакше `null`.",
+            "description": "Чому не буде перераховано: `approved` — затверджений період перерахунок пропускає (D-493/D-510); `dependentsOff` —\nзв'язка не перераховує залежних; `notWritable` — у період писати не можна; інакше `null`.",
             "type": [
               "null",
               "string"
@@ -31113,7 +31136,9 @@
           "approved",
           "willRecalculate",
           "skipReason",
-          "sheets"
+          "sheets",
+          "reason",
+          "readsPeriodKey"
         ],
         "type": "object"
       },
@@ -31166,12 +31191,19 @@
             "type": "boolean"
           },
           "sourceMonths": {
-            "description": "Зачеплені місяці джерела `yyyyMM`.",
+            "description": "Місяці джерела `yyyyMM`, які зміна донесе до каскаду (увесь рік — усі місяці року).",
             "items": {
               "format": "int32",
               "type": "integer"
             },
             "type": "array"
+          },
+          "wholeYearReason": {
+            "description": "✎ Чому зміну джерела не звужено до місяців (каскад будить увесь рік споживачів): `periodApproval` |\n`editedMonthsUnknown` | `queueWithoutMonths` | `annualColumn` | `sourceSpreadsMonths`; `null` — звужено.",
+            "type": [
+              "null",
+              "string"
+            ]
           }
         },
         "required": [
@@ -31185,7 +31217,8 @@
           "dependentCount",
           "approvedCount",
           "consumers",
-          "canRecalculateApproved"
+          "canRecalculateApproved",
+          "wholeYearReason"
         ],
         "type": "object"
       },
@@ -48648,6 +48681,18 @@
             "schema": {
               "format": "int64",
               "type": "integer"
+            }
+          },
+          {
+            "description": "✎ Для `edit` річного/квартального джерела — місяці (1–12) МІСЯЧНИХ колонок правки (`months=1&amp;months=3`):\nкаскад донесе лише їх, якщо доказ PERF-06b пройде; немає — увесь рік.",
+            "in": "query",
+            "name": "months",
+            "schema": {
+              "items": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "type": "array"
             }
           }
         ],

@@ -947,7 +947,24 @@ public sealed partial class RecalculationJob
     }
 
     /// <summary>Залежності формул документа, що читають ОБЧИСЛЕНІ числа іншого місяця (кеш на виконання задачі).</summary>
+    /// <remarks>Ключ — документ: прогноз каскаду (<see cref="ISourceCascadePlanner.PlanSourceCascadeAsync"/>) питає кілька документів одним екземпляром.</remarks>
     private Func<int, int, bool>? _crossReads;
+
+    /// <summary>Документ, для якого обчислено <see cref="_crossReads"/> (ставиться разом із ним, лише після успіху).</summary>
+    private long _crossReadsDocumentId;
+
+    /// <summary>
+    /// ✎ D-581 (огляд M1): залежності формул за набором версій шаблону — прогноз каскаду питає ~200 документів-споживачів
+    /// одного шаблону, тож правило читається раз на набір версій, а не раз на документ.
+    /// </summary>
+    private readonly Dictionary<string, IReadOnlyList<CrossReadDependency>?> _crossReadRules = new(StringComparer.Ordinal);
+
+    /// <summary>✎ D-581: якорі років проєкту (найраніший місяць календаря року) — раз на проєкт.</summary>
+    private readonly Dictionary<int, Dictionary<int, int>> _yearAnchors = [];
+
+    /// <summary>Міжмісячна залежність формули (див. <see cref="CrossReadsAsync"/>).</summary>
+    private sealed record CrossReadDependency(
+        byte Kind, short? Offset, int? Column, bool MonthColumn, byte? Month, bool TableHasComputedMonths, bool AnnualOfRoutedTable);
 
     /// <summary>
     /// ✎ Огляд H1: чи місяць <c>reader</c> читає обчислені числа ранішого місяця <c>owner</c> (обидва — ключі одного року) — за
@@ -971,11 +988,18 @@ public sealed partial class RecalculationJob
     /// </remarks>
     private async Task<Func<int, int, bool>> CrossReadsAsync(long documentId, CancellationToken ct)
     {
-        if (_crossReads is not null)
+        if (_crossReads is not null && _crossReadsDocumentId == documentId)
         {
             return _crossReads;
         }
 
+        var reads = await CrossReadsCoreAsync(documentId, ct).ConfigureAwait(false);
+        (_crossReads, _crossReadsDocumentId) = (reads, documentId);
+        return reads;
+    }
+
+    private async Task<Func<int, int, bool>> CrossReadsCoreAsync(long documentId, CancellationToken ct)
+    {
         var versionIds = await (
                 from i in DocumentInstancesQuery(db, documentId)
                 join t in db.TableDefs.AsNoTracking() on i.TableDefId equals t.Id
@@ -990,55 +1014,35 @@ public sealed partial class RecalculationJob
         // ✎ Повторний огляд M-b: версій понад стелю — перелік залежностей неповний: кожен пізніший місяць читає кожен раніший.
         if (versionIds.Count > CrossReadVersionLimit)
         {
-            return _crossReads = static (owner, reader) => reader > owner;
+            return static (owner, reader) => reader > owner;
         }
 
         // ✎ Повторний огляд M-a: якір року (найраніший місяць календаря року проєкту) — власник не-місячних колонок
         // маршрутизованих таблиць (річні значення, Q-17/D-474).
         var projectId = await db.Documents.AsNoTracking().Where(d => d.Id == documentId).Select(d => d.ProjectId)
             .FirstAsync(ct).ConfigureAwait(false);
-        var anchors = (await db.Periods.AsNoTracking().Where(p => p.ProjectId == projectId).Select(p => p.PeriodKeyValue)
-                .ToListAsync(ct).ConfigureAwait(false))
-            .GroupBy(k => k / 100)
-            .ToDictionary(g => g.Key, g => g.Min());
-
-        const Domain.Enums.CellDataType formula = Domain.Enums.CellDataType.Formula;
-        const Domain.Enums.CellDataType calculated = Domain.Enums.CellDataType.Calculated;
-        var deps = await (
-                from d in db.FormulaDependencies.AsNoTracking()
-                join f in db.FormulaDefs.AsNoTracking() on d.FormulaDefId equals f.Id
-                join t in db.TableDefs.AsNoTracking() on f.TableDefId equals t.Id
-                join sh in db.SheetDefs.AsNoTracking() on t.SheetDefId equals sh.Id
-                where versionIds.Contains(sh.TemplateVersionId) && !f.IsDeleted
-                join c in db.ColumnDefs.AsNoTracking() on d.ColumnDefId equals (int?)c.Id into cs
-                from c in cs.DefaultIfEmpty()
-                select new
-                {
-                    Kind = d.DependsOnKind,
-                    Offset = d.PeriodOffset,
-                    Column = (int?)c.Id,
-                    Computed = c == null || c.DataType == formula || c.DataType == calculated,
-                    MonthColumn = c != null && c.IsMonthColumn,
-                    Month = c == null ? null : c.MonthNumber,
-                    TableHasComputedMonths = d.TableDefId != null
-                        && db.ColumnDefs.Any(x => x.TableDefId == d.TableDefId && !x.IsDeleted && x.IsMonthColumn
-                                                  && (x.DataType == formula || x.DataType == calculated)),
-                    AnnualOfRoutedTable = c != null && !c.IsMonthColumn
-                        && db.ColumnDefs.Any(x => x.TableDefId == c.TableDefId && !x.IsDeleted && x.IsMonthColumn),
-                })
-            .Where(x => x.Computed && ((x.Offset != null && x.Offset != 0) || x.MonthColumn || x.AnnualOfRoutedTable
-                                       || (x.Column == null && x.TableHasComputedMonths)))
-            .Distinct()
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        // Понад стелю — перелік неповний: кожен пізніший місяць читає кожен раніший (консервативно).
-        if (deps.Count > MaxCrossReads)
+        if (!_yearAnchors.TryGetValue(projectId, out var anchors))
         {
-            return _crossReads = static (owner, reader) => reader > owner;
+            anchors = (await db.Periods.AsNoTracking().Where(p => p.ProjectId == projectId).Select(p => p.PeriodKeyValue)
+                    .ToListAsync(ct).ConfigureAwait(false))
+                .GroupBy(k => k / 100)
+                .ToDictionary(g => g.Key, g => g.Min());
+            _yearAnchors[projectId] = anchors;
         }
 
-        return _crossReads = (owner, reader) =>
+        var deps = await CrossReadRulesAsync(versionIds, ct).ConfigureAwait(false);
+        return BuildReads(deps, anchors);
+    }
+
+    /// <summary>Правило «читач читає обчислене власника» з залежностей і якорів року (<c>null</c> — кожен пізніший читає кожен раніший).</summary>
+    private static Func<int, int, bool> BuildReads(IReadOnlyList<CrossReadDependency>? deps, Dictionary<int, int> anchors)
+    {
+        if (deps is null)
+        {
+            return static (owner, reader) => reader > owner;
+        }
+
+        return (owner, reader) =>
         {
             if (reader <= owner || reader / 100 != owner / 100)
             {
@@ -1047,13 +1051,61 @@ public sealed partial class RecalculationJob
 
             var (o, r) = (owner % 100, reader % 100);
             var isAnchor = !anchors.TryGetValue(owner / 100, out var anchor) || anchor == owner;
-            return deps.Exists(x =>
+            return deps.Any(x =>
                 (x.Kind == AbsoluteDependencyKind && x.Offset == o)
                 || ((x.Offset ?? 0) == 0 && x.AnnualOfRoutedTable && isAnchor)
                 || (x.Kind != AbsoluteDependencyKind && x.Offset is < 0 and var back && r + back == o)
                 || ((x.Offset ?? 0) == 0 && x.MonthColumn && x.Month == o)
                 || ((x.Offset ?? 0) == 0 && x.Column == null && x.TableHasComputedMonths));
         };
+    }
+
+    /// <summary>Залежності формул набору версій (кеш на екземпляр, <see cref="_crossReadRules"/>); <c>null</c> — понад стелю.</summary>
+    private async Task<IReadOnlyList<CrossReadDependency>?> CrossReadRulesAsync(IReadOnlyCollection<int> versionIds, CancellationToken ct)
+    {
+        var ids = versionIds.Order().ToList();
+        var key = string.Join(',', ids);
+        if (!_crossReadRules.TryGetValue(key, out var deps))
+        {
+            const Domain.Enums.CellDataType formula = Domain.Enums.CellDataType.Formula;
+            const Domain.Enums.CellDataType calculated = Domain.Enums.CellDataType.Calculated;
+            var found = await (
+                    from d in db.FormulaDependencies.AsNoTracking()
+                    join f in db.FormulaDefs.AsNoTracking() on d.FormulaDefId equals f.Id
+                    join t in db.TableDefs.AsNoTracking() on f.TableDefId equals t.Id
+                    join sh in db.SheetDefs.AsNoTracking() on t.SheetDefId equals sh.Id
+                    where ids.Contains(sh.TemplateVersionId) && !f.IsDeleted
+                    join c in db.ColumnDefs.AsNoTracking() on d.ColumnDefId equals (int?)c.Id into cs
+                    from c in cs.DefaultIfEmpty()
+                    select new
+                    {
+                        Kind = d.DependsOnKind,
+                        Offset = d.PeriodOffset,
+                        Column = (int?)c.Id,
+                        Computed = c == null || c.DataType == formula || c.DataType == calculated,
+                        MonthColumn = c != null && c.IsMonthColumn,
+                        Month = c == null ? null : c.MonthNumber,
+                        TableHasComputedMonths = d.TableDefId != null
+                            && db.ColumnDefs.Any(x => x.TableDefId == d.TableDefId && !x.IsDeleted && x.IsMonthColumn
+                                                      && (x.DataType == formula || x.DataType == calculated)),
+                        AnnualOfRoutedTable = c != null && !c.IsMonthColumn
+                            && db.ColumnDefs.Any(x => x.TableDefId == c.TableDefId && !x.IsDeleted && x.IsMonthColumn),
+                    })
+                .Where(x => x.Computed && ((x.Offset != null && x.Offset != 0) || x.MonthColumn || x.AnnualOfRoutedTable
+                                           || (x.Column == null && x.TableHasComputedMonths)))
+                .Distinct()
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            // Понад стелю — перелік неповний: кожен пізніший місяць читає кожен раніший (консервативно; null у кеші).
+            deps = found.Count > MaxCrossReads
+                ? null
+                : [.. found.Select(x => new CrossReadDependency(
+                    x.Kind, x.Offset, x.Column, x.MonthColumn, x.Month, x.TableHasComputedMonths, x.AnnualOfRoutedTable))];
+            _crossReadRules[key] = deps;
+        }
+
+        return deps;
     }
 
     /// <summary>Вид залежності «абсолютний період» (<c>[Period:#k]</c>), як у <c>CrossPeriodReaders</c>.</summary>

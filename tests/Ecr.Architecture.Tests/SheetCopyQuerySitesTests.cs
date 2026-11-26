@@ -120,6 +120,8 @@ public sealed partial class SheetCopyQuerySitesTests
         // в роботу будь-якої копії — вхід документа; версії шаблону й документи-джерела — за екземплярами всіх видів.
         ["src/Ecr.Infrastructure/Jobs/RecalculationJob.Nightly.cs"] =
             "версії шаблону документа й документи шаблону-джерела — за екземплярами будь-якого виду (копія тієї ж версії)",
+        ["src/Ecr.Infrastructure/Jobs/RecalculationJob.Forecast.cs"] =
+            "D-581: пізніші читачі для політики впливу джерела — періоди й версії за екземплярами ОРИГІНАЛУ (SheetCopyId == null), як план каскаду",
         ["src/Ecr.Infrastructure/Jobs/RecalculationJob.Selective.cs"] =
             "✎ PERF-06b (D-572): покривні періоди документа-джерела — за екземплярами ОРИГІНАЛУ (SheetCopyId IS NULL), як завантажувач складу",
         ["src/Ecr.Infrastructure/Jobs/NightlyInputChangeQuery.cs"] =

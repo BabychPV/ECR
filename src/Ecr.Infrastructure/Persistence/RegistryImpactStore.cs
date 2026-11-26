@@ -91,9 +91,26 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
         => ListTemplateConsumersRoutedAsync(templateIds, firstPeriod, lastPeriod, month, routedMonth: null, routedVersions: null, ct);
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<RegistryImpactRow>> ListTemplateConsumersRoutedAsync(
+    public Task<IReadOnlyList<RegistryImpactRow>> ListTemplateConsumersRoutedAsync(
         IReadOnlyCollection<int> templateIds, int firstPeriod, int lastPeriod, int? month, int? routedMonth,
         IReadOnlySet<int>? routedVersions, CancellationToken ct)
+        => ListRoutedConsumersAsync(templateIds, firstPeriod, lastPeriod, month, routedMonth, routedVersions, anyPeriodState: false, ct);
+
+    /// <summary>
+    /// ✎ D-581: те саме відображення, але й у періодах БУДЬ-ЯКОГО стану (закритий, ще не відкритий) — для політики зв'язки
+    /// D-554: затверджений закритий місяць споживача зміна джерела теж робить застарілим, хоч каскад його й не чіпає.
+    /// </summary>
+    /// <param name="templateIds">Шаблони-споживачі.</param>
+    /// <param name="firstPeriod">Найменший ключ періоду (включно).</param>
+    /// <param name="lastPeriod">Найбільший ключ періоду (включно).</param>
+    /// <param name="month">Обсяг «місяць».</param>
+    /// <param name="routedMonth">Місяць правки для ребра <c>MonthOwned</c>.</param>
+    /// <param name="routedVersions">Версії, на яких звуження діє.</param>
+    /// <param name="anyPeriodState"><c>true</c> — періоди будь-якого стану; <c>false</c> — лише <c>Open</c>/<c>Grace</c>.</param>
+    /// <param name="ct">Токен скасування.</param>
+    internal async Task<IReadOnlyList<RegistryImpactRow>> ListRoutedConsumersAsync(
+        IReadOnlyCollection<int> templateIds, int firstPeriod, int lastPeriod, int? month, int? routedMonth,
+        IReadOnlySet<int>? routedVersions, bool anyPeriodState, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(templateIds);
         if (templateIds.Count == 0)
@@ -111,7 +128,7 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
                 join period in db.Periods.AsNoTracking()
                     on new { d.ProjectId, PeriodKey = instance.PeriodKeyValue }
                     equals new { period.ProjectId, PeriodKey = period.PeriodKeyValue }
-                where period.State == PeriodState.Open || period.State == PeriodState.Grace
+                where anyPeriodState || period.State == PeriodState.Open || period.State == PeriodState.Grace
                 let versionId = d.TemplateId == null
                     ? EcrDbContext.VersionOf(d.ProjectId, instance.PeriodKeyValue)
                     : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, instance.PeriodKeyValue)

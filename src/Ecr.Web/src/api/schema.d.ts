@@ -8766,6 +8766,9 @@ export interface paths {
                     action?: string;
                     /** @description Копія аркуша; не `null` — впливу немає. */
                     sheetCopyId?: number;
+                    /** @description ✎ Для `edit` річного/квартального джерела — місяці (1–12) МІСЯЧНИХ колонок правки (`months=1&amp;months=3`):
+                     *     каскад донесе лише їх, якщо доказ PERF-06b пройде; немає — увесь рік. */
+                    months?: number[];
                 };
                 header?: never;
                 path: {
@@ -42215,6 +42218,8 @@ export interface components {
         RecalculateApprovedDependentsRequest: {
             /** @description Відбиток впливу (`GET …/source-impact?action=edit`). */
             hash: null | string;
+            /** @description ✎ Місяці правки, з якими людина бачила вплив (ті самі, що в `GET …/source-impact?months=`). */
+            months?: null | number[];
             /**
              * Format: int32
              * @description Період аркуша.
@@ -46269,9 +46274,20 @@ export interface components {
             periodKey: number;
             /** @description Код проєкту. */
             projectCode: string;
+            /**
+             * Format: int32
+             * @description Для `crossMonth` — місяць, числа якого читає період; інакше `null`.
+             */
+            readsPeriodKey: null | number;
+            /** @description ✎ Чому період у переліку: `sourceMonth` — володіє зміненим місяцем джерела; `sourceYear` — зміну не звужено до
+             *     місяців (string? SourceImpactDto.WholeYearReason); `readsYear` — шаблон читає джерело за рік; `crossMonth` —
+             *     формули читають обчислені числа місяця ReadsPeriodKey; `annualAnchor` — закритий якір року (річні
+             *     значення); `readerPass` — методологія читає числа перерахованого місяця. */
+            reason: string;
             /** @description Аркуші залежного документа за період: які буде, а які не буде перераховано (затверджені пропускаються). */
             sheets: components["schemas"]["SourceImpactSheetDto"][];
-            /** @description Чому не буде перераховано: `approved` — затверджений період перерахунок пропускає (D-493/D-510); інакше `null`. */
+            /** @description Чому не буде перераховано: `approved` — затверджений період перерахунок пропускає (D-493/D-510); `dependentsOff` —
+             *     зв'язка не перераховує залежних; `notWritable` — у період писати не можна; інакше `null`. */
             skipReason: null | string;
             /** @description Код шаблону залежного документа. */
             templateCode: string;
@@ -46306,8 +46322,11 @@ export interface components {
             reasonRequired: boolean;
             /** @description Дія потребує підтвердження (чи відмовляє): політика не `None` і є затверджені залежні. */
             required: boolean;
-            /** @description Зачеплені місяці джерела `yyyyMM`. */
+            /** @description Місяці джерела `yyyyMM`, які зміна донесе до каскаду (увесь рік — усі місяці року). */
             sourceMonths: number[];
+            /** @description ✎ Чому зміну джерела не звужено до місяців (каскад будить увесь рік споживачів): `periodApproval` |
+             *     `editedMonthsUnknown` | `queueWithoutMonths` | `annualColumn` | `sourceSpreadsMonths`; `null` — звужено. */
+            wholeYearReason: null | string;
         };
         /** @description Аркуш залежного періоду в оцінці впливу. */
         SourceImpactSheetDto: {

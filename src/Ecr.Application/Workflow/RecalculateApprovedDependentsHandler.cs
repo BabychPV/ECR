@@ -47,8 +47,10 @@ public sealed class RecalculateApprovedDependentsHandler(
     /// <param name="hash">Відбиток впливу (<c>action=edit</c>), який бачила людина.</param>
     /// <param name="reason">Причина; обов'язкова.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="editedMonths">✎ Місяці правки, з якими людина бачила вплив (<c>GET …/source-impact?months=</c>); <c>null</c> — невідомо.</param>
     public async Task<RecalculateApprovedDependentsResult> HandleAsync(
-        long documentId, int sheetDefId, int periodKey, string? hash, string? reason, CancellationToken ct)
+        long documentId, int sheetDefId, int periodKey, string? hash, string? reason, CancellationToken ct,
+        IReadOnlyCollection<int>? editedMonths = null)
     {
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
@@ -73,7 +75,7 @@ public sealed class RecalculateApprovedDependentsHandler(
         }
 
         var trimmed = reason?.Trim();
-        var impact = await assessor.AssessAsync(documentId, sheetDefId, periodKey, SourceApprovalChange.Edited, ct)
+        var impact = await assessor.AssessAsync(documentId, sheetDefId, periodKey, SourceApprovalChange.Edited, editedMonths, ct)
             .ConfigureAwait(false);
         if (string.IsNullOrEmpty(trimmed))
         {
@@ -126,7 +128,9 @@ public sealed class RecalculateApprovedDependentsHandler(
         var queued = approved.Count == 0
             ? 0
             : await trigger.RequestApprovedDependentsRecalculationAsync(
-                    documentId, sheetDefId, periodKey, new ApprovedRecalculationOverride(userId, trimmed), ct)
+                    // ✎ D-581 (огляд H1): явне «перерахувати й затверджені» — УВЕСЬ рік, не місяці першої правки: після неї людина
+                    // могла правити й інші місяці, а затверджені пізніші читачі ([Period:-1]) теж мають отримати нові числа.
+                    documentId, sheetDefId, periodKey, cascadeMonths: null, new ApprovedRecalculationOverride(userId, trimmed), ct)
                 .ConfigureAwait(false);
         return new RecalculateApprovedDependentsResult(queued, approved.Count);
     }
