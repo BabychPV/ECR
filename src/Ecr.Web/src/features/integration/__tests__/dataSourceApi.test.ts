@@ -19,6 +19,7 @@ const body: SaveDataSourceBody = {
   endpoint: 'https://pi.corp.example/piwebapi',
   isActive: true,
   confirmEndpointChange: false,
+  clearPassword: false,
 };
 
 const RowVersion = 'AAAAAAAAB9E=';
