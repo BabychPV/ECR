@@ -1,5 +1,6 @@
 import { useState, type JSX } from 'react';
 import {
+  Alert,
   Badge,
   Button,
   Checkbox,
@@ -28,6 +29,7 @@ import { showApiError, showDone } from '@/shared/ui/notify';
 import {
   calculationBindings,
   deleteMethodologyRequiredInput,
+  methodologyDerivedInputs,
   methodologyRequiredInputs,
   saveCalculationBinding,
   saveMethodologyModes,
@@ -76,6 +78,64 @@ interface RequiredInputDraft {
  * ⚠ Ключ запису — `ColumnDefId`, а не код: на відміну від правил і виходів,
  * ця сутність не має природного коду.
  */
+/** ✎ D-578: підпис рівня вимоги методолога (Block / Warn / Optional). */
+function severityLabel(severity: RequiredInputSeverity): string {
+  if (severity === 'Optional') return t('methodologies.severityOptional');
+  return severity === 'Warn' ? t('methodologies.severityWarn') : t('methodologies.severityBlock');
+}
+
+/**
+ * ✎ D-578 (рішення людини 26.11): поля, які читає скрипт версії, — обов'язкові для подання автоматично (лише читання).
+ * Послабити вимогу може лише методолог — заведенням поля в перелік вище як Warn чи Optional; рядок показує, який виняток
+ * діє. Автоматичного переліку немає (скрипт не скомпілювався чи поля не записано) — попередження; формульна версія —
+ * секції немає.
+ */
+function DerivedInputsTable({ methodologyId, versionId }: { methodologyId: number; versionId: number }): JSX.Element | null {
+  const derived = useQuery({
+    queryKey: queryKeys.methodologies.derivedInputs(versionId),
+    queryFn: () => methodologyDerivedInputs(methodologyId, versionId),
+  });
+
+  if (derived.data === undefined || derived.data.status === 'notScript') return null;
+
+  return (
+    <Stack gap="xs" mt="md" data-testid="methodology-derived-inputs">
+      <Text fw={600} size="sm">{t('methodologies.derivedInputs')}</Text>
+      {derived.data.status !== 'available' ? (
+        <Alert color="statusWarning" variant="light" data-testid="methodology-derived-unavailable">
+          {t('methodologies.derivedUnavailable')}
+        </Alert>
+      ) : (
+        <>
+          <Text size="xs" c="dimmed">{t('methodologies.derivedInputsHint')}</Text>
+          <Table withTableBorder>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>{t('methodologies.derivedField')}</Table.Th>
+                <Table.Th>{t('methodologies.derivedRequirement')}</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {derived.data.fields.map((field) => (
+                <Table.Tr key={field.fieldCode}>
+                  <Table.Td>{field.fieldCode}</Table.Td>
+                  <Table.Td>
+                    {!field.inScope
+                      ? t('methodologies.derivedOtherMonths')
+                      : field.exceptionSeverity === undefined || field.exceptionSeverity === null
+                        ? t('methodologies.derivedRequired')
+                        : severityLabel(field.exceptionSeverity)}
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </>
+      )}
+    </Stack>
+  );
+}
+
 export function MethodologyRequiredInputsPanel({
   methodologyId,
   versionId,
@@ -185,9 +245,7 @@ export function MethodologyRequiredInputsPanel({
                     </Group>
                   </Table.Td>
                   <Table.Td>
-                    {requiredInput.severity === 'Block'
-                      ? t('methodologies.severityBlock')
-                      : t('methodologies.severityWarn')}
+                    {severityLabel(requiredInput.severity)}
                   </Table.Td>
                   <Table.Td>
                     <Text size="sm" c="dimmed">
@@ -229,6 +287,8 @@ export function MethodologyRequiredInputsPanel({
           </Table>
         )}
       </AsyncBoundary>
+
+      <DerivedInputsTable methodologyId={methodologyId} versionId={versionId} />
 
       {/* ⛔ Закриття без кнопки (хрестик, Esc) — скасування: запиту немає. */}
       <Modal
@@ -291,13 +351,14 @@ export function MethodologyRequiredInputsPanel({
               data={[
                 { value: 'Block', label: t('methodologies.severityBlock') },
                 { value: 'Warn', label: t('methodologies.severityWarn') },
+                { value: 'Optional', label: t('methodologies.severityOptional') },
               ]}
               value={editing.severity}
               allowDeselect={false}
               onChange={(value) =>
                 setEditing({
                   ...editing,
-                  severity: value === 'Warn' ? 'Warn' : 'Block',
+                  severity: value === 'Warn' || value === 'Optional' ? value : 'Block',
                 })
               }
             />

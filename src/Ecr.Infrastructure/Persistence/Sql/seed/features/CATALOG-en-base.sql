@@ -1493,7 +1493,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'methodologies.requiredInputSaved', N'en', N'The required input has been saved.', 1),
     (N'methodologies.requiredInputColumnHint', N'en', N'The column whose emptiness blocks or warns on save. The table is derived from the methodology binding.', 1),
     (N'methodologies.severity', N'en', N'Severity', 1),
-    (N'methodologies.severityHint', N'en', N'Whether an unfilled column blocks saving the row, or only warns while the save goes through.', 1),
     (N'methodologies.severityBlock', N'en', N'Block', 1),
     (N'methodologies.severityWarn', N'en', N'Warn', 1),
     (N'methodologies.hint', N'en', N'Hint', 1),
