@@ -42,8 +42,8 @@ test.describe('застарілі результати методологій', 
     await signIn(page);
     await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
 
-    // Початковий стан: банер «результати застаріли» видно (окремого бейджа більше немає).
-    const badge = page.getByTestId('document-stale-results');
+    // Початковий стан: чип «Results out of date» у рядку стану (DOCUX L4: банера більше немає).
+    const badge = page.locator('[data-calc-status="stale"]');
     await expect(badge).toBeVisible({ timeout: 60_000 });
 
     // Дія: пункт з новою назвою в «More».

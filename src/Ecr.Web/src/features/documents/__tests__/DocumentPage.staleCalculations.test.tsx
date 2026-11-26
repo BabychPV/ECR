@@ -187,7 +187,9 @@ function show(
 }
 
 const Slow = 60_000;
-const BannerId = 'document-stale-results';
+// ✎ DOCUX L4: «застаріло» — чип стану розрахунку в рядку стану (банера `document-stale-results` більше немає).
+const staleChip = (): Element | null => document.querySelector('[data-calc-status="stale"]');
+const findStale = (): Promise<void> => waitFor(() => expect(staleChip()).not.toBeNull(), { timeout: Slow });
 const MoreButton = { name: '⟦document.moreActions⟧' };
 const ValidateButton = { name: '⟦document.validate⟧' };
 
@@ -201,7 +203,7 @@ describe('DocumentPage: застарілі числа методологій', (
     async () => {
       show(['Document.View', 'Calculation.View'], [true]);
 
-      await screen.findByTestId(BannerId, undefined, { timeout: Slow });
+      await findStale();
 
       // ✎ D-441 CLS: дії — після відповіді `submission-target` (до того скелет).
       fireEvent.click(await screen.findByRole('button', MoreButton, { timeout: Slow }));
@@ -224,7 +226,7 @@ describe('DocumentPage: застарілі числа методологій', (
       expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).includes('/calculation-results'))).toBe(false);
       fireEvent.click(screen.getByRole('button', MoreButton));
       expect(await screen.findByRole('menuitem', { name: /⟦workflow\.recalculate⟧/ })).toBeDefined();
-      expect(screen.queryByTestId(BannerId)).toBeNull();
+      expect(staleChip()).toBeNull();
       expect(screen.queryByRole('menuitem', { name: /recalculateCalculations/ })).toBeNull();
     },
     Slow,
@@ -291,7 +293,7 @@ describe('DocumentPage: застарілі числа методологій', (
       show(['Document.View'], [false]);
 
       await screen.findByRole('button', ValidateButton, { timeout: Slow });
-      expect(screen.queryByTestId(BannerId)).toBeNull();
+      expect(staleChip()).toBeNull();
       expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).includes('/calculation-results'))).toBe(false);
     },
     Slow,
@@ -302,14 +304,14 @@ describe('DocumentPage: застарілі числа методологій', (
     async () => {
       const probe = show(['Document.View', 'Calculation.View'], [true, false]);
 
-      await screen.findByTestId(BannerId, undefined, { timeout: Slow });
+      await findStale();
       // ✎ D-441 CLS: дії — після відповіді `submission-target` (до того скелет).
       fireEvent.click(await screen.findByRole('button', MoreButton, { timeout: Slow }));
       fireEvent.click(await screen.findByRole('menuitem', { name: /⟦workflow\.recalculateCalculations⟧/ }));
 
       await waitFor(() => {
         expect(probe.posts()).toBe(1);
-        expect(screen.queryByTestId(BannerId)).toBeNull();
+        expect(staleChip()).toBeNull();
       }, { timeout: Slow });
     },
     Slow,
@@ -321,7 +323,7 @@ describe('DocumentPage: застарілі числа методологій', (
       vi.mocked(notifications.show).mockClear();
       const probe = show(['Document.View', 'Calculation.View'], [true], true);
 
-      await screen.findByTestId(BannerId, undefined, { timeout: Slow });
+      await findStale();
       // ✎ D-441 CLS: дії — після відповіді `submission-target` (до того скелет).
       fireEvent.click(await screen.findByRole('button', MoreButton, { timeout: Slow }));
       fireEvent.click(await screen.findByRole('menuitem', { name: /⟦workflow\.recalculateCalculations⟧/ }));
@@ -336,7 +338,7 @@ describe('DocumentPage: застарілі числа методологій', (
       // ⛔ Мутаційний доказ: покажи «Recalculated»/«queued» на відмову — тут червоне.
       expect(shown.some((o) => o.color === 'statusSuccess')).toBe(false);
       expect(JSON.stringify(shown.find((o) => o.color === 'statusError'))).toContain('Return the submitted sheets for edits first');
-      expect(screen.getByTestId(BannerId)).toBeDefined();
+      expect(staleChip()).not.toBeNull();
     },
     Slow,
   );

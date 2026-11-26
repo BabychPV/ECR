@@ -482,10 +482,12 @@ describe('банер річної розкладки (рецензія №3)', (
     );
 
     await waitFor(() => expect(screen.getAllByTestId('document-sheet-banner')).toHaveLength(2));
-    const [rejected, month] = screen.getAllByTestId('document-sheet-banner');
-    expect(rejected?.getAttribute('data-banner-period')).toBe(String(Jan));
+    // ✎ DOCUX L8: поданий квітень — чип у рядку стану (вище), відхилений січень — банер із причиною під рядком дій.
+    const banners = screen.getAllByTestId('document-sheet-banner');
+    const rejected = banners.find((node) => node.getAttribute('data-banner-period') === String(Jan));
+    const month = banners.find((node) => node.getAttribute('data-banner-period') === String(Apr));
     await waitFor(() => expect(rejected?.textContent).toContain('wrong meter'));
-    expect(month?.getAttribute('data-banner-period')).toBe(String(Apr));
+    expect(month?.getAttribute('data-sheet-state-chip')).toBe('Submitted');
   });
 
   it('«перераховано після подання» (позначка якоря) — лише коли банер про якір', async () => {

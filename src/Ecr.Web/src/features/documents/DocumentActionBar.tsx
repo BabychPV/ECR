@@ -15,12 +15,14 @@ import { DecisionPeriodPicker } from './DecisionPeriodPicker';
 import { SubmitPeriodPicker } from './SubmitPeriodPicker';
 import { useStaleResultsReminder, type StaleReminderState } from './useStaleResultsReminder';
 import { t } from '@/shared/i18n';
+import type { CalcStatusSource } from './calcStatus/calcStatusModel';
+import { useQueryClient } from '@tanstack/react-query';
 
 // ⚠ `import()` — той самий чанк, що й раніше в `DocumentPage` (`D-132`): імпорт
 // не потрібен у мить першого малюнка сторінки.
 const ImportPanel = lazy(async () => ({ default: (await import('@/features/import/ImportPanel')).ImportPanel }));
-// Банер «результати застаріли» — лише коли сервер так каже (`resultsStale === true`), тож окремим чанком (`D-132`).
-const StaleResultsBanner = lazy(async () => ({ default: (await import('./StaleResultsBanner')).StaleResultsBanner }));
+// ✎ DOCUX L4: чип стану розрахунку (замість банера «Calculation results are out of date») — окремим чанком (`D-132`).
+const CalcStatusChip = lazy(async () => ({ default: (await import('./calcStatus/CalcStatusChip')).CalcStatusChip }));
 // Експорт (задача, опитування, тост із посиланням) — окремим чанком, з першим запуском (`D-132`).
 const loadExportButton = () => import('@/features/export/ExportButton');
 const ExportButton = lazy(async () => ({ default: (await loadExportButton()).ExportButton }));
@@ -127,6 +129,7 @@ export function DocumentActionBar({
     decideMonth,
     onDecideConsumed,
   });
+  const queryClient = useQueryClient();
   useStaleResultsReminder(documentId, resultsStale === true, actions.recalculate !== null, staleReminderHost);
   // ✎ D-441 CLS: доки сервер не відповів, ЧИ і ЯКИЙ період подавати, остаточна форма рядка дій невідома
   // (кнопка «Подати: <період>», ▾, «Next to submit: …» або нічого) — скелет замість дій (`DocumentToolbar`,
@@ -287,6 +290,43 @@ export function DocumentActionBar({
         status={
           <>
             {status}
+            {/* ✎ DOCUX L4 (Q2, Q3): стан розрахунку — один чип у рядку стану (актуально / застаріло · Recalculate / у черзі /
+                рахується / збій · Retry; закриті місяці — сіра довідка). Картка — той самий кеш, що в сторінки. */}
+            {(resultsStale !== null && resultsStale !== undefined) || actions.recalculate?.running === true || actions.recalculate?.failed != null ? (
+              <Suspense fallback={null}>
+                <CalcStatusChip
+                  documentId={documentId}
+                  periodKey={periodKey}
+                  source={{ resultsStale: resultsStale ?? null, resultsStaleSince: resultsStaleSince ?? null, ...(queryClient.getQueryData<CalcStatusSource>(['document', documentId, periodKey]) ?? {}) }}
+                  local={{
+                    running: actions.recalculate?.running === true && actions.recalculate.queued !== true,
+                    queued: actions.recalculate?.queued === true,
+                    failed: actions.recalculate?.failed ?? null,
+                  }}
+                  recalculate={
+                    actions.recalculate === null
+                      ? null
+                      : { run: actions.recalculate.run, loading: actions.recalculate.loading, blockedReason: actions.recalculate.blockedReason }
+                  }
+                />
+              </Suspense>
+            ) : null}
+            {/* ✎ DOCUX L8 (Q7): «Submitted / Approved … by …» — чип у рядку стану (пояснення — ⓘ), а не банер під ним. */}
+            <DocumentSheetBanner
+                  part="chips"
+                  documentId={documentId}
+                  periodKey={periodKey}
+                  sheetCode={sheetCode}
+                  sheetCopyId={sheetCopyId}
+                  state={state}
+                  lock={lock}
+                  // ✎ D-6: річна розкладка — банер місяця (поданий / затверджений), а не «увесь аркуш»; якірний Rejected — свій.
+                  monthTarget={yearLayout ? actions.monthBanner : undefined}
+                  canDecide={actions.approve !== null || actions.reject !== null}
+                  recalculatedAfterSubmission={recalculatedAfterSubmission}
+                  periodAction={periodAction}
+                  yearLayout={yearLayout}
+                />
             {/* Задача експорту триває — «Building…» тут, поруч зі станом. */}
             {canExport && startExport.mounted && (
               <Suspense fallback={null}>
@@ -339,6 +379,7 @@ export function DocumentActionBar({
           будь-якої сітки; ✎ UI-26: для поданого, затвердженого й
           відхиленого аркуша — хто, коли і що робити далі цій ролі. */}
       <DocumentSheetBanner
+        part="alerts"
         documentId={documentId}
         periodKey={periodKey}
         sheetCode={sheetCode}
@@ -353,12 +394,6 @@ export function DocumentActionBar({
         yearLayout={yearLayout}
       />
 
-      {/* ✎ resultsStale: входи змінилися після прогону - банер і кнопка «Recalculate» (автоперерахунку немає). */}
-      {resultsStale === true && (
-        <Suspense fallback={null}>
-          <StaleResultsBanner since={resultsStaleSince ?? null} recalculate={actions.recalculate} />
-        </Suspense>
-      )}
 
       {showImport && (
         <Suspense fallback={null}>
