@@ -742,7 +742,9 @@ public sealed class ListDocumentsHandler(
 public sealed class GetDocumentHandler(
     IDocumentStore documents, IAccessDecisionService access, ICurrentUser currentUser,
     StepApproversResolver? stepApprovers = null,
-    RowLocks.RowLockCapability? rowLocks = null)
+    RowLocks.RowLockCapability? rowLocks = null,
+    // ✎ D-577 (Q3): без нього (тести, що збирають обробник вручну) — застарілість картки як доти (будь-який місяць).
+    CalcStatus.DocumentStaleMonths? staleMonths = null)
 {
     /// <summary>Повертає документ; <c>null</c> — не існує або невидимий.</summary>
     /// <param name="documentId">Документ.</param>
@@ -830,6 +832,27 @@ public sealed class GetDocumentHandler(
             result = result with
             {
                 CanLockRows = await rowLocks.CanLockRowsAsync(profile, document.Id, lockPeriod, ct).ConfigureAwait(false),
+            };
+        }
+
+        // ✎ D-577 (Q3, рішення людини 26.11; BUG-2 UX-огляду): «застаріло» — лише місяці, які перерахунок перерахує. Закритий,
+        // ще не відкритий, затверджений місяць чи архівований проєкт — довідка в `GET …/calc-status`, а не банер: інакше
+        // після успішного «Перерахувати» річного документа банер лишався назавжди. Запити — лише коли картка застаріла.
+        if (staleMonths is not null && result.ResultsStale == true && periodKey is { } stalePeriod)
+        {
+            var year = string.Equals(result.TemplateLayout, nameof(TemplateLayout.YearWithMonthColumns), StringComparison.Ordinal)
+                       && string.Equals(result.PeriodKind, nameof(PeriodKind.Monthly), StringComparison.Ordinal)
+                ? stalePeriod / 100
+                : (int?)null;
+            var recalculable = (await staleMonths
+                    .ClassifyAsync(document.Id, document.ProjectId, stalePeriod, year, ct)
+                    .ConfigureAwait(false))
+                .Where(m => m.Recalculable)
+                .ToList();
+            result = result with
+            {
+                ResultsStale = recalculable.Count > 0,
+                ResultsStaleSince = recalculable.Count > 0 ? recalculable.Min(m => m.Since) : null,
             };
         }
 

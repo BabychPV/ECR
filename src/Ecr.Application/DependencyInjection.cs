@@ -186,6 +186,8 @@ public static class DependencyInjection
         services.AddScoped<GetDocumentListSummaryHandler>();
         services.AddScoped<StepApproversResolver>();
         services.AddScoped<GetDocumentHandler>();
+        services.AddScoped<Documents.CalcStatus.DocumentStaleMonths>();               // D-577 (L3)
+        services.AddScoped<Documents.CalcStatus.GetDocumentCalcStatusHandler>();      // D-577 (L3)
         services.AddScoped<GetTableSliceHandler>();
         services.AddScoped<CreateRowHandler>();
         services.AddScoped<DeleteRowHandler>();

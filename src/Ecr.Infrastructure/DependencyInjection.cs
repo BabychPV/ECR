@@ -185,6 +185,7 @@ public static class DependencyInjection
         services.AddScoped<IEditAssignmentManagementStore, EditAssignmentManagementStore>();
         services.AddScoped<ITableDiscussionStore, TableDiscussionStore>();
         services.AddScoped<ISheetChangeStore, SheetChangeStore>();
+        services.AddScoped<IDocumentCalcStatusStore, DocumentCalcStatusStore>(); // D-577 (L3)
         services.AddScoped<IApprovalQueueStore, ApprovalQueueStore>();
         services.AddScoped<IStepApproverStore, StepApproverStore>();
         services.AddScoped<IColumnDefSearchStore, ColumnDefSearchStore>();
