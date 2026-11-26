@@ -4,6 +4,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Application.Registries;
 using Ecr.Application.Registries.Flert;
+using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Jobs;
 using Ecr.Infrastructure.Persistence;
@@ -79,7 +80,58 @@ public sealed class FlaringRegistryProvisionerTests(SqlServerFixture sql)
         Assert.Equal(0, second.Rows);
     }
 
-    private async Task<FlaringRegistryReport> EnsureAsync(ServiceProvider provider, FlaringRegistryCodes codes)
+    /// <summary>Огляд M4: наявний ПОРОЖНІЙ довідник заповнюється; наявний з даними — не чіпається.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "SGF-FLARING-REVIEW-M4")]
+    public async Task Наявний_порожній_заповнюється__наявний_з_даними_не_чіпається()
+    {
+        await using var provider = BuildProvider();
+        var codes = FlertCompositionSyncJob.FlaringCodes(Gas);
+
+        var report = await EnsureAsync(provider, codes, async (services, ct) =>
+        {
+            var flert = services.GetRequiredService<FlertRegistryProvisioner>();
+            await flert.CreateAsync(codes.Location, "loc", "loc", isTemporal: false, RegistrySourceKind.Local,
+                [("AF_NAME", "a", "a", CellDataType.String, true), ("IS_ONSHORE", "o", "o", CellDataType.Bool, true),
+                 ("TYPE_REPORT", "t", "t", CellDataType.Int, true), ("FLARE_UNIT", "u", "u", CellDataType.String, false)],
+                _ => null, 11, ct);
+            var manual = await flert.CreateAsync(codes.Split, "split", "split", isTemporal: true, RegistrySourceKind.Local,
+                [("SLOT", "s", "s", CellDataType.Int, true), ("COEF", "c", "c", CellDataType.Decimal, true)], _ => null, 11, ct);
+            await services.GetRequiredService<RegistryEntryWriter>().WriteAsync(new RegistryEntryWriteBatch(manual.Id,
+                [new RegistryEntryWrite("ADMIN", new Dictionary<string, object?> { ["SLOT"] = 1, ["COEF"] = 1m })]), ct);
+            await services.GetRequiredService<IUnitOfWork>().SaveChangesAsync(ct);
+        });
+
+        Assert.Equal([codes.Pin], report.Created);
+        Assert.Equal(5 + 15, report.Rows);
+        await using var db = Context();
+        Assert.Equal(5, await db.RegistryEntries.CountAsync(e => db.RegistryDefs.Any(d => d.Id == e.RegistryDefId && d.Code == codes.Location)));
+        Assert.Equal(["ADMIN"], await db.RegistryEntries.Where(e => db.RegistryDefs.Any(d => d.Id == e.RegistryDefId && d.Code == codes.Split))
+            .Select(e => e.Code).ToListAsync());
+    }
+
+    /// <summary>Огляд M4: рядок, який відхилив writer, — відмова й відкат, а не напівзаповнений довідник із зауваженням.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "SGF-FLARING-REVIEW-M4")]
+    public async Task Помилка_запису_рядка__відмова_і_відкат()
+    {
+        await using var provider = BuildProvider();
+        var codes = FlertCompositionSyncJob.FlaringCodes(Gas);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => EnsureAsync(provider, codes, async (services, ct) =>
+            _ = await services.GetRequiredService<FlertRegistryProvisioner>().CreateAsync(codes.Pin, "pin", "pin", isTemporal: true,
+                RegistrySourceKind.Local, [("COLUMN", "c", "c", CellDataType.Int, true)], _ => null, 11, ct)));
+
+        await using var db = Context();
+        Assert.False(await db.RegistryDefs.AnyAsync(d => d.Code == codes.Location || d.Code == codes.Pin));
+    }
+
+    private async Task<FlaringRegistryReport> EnsureAsync(
+        ServiceProvider provider, FlaringRegistryCodes codes, Func<IServiceProvider, CancellationToken, Task>? prepare = null)
     {
         await using var scope = provider.CreateAsyncScope();
         var services = scope.ServiceProvider;
@@ -112,6 +164,11 @@ public sealed class FlaringRegistryProvisionerTests(SqlServerFixture sql)
                     Validity = new ValidityWindow(new DateOnly(2022, 1, 1), null),
                 })]), tx);
                 await uow.SaveChangesAsync(tx);
+
+                if (prepare is not null)
+                {
+                    await prepare(services, tx);
+                }
 
                 report = await services.GetRequiredService<FlaringRegistryProvisioner>().EnsureAsync(codes, set.Stream.Id, set.Case.Id, tx);
             },

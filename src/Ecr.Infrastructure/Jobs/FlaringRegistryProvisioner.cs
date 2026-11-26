@@ -37,7 +37,7 @@ public sealed record FlaringRegistryReport(IReadOnlyList<string> Created, int Ro
 /// <remarks>
 /// <list type="bullet">
 /// <item>Ідемпотентно і НЕ руйнівно: наявний довідник не чіпається зовсім (його веде адміністратор, H7; зміни — під
-/// запобіжником закритих місяців). Рядки пишуться лише в довідник, створений цим викликом.</item>
+/// запобіжником закритих місяців). Рядки пишуться лише в ПОРОЖНІЙ довідник (створений цим викликом або наявний без записів); помилка запису — відмова й відкат (огляд M4).</item>
 /// <item><c>LP_SOUR_SPLIT</c>: слоти 1–3 → потоки FLERT 19/21/146, v1 2024 = значення AF 0.4285714/0.4285714/0.1428571,
 /// v2 з 2025-01-01 = 0.4/0.4/0.2; кейси «370 Summer»/«370 Winter» (DESIGN §2.1, §2.3).</item>
 /// <item><c>TOX_GAS_STREAM</c> (з 2022-01-01): стовпці 14/412/415/416/417/453 × обидва поїзди, 417 → потік 575 (H5); 481:
@@ -124,11 +124,17 @@ public sealed class FlaringRegistryProvisioner(
 
         var streams = await StreamsAsync(streamRegistryId, ct).ConfigureAwait(false);
 
-        if (await flert.FindAsync(codes.Location, ct).ConfigureAwait(false) is null)
+        var location = await flert.FindAsync(codes.Location, ct).ConfigureAwait(false);
+        if (location is null)
         {
-            var def = await flert.CreateAsync(codes.Location, "Flare locations (AF)", "Места факелов (AF)", isTemporal: false,
+            location = await flert.CreateAsync(codes.Location, "Flare locations (AF)", "Места факелов (AF)", isTemporal: false,
                 RegistrySourceKind.Local, LocationFields, _ => null, userId, ct).ConfigureAwait(false);
-            created.Add(def.Code);
+            created.Add(location.Code);
+        }
+
+        if (await IsEmptyAsync(location, ct).ConfigureAwait(false))
+        {
+            var def = location;
             rows += await WriteAsync(def, [.. Locations.Select(l => new RegistryEntryWrite(l.Code, Values(
                 ("AF_NAME", l.AfName), ("IS_ONSHORE", l.Onshore), ("TYPE_REPORT", l.TypeReport), ("FLARE_UNIT", l.Unit)))
             {
@@ -136,13 +142,19 @@ public sealed class FlaringRegistryProvisioner(
             })], warnings, ct).ConfigureAwait(false);
         }
 
-        if (await flert.FindAsync(codes.Split, ct).ConfigureAwait(false) is null)
+        var split = await flert.FindAsync(codes.Split, ct).ConfigureAwait(false);
+        if (split is null)
         {
-            var def = await flert.CreateAsync(codes.Split, "LP sour analyzers split (D Island)", "Распределение LP-анализаторов (остров D)",
+            split = await flert.CreateAsync(codes.Split, "LP sour analyzers split (D Island)", "Распределение LP-анализаторов (остров D)",
                 isTemporal: true, RegistrySourceKind.Local, SplitFields, f => f == "STREAM" ? (streamRegistryId, false) : null, userId, ct)
                 .ConfigureAwait(false);
-            await flert.AddKeyAsync(def, "PK", "Slot", isPrimary: true, ["SLOT"], userId, ct).ConfigureAwait(false);
-            created.Add(def.Code);
+            await flert.AddKeyAsync(split, "PK", "Slot", isPrimary: true, ["SLOT"], userId, ct).ConfigureAwait(false);
+            created.Add(split.Code);
+        }
+
+        if (await IsEmptyAsync(split, ct).ConfigureAwait(false))
+        {
+            var def = split;
             var writes = new List<RegistryEntryWrite>();
             foreach (var (slot, streamId, v1, v2) in Slots)
             {
@@ -163,13 +175,19 @@ public sealed class FlaringRegistryProvisioner(
             rows += await WriteAsync(def, writes, warnings, ct).ConfigureAwait(false);
         }
 
-        if (await flert.FindAsync(codes.Pin, ct).ConfigureAwait(false) is null)
+        var pin = await flert.FindAsync(codes.Pin, ct).ConfigureAwait(false);
+        if (pin is null)
         {
-            var def = await flert.CreateAsync(codes.Pin, "Thermal oxidizer gas column → stream", "Столбец газа ТОх → поток",
+            pin = await flert.CreateAsync(codes.Pin, "Thermal oxidizer gas column → stream", "Столбец газа ТОх → поток",
                 isTemporal: true, RegistrySourceKind.Local, PinFields, f => f == "STREAM" ? (streamRegistryId, false) : null, userId, ct)
                 .ConfigureAwait(false);
-            await flert.AddKeyAsync(def, "PK", "Column + train", isPrimary: true, ["COLUMN", "TRAIN"], userId, ct).ConfigureAwait(false);
-            created.Add(def.Code);
+            await flert.AddKeyAsync(pin, "PK", "Column + train", isPrimary: true, ["COLUMN", "TRAIN"], userId, ct).ConfigureAwait(false);
+            created.Add(pin.Code);
+        }
+
+        if (await IsEmptyAsync(pin, ct).ConfigureAwait(false))
+        {
+            var def = pin;
             var caseNames = await CaseNamesAsync(caseRegistryId, ct).ConfigureAwait(false);
             var writes = new List<RegistryEntryWrite>();
             foreach (var (column, train, streamId) in Pins)
@@ -256,13 +274,27 @@ public sealed class FlaringRegistryProvisioner(
         return null;
     }
 
+    /// <summary>
+    /// ✎ огляд M4: помилка запису рядка — відмова (транзакцію викликача відкочено), а не зауваження з напівзаповненим довідником.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Writer відхилив хоча б один рядок.</exception>
     private async Task<int> WriteAsync(RegistryDef def, List<RegistryEntryWrite> writes, List<string> warnings, CancellationToken ct)
     {
+        _ = warnings;
         var result = await writer.WriteAsync(new RegistryEntryWriteBatch(def.Id, writes) { CreateOnly = true }, ct).ConfigureAwait(false);
+        if (result.Errors.Count > 0 || !result.Applied)
+        {
+            throw new InvalidOperationException(
+                $"SGF provisioning: {def.Code} rows rejected — " + string.Join("; ", result.Errors.Select(e => e.ToString())));
+        }
+
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
-        warnings.AddRange(result.Errors.Select(e => $"{def.Code}: {e}"));
         return result.Added;
     }
+
+    /// <summary>✎ огляд M4: рядки пишуться лише в ПОРОЖНІЙ довідник (щойно створений чи наявний без записів); наявні дані — ніколи.</summary>
+    private async Task<bool> IsEmptyAsync(RegistryDef def, CancellationToken ct)
+        => !await db.RegistryEntries.AsNoTracking().AnyAsync(e => e.RegistryDefId == def.Id, ct).ConfigureAwait(false);
 
     /// <summary>Id FLERT → запис <c>STREAM</c>.</summary>
     private async Task<Dictionary<int, long>> StreamsAsync(int streamRegistryId, CancellationToken ct)
