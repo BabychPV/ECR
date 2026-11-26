@@ -303,7 +303,10 @@ public sealed class SubmitBlockedMessageOrderTests(SqlServerFixture sql)
         methodologies.GetMethodologyIdsBoundToTableAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
                      .Returns(new List<int>());
         methodologies.GetMethodologyIdsBoundToTablesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
-                     .Returns(new List<int>());
+                     .Returns(requiredInputs is null ? new List<int>() : new List<int> { 4_577 });
+        methodologies.GetCalculationFreshnessAsync(
+                         Arg.Any<long>(), Arg.Any<int>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
+                     .Returns(new CalculationFreshness(null, null));
 
         var metadata = Metadata(doc);
 

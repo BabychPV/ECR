@@ -679,9 +679,8 @@ public sealed class SubmitSheetHandler(
         // наперед заданих (Q4), а не лише по рядках, які правили (ворота PATCH). Блокує рівень Block — заведений методологом
         // і ВИВЕДЕНИЙ з полів, які читає скрипт (D-578; виняток методолога Optional/Warn знімає);
         // попередження входів — у «Перевірити» й переліку при відкритті, не діалог підтвердження подання. Без прив'язаних
-        // методологій — одне звернення на аркуш (пакетний пошук прив'язок), зрізи не читаються.
-        if (requiredInputs is not null && tables.Count > 0
-            && (await methodologies.GetMethodologyIdsBoundToTablesAsync([.. tables.Keys], ct).ConfigureAwait(false)).Count > 0)
+        // методологій (той самий пакетний пошук прив'язок, що для свіжості вище) — жодного нового звернення.
+        if (requiredInputs is not null && boundMethodologyIds.Count > 0)
         {
             foreach (var instance in instances.Where(i => tables.ContainsKey(i.TableDefId)))
             {
