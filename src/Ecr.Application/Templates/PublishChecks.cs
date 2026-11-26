@@ -1261,8 +1261,9 @@ public static class PublishChecks
     /// <c>[Period].Days</c> чи методологія в такій колонці дають число одного місяця, показане як річне — Land
     /// (669 розрахованих колонок, усі немісячні) так перемкнути не можна
     /// (<c>docs/build/D474-year-layout-calculated-cells.md</c>, варіант A).
-    /// Перевіряються лише таблиці <see cref="TableLayoutKind.MonthsInColumns"/>: таблиця «екземпляр на період»
-    /// (HSE401) місяць має власний. <c>[Period].Year</c> у межах року стала — дозволена. Посилання на інший період
+    /// Перевіряються таблиці <see cref="TableLayoutKind.MonthsInColumns"/> і ✎ b14 N1 <see cref="TableLayoutKind.PerPeriodInstance"/>:
+    /// у річній розкладці «екземпляр на період» — теж ОДНА копія на рік у якорі (HSE401: <c>[Period].Days</c> = 365 у
+    /// річному проєкті й 31 у січні місячного). <c>[Period].Year</c> у межах року стала — дозволена. Посилання на інший період
     /// (<c>[Period:-1]</c> у комірці) не ловиться: перенесення з минулого року законне. Транзитивна залежність
     /// (формула від формули) окремо не шукається: корінь такого ланцюга завжди спіймано тут.
     /// Вираз, що не розбирається, пропускається — його відхиляє <see cref="Run"/>.
@@ -1283,7 +1284,7 @@ public static class PublishChecks
 
         var boundColumns = active.Select(b => b.ColumnDefId).ToHashSet();
         var result = new List<ExpressionDiagnostic>();
-        foreach (var table in LiveTables(version.Sheets).Where(t => t.LayoutKind == TableLayoutKind.MonthsInColumns))
+        foreach (var table in LiveTables(version.Sheets).Where(t => t.LayoutKind is TableLayoutKind.MonthsInColumns or TableLayoutKind.PerPeriodInstance))
         {
             var columns = table.Columns.Where(c => !c.IsDeleted).ToDictionary(c => c.Id);
 

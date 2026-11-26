@@ -79,9 +79,37 @@ public sealed class PublishYearLayoutPeriodDependenceTests
 
     [Fact]
     [Trait("Requirement", "D-474")]
-    public void Таблиця_екземпляр_на_період_у_річній_розкладці_не_перевіряється()
+    [Trait("Finding", "b14-document-move-N1")]
+    public void Таблиця_екземпляр_на_період_у_річній_розкладці_теж_перевіряється()
     {
+        // ✎ b14 N1: у річній розкладці таблиця «екземпляр на період» — ОДНА копія на рік (якір); [Period].Days там —
+        // 365 у річному проєкті й 31 у січні місячного (HSE401 після перенесення в LANDUI2026 множив би на ~11.8).
         var version = Version(TemplateLayout.YearWithMonthColumns, TableLayoutKind.PerPeriodInstance, (PlainColumnId, "[Jan] * [Period].Days"));
+
+        var diagnostics = PublishChecks.CheckYearLayoutPeriodDependence(version, Engine, [Binding(PlainColumnId)]);
+
+        Assert.Contains(diagnostics, d => d.MessageKey == "err.ECR-TMPL-0422.yearLayoutPeriodFormula");
+        Assert.Contains(diagnostics, d => d.MessageKey == "err.ECR-TMPL-0422.yearLayoutNonMonthBinding");
+    }
+
+    [Fact]
+    [Trait("Finding", "b14-document-move-N1")]
+    public void Довжина_року_через_рік_періоду_в_таблиці_екземпляр_на_період_дозволена()
+    {
+        // HSE401 v14: [Period].Days → довжина року з [Period].Year — однакова в річному й місячному проєкті.
+        var version = Version(
+            TemplateLayout.YearWithMonthColumns,
+            TableLayoutKind.PerPeriodInstance,
+            (PlainColumnId, "[Jan] / IF([Period].Year % 4 = 0, 366, 365)"));
+
+        Assert.Empty(PublishChecks.CheckYearLayoutPeriodDependence(version, Engine, []));
+    }
+
+    [Fact]
+    [Trait("Finding", "b14-document-move-N1")]
+    public void Статична_таблиця_річної_розкладки_не_перевіряється()
+    {
+        var version = Version(TemplateLayout.YearWithMonthColumns, TableLayoutKind.Static, (PlainColumnId, "[Jan] * [Period].Days"));
 
         Assert.Empty(PublishChecks.CheckYearLayoutPeriodDependence(version, Engine, [Binding(PlainColumnId)]));
     }

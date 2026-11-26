@@ -2412,9 +2412,11 @@ public sealed class AccessDecisionService(
                 IReadOnlyDictionary<int, (string Code, IReadOnlyList<int> Months)> otherApproved = NoOtherSheetsApproved;
                 IReadOnlyDictionary<int, IReadOnlyList<long>> readerCopies = NoReaderCopies;
                 var instanceTable = snapshot.Sheets.SelectMany(s => s.Tables).FirstOrDefault(t => t.Id == instance.TableDefId);
+                // ✎ b14 P2 (H4): «річна» таблиця — за предикатом роутера (MonthsInColumns АБО «екземпляр на період» версії
+                // «рік + місячні колонки», D-474: одна копія на рік у якорі), а не лише за LayoutKind.
                 var isMonthsTable = !profile.IsIntegrationWriter
                     && !profile.IsSimulation
-                    && instanceTable is { LayoutKind: TableLayoutKind.MonthsInColumns };
+                    && instanceTable is { LayoutKind: TableLayoutKind.MonthsInColumns or TableLayoutKind.PerPeriodInstance };
                 // ✎ D-474 (6): місячна колонка належить СВОЄМУ періоду в будь-якій таблиці, не лише MonthsInColumns —
                 // січнева колонка таблиці PerPeriodInstance так само замкнена, коли січень закрито.
                 var hasOtherMonthColumn = !profile.IsIntegrationWriter

@@ -1141,12 +1141,16 @@ public sealed class RowStore(
         }
 
         var createdIds = created.Keys.ToList();
-        var monthTables = await db.TableDefs
-            .AsNoTracking()
-            .Where(t => createdIds.Contains(t.Id) && t.LayoutKind == Domain.Enums.TableLayoutKind.MonthsInColumns)
+        // ✎ b14 P2 (B1): той самий предикат, що й маршрутизація комірок (MonthsInColumns АБО «екземпляр на період» річної
+        // розкладки) — інакше лінивий екземпляр HSE401 за не-якірний місяць був би без рядків, тобто порожнім.
+        var monthTables = (await db.TableDefs
+                .AsNoTracking()
+                .Where(t => createdIds.Contains(t.Id))
+                .ToListAsync(ct)
+                .ConfigureAwait(false))
+            .Where(monthRouter.AppliesToTable)
             .Select(t => t.Id)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+            .ToList();
         if (monthTables.Count == 0)
         {
             return;
