@@ -9,7 +9,9 @@
 #                     золоті тести: окремий проєкт HSE400_GOLD з одним документом, у який пишеться синтетичний
 #                     ввід тестів (модуль читає комірки документа, а не аргументи тесту); публікація (лише коли
 #                     модель покриває всі F_<X> і має тест), активні прив'язки на якір кожної з 6 таблиць;
-#   -Stage Project  : політика періодів, річний проєкт HSE400_<рік>, активація, один документ;
+#   -Stage Project  : робочий документ року в проєкті -ProjectCode (типово LANDUI2026, куди 26.11 перенесено doc 98);
+#                     новий річний проєкт - лише з кодом HSE400_<рік> (scratch); другий документ HSE400 того самого
+#                     року НЕ створюється ніколи (b14 H6: Land узяв би найбільший id як джерело);
 #   -Stage All      : обидва.
 #
 # Ідемпотентний: опубліковані версії не змінюються, наявні методологія, проєкт і документ не створюються вдруге,
@@ -21,6 +23,7 @@
 param(
     [ValidateSet('Template', 'Project', 'All')][string]$Stage = 'All',
     [int]$Year = (Get-Date).Year,
+    [string]$ProjectCode = 'LANDUI2026',
     [Parameter(Mandatory)][string]$BaseUrl,
     [Parameter(Mandatory)][string]$Database,
     [Parameter(Mandatory)][string]$ConfirmStand,
@@ -33,6 +36,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Hse400Stand.Lib.ps1')
 . (Join-Path $PSScriptRoot 'Hse400Model.Lib.ps1')
 . (Join-Path $PSScriptRoot 'Hse400Methodology.Lib.ps1')
+. (Join-Path $PSScriptRoot 'Hse400Project.Lib.ps1')
 
 $script:Incomplete = New-Object System.Collections.Generic.List[string]
 
@@ -96,12 +100,15 @@ function Get-Hse400PolicyId {
 function Get-Hse400ProjectDocument {
     <# Річний проєкт з одним документом на версії шаблону: наявні не створюються вдруге. Повертає адреси документа. #>
     param([Parameter(Mandatory)][string]$Code, [Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)][int]$ProjectYear,
-        [Parameter(Mandatory)]$VersionId, [Parameter(Mandatory)]$PolicyId)
+        [Parameter(Mandatory)]$VersionId, [Parameter(Mandatory)]$PolicyId, [switch]$Work)
     $st = Get-Hse400Structure $VersionId
     $sheetDef = @($st.sheets) | Where-Object { [string]$_.code -eq [string]$model.sheet.code } | Select-Object -First 1
     if ($null -eq $sheetDef) { throw "У версії $VersionId немає аркуша $($model.sheet.code)." }
 
     $proj = Get-Hse400AllItems -Path '/api/v1/projects' | Where-Object { [string]$_.code -eq $Code } | Select-Object -First 1
+    if ($null -eq $proj -and $Work -and -not (Test-Hse400MayCreateProject -ProjectCode $Code -Year $ProjectYear)) {
+        throw "Проєкту $Code немає. Новий річний проєкт будівник створює лише з кодом HSE400_$ProjectYear (scratch); робочий документ live - у LANDUI2026 (b14)."
+    }
     if ($null -eq $proj) {
         $proj = (Invoke-Hse400Ok -Method POST -Path '/api/v1/projects' -Body @{
                 code = $Code; nameL10n = @{ en = $Title; ru = $Title }; timeZoneId = 'Asia/Atyrau'
@@ -116,7 +123,16 @@ function Get-Hse400ProjectDocument {
     if (-not $periods.Count) { throw "Проєкт $Code не має періодів." }
     $periodKey = $periods[0].periodKey
 
-    $doc = Get-Hse400Items (Invoke-Hse400Ok -Method GET -Path ("/api/v1/documents?limit=200&projectId={0}" -f $projectId)).Json | Select-Object -First 1
+    # ✎ b14: у LANDUI2026 поруч документи Land - лише документ шаблону HSE400; робочий документ року - один на всі проєкти (H6).
+    $tplDocs = @(Get-Hse400Items (Invoke-Hse400Ok -Method GET -Path ("/api/v1/documents?limit=200&templateCode={0}" -f [Uri]::EscapeDataString([string]$model.template.code))).Json)
+    $doc = $tplDocs | Where-Object { [string]$_.projectId -eq [string]$projectId } | Select-Object -First 1
+    if ($Work) {
+        $codes = @{}; $years = @{}
+        foreach ($pr in Get-Hse400AllItems -Path '/api/v1/projects') { $codes[[string]$pr.id] = [string]$pr.code; $years[[string]$pr.id] = $pr.year }
+        $known = @($tplDocs | ForEach-Object { @{ Id = $_.id; ProjectCode = $codes[[string]$_.projectId]; Year = $(if ($null -ne $years[[string]$_.projectId]) { [int]$years[[string]$_.projectId] } else { 0 }) } })
+        $own = Resolve-Hse400WorkDocument -ProjectCode $Code -Year $ProjectYear -Documents $known
+        if ($null -ne $own) { $doc = $tplDocs | Where-Object { [string]$_.id -eq [string]$own } | Select-Object -First 1 }
+    }
     if ($null -eq $doc) {
         $doc = (Invoke-Hse400Ok -Method POST -Path '/api/v1/documents' -Body @{
                 name = @{ en = $Title }; projectId = $projectId; sheetDefIds = @($sheetDef.id); templateVersionId = $VersionId }).Json
@@ -199,7 +215,7 @@ $months = @(Get-Hse400MonthColumns)
 $plan = Get-Hse400MethodologyPlan $model
 $tplCode = [string]$model.template.code
 $tplVersion = [string]$model.template.version
-$projectCode = '{0}_{1}' -f $tplCode, $Year
+$projectCode = $ProjectCode
 $policyCode = 'HSE400_OPEN'
 $goldCode = '{0}_GOLD' -f $tplCode
 $state = Read-Hse400State
@@ -397,7 +413,7 @@ if ($Stage -in 'Template', 'All') {
 if ($Stage -in 'Project', 'All') {
     if (-not $state.ContainsKey('templateVersionId')) { throw 'У стані немає templateVersionId: спершу -Stage Template на цьому стенді.' }
     $vid = $state['templateVersionId']
-    $work = Get-Hse400ProjectDocument -Code $projectCode -Title "HSE400 $Year" -ProjectYear $Year -VersionId $vid -PolicyId (Get-Hse400PolicyId $policyCode)
+    $work = Get-Hse400ProjectDocument -Code $projectCode -Title "HSE400 $Year" -ProjectYear $Year -VersionId $vid -PolicyId (Get-Hse400PolicyId $policyCode) -Work
     $state['projectId'] = $work.ProjectId; $state['documentId'] = $work.DocumentId; $state['periodKey'] = $work.PeriodKey; $state['tableInstances'] = $work.Instances
     Save-Hse400State $state
     Write-Hse400Log ("Документ {0}, період {1}, таблиць {2}. Стан: {3}" -f $work.DocumentId, $work.PeriodKey, $work.Instances.Count, (Get-Hse400StateFile))

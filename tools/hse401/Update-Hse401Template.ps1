@@ -26,7 +26,10 @@ param(
     [switch]$RebuildState,
     [switch]$SkipCompare,
     [ValidateSet('Scratch', 'Live')][string]$Target = 'Scratch', [string]$BaseUrl, [string]$Database, [string]$ConfirmStand, [string]$CredentialFile,
-    [switch]$PreviewOnly, [switch]$AcceptNaePreview
+    [switch]$PreviewOnly, [switch]$AcceptNaePreview,
+    # ✎ b14 (D-577): проєкт документа HSE401. Порожньо - LANDUI2026 на live (після перенесення 26.11), HSE401_2026 на scratch.
+    # Вікно W-1 (v14 ДО перенесення) передає -ProjectCode HSE401_2026 явно.
+    [string]$ProjectCode
 )
 $ErrorActionPreference = 'Stop'
 $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
@@ -50,9 +53,11 @@ function Get-HseTemplateDiff {
     <# Різниця «опублікована структура (колонки таблиці) -> модель». Повертає список @{ Kind; Code; Field; From; To }.
        Kind: Retitle | DisplayFormat | RemoveColumn | HideColumn | Reorder | MissingColumn (помилка: у версії немає колонки моделі).
     Прибрана з моделі колонка (H_MPE): типово HideColumn (вже схована = виконано); RemoveColumn - лише з -DeleteRemoved. #>
-    param([Parameter(Mandatory)]$LiveColumns, [Parameter(Mandatory)]$ModelColumns, [switch]$DeleteRemoved)
+    param([Parameter(Mandatory)]$LiveColumns, [Parameter(Mandatory)]$ModelColumns, [switch]$DeleteRemoved, [AllowNull()][object[]]$LiveFormulas)
     $diff = New-Object System.Collections.Generic.List[object]
     $live = @{}; foreach ($lc in @($LiveColumns)) { $live[[string]$lc.code] = $lc }
+    # ✎ b14 N1: формули колонок (columnDefId -> вираз); без переліку формул (старі виклики) - формули не порівнюються.
+    $liveExpr = @{}; foreach ($f in @($LiveFormulas)) { if ($null -ne $f -and $null -ne $f.columnDefId) { $liveExpr[[string]$f.columnDefId] = [string]$f.expression } }
     $modelCodes = @($ModelColumns | ForEach-Object { $_.Code })
     foreach ($m in $ModelColumns) {
         if (-not $live.ContainsKey($m.Code)) { $diff.Add([pscustomobject]@{ Kind = 'MissingColumn'; Code = $m.Code; Field = ''; From = $null; To = $null }); continue }
@@ -66,6 +71,9 @@ function Get-HseTemplateDiff {
         $wantF = if ($m.DisplayFormat) { [string]$m.DisplayFormat } else { '' }
         $haveF = if ($l.displayFormat) { [string]$l.displayFormat } else { '' }
         if ($haveF -cne $wantF) { $diff.Add([pscustomobject]@{ Kind = 'DisplayFormat'; Code = $m.Code; Field = 'displayFormat'; From = $haveF; To = $wantF }) }
+        if ($null -ne $LiveFormulas -and $m.Expr -and $liveExpr.ContainsKey([string]$l.id) -and $liveExpr[[string]$l.id] -cne [string]$m.Expr) {
+            $diff.Add([pscustomobject]@{ Kind = 'Formula'; Code = $m.Code; Field = 'expression'; From = $liveExpr[[string]$l.id]; To = [string]$m.Expr })
+        }
     }
     # колонки, яких у моделі більше немає (H_MPE): видалити (чернетка, м'яко) або сховати
     foreach ($code in $live.Keys) {
@@ -111,6 +119,7 @@ if ($MyInvocation.InvocationName -eq '.') { return }   # підключення 
 
 Set-Hse401Target -Target $Target -BaseUrl $BaseUrl -Database $Database -ConfirmStand $ConfirmStand -CredentialFile $CredentialFile -PreviewOnly:$PreviewOnly -AcceptNaePreview:$AcceptNaePreview
 $out = Get-Hse401OutDir
+if (-not $ProjectCode) { $ProjectCode = if ($Target -eq 'Live') { 'LANDUI2026' } else { 'HSE401_2026' } }
 $stateFile = Get-Hse401StateFile
 $preview = Test-Hse401Preview
 Connect-Hse
@@ -120,7 +129,7 @@ Assert-Hse401StateMatches $state    # D4: стан іншого стенда - �
 $stateMissing = @($stateKeys | Where-Object { -not $state.ContainsKey($_) -or $null -eq $state[$_] })
 if ($stateMissing.Count -gt 0) {
     if (-not $RebuildState) { throw "Файл стану $stateFile відсутній або неповний (немає: $($stateMissing -join ', ')). Запустіть з -RebuildState (перебудова з API за кодами) або спершу Build/Load." }
-    Write-HseLog "== RebuildState: стан збирається з API (шаблон $($script:HseTemplateCode), проєкт HSE401_2026) =="
+    Write-HseLog "== RebuildState: стан збирається з API (шаблон $($script:HseTemplateCode), проєкт $ProjectCode) =="
     $tq = (Invoke-HseOk GET ("/api/v1/templates?limit=50&q=" + $script:HseTemplateCode)).Json
     $tplR = @($tq.items) | Where-Object { $_.code -eq $script:HseTemplateCode } | Select-Object -First 1
     if ($null -eq $tplR) { throw "Шаблону $($script:HseTemplateCode) на стенді немає." }
@@ -132,8 +141,8 @@ if ($stateMissing.Count -gt 0) {
     $tableR = @($sheetR.tables) | Where-Object { $_.code -eq $script:HseTableCode } | Select-Object -First 1
     if ($null -eq $tableR) { throw "У версії $($pubR.version) немає таблиці $($script:HseTableCode)." }
     $cidR = @{}; foreach ($c in @($tableR.columns)) { $cidR[[string]$c.code] = [int]$c.id }
-    $foundR = Find-Hse401Document
-    if ($null -eq $foundR -or $null -eq $foundR['documentId']) { throw 'Проєкт HSE401_2026 або його документ не знайдено - перебудувати стан неможливо.' }
+    $foundR = Find-Hse401Document -ProjectCode $ProjectCode
+    if ($null -eq $foundR -or $null -eq $foundR['documentId']) { throw "Проєкт $ProjectCode або його документ HSE401 не знайдено - перебудувати стан неможливо." }
     foreach ($kv in @{ templateId = [int]$tplR.id; versionId = [int]$pubR.id; sheetDefId = [int]$sheetR.id; tableDefId = [int]$tableR.id; columnIds = $cidR
             projectId = [int]$foundR['projectId']; documentId = [int]$foundR['documentId']; periodKey = $foundR['periodKey']; tableInstanceId = $foundR['tableInstanceId'] }.GetEnumerator()) { $state[$kv.Key] = $kv.Value }
     $state['standKey'] = Get-Hse401StandKey
@@ -160,15 +169,16 @@ function Get-TableOf($vid) {
     return $table
 }
 $liveTable = Get-TableOf $pubId
-$diff = @(Get-HseTemplateDiff -LiveColumns $liveTable.columns -ModelColumns $model -DeleteRemoved:$DeleteRemovedColumns)
+$diff = @(Get-HseTemplateDiff -LiveColumns $liveTable.columns -ModelColumns $model -DeleteRemoved:$DeleteRemovedColumns -LiveFormulas $(if ($liveTable.PSObject.Properties['formulas']) { @($liveTable.formulas) } else { $null }))
 if ($HideInsteadOfDelete) { Write-HseLog '  -HideInsteadOfDelete застаріло: приховування тепер типове, ключ нічого не змінює.' }
 
 # 2. документи проєкту і чи всі вже на останній версії (GET /documents/{id} віддає лише рядок templateVersion, напр. "1.0.0.3")
-$found = Find-Hse401Document
+$found = Find-Hse401Document -ProjectCode $ProjectCode
 $docIds = @()
 if ($null -ne $found -and $null -ne $found['documentId']) {
     $docs = Get-HseItems (Invoke-HseOk GET "/api/v1/documents?limit=200&projectId=$($found['projectId'])").Json
-    $docIds = @($docs | Where-Object { $_.projectId -eq $found['projectId'] } | ForEach-Object { [int]$_.id })
+    # ✎ b14: лише документ HSE401 (у LANDUI2026 поруч Land 96/100 - їх перенос на версію HSE401 зруйнував би їх)
+    $docIds = @($docs | Where-Object { $_.projectId -eq $found['projectId'] -and [int]$_.id -eq [int]$found['documentId'] } | ForEach-Object { [int]$_.id })
 }
 function Get-DocTemplateVersion($docId) {
     $d = (Invoke-HseOk GET "/api/v1/documents/$docId").Json
@@ -222,6 +232,11 @@ if ($diff.Count -gt 0) {
             'Retitle' { if (-not $titles.ContainsKey($x.Code)) { $titles[$x.Code] = @{} }; $titles[$x.Code][$x.Field] = $x.To }
             'DisplayFormat' { $changes.Add(@{ entityType = 'ColumnDef'; entityId = [int]$byCode[$x.Code].id; field = 'DisplayFormat'; value = $(if ($x.To) { [string]$x.To } else { $null }) }) }
             'HideColumn' { $changes.Add(@{ entityType = 'ColumnDef'; entityId = [int]$byCode[$x.Code].id; field = 'IsHidden'; value = 'true' }) }
+            'Formula' {
+                # ✎ b14 N1: формула колонки в чернетці (той самий PUT, що Test-Hse401FormulaEdit.ps1)
+                $null = Invoke-HseOk PUT "/api/v1/template-versions/$newVid/tables/$($tbl.id)/formulas/column/$([int]$byCode[$x.Code].id)" @{ dialect = 'Template'; expression = [string]$x.To }
+                Write-HseLog "  формула $($x.Code): $($x.To)"
+            }
             'Reorder' {
                 $i = 0
                 foreach ($m in $model) { $i++; if ($byCode.ContainsKey($m.Code)) { $changes.Add(@{ entityType = 'ColumnDef'; entityId = [int]$byCode[$m.Code].id; field = 'Ordinal'; value = [string]$i }) } }
@@ -246,9 +261,10 @@ if ($diff.Count -gt 0) {
         Write-HseLog "  колонку $($x.Code) видалено (м'яко) у чернетці"
     }
     # перевірка чернетки ДО publish: структура = модель
-    $left = @(Get-HseTemplateDiff -LiveColumns (Get-TableOf $newVid).columns -ModelColumns $model -DeleteRemoved:$DeleteRemovedColumns)
+    $draftTable = Get-TableOf $newVid
+    $left = @(Get-HseTemplateDiff -LiveColumns $draftTable.columns -ModelColumns $model -DeleteRemoved:$DeleteRemovedColumns -LiveFormulas $(if ($draftTable.PSObject.Properties['formulas']) { @($draftTable.formulas) } else { $null }))
     if ($left.Count -gt 0) { throw ("Після змін чернетка id $newVid ще відрізняється від моделі: " + (($left | ForEach-Object { "$($_.Kind) $($_.Code)" }) -join '; ') + '. Publish не виконано.') }
-    $p = Invoke-Hse POST "/api/v1/template-versions/$newVid/publish" @{ reason = "HSE401: колонка L = вузол NAE (MPE number), назви, формати показу" }
+    $p = Invoke-Hse POST "/api/v1/template-versions/$newVid/publish" @{ reason = "HSE401: оновлення з моделі ($((@($diff | ForEach-Object { $_.Kind }) | Sort-Object -Unique) -join ', '))" }
     if ($p.Status -notin 200, 201, 202, 204) { throw "publish -> $($p.Status) $(Get-EcrErrorCode $p) $($p.Text)" }
     Write-HseLog "  опубліковано версію $NewVersion (id $newVid)"
     $targetVid = $newVid

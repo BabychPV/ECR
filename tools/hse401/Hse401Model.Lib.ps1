@@ -27,9 +27,14 @@ function New-HseCol {
         Expr = $Expr; Hidden = $Hidden; Precision = $Precision; Scale = $Scale; Kind = $Kind; Width = $Width; DisplayFormat = $DisplayFormat }
 }
 
+# ✎ b14 N1: довжина року періоду - однакова в річному й місячному проєкті (PublishChecks D-474 забороняє [Period].Days тут).
+$script:HseYearDays = 'IF([Period].Year % 4 = 0, 366, 365)'
+
 function Get-Hse401Columns {
     <# Колонки в порядку шаблону. Kind: Input (вводиться), Formula (рахується), NewInput (нова вхідна, якої нема в Excel). #>
-    param([string]$RateExpr = '[H_LIMIT_T] / IF([H_BASIS] = NULL, [Period].Days, [H_BASIS])')
+    # ✎ b14 N1 (D-577, HSE401 v14): довжина року з [Period].Year замість [Period].Days - таблиця 775 одна на рік (якір 202601);
+    # [Period].Days там 365 у річному HSE401_2026 і 31 у січні місячного LANDUI2026 (x11.8). Межа: вікові роки (2100).
+    param([string]$RateExpr = ('[H_LIMIT_T] / IF([H_BASIS] = NULL, {0}, [H_BASIS])' -f $script:HseYearDays))
     $c = New-Object System.Collections.Generic.List[object]
     $c.Add((New-HseCol H_NO B Int 'No' 'No' G_IDENT -Width 60))
     $c.Add((New-HseCol H_REGION C Lookup 'Region' 'Регион' G_IDENT -Registry HSE401_REGION))
@@ -65,7 +70,7 @@ function Get-Hse401Columns {
     $c.Add((New-HseCol H_RUN_H BD Decimal 'Equipment run time, hours/year' 'Время работы оборудования, часов/год' G_RAWY -Precision 24 -Scale 6 -DisplayFormat $script:HseFmtRaw))
     for ($q = 1; $q -le 4; $q++) {
         $a = '{0:00}' -f (3 * $q - 2); $b = '{0:00}' -f (3 * $q - 1); $z = '{0:00}' -f (3 * $q)
-        $days = "IF([H_BASIS] = NULL, [Period].Days, [H_BASIS])"
+        $days = "IF([H_BASIS] = NULL, $($script:HseYearDays), [H_BASIS])"
         $c.Add((New-HseCol "H_RQ${q}_T" $script:HseRawQ[$q - 1][0] Decimal 'Raw material, tons/quarter' 'Расход сырья/материала, тонн/кв' "G_RQ$q" -Expr "[H_RAW_T] / $days * SUM([H_D$a], [H_D$b], [H_D$z])" -Kind Formula))
         $c.Add((New-HseCol "H_RQ${q}_H" $script:HseRawQ[$q - 1][1] Decimal 'Run time, hours/quarter' 'Время работы оборудования, часов/кв' "G_RQ$q" -Expr "[H_RUN_H] / $days * SUM([H_D$a], [H_D$b], [H_D$z])" -Kind Formula))
     }
