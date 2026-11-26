@@ -143,6 +143,8 @@ public sealed class NotFoundException(
 /// <param name="errorCode">Код помилки.</param>
 /// <param name="message">Текст без стека (ФВ-6.11).</param>
 /// <param name="details">Подробиці для журналу.</param>
-public sealed class SourceAuthenticationException(
+/// <remarks>✎ P-1126-SRCCRED: не <c>sealed</c> заради підтипів облікових даних джерела (пароль не читається / уже
+/// відхилений) — вони лишаються відмовою автентифікації для кожного наявного <c>catch</c> і арма статусу (502).</remarks>
+public class SourceAuthenticationException(
     string errorCode, string message, IReadOnlyDictionary<string, object?>? details = null)
     : EcrException(errorCode, message, details);

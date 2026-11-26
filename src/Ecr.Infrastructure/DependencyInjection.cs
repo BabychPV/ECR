@@ -571,6 +571,9 @@ public static class DependencyInjection
         services.AddSingleton<ISmtpPasswordProtector>(sp => sp.GetRequiredService<Notifications.SmtpPasswordProtector>());
         services.AddScoped<ISmtpSettingsStore, Notifications.SmtpSettingsStore>();
 
+        // P-1126-SRCCRED: пароль джерела під DataProtection (власне призначення); адаптери бачать лише порт.
+        services.AddSingleton<IDataSourceCredentialResolver, Integration.DataSourceCredentialResolver>();
+
         // D-471: вихід після бездіяльності — значення в `sys_ecr.SystemSetting`, межа з коротким кешем.
         services.AddScoped<ISessionSettingsStore, Security.SessionSettingsStore>();
         services.AddSingleton<IIdleTimeoutPolicy, Security.IdleTimeoutPolicy>();

@@ -136,6 +136,50 @@ public sealed class DataSource : Entity<int>
         IsActive = isActive;
     }
 
+    /// <summary>Чи транспорт уміє входити логіном і паролем (лише рядки з'єднання: PiSqlClient і Sql, R-11).</summary>
+    /// <param name="transport">Транспорт.</param>
+    public static bool SupportsUserPassword(ExternalTransport transport)
+        => transport is ExternalTransport.PiSqlClient or ExternalTransport.Sql;
+
+    /// <summary>
+    /// Замінює облікові дані ЦІЛКОМ: режим, логін і вже зашифрований пароль (P-1126-SRCCRED). Мітку відмови скидає.
+    /// </summary>
+    /// <param name="authMode">Режим входу.</param>
+    /// <param name="userName">Логін; за Windows ігнорується.</param>
+    /// <param name="protectedPassword">Зашифрований пароль; за Windows ігнорується.</param>
+    /// <remarks>
+    /// ⛔ Інваріанти: Windows ⇒ ні логіна, ні пароля (перехід на Windows їх стирає); UserPassword ⇒ непорожні логін і
+    /// пароль, і лише на транспорті, що вміє логін (<see cref="SupportsUserPassword"/>).
+    /// </remarks>
+    public void ReplaceCredentials(SourceAuthMode authMode, string? userName, byte[]? protectedPassword)
+    {
+        if (authMode == SourceAuthMode.UserPassword)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(userName);
+
+            if (protectedPassword is not { Length: > 0 } || !SupportsUserPassword(Transport))
+            {
+                throw new InvalidOperationException("UserPassword потребує пароля й транспорту PiSqlClient або Sql.");
+            }
+        }
+
+        var windows = authMode == SourceAuthMode.Windows;
+        AuthMode = authMode;
+        UserName = windows ? null : userName;
+        PasswordProtected = windows ? null : protectedPassword;
+        CredentialsRejectedAt = null;
+    }
+
+    /// <summary>Джерело відмовило в автентифікації збереженим паролем: збір і перевірка за id далі не ходять (R-03).</summary>
+    /// <param name="utcNow">Момент відмови, UTC.</param>
+    public void MarkCredentialsRejected(DateTime utcNow)
+    {
+        if (AuthMode == SourceAuthMode.UserPassword)
+        {
+            CredentialsRejectedAt = utcNow;
+        }
+    }
+
     /// <summary>Вимикає джерело; збір із нього припиняється.</summary>
     public void Deactivate() => IsActive = false;
 }

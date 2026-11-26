@@ -110,7 +110,8 @@ public sealed class DataSourcesController(
         var created = await save
             .CreateAsync(
                 request.Code ?? string.Empty, request.NameL10n, request.Transport, request.Endpoint,
-                request.SecondaryEndpoint, request.Catalog, request.MaxParallel, request.SecretConfirmation?.Reveal(), ct)
+                request.SecondaryEndpoint, request.Catalog, request.MaxParallel, request.SecretConfirmation?.Reveal(),
+                Credentials(request), ct)
             .ConfigureAwait(false);
 
         return Created(new Uri("/api/v1/data-sources", UriKind.Relative), created);
@@ -148,9 +149,13 @@ public sealed class DataSourcesController(
             .UpdateAsync(
                 id, request.NameL10n, request.Transport, request.Endpoint, request.SecondaryEndpoint,
                 request.Catalog, request.MaxParallel, request.IsActive, ifMatch, request.SecretConfirmation?.Reveal(),
-                request.ConfirmEndpointChange, ct)
+                request.ConfirmEndpointChange, Credentials(request), ct)
             .ConfigureAwait(false));
     }
+
+    /// <summary>Облікові дані з тіла: відсутні поля — «не змінювати» (R-08).</summary>
+    private static SourceCredentialsInput Credentials(SaveDataSourceRequest request)
+        => new(request.AuthMode, request.UserName, request.Password, request.ClearPassword);
 
     /// <summary>
     /// Прибирає джерело, на яке ніщо не спирається. Право <c>Integration.Manage</c>.
