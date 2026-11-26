@@ -250,7 +250,7 @@ public static class ValidationMessageTemplates
     /// <param name="language">Мова.</param>
     /// <param name="parameters">Підстановки.</param>
     public static string Render(string key, string? language, IReadOnlyDictionary<string, string> parameters)
-        => UiStringResolver.Format(Template(key, language) ?? key, parameters);
+        => UiStringResolver.Format(Template(key, language) ?? key, Localization.RowKeyText.Humanize(parameters, language));
 
     /// <summary>
     /// Повідомлення мовою читача: текст каталогу за <see cref="ValidationMessage.MessageKey"/> із підстановками
@@ -275,7 +275,7 @@ public static class ValidationMessageTemplates
 
         return template is null
             ? message
-            : message with { Message = UiStringResolver.Format(template, message.Params) };
+            : message with { Message = UiStringResolver.Format(template, Localization.RowKeyText.Humanize(message.Params, language, catalog)) };
     }
 
     /// <summary>Підстановка-число: інваріантна культура, як у каталозі помилок.</summary>
