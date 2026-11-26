@@ -43,7 +43,8 @@ export function visibleRecalcs(
   isDismissed: (jobId: string) => boolean,
   now: number,
 ): RecalcProgress[] {
-  return items.filter((item) => isRecalcActive(item) || (isRecentlyFinished(item, now) && !isDismissed(item.jobId)));
+  // ✎ DOCUX L1 (BUG-5): закрити можна й рядок, що ще йде, — людина вирішує, чи стежити (стан документа каже його чип).
+  return items.filter((item) => !isDismissed(item.jobId) && (isRecalcActive(item) || isRecentlyFinished(item, now)));
 }
 
 interface ProjectRecalcBannerProps {
@@ -159,11 +160,11 @@ function RecalcRow({
               {t('recalcProgress.openList')}
             </Anchor>
           )}
-          {!collapsed && !active && (
-            <Anchor component="button" type="button" size="xs" onClick={onDismiss} data-recalc-dismiss="">
-              {t('recalcProgress.dismiss')}
-            </Anchor>
-          )}
+          {/* ✎ DOCUX L1 (BUG-5): Dismiss — ЗАВЖДИ (і згорнутим, і під час виконання): згорнутість пам'ятається, і
+              без нього смуга висіла 24 години без способу її прибрати. */}
+          <Anchor component="button" type="button" size="xs" onClick={onDismiss} data-recalc-dismiss="">
+            {t('recalcProgress.dismiss')}
+          </Anchor>
           <UnstyledButton
             onClick={onToggle}
             aria-expanded={!collapsed}

@@ -6,6 +6,7 @@ import { applyPatchToSlice } from './sliceApply';
 import { hasConfirmed } from './confirmedEdits';
 import { overrideReasonOf } from './overrideReasons';
 import { calculationResultsKey } from '@/features/methodologies/calculationResultsKey';
+import { refreshCalcIssuesAfterSave } from '@/features/calculationIssues/refreshIssues';
 
 /*
  * ⚠ Запит патча комірок і його застосування до кешу — окремим модулем від `useCellPatch.ts` (`D-132`).
@@ -209,7 +210,15 @@ export function applyPatchLocally(
  * платить додатковим `GET` картки щоразу (`CL-01`). Числа методологій (бейдж у шапці, один ключ із панеллю)
  * перечитуються разом із карткою, щоб бейдж і банер не розходилися.
  */
-export function refreshStaleness(queryClient: QueryClient, documentId: number, periodKey: number): void {
+export function refreshStaleness(
+  queryClient: QueryClient,
+  documentId: number,
+  periodKey: number,
+  savedRowKeys: readonly string[] = [],
+): void {
+  // ✎ DOCUX L1 (BUG-6): виправили рядок із переліку проблем розрахунку — перелік перечитується одразу (смуга над сіткою).
+  refreshCalcIssuesAfterSave(queryClient, documentId, savedRowKeys);
+
   const summaryKey = ['document', documentId, periodKey] as const;
   const summary = queryClient.getQueryData<{ resultsStale?: boolean | null }>(summaryKey);
   const becameStale = summary !== undefined && summary.resultsStale === false;

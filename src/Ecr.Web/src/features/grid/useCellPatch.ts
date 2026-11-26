@@ -12,6 +12,7 @@ import { formatTime } from '@/shared/format';
 import { QueuedPollSteps, randomJittered, stepOf } from '@/shared/polling/pollBackoff';
 import { invalidateSlicesForPeriods, markDocumentPeriodStale } from './sliceCache';
 import { applyPatchLocally, patchCells, refreshStaleness } from './cellPatchRequest';
+import { refreshCalcIssues } from '@/features/calculationIssues/refreshIssues';
 
 // Запит патча й застосування до кешу — у `cellPatchRequest.ts` (`D-132`); реекспорт для сітки й тестів.
 export {
@@ -147,6 +148,8 @@ export function settleRecalculation(
     // Невраховані старіші задачі (olderPending) знають про період правки лише те, що він міг змінитися.
     const periods = known ? (olderPending ? [...writtenPeriods, periodKey] : writtenPeriods) : [periodKey];
     void invalidateSlicesForPeriods(queryClient, documentId, periods);
+    // ✎ DOCUX L1 (BUG-6): перерахунок записав нові значення — переліки проблем розрахунку документа теж застаріли.
+    refreshCalcIssues(queryClient, documentId);
   }
   return true;
 }
@@ -362,7 +365,7 @@ export function useCellPatch(documentId: number): {
         versions.current = { ...versions.current, ...response.rowVersions };
 
         applyPatchLocally(queryClient, request, response);
-        refreshStaleness(queryClient, documentId, request.periodKey);
+        refreshStaleness(queryClient, documentId, request.periodKey, request.rows.map((row) => row.rowKey));
 
         // ⚠ `BE-05`: `null` у відповіді означає «перерахунку не поставлено»
         // (гілка відкладання `DAT-05`) — і тоді стеження ЗНІМАЄТЬСЯ, а не

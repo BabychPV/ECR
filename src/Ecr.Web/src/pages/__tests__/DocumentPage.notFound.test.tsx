@@ -55,7 +55,6 @@ beforeAll(async () => {
     import('@/features/permits/bindings/PermitRefreshStrip'),
     import('@/features/permits/history/HeaderSplitBanner'),
     import('@/features/projects/allProjects'),
-    import('@/features/recalc/ProjectRecalcBannerSlot'),
     import('@/features/tableChat/TableChatEntry'),
     import('@/shared/ui/PeriodPicker'),
   ]);

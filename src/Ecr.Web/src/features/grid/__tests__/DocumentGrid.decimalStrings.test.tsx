@@ -413,4 +413,20 @@ describe('В: вставка шле на сервер РІВНО той рядо
     fireEvent.click(await screen.findByRole('button', { name: /roundedShow|Show|Показ/u }));
     expect(await screen.findByText(/12\.345 → 12\.35/u)).toBeTruthy();
   });
+
+  it('L1-5 (DOCUX BUG-8): «Rounded N value(s)» закривається хрестиком; наступна вставка з округленням показує знову', async () => {
+    mockServer();
+    show();
+
+    const stub = await screen.findByTestId('revogrid-stub');
+    fireEvent.paste(stub, clipboard('1\t12.345\n'));
+    await waitFor(() => expect(patched).toHaveLength(1));
+
+    const notice = await screen.findByTestId('grid-rounded-notice');
+    fireEvent.click(notice.querySelector('button.mantine-Alert-closeButton') as HTMLElement);
+    await waitFor(() => expect(screen.queryByTestId('grid-rounded-notice')).toBeNull());
+
+    fireEvent.paste(stub, clipboard('1\t2.555\n'));
+    expect(await screen.findByTestId('grid-rounded-notice')).toBeTruthy();
+  });
 });

@@ -983,6 +983,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // повідомлення без переліку — це «щось змінилося, розбирайся сам».
   const [rounded, setRounded] = useState<readonly RoundedCell[]>([]);
   const [showRounded, setShowRounded] = useState(false);
+  // ✎ DOCUX L1 (BUG-8): «Rounded N value(s)» закривається хрестиком; позначки комірок лишаються до наступної вставки.
+  const [roundedNoticeOpen, setRoundedNoticeOpen] = useState(false);
 
   // ⛔ Директива «обов'язкові вхідні колонки методології»: два різних
   // повідомлення сервера про той самий факт («у рядка вже визначена
@@ -1877,6 +1879,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // ⚠ Позначки попередньої вставки знімаються: інакше через десять вставок
         // половина таблиці була б помічена, і лічильник перестав би щось значити.
         setRounded(roundedNow);
+        setRoundedNoticeOpen(roundedNow.length > 0);
 
         // ⚠ Уся вставка — ОДИН крок історії: інакше одне Ctrl+V з'їдало б усю
         // глибину, а Ctrl+Z відкочував би її по комірці.
@@ -3243,12 +3246,19 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         </Alert>
       )}
 
-      {rounded.length > 0 && (
+      {rounded.length > 0 && roundedNoticeOpen && (
         // ⛔ Повідомлення, а не діалог підтвердження (ФВ-9.16c). Діалог на
         // кожну вставку з Excel закривали б не читаючи — і правило «мовчки
         // округлювати не можна ніде» перестало б працювати саме там, де воно
         // потрібне найбільше.
-        <Alert color="violet" title={t('grid.roundedTitle', { count: rounded.length })}>
+        <Alert
+          color="violet"
+          title={t('grid.roundedTitle', { count: rounded.length })}
+          withCloseButton
+          closeButtonLabel={t('common.close')}
+          onClose={() => setRoundedNoticeOpen(false)}
+          data-testid="grid-rounded-notice"
+        >
           <Group gap="sm">
             <Text size="sm">{t('grid.roundedHint')}</Text>
             <Button variant="subtle" onClick={() => setShowRounded(true)}>

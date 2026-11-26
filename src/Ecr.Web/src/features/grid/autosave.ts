@@ -652,7 +652,7 @@ async function saveOrphanSlice(
       const response = await patchCells(documentId, request);
 
       applyPatchLocally(queryClient, request, response);
-      refreshStaleness(queryClient, documentId, request.periodKey);
+      refreshStaleness(queryClient, documentId, request.periodKey, request.rows.map((row) => row.rowKey));
       discardPendingRows(
         slice.tableInstanceId,
         slice.periodKey,

@@ -7,7 +7,7 @@ import type { FormulaErrorIssue } from '@/features/calculationIssues/api';
 import type { MonthUnmatchedRows, UnmatchedRows } from '@/features/documents/useUnmatchedRows';
 import { testTheme } from '@/test/render';
 import { CalculationIssuesStrip } from '../CalculationIssuesStrip';
-import { detailsStorageKey } from '../calcIssuesStripModel';
+import { resetDetailsOpen } from '../calcIssuesStripModel';
 
 /**
  * ⛔ b14 doc-notices-compact (людина 25.11, doc 96: три блоки «Calculation for <місяць>: some rows are not included» по
@@ -54,11 +54,11 @@ const Months: readonly MonthUnmatchedRows[] = [
   { periodKey: Nov, rows: rowsOf({ issues: [issue(1, 7, { kind: 'MissingInputs' })] }) },
 ];
 
-function show(userId = 7, months: readonly MonthUnmatchedRows[] = Months) {
+function show(userId = 7, months: readonly MonthUnmatchedRows[] = Months, documentId = 96) {
   const onOpenCell = vi.fn();
   const view = render(
     <MantineProvider theme={testTheme}>
-      <CalculationIssuesStrip userId={userId} months={months} tables={[table(1, 'Stationary')]} onOpenCell={onOpenCell} />
+      <CalculationIssuesStrip userId={userId} memoryDocumentId={documentId} months={months} tables={[table(1, 'Stationary')]} onOpenCell={onOpenCell} />
     </MantineProvider>,
   );
 
@@ -66,7 +66,10 @@ function show(userId = 7, months: readonly MonthUnmatchedRows[] = Months) {
 }
 
 describe('CalculationIssuesStrip (b14 doc-notices-compact)', () => {
-  beforeEach(() => window.localStorage.clear());
+  beforeEach(() => {
+    window.localStorage.clear();
+    resetDetailsOpen();
+  });
   afterEach(() => {
     window.localStorage.clear();
     vi.restoreAllMocks();
@@ -114,30 +117,19 @@ describe('CalculationIssuesStrip (b14 doc-notices-compact)', () => {
     expect(await screen.findAllByTestId('document-calc-issues')).toHaveLength(3);
   });
 
-  it('AC-3: Details пам\'ятається між відкриттями (на людину); без localStorage — згорнуто, без помилки', async () => {
-    const first = show(7);
+  it('DOCUX L1: Details пам’ятається лише для ЦЬОГО документа; інший документ відкривається згорнутим; localStorage не пишеться', async () => {
+    const first = show(7, Months, 96);
     await userEvent.click(screen.getByTestId('document-calc-strip-toggle'));
-    expect(window.localStorage.getItem(detailsStorageKey(7))).toBe('1');
+    expect(window.localStorage.length).toBe(0);
     first.view.unmount();
 
-    // Повторне відкриття документа — розгорнуто.
-    const second = show(7);
+    // Той самий документ (перемкнули аркуш і повернулись) — розгорнуто.
+    const again = show(7, Months, 96);
     expect(screen.getByTestId('document-calc-strip-toggle').getAttribute('aria-expanded')).toBe('true');
-    second.view.unmount();
+    again.view.unmount();
 
-    // Інша людина — своя пам'ять (згорнуто).
-    const other = show(8);
-    expect(screen.getByTestId('document-calc-strip-toggle').getAttribute('aria-expanded')).toBe('false');
-    other.view.unmount();
-
-    // Сховище кидає (приватне вікно, заборона) — згорнуто, перемикач працює.
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-      throw new Error('denied');
-    });
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('denied');
-    });
-    show(7);
+    // Інший документ — згорнуто (доти — розгорнуто на кожному документі: пам'ять на людину).
+    show(7, Months, 100);
     const toggle = screen.getByTestId('document-calc-strip-toggle');
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     await userEvent.click(toggle);

@@ -57,10 +57,10 @@ export function hasLockedSheet(sheetStates: Readonly<Record<string, string>> | u
 }
 
 /**
- * RC15-C: чи подані/затверджені ВСІ аркуші документа - лише тоді сервер відмовляє в перерахунку (`422 4221`);
- * частково подані аркуші він пропускає й перераховує решту.
+ * RC15-C → ✎ DOCUX L1 (BUG-1): чи ЗАТВЕРДЖЕНІ всі аркуші документа — лише тоді сервер не має що рахувати
+ * (UAT-recalc-ux 07.11: поданий аркуш перераховується, пропускається лише затверджений).
  */
-export function allSheetsLocked(sheetStates: Readonly<Record<string, string>> | undefined): boolean {
+export function allSheetsApproved(sheetStates: Readonly<Record<string, string>> | undefined): boolean {
   const states = Object.values(sheetStates ?? {});
-  return states.length > 0 && states.every((state) => state === 'Submitted' || state === 'Approved');
+  return states.length > 0 && states.every((state) => state === 'Approved');
 }

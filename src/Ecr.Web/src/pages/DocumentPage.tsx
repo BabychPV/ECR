@@ -187,12 +187,6 @@ const CalculationIssuesStrip = lazy(async () => ({
   default: (await import('@/features/documents/calcIssuesStrip/CalculationIssuesStrip')).CalculationIssuesStrip,
 }));
 
-// Місце банера перерахунку проєкту (lane A) — за `import()`, як на Documents: хук опитування задач і модель
-// прогресу не входять у граф маршруту (бюджет D-132: DocumentPage 250.5 КБ gzip після зведення з банерами #782).
-const ProjectRecalcBannerSlot = lazy(async () => ({
-  default: (await import('@/features/recalc/ProjectRecalcBannerSlot')).ProjectRecalcBannerSlot,
-}));
-
 // PM-11: «З дозволу» + «Оновити з дозволу» — окремий чанк (бюджет маршруту D-132).
 const PermitRefreshStrip = lazy(async () => ({
   default: (await import('@/features/permits/bindings/PermitRefreshStrip')).PermitRefreshStrip,
@@ -1199,6 +1193,7 @@ export function DocumentPage(): JSX.Element {
           <CalculationIssuesStrip
             userId={session.data?.userId}
             documentId={can(session.data, 'Calculation.View') ? documentId : undefined}
+            memoryDocumentId={documentId}
             months={issuePanels}
             tables={tables.data ?? []}
             onOpenCell={openUnmatchedRow}
@@ -1209,11 +1204,8 @@ export function DocumentPage(): JSX.Element {
         </Suspense>
       )}
 
-      {projectId !== null && (
-        <Suspense fallback={null}>
-          <ProjectRecalcBannerSlot projectId={projectId} />
-        </Suspense>
-      )}
+      {/* ✎ DOCUX Q5 (рішення людини 26.11): смуги «перерахунок проєкту» тут немає — вона на дошці документів; стан ЦЬОГО
+          документа каже чип розрахунку в рядку стану. */}
 
       {/* ⛔ `F-18`: ЧОМУ тут нічого не змінити — одразу під рядком дій, до
           будь-якої сітки: сірі комірки без пояснення читаються як збій.

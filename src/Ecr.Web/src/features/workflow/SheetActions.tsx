@@ -12,7 +12,7 @@ import type {
   ReopenDocumentRequest,
   SheetWorkflowRequest,
 } from '@/api/types';
-import { allSheetsLocked, locksDataActions, type DocumentLock } from '@/features/documents/documentLock';
+import { allSheetsApproved, locksDataActions, type DocumentLock } from '@/features/documents/documentLock';
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { refreshSheetWorkflow } from './refreshSheetWorkflow';
 import { useStatusStale } from './statusStale';
@@ -1444,11 +1444,15 @@ export function useSheetActions({
   // ✎ AN-77 / L8-12: клієнт завжди шле `sheetDefId`, а для цієї області сервер відмовляє, щойно поданий
   // САМ цей аркуш (`RecalculateDocumentHandler`, ФВ-9.17), хай сусідні й у чернетці, - кнопка (і F9, і
   // кнопка банера) вимкнена з причиною. «Усі подані» лишається для випадку, коли стан цього аркуша невідомий.
-  const ownLocked = state === 'Submitted' || state === 'Approved';
-  const recalcBlockedReason = ownLocked
-    ? t('workflow.recalculateSheetSubmitted', { sheet: sheetName ?? String(sheetDefId) })
-    : allSheetsLocked(summary?.sheetStates)
-      ? t('workflow.recalculateAllSubmitted', { period: formatPeriodKey(periodKey) || String(periodKey) })
+  // ✎ DOCUX L1 (BUG-1, правило людини 07.11/16.11): сервер ПЕРЕРАХОВУЄ поданий аркуш і пропускає лише ЗАТВЕРДЖЕНИЙ
+  // (`RecalculateDocumentHandler`: «нічого рахувати» — лише коли затверджено оригінал і кожну копію). Тож вимкнена кнопка —
+  // лише над затвердженим аркушем. Річна розкладка не дивиться на стан якоря (січня): рік рахує відкриті місяці, а на
+  // «нічого рахувати» сервер відповідає поясненням (`recalc.nothingToRecalculate`), не відмовою.
+  const ownApproved = !yearLayout && state === 'Approved';
+  const recalcBlockedReason = ownApproved
+    ? t('workflow.recalculateSheetApproved', { sheet: sheetName ?? String(sheetDefId) })
+    : !yearLayout && allSheetsApproved(summary?.sheetStates)
+      ? t('workflow.recalculateAllApproved', { period: formatPeriodKey(periodKey) || String(periodKey) })
       : null;
   const recalcBusy = recalculate.isPending || recalcRunning || settled.settling;
 
