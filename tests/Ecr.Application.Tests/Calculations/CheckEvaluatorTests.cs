@@ -339,4 +339,24 @@ public sealed class CheckEvaluatorTests
     public void A2_03_Check_із_ключами_підказки_не_дає()
         => Assert.Null(CheckEvaluator.NoKeysNotice(
             "CHK", 7, new RelationMatchSpec([new RelationKey("A", "A")]), [Row("s")], [Row("t1"), Row("t2")], "en"));
+
+    [Theory]
+    [InlineData("en", "(added by a user)")]
+    [InlineData("ru", "(добавлена пользователем)")]
+    [InlineData("kz", "(пайдаланушы қосқан)")]
+    public void RowLabel_Check_службовий_ключ_рядка_джерела_не_потрапляє_в_текст(string lang, string marker)
+    {
+        // integ-row-label-messages: рядок, доданий людиною, має ключ-GUID; текст каже «added by a user», не 32 символи.
+        const string guid = "adc95dc2bdb84fa0bce2d80e0defc581";
+        var spec = Spec("0");
+        var f = CheckEvaluator.Failures(new RelationMatchSpec([]), spec, [Row(guid, "x", fact: 7m)], [Row("TOT", "x", total: 8m)]);
+
+        var message = Assert.Single(CheckEvaluator.ToMessages("CHK", 1, spec, f, lang));
+
+        Assert.DoesNotContain(guid, message.Message, StringComparison.Ordinal);
+        Assert.Contains(marker, message.Message, StringComparison.Ordinal);
+        // Збережені підстановки лишають ключ (на читанні `Localize` знову його ховає).
+        Assert.Equal(guid, message.Params!["sourceRow"]);
+        Assert.DoesNotContain(guid, ValidationMessageTemplates.Localize(message, lang, null).Message, StringComparison.Ordinal);
+    }
 }

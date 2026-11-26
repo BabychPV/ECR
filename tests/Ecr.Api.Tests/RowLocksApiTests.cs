@@ -71,6 +71,44 @@ public sealed class RowLocksApiTests(SqlServerFixture sql)
         Assert.Contains("Unlock", await AuditOperationsAsync(lockId).ConfigureAwait(true));
     }
 
+    /// <summary>
+    /// integ-row-label-messages: рядок, доданий людиною (ключ — GUID без дефісів), уже заблоковано — 409
+    /// <c>rowAlreadyLocked</c> називає його номером у зрізі («2»: другий за Id), а не 32 символами; сирий ключ лишається в
+    /// <c>rowKeys</c> для клієнта. ⛔ Мутація: прибрати <c>RowDisplayNames</c> у <c>CreateRowLocksHandler</c> — у тексті
+    /// «(added by a user)».
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "integ-row-label-messages")]
+    public async Task Повторне_блокування_рядка_з_GUID_ключем_називає_рядок_номером()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var keys = new[] { Guid.NewGuid().ToString("N"), Guid.NewGuid().ToString("N") };
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            for (var i = 0; i < keys.Length; i++)
+            {
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                    $@"UPDATE r SET RowKey = {keys[i]} FROM doc.TableRow r
+                       JOIN doc.TableInstance t ON t.Id = r.TableInstanceId
+                       WHERE t.DocumentId = {s.Document.DocumentId} AND r.RowKey = {s.RowKeys[i]}").ConfigureAwait(true);
+            }
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var author = await SignInAsync(app, s.Author).ConfigureAwait(true);
+        await JsonAsync(app, HttpStatusCode.OK, author.PostAsJsonAsync(LocksUri(s), LockBody(s, keys[1]))).ConfigureAwait(true);
+
+        var again = await JsonAsync(app, HttpStatusCode.Conflict, author.PostAsJsonAsync(LocksUri(s), LockBody(s, keys[1])))
+            .ConfigureAwait(true);
+
+        Assert.Equal("err.ECR-ROW-0409.rowAlreadyLocked", again.GetProperty("messageKey").GetString());
+        Assert.Equal(keys[1], again.GetProperty("rowKeys").GetString());
+        var detail = again.GetProperty("detail").GetString()!;
+        Assert.DoesNotContain(keys[1], detail, StringComparison.Ordinal);
+        Assert.Contains("locked for this time: 2.", detail, StringComparison.Ordinal);
+    }
+
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "B75")]

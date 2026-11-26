@@ -116,6 +116,7 @@ public static class JobProgressMessageResolver
             parameters["message"] = Resolve(envelope.Inner, strings);
         }
 
-        return UiStringResolver.Format(template, parameters);
+        // ✎ integ-row-label-messages: службовий ключ рядка (GUID) у текст журналу не потрапляє.
+        return UiStringResolver.Format(template, RowKeyText.Humanize(parameters, strings.LanguageCode, strings));
     }
 }

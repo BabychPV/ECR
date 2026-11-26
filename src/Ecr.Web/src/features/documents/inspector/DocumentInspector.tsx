@@ -49,6 +49,7 @@ import {
   tableTitleOf,
   type InspectorIssueGroup,
 } from './inspectorModel';
+import { rowKeyText } from '@/features/grid/rowKeyText';
 import { LockedRows } from './LockedRows';
 import { SheetLog, type InspectorSheet, type SheetLogTarget } from './SheetLog';
 import './inspector.css';
@@ -588,7 +589,7 @@ function AttentionSection({
               <b>{row.rowLabel}</b> — {row.reason}
             </span>
             <span className="ecr-insp-where">
-              <span className="ecr-insp-chip">{row.rowKey}</span>
+              <span className="ecr-insp-chip">{rowKeyText(row.rowKey, row.rowOrdinal)}</span>
               <span>{titleOf(table.tableInstanceId)}</span>
             </span>
           </div>

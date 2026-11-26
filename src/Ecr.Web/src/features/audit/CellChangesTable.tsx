@@ -9,6 +9,7 @@ import { NumericTypes, auditValueText } from '@/features/audit/auditValue';
 import { cellChangeReasonText } from '@/features/audit/cellChangeReason';
 import { AuditChangedAt } from '@/features/audit/AuditChangedAt';
 import { TwoLine } from '@/shared/ui/TwoLine';
+import { isOpaqueRowKey } from '@/features/grid/rowKeyText';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { formatDecimal, formatPeriodKey } from '@/shared/format';
@@ -68,9 +69,6 @@ function columnText(change: CellChange): string {
   return code ?? t('audit.columnGone', { id: change.columnDefId });
 }
 
-/** Ключ рядка, доданого користувачем: GUID без дефісів (32 hex) — людині нічого не каже. */
-const OpaqueRowKey = /^[0-9a-f]{24,}$/i;
-
 /**
  * ✎ audit-filters-followup AC-12: рядок комірки для людини. Джерело мітки — `cfg.RowDef.LabelL10n` фіксованого рядка
  * шаблону (`rowLabelL10n` рядка журналу); у динамічного (доданого людиною) рядка мітки немає ніде, а його ключ —
@@ -81,7 +79,7 @@ const OpaqueRowKey = /^[0-9a-f]{24,}$/i;
 export function rowText(change: Pick<CellChange, 'rowKey' | 'rowLabelL10n' | 'rowOrdinal'>): string {
   const label = localized(change.rowLabelL10n);
   if (label.length > 0) return label;
-  if (OpaqueRowKey.test(change.rowKey)) {
+  if (isOpaqueRowKey(change.rowKey)) {
     const ordinal = change.rowOrdinal;
     return typeof ordinal === 'number'
       ? `${t('grid.rowLabelHeader')} ${String(ordinal)}`

@@ -140,7 +140,21 @@ public sealed partial class PatchCellsHandler(
 
         // ⛔ L6-10: дубль RowKey чи колонки в рядку — 422 тут, а не 500 у
         // ToDictionary/MERGE/первинному ключі нижче.
-        request.EnsureNoDuplicates();
+        try
+        {
+            request.EnsureNoDuplicates();
+        }
+        catch (BusinessRuleException refusal)
+        {
+            // ✎ integ-row-label-messages: рядок названо номером і підписом, не службовим ключем.
+            var named = await NameRowsOfRequestRefusalAsync(refusal, request, resolvedInstance, ct).ConfigureAwait(false);
+            if (ReferenceEquals(named, refusal))
+            {
+                throw;
+            }
+
+            throw named;
+        }
 
         var context = await LoadContextAsync(request, resolvedInstance, ct).ConfigureAwait(false);
 

@@ -1,6 +1,7 @@
 import type { TableSliceDto } from '@/api/types';
 import type { components } from '@/api/schema';
 import { t } from '@/shared/i18n';
+import { isOpaqueRowKey } from './rowKeyText';
 import { formatDateTime } from '@/shared/format/datetime';
 
 /**
@@ -44,7 +45,10 @@ export function calcErrorCause(code: string): string {
 
 /** Адреса комірки-джерела словами: «таблиця · колонка (рядок)». */
 export function calcErrorSourceText(source: components['schemas']['FormulaErrorSourceDto']): string {
-  return `${source.tableCode} · ${source.columnCode} (${source.rowKey})`;
+  // ✎ integ-row-label-messages: службовий GUID-ключ рядка (доданого людиною) у адресу не йде.
+  return isOpaqueRowKey(source.rowKey)
+    ? `${source.tableCode} · ${source.columnCode}`
+    : `${source.tableCode} · ${source.columnCode} (${source.rowKey})`;
 }
 
 /** Текст підказки (`title`): стан — і словами, не лише лінією. */

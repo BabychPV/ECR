@@ -18,6 +18,7 @@ import {
   type HeaderFieldChange,
   type RowChange,
 } from '@/features/documents/documentVersionsApi';
+import { rowKeyText } from '@/features/grid/rowKeyText';
 import { formatDate, formatDateTime } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
@@ -445,7 +446,7 @@ function RowMarkBlock({
             <Badge size="xs" variant="light" color={tone}>
               {mark}
             </Badge>
-            <Text size="sm">{row.rowKey}</Text>
+            <Text size="sm">{rowKeyText(row.rowKey)}</Text>
           </Group>
         ))}
       </Group>

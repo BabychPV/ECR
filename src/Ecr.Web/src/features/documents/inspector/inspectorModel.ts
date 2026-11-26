@@ -1,4 +1,5 @@
 import type { DocumentTableDto, ValidationFindingDto } from '@/api/types';
+import { rowKeyText } from '@/features/grid/rowKeyText';
 import { localized } from '@/shared/i18n/localized';
 import { isHeaderFinding } from './headerFinding';
 
@@ -159,7 +160,7 @@ export function countIssues(groups: readonly InspectorIssueGroup[]): InspectorIs
  * Зауваження до таблиці цілком (без рядка) — прочерк, а не порожнеча.
  */
 export function addressChip(rowKey: string | null, columnCode: string | null): string {
-  return `${rowKey ?? '—'} · ${columnCode ?? '—'}`;
+  return `${rowKey === null ? '—' : rowKeyText(rowKey)} · ${columnCode ?? '—'}`;
 }
 
 /**

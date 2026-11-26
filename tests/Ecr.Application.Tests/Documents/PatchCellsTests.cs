@@ -290,6 +290,77 @@ public sealed partial class PatchCellsTests
     }
 
     /// <summary>
+    /// integ-row-label-messages: дубль рядка, доданого людиною (GUID-ключ), що вже є в таблиці, — відмова називає його
+    /// номером у зрізі («2»), сирий ключ лишається в <c>rowKeys</c>; рядка немає (новий) — назви нема, текст скаже
+    /// «(added by a user)». ⛔ Мутація: прибрати <c>NameRowsOfRequestRefusalAsync</c> у <c>HandleAsync</c> — червоніє.
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public async Task Дубль_рядка_з_GUID_ключем_відмова_називає_рядок_номером()
+    {
+        const string existing = "bbc95dc2bdb84fa0bce2d80e0defc582";
+        const string fresh = "adc95dc2bdb84fa0bce2d80e0defc581";
+        _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(new Dictionary<string, long> { ["7001001"] = 1001L, [existing] = 1002L });
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
+            Request(
+                new PatchRow(existing, "0x0A", [new PatchCell("Volume", 1m)]),
+                new PatchRow(fresh, null, [new PatchCell("Volume", 3m)]),
+                new PatchRow(existing, "0x0A", [new PatchCell("Volume", 2m)]),
+                new PatchRow(fresh, null, [new PatchCell("Volume", 4m)])),
+            CancellationToken.None));
+
+        Assert.Equal("err.ECR-REQ-0422.patchDuplicateRowKey", error.Details!["messageKey"]);
+        Assert.Contains(existing, (string)error.Details["rowKeys"]!, StringComparison.Ordinal);
+        Assert.Equal($"{existing}\t2", (string)error.Details[Ecr.Application.Localization.RowKeyText.RowNamesParameter]!);
+
+        var text = Ecr.Application.Localization.UiStringResolver.Format(
+            "The change lists row {rowKeys} more than once.",
+            Ecr.Application.Localization.RowKeyText.Humanize(Ecr.Application.Localization.UiStringResolver.Parameters(error.Details), "en"));
+        Assert.Equal("The change lists row 2, (added by a user) more than once.", text);
+    }
+
+    /// <summary>integ-row-label-messages: дубль колонки в наявному рядку з GUID-ключем — «row 2», не ключ.</summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public async Task Дубль_колонки_в_рядку_з_GUID_ключем_відмова_називає_рядок_номером()
+    {
+        const string existing = "bbc95dc2bdb84fa0bce2d80e0defc582";
+        _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(new Dictionary<string, long> { ["7001001"] = 1001L, [existing] = 1002L });
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
+            Request(new PatchRow(existing, "0x0A", [new PatchCell("Volume", 1m), new PatchCell("Volume", 2m)])),
+            CancellationToken.None));
+
+        Assert.Equal("err.ECR-REQ-0422.patchDuplicateCell", error.Details!["messageKey"]);
+        var text = Ecr.Application.Localization.UiStringResolver.Format(
+            "The change sets column {columnCodes} of row {rowKey} more than once.",
+            Ecr.Application.Localization.RowKeyText.Humanize(Ecr.Application.Localization.UiStringResolver.Parameters(error.Details), "en"));
+        Assert.Equal("The change sets column Volume of row 2 more than once.", text);
+    }
+
+    /// <summary>
+    /// integ-row-label-messages: причина ручного значення (<c>overrideReasonRequired</c>) — рядок названо номером із уже
+    /// прочитаних рядків (нуль додаткових запитів). ⛔ Мутація: прибрати <c>NameRows</c> у <c>PlanFormulaOverridesAsync</c>
+    /// (або <c>WithNames</c>) — текст каже «(added by a user)».
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Причина_ручного_значення_називає_рядок_номером_з_контексту()
+    {
+        const string key = "bbc95dc2bdb84fa0bce2d80e0defc582";
+        var refusal = Assert.Throws<BusinessRuleException>(() => PatchCellsHandler.ValidReason("  ", key, "F"));
+
+        var named = PatchCellsHandler.NameRows(
+            refusal, new Dictionary<string, long> { ["7001001"] = 1001L, [key] = 1002L }, [], "en");
+
+        var text = Ecr.Application.Localization.UiStringResolver.Format(
+            "(column \"{columnCode}\", row {rowKey})",
+            Ecr.Application.Localization.RowKeyText.Humanize(Ecr.Application.Localization.UiStringResolver.Parameters(named.Details), "en"));
+        Assert.Equal("(column \"F\", row 2)", text);
+        Assert.Equal(key, named.Details!["rowKey"]);
+    }
+
+    /// <summary>
     /// L6-10, межа перевірки: та сама колонка в РІЗНИХ рядках і ключі, що різняться регістром, — не дубль
     /// (обробник порівнює <c>Ordinal</c>).
     /// </summary>

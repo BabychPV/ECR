@@ -1,4 +1,5 @@
 import { t } from '@/shared/i18n';
+import { humanRowKeyParams } from '@/features/grid/rowKeyText';
 
 /**
  * Текст причини прогону збору (`itg.CollectionRun.ErrorMessage`) мовою
@@ -104,7 +105,9 @@ function resolve(envelope: Envelope): string | null {
   return render(envelope.k, params);
 }
 
-function render(key: string, params: Record<string, string>): string | null {
+function render(key: string, rawParams: Record<string, string>): string | null {
+  // ✎ integ-row-label-messages: службовий ключ рядка (GUID) у текст журналу не потрапляє.
+  const params = humanRowKeyParams(rawParams);
   switch (key) {
     case 'jobs.collectionRunReason':
       return t('jobs.collectionRunReason', params);

@@ -480,12 +480,16 @@ public sealed partial class ExceptionHandlingMiddleware(
             // користувачу `{maxLength}` фігурними дужками (клас `D1`).
             return UiStringResolver.Format(
                 template,
-                UiStringResolver.WithLocalizedPeriods(
-                    strings,
-                    UiStringResolver.WithLocalizedStates(
+                // ✎ integ-row-label-messages: службовий ключ рядка (GUID) у текст не потрапляє.
+                RowKeyText.Humanize(
+                    UiStringResolver.WithLocalizedPeriods(
                         strings,
-                        messageKey,
-                        UiStringResolver.WithLocalizedReason(strings, UiStringResolver.Parameters(details)))));
+                        UiStringResolver.WithLocalizedStates(
+                            strings,
+                            messageKey,
+                            UiStringResolver.WithLocalizedReason(strings, UiStringResolver.Parameters(details)))),
+                    strings.LanguageCode,
+                    strings));
         }
 #pragma warning disable CA1031 // Причина — та сама, що й у LocalizedTitleAsync: обробник помилок не падає вдруге.
         catch (Exception)

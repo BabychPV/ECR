@@ -447,14 +447,23 @@ public sealed class CreateRowLocksHandler(
                 .ConfigureAwait(false);
             if (overlapping.Count > 0)
             {
+                // ✎ integ-row-label-messages: рядки названо номером і підписом (як на екрані), а не службовим ключем.
+                var shown = overlapping.Take(10).ToList();
+                var names = RowDisplayNames.Of(
+                    await store.LiveRowsAsync(documentId, key.Value, request.SheetCopyId, found.Table.Id, innerCt).ConfigureAwait(false),
+                    found.Table.Rows,
+                    shown,
+                    currentUser.Language);
                 throw new ConcurrencyConflictException(
                     ErrorCodes.RowDuplicate,
-                    $"Рядки вже заблоковано на цей час: {string.Join(", ", overlapping.Take(10))}.",
-                    new Dictionary<string, object?>
-                    {
-                        ["messageKey"] = "err.ECR-ROW-0409.rowAlreadyLocked",
-                        ["rowKeys"] = string.Join(", ", overlapping.Take(10)),
-                    });
+                    $"Рядки вже заблоковано на цей час: {string.Join(", ", shown)}.",
+                    RowDisplayNames.Merge(
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-ROW-0409.rowAlreadyLocked",
+                            ["rowKeys"] = string.Join(", ", shown),
+                        },
+                        names));
             }
 
             created.AddRange(rowKeys.Select(k => RowLock.Create(
