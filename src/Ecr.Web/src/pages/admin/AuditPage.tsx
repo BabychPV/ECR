@@ -1,9 +1,8 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, type JSX } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import {
   Badge,
   Button,
   Checkbox,
-  NumberInput,
   SegmentedControl,
   Select,
   Skeleton,
@@ -11,6 +10,7 @@ import {
 } from '@mantine/core';
 import type { CellChangePage } from '@/api/types';
 import { useAuthorOptions } from '@/features/audit/authorOptions';
+import { columnOptions, useDocumentOptions } from '@/features/audit/filterOptions';
 import { CellChangesTable, originLabel } from '@/features/audit/CellChangesTable';
 import { AuditExportButton } from '@/features/audit/AuditExportButton';
 import { useAuditSort } from '@/features/audit/auditSort';
@@ -130,9 +130,9 @@ export function AuditPage(): JSX.Element {
    */
   const fromField = useFieldDraft(fromDate);
   const toField = useFieldDraft(toDate);
-  const documentField = useFieldDraft<string | number>(documentId ?? '');
   const rowKeyField = useFieldDraft(rowKey ?? '');
-  const columnField = useFieldDraft<string | number>(columnDefId ?? '');
+  const [documentSearch, setDocumentSearch] = useState('');
+  const appliedDocumentSearch = useDebouncedFilter(documentSearch);
 
   /*
    * ⛔ Поля, що набираються з клавіатури, йдуть у запит ПІСЛЯ паузи
@@ -206,6 +206,8 @@ export function AuditPage(): JSX.Element {
   const single = isSingleCell(applied);
 
   const authorOptions = useAuthorOptions(cellPage?.items, author);
+  const documentOptions = useDocumentOptions(appliedDocumentSearch, cellPage?.items, documentId);
+  const columnChoices = columnOptions(cellPage?.items, documentId, columnDefId);
 
   return (
     <>
@@ -254,9 +256,13 @@ export function AuditPage(): JSX.Element {
                 }}
               />
             </Suspense>
-            <NumberInput
+            {/* audit-filters-live D2: документ — ВИБОРОМ за назвою/кодом (як у «Documents»), у адресі — Id. Набраний
+                текст лише шукає: «P1-V9-0001» більше не стає документом 190001. */}
+            <Select
               size="xs"
-              miw={140}
+              miw={220}
+              searchable
+              clearable
               // ⚠ На вкладці структурних змін документа немає: мертвий фільтр
               // читався б як «за цим документом змін не було».
               display={other ? 'none' : undefined}
@@ -265,12 +271,13 @@ export function AuditPage(): JSX.Element {
               // фільтрів (`FilterHints`); інакше воно зсуває ряд шапки.
               description={t('audit.documentHint')}
               styles={readerOnlyDescription}
-              value={documentField.value}
-              onFocus={documentField.onFocus}
-              onBlur={documentField.onBlur}
+              nothingFoundMessage={t('audit.filterNothing')}
+              data={documentOptions}
+              searchValue={documentSearch}
+              onSearchChange={setDocumentSearch}
+              value={documentId === null ? null : String(documentId)}
               onChange={(value) => {
-                documentField.setValue(value);
-                setDocumentId(typeof value === 'number' ? value : null);
+                setDocumentId(value === null ? null : Number(value));
               }}
             />
           </FilterRow>
@@ -346,18 +353,21 @@ export function AuditPage(): JSX.Element {
             setRowKey(event.currentTarget.value);
           }}
         />
-        <NumberInput
+        {/* audit-filters-live D3: колонка — ВИБОРОМ за підписом (аркуш / таблиця / заголовок) серед колонок обраного
+            документа в журналі; «M10» лише шукає і більше не стає колонкою 10 з хибним «No changes». */}
+        <Select
           size="xs"
-          miw={120}
+          miw={180}
+          searchable
+          clearable
           label={t('audit.columnDefId')}
           description={t('audit.cellHint')}
           styles={readerOnlyDescription}
-          value={columnField.value}
-          onFocus={columnField.onFocus}
-          onBlur={columnField.onBlur}
+          nothingFoundMessage={t('audit.filterNothing')}
+          data={columnChoices}
+          value={columnDefId === null ? null : String(columnDefId)}
           onChange={(value) => {
-            columnField.setValue(value);
-            setColumnDefId(typeof value === 'number' ? value : null);
+            setColumnDefId(value === null ? null : Number(value));
           }}
         />
         <FilterInline>

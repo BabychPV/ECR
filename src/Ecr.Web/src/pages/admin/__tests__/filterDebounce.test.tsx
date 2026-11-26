@@ -115,9 +115,10 @@ describe('/admin/audit — журнал змін комірок', () => {
   // (`Select`): один вибір — один запит, відкладати нічого.
 
   it(
-    '«Document» (число): набір 12345 — один запит',
+    // ✎ audit-filters-live D2: «Document» — пошук документа за назвою/кодом; набір 12345 — один пошуковий запит.
+    '«Document» (пошук): набір 12345 — один запит пошуку',
     async () => {
-      const seen = count('/api/v1/audit/cells', 'documentId');
+      const seen = count('/api/v1/documents', 'q');
       show(<AuditPage />, '/admin/audit');
 
       await typeAndCount('⟦audit.document⟧', '12345', seen);
@@ -126,12 +127,18 @@ describe('/admin/audit — журнал змін комірок', () => {
   );
 
   it(
-    '«Column» (число): набір 12345 — один запит',
+    // ✎ audit-filters-live D3: «Column» — вибір за підписом; набраний текст не йде в журнал числом.
+    '«Column» (вибір): набір 12345 — жодного запиту з columnDefId',
     async () => {
       const seen = count('/api/v1/audit/cells', 'columnDefId');
       show(<AuditPage />, '/admin/audit?documentId=7');
 
-      await typeAndCount('⟦audit.columnDefId⟧', '12345', seen);
+      const user = userEvent.setup();
+      const input = await screen.findByRole('textbox', { name: '⟦audit.columnDefId⟧' }, { timeout: SlowEnvTimeout });
+      await waitFor(() => expect(seen).toEqual(['']));
+      await user.type(input, '12345');
+      await settle();
+      expect(seen).toEqual(['']);
     },
     SlowEnvTimeout,
   );

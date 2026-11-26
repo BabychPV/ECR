@@ -6,6 +6,7 @@ import { isHumanCellChange } from '@/features/audit/api';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 import { can, useSession } from '@/shared/session/useSession';
+import { disambiguateNames } from '@/features/audit/filterOptions';
 
 /** Автор для фільтра «By user» (`GET /api/v1/audit/authors`, ✎ P-1124-4): номер і ім'я, без логіна й SID. */
 type AuditAuthor = components['schemas']['AuditAuthorView'];
@@ -124,10 +125,16 @@ export function useAuthorOptions(
       names.set(selected, authorName({ changedByUserId: selected }));
     }
 
+    // audit-filters-live D4: однакові імена (тимчасові акаунти вікон) розрізняються логіном, без нього — номером.
+    const logins = new Map<number, string>((users.data?.items ?? []).map((user) => [user.id, user.userName]));
+
     return [
-      ...[...names.entries()]
-        .sort((a, b) => a[1].localeCompare(b[1]))
-        .map(([id, label]) => ({ value: String(id), label })),
+      ...disambiguateNames(
+        [...names.entries()]
+          .sort((a, b) => a[1].localeCompare(b[1]))
+          .map(([id, label]) => ({ value: String(id), label })),
+        logins,
+      ),
       // PSS-19c / L4: користувачів дочитано лише до запобіжника — останнім неактивним пунктом сказано прямо.
       // ⚠ Те саме, що `truncatedOption` (`@/shared/ui/truncatedOption`), але рядком тут: `AuditPage` — біля межі
       // бюджету `D-132`, а окремий спільний чанк ради трьох рядків коштував би маршруту ~0,2 КБ (рецензія L10, M3).

@@ -43,6 +43,8 @@ function count(): URLSearchParams[] {
 
       if (url.pathname === '/api/v1/audit/cells') seen.push(url.searchParams);
       if (url.pathname === '/api/v1/me') return json({ permissions: [], denies: [], grants: {} });
+      // audit-filters-live D2: «Document» — вибір із переліку документів за назвою/кодом.
+      if (url.pathname === '/api/v1/documents') return json({ items: [{ id: 7, projectId: 1, businessKey: 'DOC-7' }], nextCursor: null });
 
       return json({ items: [], nextCursor: null, totalCount: 0 });
     }),
@@ -95,17 +97,16 @@ describe('AuditPage: адреса комірки без документа', () 
   it(
     '«Column» без «Document» — теж 0 запитів',
     async () => {
+      // ✎ audit-filters-live D3: «Column» — вибір, а не число; колонка без документа приходить адресою.
       const seen = count();
-      const user = userEvent.setup();
-      show('/admin/audit');
+      show('/admin/audit?columnDefId=11');
 
-      const column = await screen.findByRole('textbox', { name: '⟦audit.columnDefId⟧' }, { timeout: SlowEnvTimeout });
+      await screen.findByRole('textbox', { name: '⟦audit.columnDefId⟧' }, { timeout: SlowEnvTimeout });
       await waitFor(() => expect(seen).toHaveLength(1));
-
-      await user.type(column, '11');
       await settle();
 
       expect(seen).toHaveLength(1);
+      expect(seen[0]?.has('columnDefId')).toBe(false);
       expect(activeHint()?.textContent).toBe('⟦audit.cellHint⟧');
     },
     SlowEnvTimeout,
@@ -122,7 +123,9 @@ describe('AuditPage: адреса комірки без документа', () 
       await waitFor(() => expect(seen).toHaveLength(1));
       expect(seen[0]?.has('rowKey')).toBe(false);
 
-      await user.type(documentField, '7');
+      // ✎ audit-filters-live D2: код документа шукає, документ обирається пунктом переліку.
+      await user.type(documentField, 'DOC-7');
+      await user.click(await screen.findByRole('option', { name: 'DOC-7' }, { timeout: SlowEnvTimeout }));
       await waitFor(() => expect(seen).toHaveLength(2));
       await settle();
 
