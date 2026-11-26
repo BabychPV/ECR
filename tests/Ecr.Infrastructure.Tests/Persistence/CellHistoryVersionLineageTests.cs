@@ -141,6 +141,58 @@ public sealed class CellHistoryVersionLineageTests(SqlServerFixture sql) : IDisp
         }
     }
 
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ (AC-14, закладка зі старим Id): у <c>AuthorizeAsync</c> замість
+    /// <c>ResolveCurrentColumnAsync</c> повернути <c>null</c> — старий Id знову дає порожньо, перший тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-7.5")]
+    public async Task Закладка_зі_старим_Id_колонки_дає_ті_самі_зміни_що_й_поточний_Id()
+    {
+        var world = await ArrangeAsync();
+        await AuditAsync(world);
+
+        var auditor = Reader(world).Permission(GetCellChangesHandler.Permission);
+        var window = new CellChangeFilter(Now.AddDays(-30), Now.AddDays(1), world.Doc.DocumentId);
+
+        var current = await WithHandlerAsync(auditor, h => h.HandleAsync(window with { ColumnDefId = world.C1 }, new CursorRequest(50), CancellationToken.None));
+        var old = await WithHandlerAsync(auditor, h => h.HandleAsync(window with { ColumnDefId = world.P1 }, new CursorRequest(50), CancellationToken.None));
+        Assert.Equal(["8", "7"], old.Items.Select(c => c.NewValue));
+        Assert.Equal(current.Items.Select(c => c.NewValue), old.Items.Select(c => c.NewValue));
+        Assert.Equal(current.TotalCount, old.TotalCount);
+
+        // Історія однієї комірки зі старим Id — теж та сама.
+        var cell = await HistoryAsync(world, world.P1, Reader(world));
+        Assert.Equal(["8", "7"], cell.Items.Select(c => c.NewValue));
+
+        // Id поза родоводом видимих колонок — як і раніше порожньо.
+        foreach (var foreign in new[] { world.PX, int.MaxValue })
+        {
+            var none = await WithHandlerAsync(auditor, h => h.HandleAsync(window with { ColumnDefId = foreign }, new CursorRequest(50), CancellationToken.None));
+            Assert.Empty(none.Items);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Закладка_зі_старим_Id_забороненої_колонки_лишається_порожньою()
+    {
+        var world = await ArrangeAsync();
+        await AuditAsync(world);
+
+        var auditor = Reader(world).Permission(GetCellChangesHandler.Permission).Deny(ResourceKind.Column, world.C1);
+        var page = await WithHandlerAsync(auditor, h => h.HandleAsync(
+            new CellChangeFilter(Now.AddDays(-30), Now.AddDays(1), world.Doc.DocumentId, ColumnDefId: world.P1), new CursorRequest(50), CancellationToken.None));
+
+        Assert.Empty(page.Items);
+        Assert.Equal(0, page.TotalCount);
+        Assert.Empty((await HistoryAsync(world, world.P1, Reader(world).Deny(ResourceKind.Column, world.C1))).Items);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
