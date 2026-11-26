@@ -6,6 +6,7 @@ using Ecr.Application.Ports;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Enums;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Integration;
 
@@ -57,5 +58,24 @@ public sealed class DataSourceCredentialResolver(IDataProtectionProvider provide
             // ⛔ Ні блоба, ні тексту винятку DataProtection назовні: лише «введіть пароль заново» (R-03).
             throw new CredentialsUnreadableException(source.Code);
         }
+    }
+}
+
+/// <summary>
+/// Мітка відмови автентифікації збереженим паролем (R-03): одним <c>UPDATE</c>, лише для UserPassword-джерела.
+/// </summary>
+/// <remarks>⚠ Поза відстежуванням EF: адаптер ставить мітку посеред збору, а не в транзакції збереження джерела.</remarks>
+public sealed class DataSourceCredentialRejections(Persistence.EcrDbContext db, Domain.Abstractions.IClock clock)
+    : IDataSourceCredentialRejections
+{
+    /// <inheritdoc />
+    public async Task ReportRejectedAsync(int dataSourceId, CancellationToken ct)
+    {
+        var now = clock.UtcNow;
+
+        await db.DataSources
+            .Where(s => s.Id == dataSourceId && s.AuthMode == SourceAuthMode.UserPassword)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(s => s.CredentialsRejectedAt, now), ct)
+            .ConfigureAwait(false);
     }
 }

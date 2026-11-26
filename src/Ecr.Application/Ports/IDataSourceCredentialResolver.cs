@@ -52,3 +52,54 @@ public sealed class CredentialsUnreadableException(string code)
     /// <summary>Ключ каталогу.</summary>
     public const string MessageKey = "err.ECR-INT-0502.credentialsUnreadable";
 }
+
+/// <summary>
+/// Джерело вже відмовило в автентифікації збереженим паролем (<c>CredentialsRejectedAt</c>, R-03,
+/// <c>credentialsRejected</c>): збір і перевірка за id не відкривають з'єднання, доки пароль не замінено — захист облікового
+/// запису від блокування.
+/// </summary>
+/// <param name="code">Код джерела.</param>
+public sealed class CredentialsRejectedException(string code)
+    : Errors.SourceAuthenticationException(
+        Domain.Errors.ErrorCodes.SourceAuthenticationRefused,
+        $"Джерело «{code}» уже відхилило збережений пароль: до заміни пароля з'єднання не відкривається.",
+        new Dictionary<string, object?> { ["messageKey"] = MessageKey, ["code"] = code })
+{
+    /// <summary>Ключ каталогу.</summary>
+    public const string MessageKey = "err.ECR-INT-0502.credentialsRejected";
+}
+
+/// <summary>Позначає відмову автентифікації збереженим паролем (<c>CredentialsRejectedAt</c>, R-03).</summary>
+public interface IDataSourceCredentialRejections
+{
+    /// <summary>Ставить мітку відмови джерелу в режимі UserPassword.</summary>
+    /// <param name="dataSourceId">Джерело.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task ReportRejectedAsync(int dataSourceId, CancellationToken ct);
+}
+
+/// <summary>
+/// Скидає пули з'єднань драйвера після заміни чи стирання облікових даних (R-20): відкрите з'єднання зі старим паролем
+/// не має жити далі в пулі процесу.
+/// </summary>
+public interface IConnectionPoolReset
+{
+    /// <summary>Скидає пул.</summary>
+    public void Reset();
+}
+
+/// <summary>
+/// Перевірка з'єднання з НЕЗБЕРЕЖЕНОЇ конфігурації (P-1126-SRCCRED §13.1): адаптер відкриває з'єднання за ефемерною
+/// сутністю й обліковими даними з тіла — тією самою точкою підстановки, що й збір.
+/// </summary>
+public interface IExternalConnectionProbe
+{
+    /// <summary>Транспорт адаптера.</summary>
+    public Domain.Enums.ExternalTransport Transport { get; }
+
+    /// <summary>Відкриває й закриває з'єднання; відмова — виняток, як у збору.</summary>
+    /// <param name="spec">Ефемерна (не збережена) сутність.</param>
+    /// <param name="credentials">Облікові дані; <c>null</c> — Windows.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task ProbeAsync(DataSource spec, ResolvedCredentials? credentials, CancellationToken ct);
+}

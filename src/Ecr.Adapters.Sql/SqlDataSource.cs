@@ -54,10 +54,13 @@ namespace Ecr.Adapters.Sql;
 /// <param name="secrets">Значення секрету за іменем (ФВ-6.11).</param>
 /// <param name="settings">Канал налаштувань: тексти запитів.</param>
 /// <param name="logger">Журнал: повний виняток відмови з'єднання (у текст помилки він не йде).</param>
+/// <param name="credentials">Облікові дані UserPassword (P-1126-SRCCRED): розшифрування в момент з'єднання.</param>
+/// <param name="rejections">Мітка відмови автентифікації збереженим паролем (R-03).</param>
 public sealed partial class SqlDataSource(
     ICollectionStore store, ISecretProvider secrets, ISecretProvider? settings = null,
-    ILogger<SqlDataSource>? logger = null)
-    : IExternalDataSource, IExternalTableSource, IExternalConnectionCheck
+    ILogger<SqlDataSource>? logger = null,
+    IDataSourceCredentialResolver? credentials = null, IDataSourceCredentialRejections? rejections = null)
+    : IExternalDataSource, IExternalTableSource, IExternalConnectionCheck, IExternalConnectionProbe
 {
     private readonly ILogger log = (ILogger?)logger ?? NullLogger.Instance;
 
@@ -518,8 +521,67 @@ public sealed partial class SqlDataSource(
     /// </remarks>
     /// <param name="source">Джерело з <c>ext.DataSource</c>.</param>
     /// <param name="ct">Скасування.</param>
-    private async Task<SqlConnection> OpenAsync(
-        Domain.Entities.External.DataSource source, CancellationToken ct)
+    private Task<SqlConnection> OpenAsync(Domain.Entities.External.DataSource source, CancellationToken ct)
+    {
+        // ⛔ R-03: джерело вже відмовило збереженим паролем — до сервера не йдемо, доки пароль не замінено.
+        if (source is { AuthMode: SourceAuthMode.UserPassword, CredentialsRejectedAt: not null })
+        {
+            throw new CredentialsRejectedException(source.Code);
+        }
+
+        return OpenWithAsync(
+            source,
+            () => source.AuthMode == SourceAuthMode.UserPassword
+                ? (credentials ?? throw new CredentialsUnreadableException(source.Code)).Resolve(source)
+                : null,
+            stored: true,
+            ct);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>⛔ З тіла форми (§13.1): секрет середовища не підставляється, мітка відмови не ставиться.</remarks>
+    public async Task ProbeAsync(
+        Domain.Entities.External.DataSource spec, ResolvedCredentials? credentials, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+
+        await using var connection = await OpenWithAsync(spec, () => credentials, stored: false, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Рядок з'єднання SqlClient з обліковими даними — ЄДИНА точка підстановки (P-1126-SRCCRED, R-06, R-07, AC-3).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ UserPassword: <c>UserID</c>/<c>Password</c> builder-ом (синоніми <c>UID</c>/<c>PWD</c> він зводить сам),
+    /// <c>IntegratedSecurity=false</c>, <c>PersistSecurityInfo=false</c>. Windows — як до змін: секрет середовища в
+    /// <c>Password</c>, якщо заданий.
+    /// </remarks>
+    /// <param name="builder">Розібраний рядок з'єднання (після політики адреси й каталогу).</param>
+    /// <param name="credentials">Облікові дані; <c>null</c> — Windows.</param>
+    /// <param name="envSecret">Секрет середовища (лише Windows).</param>
+    public static string BuildConnectionString(
+        SqlConnectionStringBuilder builder, ResolvedCredentials? credentials, string? envSecret)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        if (credentials is not null)
+        {
+            builder.IntegratedSecurity = false;
+            builder.PersistSecurityInfo = false;
+            builder.UserID = credentials.UserName;
+            builder.Password = credentials.Password.Reveal();
+        }
+        else if (envSecret is { Length: > 0 })
+        {
+            builder.Password = envSecret;
+        }
+
+        return builder.ConnectionString;
+    }
+
+    private async Task<SqlConnection> OpenWithAsync(
+        Domain.Entities.External.DataSource source, Func<ResolvedCredentials?> credentialsOf, bool stored,
+        CancellationToken ct)
     {
         SqlConnectionStringBuilder builder;
 
@@ -557,12 +619,14 @@ public sealed partial class SqlDataSource(
             builder.InitialCatalog = source.Catalog;
         }
 
-        if (secrets.Find(source.SecretName) is { Length: > 0 } secret)
-        {
-            builder.Password = secret;
-        }
+        // ⛔ R-24: розшифрування — ПІСЛЯ політики адреси. R-05: UserPassword ігнорує секрет середовища.
+        var resolved = credentialsOf();
+        var envSecret = stored && resolved is null && source.AuthMode == SourceAuthMode.Windows
+            ? secrets.Find(source.SecretName)
+            : null;
+        string?[] known = [resolved?.Password.Reveal(), resolved?.UserName, envSecret];
 
-        var connection = new SqlConnection(builder.ConnectionString);
+        var connection = new SqlConnection(BuildConnectionString(builder, resolved, envSecret));
 
         // Прапорець, а не `catch`: будь-який шлях виходу, що не повернув
         // з'єднання, мусить його закрити — зокрема скасування токена.
@@ -584,9 +648,15 @@ public sealed partial class SqlDataSource(
             // наздоганяння і рапортував успіх.
             if (IsAuthenticationFailure(ex))
             {
+                // ⛔ R-03: перша ж відмова збереженим паролем ставить мітку — далі збір не стукає в джерело.
+                if (stored && resolved is not null && rejections is not null)
+                {
+                    await rejections.ReportRejectedAsync(source.Id, CancellationToken.None).ConfigureAwait(false);
+                }
+
                 throw new SourceAuthenticationException(
                     AuthenticationRefused,
-                    $"SQL-джерело {source.Code} не приймає облікові дані (помилка SQL Server {ex.Number}, кореляція {LogConnectFailure(source.Code, ex)}); подробиці — в журналі сервера.",
+                    $"SQL-джерело {source.Code} не приймає облікові дані (помилка SQL Server {ex.Number}, кореляція {LogConnectFailure(source.Code, ex, known)}); подробиці — в журналі сервера.",
                     new Dictionary<string, object?>
                     {
                         ["messageKey"] = "err.ECR-INT-0502.credentialsRefused",
@@ -596,7 +666,7 @@ public sealed partial class SqlDataSource(
 
             throw new BusinessRuleException(
                 SourceUnavailable,
-                $"SQL-джерело {source.Code} не з'єднується (помилка SQL Server {ex.Number}, кореляція {LogConnectFailure(source.Code, ex)}); подробиці — в журналі сервера.",
+                $"SQL-джерело {source.Code} не з'єднується (помилка SQL Server {ex.Number}, кореляція {LogConnectFailure(source.Code, ex, known)}); подробиці — в журналі сервера.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-INT-0503.connectFailed",
@@ -620,26 +690,29 @@ public sealed partial class SqlDataSource(
     private static readonly int[] AuthenticationErrors = [18456, 18452];
 
     /// <summary>Пише повний виняток у журнал сервера і повертає кореляцію для тексту помилки.</summary>
-    private string LogConnectFailure(string sourceCode, SqlException error)
+    /// <remarks>⛔ R-02: у журнал — <see cref="SafeLogException"/>, а не сам виняток (текст драйвера, <c>Errors[]</c>).</remarks>
+    private string LogConnectFailure(string sourceCode, SqlException error, string?[] secrets)
     {
         var correlationId = SafeErrorText.NewCorrelationId();
-        LogConnectFailed(log, sourceCode, error.Number, correlationId, error);
+        LogConnectFailed(
+            log, sourceCode, error.Number, correlationId,
+            SafeLogException.Of(error, error.Number.ToString(System.Globalization.CultureInfo.InvariantCulture), secrets));
         return correlationId;
     }
 
-    /// <summary>Те саме для зіпсованого рядка з'єднання.</summary>
+    /// <summary>Те саме для зіпсованого рядка з'єднання (облікових даних тут ще немає; скрабер прибирає пари).</summary>
     private string LogConnectionStringBroken(string sourceCode, Exception error)
     {
         var correlationId = SafeErrorText.NewCorrelationId();
-        LogConnectionStringUnreadable(log, sourceCode, correlationId, error);
+        LogConnectionStringUnreadable(log, sourceCode, correlationId, SafeLogException.Of(error, null));
         return correlationId;
     }
 
     [LoggerMessage(
         Level = LogLevel.Warning,
-        Message = "SqlDataSource: джерело {SourceCode} не відкрилось (помилка SQL Server {ErrorNumber}); кореляція {CorrelationId}.")]
+        Message = "SqlDataSource: джерело {SourceCode} не відкрилось (помилка SQL Server {ErrorNumber}); кореляція {CorrelationId}: {Error}.")]
     private static partial void LogConnectFailed(
-        ILogger logger, string sourceCode, int errorNumber, string correlationId, Exception exception);
+        ILogger logger, string sourceCode, int errorNumber, string correlationId, SafeLogException error);
 
     /// <summary>Те саме для запиту, що впав на відкритому з'єднанні (b14, AC-3).</summary>
     private string LogQueryFailure(string sourceCode, SqlException error)
@@ -657,9 +730,9 @@ public sealed partial class SqlDataSource(
 
     [LoggerMessage(
         Level = LogLevel.Warning,
-        Message = "SqlDataSource: рядок з'єднання джерела {SourceCode} не читається; кореляція {CorrelationId}.")]
+        Message = "SqlDataSource: рядок з'єднання джерела {SourceCode} не читається; кореляція {CorrelationId}: {Error}.")]
     private static partial void LogConnectionStringUnreadable(
-        ILogger logger, string sourceCode, string correlationId, Exception exception);
+        ILogger logger, string sourceCode, string correlationId, SafeLogException error);
 
     /// <summary>Чи це відмова саме в автентифікації.</summary>
     /// <param name="error">Виняток клієнта.</param>
