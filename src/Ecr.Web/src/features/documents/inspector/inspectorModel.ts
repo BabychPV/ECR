@@ -1,5 +1,5 @@
 import type { DocumentTableDto, ValidationFindingDto } from '@/api/types';
-import { rowKeyText } from '@/features/grid/rowKeyText';
+import { isOpaqueRowKey, rowKeyText } from '@/features/grid/rowKeyText';
 import { localized } from '@/shared/i18n/localized';
 import { isHeaderFinding } from './headerFinding';
 
@@ -159,8 +159,11 @@ export function countIssues(groups: readonly InspectorIssueGroup[]): InspectorIs
  * немає (і не має бути: зріз живе в чанку сітки). Тому чип — ключі.
  * Зауваження до таблиці цілком (без рядка) — прочерк, а не порожнеча.
  */
-export function addressChip(rowKey: string | null, columnCode: string | null): string {
-  return `${rowKey === null ? '—' : rowKeyText(rowKey)} · ${columnCode ?? '—'}`;
+export function addressChip(rowKey: string | null, columnCode: string | null, rowLabel?: string | null): string {
+  // ✎ b17 e2e: службовий ключ без номера давав «this row»; підпис рядка з сітки («Row N»/назва) — точніша адреса.
+  const row = rowKey === null ? '—' : isOpaqueRowKey(rowKey) && rowLabel ? rowLabel : rowKeyText(rowKey);
+
+  return `${row} · ${columnCode ?? '—'}`;
 }
 
 /**

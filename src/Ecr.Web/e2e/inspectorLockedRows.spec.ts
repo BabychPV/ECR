@@ -125,7 +125,14 @@ test.describe('Locked rows', () => {
 
     // Клік веде в рядок: інспектор показує адресу вибраної комірки цього рядка.
     await item.click();
-    await expect(page.locator('[data-inspector-address]')).toContainText(rowKey, { timeout: 30_000 });
+    // ✎ b17: службовий ключ в адресі не показується — «Row N»; кодовий — як є.
+    const address = page.locator('[data-inspector-address]');
+    if (/^[0-9a-f]{24,}$/i.test(rowKey)) {
+      await expect(address).toContainText(/Row \d+/, { timeout: 30_000 });
+      await expect(address).not.toContainText(rowKey);
+    } else {
+      await expect(address).toContainText(rowKey, { timeout: 30_000 });
+    }
 
     // Дія відкриття — для того, кому сервер дозволяє (оператор має Period.Reopen у своєму проєкті).
     const reopen = page.locator(`[data-inspector-reopen="${String(periodKey)}"]`);

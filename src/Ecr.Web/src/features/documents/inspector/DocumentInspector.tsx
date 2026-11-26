@@ -362,11 +362,12 @@ export function DocumentInspector({
                   className="ecr-insp-chip"
                   data-inspector-address=""
                   data-inspector-column={shownCell.columnCode}
-                  title={addressChip(shownCell.rowKey, shownCell.columnCode)}
+                  title={addressChip(shownCell.rowKey, shownCell.columnCode, shownCell.rowLabel)}
                 >
                   {addressChip(
                     shownCell.rowKey,
                     `${t('inspector.info.column')}: ${shownCell.columnHeader.length > 0 ? shownCell.columnHeader : shownCell.columnCode}`,
+                    shownCell.rowLabel,
                   )}
                 </span>
               )}
@@ -808,7 +809,7 @@ function HistoryTab({
   const scope =
     effective === 'cell' && cell !== null
       ? t('inspector.history.scopeCell', {
-          cell: addressChip(cell.rowKey, cell.columnCode),
+          cell: addressChip(cell.rowKey, cell.columnCode, cell.rowLabel),
           column: cell.columnHeader.length > 0 ? cell.columnHeader : cell.columnCode,
         })
       : t('inspector.history.scopeSheet', { sheet: sheet?.name ?? '—', period });
@@ -1008,7 +1009,7 @@ function InfoTab({
   const tableStatus = year === undefined ? status.data?.find((row) => row.tableDefId === table.tableDefId) : yearTableIssues(year.messages, table.tableDefId);
 
   const items: KeyValueItem[] = [
-    { label: t('inspector.info.cell'), value: addressChip(cell.rowKey, cell.columnCode), mono: true },
+    { label: t('inspector.info.cell'), value: addressChip(cell.rowKey, cell.columnCode, cell.rowLabel), mono: true },
     { label: t('inspector.info.row'), value: cell.rowLabel },
     {
       label: t('inspector.info.column'),
