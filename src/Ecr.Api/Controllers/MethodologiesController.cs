@@ -39,6 +39,7 @@ public sealed class MethodologiesController(
     SaveMethodologyCategoryRuleHandler saveCategoryRule,
     DeleteMethodologyCategoryRuleHandler deleteCategoryRule,
     ListMethodologyRequiredInputsHandler listRequiredInputs,
+    ListDerivedRequiredInputsHandler listDerivedInputs,
     SaveMethodologyRequiredInputHandler saveRequiredInput,
     DeleteMethodologyRequiredInputHandler deleteRequiredInput,
     ListMethodologyOutputsHandler listOutputs,
@@ -543,6 +544,24 @@ public sealed class MethodologiesController(
         await scope.RequireAsync(id, vid, ListMethodologyRequiredInputsHandler.Permission, ct).ConfigureAwait(false);
 
         return Ok(await listRequiredInputs.HandleAsync(vid, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// ✎ D-578: ВИВЕДЕНІ обов'язкові входи версії — поля, які читає її скрипт, з винятком методолога (Block/Warn/Optional), якщо
+    /// він заведений у <c>required-inputs</c>. Лише читання; право <c>Calculation.View</c>. <c>status</c> ≠ <c>available</c> —
+    /// автоматичного переліку немає (діє лише перелік методолога).
+    /// </summary>
+    /// <param name="id">Методологія.</param>
+    /// <param name="vid">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("{id:int}/versions/{vid:int}/derived-inputs")]
+    [ProducesResponseType<DerivedRequiredInputsDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<DerivedRequiredInputsDto>> DerivedInputs(int id, int vid, CancellationToken ct)
+    {
+        await scope.RequireAsync(id, vid, ListMethodologyRequiredInputsHandler.Permission, ct).ConfigureAwait(false);
+
+        return Ok(await listDerivedInputs.HandleAsync(vid, ct).ConfigureAwait(false));
     }
 
     /// <summary>

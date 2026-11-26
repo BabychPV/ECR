@@ -509,6 +509,7 @@ public static class DependencyInjection
         services.AddScoped<Calculations.SaveMethodologyCategoryHandler>();
         services.AddScoped<Calculations.DeleteMethodologyCategoryHandler>();
         services.AddScoped<Calculations.ListMethodologyRequiredInputsHandler>();
+        services.AddScoped<Calculations.ListDerivedRequiredInputsHandler>(); // D-578
         services.AddScoped<Calculations.SaveMethodologyRequiredInputHandler>();
         services.AddScoped<Calculations.DeleteMethodologyRequiredInputHandler>();
         services.AddScoped<Calculations.ListMethodologyOutputsHandler>();
