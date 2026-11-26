@@ -990,17 +990,46 @@ public sealed partial class GasCompositionService(
         GasRegistryIds ids, GasDateRange? affected, IReadOnlyList<int> registryIds, int userId, string reason, CancellationToken ct)
     {
         var dependents = await store.ListDependentYearsAsync(ids, ct).ConfigureAwait(false);
+        return await EnqueueImpactAsync(
+                jobs, dependents, affected, registryIds, [ids.Case, ids.Composition], userId, reason,
+                (ex, registryId, year) => LogEnqueueFailed(_logger, ex, registryId, year), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ SGF-flaring AC-3 (+ огляд L2): ОДНА злита постановка на рік. Правка, що зачіпає кейс чи склад, нормалізується до ПАРИ
+    /// (кейс + склад): ціль черги однакова для «нова версія» (кейс + склад) і пізнішої «лише кейс», тож вони зливаються, а не
+    /// перераховують документ двічі. Payload — довідники пари із залежними в цьому році (від правки не залежить).
+    /// </summary>
+    /// <param name="jobs">Черга.</param>
+    /// <param name="dependents">Довідник → роки з відкритими залежними.</param>
+    /// <param name="affected">Зачеплені дати; <c>null</c> — усі роки.</param>
+    /// <param name="registryIds">Довідники правки.</param>
+    /// <param name="pair">Кейс і склад газу.</param>
+    /// <param name="userId">Автор.</param>
+    /// <param name="reason">Причина.</param>
+    /// <param name="onFailed">Журнал збою постановки (довідник, рік).</param>
+    /// <param name="ct">Скасування.</param>
+    internal static async Task<(IReadOnlyList<int> Queued, IReadOnlyList<int> Failed)> EnqueueImpactAsync(
+        IBackgroundJobScheduler jobs,
+        IReadOnlyDictionary<int, IReadOnlyList<int>> dependents,
+        GasDateRange? affected,
+        IReadOnlyList<int> registryIds,
+        IReadOnlyList<int> pair,
+        int userId,
+        string reason,
+        Action<Exception, int, int> onFailed,
+        CancellationToken ct)
+    {
+        var normalized = registryIds.Intersect(pair).Any() ? [.. registryIds.Union(pair)] : registryIds;
         var queued = new SortedSet<int>();
         var failed = new SortedSet<int>();
-
-        // ✎ SGF-flaring AC-3: ОДНА постановка на рік на всі довідники правки (кейс + склад): документ, що читає обидва, —
-        // перераховується раз, а не раз на довідник (DESIGN-sg-flaring §5.8 «double enqueue»).
-        foreach (var (year, registriesOfYear) in ImpactYears(dependents, affected, registryIds))
+        foreach (var (year, registriesOfYear) in ImpactYears(dependents, affected, normalized))
         {
             try
             {
                 await jobs.EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(
-                        RegistryImpactRecalculationTarget.ForYear(registriesOfYear, year),
+                        RegistryImpactRecalculationTarget.ForYear(normalized, year),
                         new RegistryImpactRecalculationRequest(
                             registriesOfYear[0], [], reason, year,
                             AlsoRegistryDefIds: registriesOfYear.Count > 1 ? [.. registriesOfYear.Skip(1)] : null),
@@ -1012,7 +1041,7 @@ public sealed partial class GasCompositionService(
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 failed.Add(year);
-                LogEnqueueFailed(_logger, ex, registriesOfYear[0], year);
+                onFailed(ex, registriesOfYear[0], year);
             }
         }
 

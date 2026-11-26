@@ -2,6 +2,7 @@
 using Ecr.Application.GasComposition;
 using Ecr.Application.Ports;
 using Ecr.TestKit;
+using NSubstitute;
 using Xunit;
 
 namespace Ecr.Application.Tests.GasComposition;
@@ -79,6 +80,67 @@ public sealed class GasCompositionImpactYearsTests
 
         Assert.Equal([Case, Composition], parsed.AllRegistryDefIds);
         Assert.Equal([Case], new RegistryImpactRecalculationRequest(Case, [], "old payload", 2026).AllRegistryDefIds);
+    }
+
+    // ───── петля постановки (огляд: AC-3 enqueue loop; L2 злиття «версія» + пізніше «лише кейс») ─────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "SGF-FLARING-AC-3")]
+    public async Task Постановка__одна_задача_на_рік_з_ціллю_пари_і_payload_з_обома_довідниками()
+    {
+        var jobs = NSubstitute.Substitute.For<IBackgroundJobScheduler>();
+        var dependents = Dependents((Case, [2026]), (Composition, [2026]));
+
+        var (queued, failed) = await GasCompositionService.EnqueueImpactAsync(
+            jobs, dependents, null, [Case, Composition], [Case, Composition], 5, "gas", (_, _, _) => { }, default);
+
+        Assert.Equal([2026], queued);
+        Assert.Empty(failed);
+        var call = Assert.Single(jobs.ReceivedCalls());
+        Assert.Equal(RegistryImpactRecalculationTarget.ForYear([Case, Composition], 2026), call.GetArguments()[0]);
+        var request = Assert.IsType<RegistryImpactRecalculationRequest>(call.GetArguments()[1]);
+        Assert.Equal([Case, Composition], request.AllRegistryDefIds);
+        Assert.Equal(5, call.GetArguments()[3]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "SGF-FLARING-REVIEW-L2")]
+    public async Task Пізніша_правка_лише_кейсу__та_сама_ціль_що_й_версія__зливається()
+    {
+        var jobs = NSubstitute.Substitute.For<IBackgroundJobScheduler>();
+        var dependents = Dependents((Case, [2026]), (Composition, [2026]));
+
+        await GasCompositionService.EnqueueImpactAsync(jobs, dependents, null, [Case, Composition], [Case, Composition], 5, "version", (_, _, _) => { }, default);
+        await GasCompositionService.EnqueueImpactAsync(jobs, dependents, null, [Case], [Case, Composition], 5, "case only", (_, _, _) => { }, default);
+
+        var targets = jobs.ReceivedCalls().Select(c => (string)c.GetArguments()[0]!).ToList();
+        Assert.Equal(2, targets.Count);
+        Assert.Single(targets.Distinct());
+        var payloads = jobs.ReceivedCalls().Select(c => ((RegistryImpactRecalculationRequest)c.GetArguments()[1]!).AllRegistryDefIds).ToList();
+        Assert.Equal(payloads[0], payloads[1]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "SGF-FLARING-AC-3")]
+    public async Task Збій_черги__рік_у_failed_і_журнал__решта_ставиться()
+    {
+        var jobs = NSubstitute.Substitute.For<IBackgroundJobScheduler>();
+        jobs.EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(
+                RegistryImpactRecalculationTarget.ForYear([Case, Composition], 2025), NSubstitute.Arg.Any<object?>(),
+                NSubstitute.Arg.Any<CancellationToken>(), NSubstitute.Arg.Any<int?>())
+            .Returns<Task<string>>(_ => throw new InvalidOperationException("queue down"));
+        var logged = new List<int>();
+
+        var (queued, failed) = await GasCompositionService.EnqueueImpactAsync(
+            jobs, Dependents((Case, [2025, 2026])), null, [Case, Composition], [Case, Composition], 5, "gas",
+            (_, _, year) => logged.Add(year), default);
+
+        Assert.Equal([2026], queued);
+        Assert.Equal([2025], failed);
+        Assert.Equal([2025], logged);
     }
 
     private static readonly System.Text.Json.JsonSerializerOptions WebJson = new(System.Text.Json.JsonSerializerDefaults.Web);
