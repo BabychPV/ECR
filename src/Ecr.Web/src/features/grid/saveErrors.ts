@@ -29,7 +29,7 @@ export function refusalText(error: unknown): string {
  * (`Uncaught (in promise)`), яке бачить лише консоль розробника, а не
  * оператор. `DocumentGrid.save` показує `refusalText(error)` в `Alert` — ця
  * функція вирішує ДРУГУ частину: яку саме комірку підсвітити маркером,
- * аналогічним `.ecr-cell-required-input-blocked` (Q-306).
+ * аналогічним `.ecr-cell-needs-input` (Q-306, DOCUX L2).
  *
  * ⚠ Сервер повертає причину у двох формах, і обидві — РЕАЛЬНІ дані, не
  * здогад:

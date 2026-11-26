@@ -7,6 +7,7 @@ import { cssVariablesResolver } from '../cssVariables';
 import {
   brand,
   brandTextOnDark,
+  cellRequired,
   cellState,
   statusError,
   statusSuccess,
@@ -764,3 +765,36 @@ describe('theme.ts і cell-states.css не розходяться', () => {
     }
   });
 });
+
+/**
+ * ✎ DOCUX L2 (AC L2-4, BUG-12): «тут потрібне значення» — колір СЛОВА «Required» у порожній комірці, її рамки й зірочки
+ * заголовка. Поріг — текстовий 4.5:1 проти КОЖНОЇ заливки станів і поверхні сітки, окремо в кожній темі; значення в
+ * `theme.ts` і `cell-states.css` однакові; колишніх літералів маркера немає.
+ */
+describe('cellRequired: контраст і синхронність (DOCUX L2)', () => {
+  const levels = Object.keys(cellRequired) as (keyof typeof cellRequired)[];
+
+  it.each(levels.flatMap((level) => (['light', 'dark'] as const).map((scheme) => [level, scheme] as const)))(
+    '«%s» (%s) — ≥ 4.5:1 на всіх заливках станів і на поверхні сітки',
+    (level, scheme) => {
+      const ink = cellRequired[level][scheme];
+      const fills = [themeSurface[scheme].body, ...names.map((name) => cellState[name][scheme].bg)];
+      for (const fill of fills) {
+        expect(contrast(ink, fill), `${level}/${scheme} на ${fill}`).toBeGreaterThanOrEqual(AA.text);
+      }
+    },
+  );
+
+  it.each(levels)('ФВ-14.11: «%s» однаковий у theme.ts і cell-states.css', (level) => {
+    expect(cssVar(`--ecr-cell-required-${level}`, 'light')).toBe(cellRequired[level].light);
+    expect(cssVar(`--ecr-cell-required-${level}`, 'dark')).toBe(cellRequired[level].dark);
+  });
+
+  it('маркери «потрібне значення» й помилки збереження — лише токенами, без літералів кольору', () => {
+    const rules = [...css.matchAll(/\.ecr-cell-(?:needs-input|save-error)[^{]*\{([^}]*)\}/g)].map((match) => match[1] ?? '');
+    expect(rules.length).toBeGreaterThan(3);
+    for (const body of rules) expect(body).not.toMatch(/#[0-9a-f]{3,8}/i);
+    expect(css).not.toContain('.ecr-cell-required-input-');
+  });
+});
+

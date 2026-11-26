@@ -1,7 +1,7 @@
 import { useEffect, useState, type JSX } from 'react';
 import { Link, useInRouterContext } from 'react-router-dom';
 import { notifications } from '@mantine/notifications';
-import { Alert, Anchor, Stack, Text } from '@mantine/core';
+import { Anchor, Stack, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import type { CalculationResultDto, RegistryDefDto } from '@/api/types';
 import { apiFetch } from '@/api/client';
@@ -208,15 +208,16 @@ export function CalculationResultsPanel({
               ⛔ F-05 / RT-25: входи або довідник, який читає методологія, змінилися після прогону — числа вже не
               відповідають даним. Без назви довідника людина шукала б зміну в документі, якої там немає.
             */}
+            {/* ✎ DOCUX L4 (BUG-14): «результати застаріли» каже ОДНЕ місце — чип стану розрахунку в рядку стану. Тут — лише
+                те, чого чип не знає: який довідник змінився (тихий рядок, не другий жовтий банер). */}
             {(list.some((result) => result.isStale) || changedRegistriesOf(list).length > 0) && (
-              <Alert color="statusWarning" data-results-stale="" title={t('documents.calculationResultsStale')}>
-                {t('documents.calculationResultsStaleHint')}
+              <Stack gap="xs" data-results-stale="">
                 {changedRegistriesOf(list).map((code) => (
-                  <Text key={code} size="sm" mt="xs" data-results-stale-registry={code}>
-                    {t('calculation.staleRegistry', { name: registryDisplayName(code, registries.data) })}
+                  <Text key={code} size="sm" c="dimmed" data-results-stale-registry={code}>
+                    {`ⓘ ${t('calculation.staleRegistry', { name: registryDisplayName(code, registries.data) })}`}
                   </Text>
                 ))}
-              </Alert>
+              </Stack>
             )}
 
             <Text size="sm">

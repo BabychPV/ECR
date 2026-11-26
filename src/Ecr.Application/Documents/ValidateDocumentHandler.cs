@@ -36,7 +36,11 @@ public sealed class ValidateDocumentHandler(
     IPermitHistoryStore? permitHistory = null,
 
     // ✎ C-1 (D-475): збережений стан помилок формул — «Перевірити» показує те, що заблокує подання. `null` (тести) — вимкнено.
-    IFormulaErrorStore? formulaErrors = null)
+    IFormulaErrorStore? formulaErrors = null,
+
+    // ✎ D-577 (L6, Q6): порожні обов'язкові входи методологій — у знахідках «Перевірити» (Block — помилка, як блокує подання).
+    // `null` (тести) — вимкнено.
+    RequiredInputs.RequiredInputsScanner? requiredInputs = null)
 {
     /// <summary>✎ C-5: дефолти колонок версії для незаповнених комірок (02b §6.3).</summary>
     private readonly Recalculation.ColumnDefaultValues columnDefaults = new(metadata, registries);
@@ -146,6 +150,47 @@ public sealed class ValidateDocumentHandler(
 
             messages.AddRange(TableValidation.MissingRequiredColumnMessages(
                 table, [.. table.Columns.Where(c => !c.IsDeleted && c.IsRequired)], cells, rowIds, currentUser.Language));
+        }
+
+        // ✎ D-577 (L6, Q6; BUG-9): обов'язкові входи методологій по всіх рядках (з введеним значенням чи наперед заданих) —
+        // те саме, що заблокує подання (Block) і що сітка показує при відкритті. Зрізи таблиць поза `toValidate` — одним
+        // пакетним запитом; таблиці без методологій з вимогами — без читання.
+        if (requiredInputs is not null)
+        {
+            var planned = new List<(TableInstanceRef Instance, TableDef Table, TemplateVersionSnapshot Snapshot, RequiredInputs.RequiredInputPlan Plan)>();
+            foreach (var instance in instances)
+            {
+                var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
+                var table = snapshot.Sheets.SelectMany(s => s.Tables).FirstOrDefault(t => t.Id == instance.TableDefId);
+                var plan = table is null
+                    ? null
+                    : await requiredInputs
+                        .PlanAsync(documentId, periodKey.Value, instance.TemplateVersionId, table, ct)
+                        .ConfigureAwait(false);
+                if (plan is not null)
+                {
+                    planned.Add((instance, table!, snapshot, plan));
+                }
+            }
+
+            var unread = planned.Select(p => p.Instance.TableInstanceId).Where(id => !cellsByInstance.ContainsKey(id)).ToList();
+            IReadOnlyDictionary<long, IReadOnlyList<CellRecord>> extraCells = unread.Count == 0
+                ? new Dictionary<long, IReadOnlyList<CellRecord>>()
+                : await cellStore.ReadSlicesAsync(unread, periodKey, ct).ConfigureAwait(false);
+            IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>> extraRows = unread.Count == 0
+                ? new Dictionary<long, IReadOnlyDictionary<string, long>>()
+                : await rowStore.GetRowIdsBatchAsync(unread, periodKey, ct).ConfigureAwait(false);
+
+            foreach (var (instance, table, snapshot, plan) in planned)
+            {
+                var id = instance.TableInstanceId;
+                var cells = cellsByInstance.TryGetValue(id, out var c) ? c : extraCells.GetValueOrDefault(id) ?? [];
+                var rowIds = rowIdsByInstance.TryGetValue(id, out var r)
+                    ? r
+                    : extraRows.GetValueOrDefault(id) ?? new Dictionary<string, long>(StringComparer.Ordinal);
+                messages.AddRange(RequiredInputs.RequiredInputsScanner
+                    .Scan(plan, table, snapshot.ColumnsById, cells, rowIds, currentUser.Language));
+            }
         }
 
         // ⛔ D-PS / R-B3: «Перевірити» рахує те саме, що подання, — порожнє обов'язкове поле шапки.

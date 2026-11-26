@@ -1,7 +1,6 @@
 import type { JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import type { RequiredInputCell } from '@/api/client';
 import { mantineProviderProps } from '@/shared/theme/provider';
@@ -11,7 +10,6 @@ import {
   groupRequiredInputs,
   liveRequiredInputs,
   RequiredInputsBlockedAlert,
-  RequiredInputsSummary,
   requiredInputLine,
 } from '../requiredInputsAlert';
 
@@ -117,49 +115,6 @@ describe('groupRequiredInputs / dedupe / live', () => {
 
     expect(live.map((c) => `${c.rowKey}:${c.columnCode}`)).toEqual(['r-a:Land_TypeEquipment']);
     expect(liveRequiredInputs(cells, null)).toHaveLength(cells.length);
-  });
-});
-
-describe('RequiredInputsSummary: Warn згорнутий до одного рядка', () => {
-  it('за замовчуванням згорнутий; розкривається на вимогу; лічильник = кількість рядків', async () => {
-    shell(<RequiredInputsSummary cells={legacyMessages('r-new')} columns={Columns} rows={Rows} />);
-
-    const toggle = screen.getByRole('button', { name: /2 required column\(s\) not filled yet/ });
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(screen.queryByRole('list')).toBeNull();
-    // Нічого не розгорнуто над сіткою: ні alert, ні переліку.
-    expect(screen.queryByRole('alert')).toBeNull();
-
-    await userEvent.setup().click(toggle);
-
-    const list = await screen.findByRole('list');
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    expect(within(list).getAllByRole('listitem')).toHaveLength(2);
-    expect(list.textContent).toContain('Type of fuel · rows: 3 · needed by ECW_C05_01, ECW_C05_02');
-    expect(document.body.textContent).not.toContain('⟦');
-  });
-
-  it('без вимог — нічого', () => {
-    shell(<RequiredInputsSummary cells={[]} columns={Columns} rows={Rows} />);
-    expect(screen.queryByRole('button')).toBeNull();
-    expect(document.querySelector('[data-required-inputs]')).toBeNull();
-  });
-
-  it('мова інтерфейсу: російський каталог — російський текст, без української', async () => {
-    current = 'ru';
-    shell(<RequiredInputsSummary cells={legacyMessages('r-new')} columns={Columns} rows={Rows} />);
-
-    const toggle = screen.getByRole('button', { name: /Не заполнено обязательных столбцов: 2/ });
-    await userEvent.setup().click(toggle);
-    const list = await screen.findByRole('list');
-    expect(list.textContent).toContain('Type of fuel · строки: 3 · требуется для ECW_C05_01');
-    expect(document.body.textContent).not.toMatch(/обов'язкова|⟦/);
-  });
-
-  it('kz: ключі є в сіді', () => {
-    current = 'kz';
-    shell(<RequiredInputsSummary cells={legacyMessages('r-new')} columns={Columns} rows={Rows} />);
-    expect(screen.getByRole('button').textContent).toContain('2 міндетті баған толтырылмаған');
   });
 });
 

@@ -1,5 +1,6 @@
 ﻿using System.Globalization;
 using Ecr.Application.Documents.Dto;
+using Ecr.Application.Documents.RequiredInputs;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;

@@ -139,7 +139,8 @@ test.describe('застарілі результати: перелік, My tasks
     await expect(cell).toBeVisible({ timeout: 60_000 });
 
     // Початок: банера немає. Маркер у window доводить, що сторінку далі не перезавантажували.
-    const banner = page.getByTestId('document-stale-results');
+    // ✎ DOCUX L4: чип стану розрахунку «Results out of date · Recalculate» замість банера.
+    const banner = page.locator('[data-calc-status="stale"]');
     await expect(banner).toHaveCount(0);
     await page.evaluate(() => {
       (window as unknown as Record<string, unknown>)['__e2eNoReload'] = true;
@@ -165,7 +166,7 @@ test.describe('застарілі результати: перелік, My tasks
     expect(await page.evaluate(() => (window as unknown as Record<string, unknown>)['__e2eNoReload'])).toBe(true);
 
     // Дія 2: «Recalculate» у банері.
-    await banner.getByTestId('document-stale-results-recalculate').click();
+    await banner.getByTestId('calc-status-action').click();
 
     // Кінець 2: перерахунок поставлено один раз, картку перечитано — банера немає.
     await expect(banner).toHaveCount(0, { timeout: 30_000 });

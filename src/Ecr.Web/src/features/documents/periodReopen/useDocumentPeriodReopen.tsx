@@ -1,5 +1,6 @@
+import { badgeLook } from '@/shared/ui/StatusBadge';
 import { lazy, Suspense, useEffect, useState, type JSX } from 'react';
-import { Alert, Button, Group, Text } from '@mantine/core';
+import { Badge, Button, Group, Popover, Text, VisuallyHidden } from '@mantine/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
 import type { components } from '@/api/schema';
@@ -127,21 +128,34 @@ export function useDocumentPeriodReopen({ documentId, periodKey, periodState, ti
     }
   }
 
+  // ✎ DOCUX L8 (№9): «відкрито для документа до …» — ЧИП у рядку стану (хто, чому — у ⓘ і для читалки), а не банер.
   const banner =
     active === null ? null : (
-      <Alert
-        color="brand"
-        variant="light"
-        role="status"
-        title={t('document.reopen.activeTitle', { until: untilText(active.openUntil, timeZoneId) })}
-        data-testid="document-period-reopened"
-      >
-        {t('document.reopen.activeBody', {
-          period,
-          reason: active.reason,
-          by: active.openedByName ?? String(active.openedByUserId),
-        })}
-      </Alert>
+      <Popover position="bottom-start" withArrow shadow="md" width={360}>
+        <Popover.Target>
+          <Badge
+            component="button"
+            type="button"
+            size="sm"
+            variant="transparent"
+            radius="xs"
+            c={badgeLook('info').text}
+            bg={badgeLook('info').bg}
+            styles={{ root: { textTransform: 'none', letterSpacing: 'normal', fontWeight: 500, cursor: 'pointer' } }}
+            data-testid="document-period-reopened"
+          >
+            {`${t('document.reopen.activeTitle', { until: untilText(active.openUntil, timeZoneId) })} ⓘ`}
+            <VisuallyHidden>
+              {` ${t('document.reopen.activeBody', { period, reason: active.reason, by: active.openedByName ?? String(active.openedByUserId) })}`}
+            </VisuallyHidden>
+          </Badge>
+        </Popover.Target>
+        <Popover.Dropdown>
+          <Text size="sm">
+            {t('document.reopen.activeBody', { period, reason: active.reason, by: active.openedByName ?? String(active.openedByUserId) })}
+          </Text>
+        </Popover.Dropdown>
+      </Popover>
     );
 
   const dialog =

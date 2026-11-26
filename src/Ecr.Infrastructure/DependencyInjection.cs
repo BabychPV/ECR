@@ -185,6 +185,7 @@ public static class DependencyInjection
         services.AddScoped<IEditAssignmentManagementStore, EditAssignmentManagementStore>();
         services.AddScoped<ITableDiscussionStore, TableDiscussionStore>();
         services.AddScoped<ISheetChangeStore, SheetChangeStore>();
+        services.AddScoped<IDocumentCalcStatusStore, DocumentCalcStatusStore>(); // D-577 (L3)
         services.AddScoped<IApprovalQueueStore, ApprovalQueueStore>();
         services.AddScoped<IStepApproverStore, StepApproverStore>();
         services.AddScoped<IColumnDefSearchStore, ColumnDefSearchStore>();
@@ -514,6 +515,8 @@ public static class DependencyInjection
         // ✎ Прогноз каскаду — окремий екземпляр задачі (кеш читачів не ділиться з прогоном у тій самій області).
         services.AddScoped<Jobs.ISourceCascadePlanner>(sp => ActivatorUtilities.CreateInstance<Jobs.RecalculationJob>(sp));
         services.AddScoped<ISourceImpactAssessor, SourceImpactAssessor>(); // B80 N5 (D-554): вплив Approve/Reopen джерела на залежні + підтвердження
+        services.AddSingleton<Jobs.BoundTablesCache>();   // D-577 (Q2): прив'язані таблиці в пам'яті (TTL 60 с)
+        services.AddScoped<Jobs.EditAutoRecalculation>(); // D-577 (Q2): автоперерахунок методологій після правки
         services.AddScoped<IFormulaRecalculationJob, Jobs.FormulaRecalculationJob>();
         // WW-03: постановка перерахунку в періоди-читачі (міжперіодні посилання).
         services.AddScoped<Jobs.CrossPeriodFanOut>();

@@ -74,6 +74,8 @@ import { parseChatKey } from '@/features/tableChat/chatKey';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { registerHeldEditRevealer, useSettledAction } from '@/features/grid/settleEdits';
+import { NoticeLine } from '@/features/documents/notices/NoticeLine';
+import { usePublishNotice } from '@/features/documents/notices/noticeStore';
 
 /**
  * Панелі нижче — за `import()`, а не статичним імпортом (`D-132`).
@@ -185,12 +187,6 @@ const ExecutorStrip = lazy(async () => ({
 // ✎ b14 doc-notices-compact: панелі місяців зведено в ОДНУ смугу (панелі — її «Technical details»), той самий чанк-підхід.
 const CalculationIssuesStrip = lazy(async () => ({
   default: (await import('@/features/documents/calcIssuesStrip/CalculationIssuesStrip')).CalculationIssuesStrip,
-}));
-
-// Місце банера перерахунку проєкту (lane A) — за `import()`, як на Documents: хук опитування задач і модель
-// прогресу не входять у граф маршруту (бюджет D-132: DocumentPage 250.5 КБ gzip після зведення з банерами #782).
-const ProjectRecalcBannerSlot = lazy(async () => ({
-  default: (await import('@/features/recalc/ProjectRecalcBannerSlot')).ProjectRecalcBannerSlot,
 }));
 
 // PM-11: «З дозволу» + «Оновити з дозволу» — окремий чанк (бюджет маршруту D-132).
@@ -1022,6 +1018,31 @@ export function DocumentPage(): JSX.Element {
       </Stack>
     ) : null;
 
+  // ✎ DOCUX L7: смуга «Calculation: rows not included…» — у рядку повідомлень (пріоритет 6), а не окремим блоком.
+  usePublishNotice(
+    'calc-issues',
+    issuePanels.length === 0
+      ? null
+      : {
+          priority: 6,
+          render: () => (
+            <Suspense fallback={<div style={{ height: 32 }} aria-hidden="true" />}>
+              <CalculationIssuesStrip
+                userId={session.data?.userId}
+                documentId={can(session.data, 'Calculation.View') ? documentId : undefined}
+                memoryDocumentId={documentId}
+                months={issuePanels}
+                tables={tables.data ?? []}
+                onOpenCell={openUnmatchedRow}
+                onOpenHse400={openHse400}
+                onOpenSource={openSource}
+                narrow={narrow}
+              />
+            </Suspense>
+          ),
+        },
+  );
+
   /*
    * D10 (a11y): документа немає (`404`, напр. `ECR-DOC-0404`) — службова сторінка з заголовком
    * сторінки, як `/404` (`NotFoundPage`), а не голий `ErrorAlert` без жодного heading. «Повторити»
@@ -1182,6 +1203,15 @@ export function DocumentPage(): JSX.Element {
                   stateOverride={sheetYearState}
                 />
                 <DocumentSaveState readOnly={gridReadOnly} periodKey={periodKey} />
+                {/* ✎ DOCUX L8 (№9): копія на місяць — «Reopened until …» чипом у рядку стану (рік — `ReopenedMonthsChip` у шапці). */}
+                {yearLayout ? null : periodReopen.banner}
+                {/* PM-11 → ✎ DOCUX L8 (№11): «з дозволу» — чип у рядку стану (одна таблиця — чип і «Refresh»; кілька — перелік
+                    у спливаючому вікні). Чанк вантажиться лише коли така таблиця є; додаткових запитів немає. */}
+                {active.tables.some((table) => table.permitBinding != null) && (
+                  <Suspense fallback={null}>
+                    <PermitRefreshStrip documentId={documentId} periodKey={periodKey} tables={active.tables} readOnly={readOnly} />
+                  </Suspense>
+                )}
                 {/* ✎ D-446: застарілість не визначена — частину документа читачеві закрито (те саме, що в рядку переліку). */}
                 {document.resultsStaleUndetermined === 'PartiallyHidden' && <StaleResultsUndeterminedMark />}
               </>
@@ -1194,26 +1224,12 @@ export function DocumentPage(): JSX.Element {
           ✎ b14 doc-notices-compact: усі місяці (W15z M4: «рік» — кожен місяць із проблемами) — ОДНА смуга в рядок,
           згорнута; «Details» — матриця «причина × місяць», панелі місяців — у її «Technical details». Поки чанк
           вантажиться, місце тримає коробка висоти смуги (сітка не стрибає). */}
-      {issuePanels.length > 0 && (
-        <Suspense fallback={<div style={{ height: 32 }} aria-hidden="true" />}>
-          <CalculationIssuesStrip
-            userId={session.data?.userId}
-            documentId={can(session.data, 'Calculation.View') ? documentId : undefined}
-            months={issuePanels}
-            tables={tables.data ?? []}
-            onOpenCell={openUnmatchedRow}
-            onOpenHse400={openHse400}
-            onOpenSource={openSource}
-            narrow={narrow}
-          />
-        </Suspense>
-      )}
+      {/* ✎ DOCUX L7: над сіткою — ОДИН рядок повідомлень (найважливіше + «+N more» → вкладка Status інспектора). Смуга
+          проблем розрахунку — повідомлення пріоритету 6 (`calcIssuesNotice` вище). */}
+      <NoticeLine />
 
-      {projectId !== null && (
-        <Suspense fallback={null}>
-          <ProjectRecalcBannerSlot projectId={projectId} />
-        </Suspense>
-      )}
+      {/* ✎ DOCUX Q5 (рішення людини 26.11): смуги «перерахунок проєкту» тут немає — вона на дошці документів; стан ЦЬОГО
+          документа каже чип розрахунку в рядку стану. */}
 
       {/* ⛔ `F-18`: ЧОМУ тут нічого не змінити — одразу під рядком дій, до
           будь-якої сітки: сірі комірки без пояснення читаються як збій.
@@ -1226,7 +1242,6 @@ export function DocumentPage(): JSX.Element {
 
       {/* ✎ L7c → b14 doc-notices-compact: «рік» — відкриті місяці року лише чипом у шапці (банер-список прибрано);
           копія на місяць — банер свого місяця, як було (у ньому причина й хто відкрив). */}
-      {yearLayout ? null : periodReopen.banner}
       {periodReopen.dialog}
 
       {/* EA-5b: передача місяця - «Місяць передано вам», «Заповнено», коментар повернення. Права комірок рішає сервер. */}
@@ -1234,13 +1249,6 @@ export function DocumentPage(): JSX.Element {
         <ExecutorStrip documentId={documentId} periodKey={periodKey} />
       </Suspense>
 
-      {/* PM-11: таблиці активного аркуша, що читають дозвіл (permitBinding у відповіді …/tables), — позначка і
-          «Оновити з дозволу». Чанк вантажиться лише коли така таблиця є; додаткових запитів немає. */}
-      {active !== undefined && active.tables.some((table) => table.permitBinding != null) && (
-        <Suspense fallback={null}>
-          <PermitRefreshStrip documentId={documentId} periodKey={periodKey} tables={active.tables} readOnly={readOnly} />
-        </Suspense>
-      )}
 
       {/* `UI-42`: чому тут нічого не змінити на телефоні — тим самим місцем, що й інші блокування.
           Аркуш і так закритий (банер вище) — другий банер не потрібен. */}

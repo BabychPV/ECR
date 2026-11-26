@@ -64,6 +64,24 @@ export function isRecalculateKey(event: {
 }
 
 /**
+ * ✎ DOCUX L2: F8 — до наступної порожньої обов'язкової комірки аркуша, Shift+F8 — до попередньої (`needsInputStore`).
+ * F8 у браузерах і в сітці вільна. `1` — наступна, `-1` — попередня, `null` — не ця клавіша (з Ctrl/Alt/Meta теж).
+ */
+export function needsInputStepKey(event: {
+  code: string;
+  key: string;
+  ctrlKey: boolean;
+  altKey: boolean;
+  shiftKey: boolean;
+  metaKey: boolean;
+}): 1 | -1 | null {
+  if (event.ctrlKey || event.altKey || event.metaKey) return null;
+  if (!(event.code === 'F8' || (event.code === '' && event.key === 'F8'))) return null;
+
+  return event.shiftKey ? -1 : 1;
+}
+
+/**
  * Shift+F5 — перечитати таблиці аркуша з сервера (LIVE-REFRESH B3), не перезавантажуючи сторінку.
  *
  * ⚠ Лише Shift без Ctrl/Alt/Meta: голий F5 і Ctrl+F5 лишаються браузеру (перезавантаження). Сітка

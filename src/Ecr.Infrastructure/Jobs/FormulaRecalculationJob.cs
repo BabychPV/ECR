@@ -38,7 +38,9 @@ public sealed partial class FormulaRecalculationJob(
     IAuditWriter? audit = null,
     Ecr.Domain.Abstractions.IClock? clock = null,
     // B179 L2: зміна документа-джерела (правка комірки дає лише цю задачу) — перерахунок залежних.
-    IRecalculationCompletionHook? completionHook = null) : IFormulaRecalculationJob
+    IRecalculationCompletionHook? completionHook = null,
+    // ✎ D-577 (Q2): автоперерахунок методологій після правки; без нього (ручна збірка в тестах) — як доти.
+    EditAutoRecalculation? editRecalculation = null) : IFormulaRecalculationJob
 {
     /// <summary>Ключ каталогу відмови спільного блокування аркуша (<c>SheetEditGate.Busy</c>).</summary>
     private const string SheetBeingSubmittedKey = "err.ECR-DOC-4091.sheetBeingSubmitted";
@@ -381,6 +383,16 @@ public sealed partial class FormulaRecalculationJob(
                         : completionHook.OnSucceededAsync(changed, sourceHop: 0, ct))
                     .ConfigureAwait(false);
             }
+        }
+
+        // ✎ D-577 (Q2): прохід із НАСІННЯМ (правка людини) — тихий автоперерахунок методологій документа за періоди правки
+        // (відкладення й злиття — у тригері). Прохід лише з міжперіодних джерел його не ставить (петлі немає).
+        if (editRecalculation is not null && seedPeriods.Count > 0)
+        {
+            int[] editedPeriods = [.. writtenPeriods.Union(seedPeriods).Order()];
+            await editRecalculation
+                .OnEditedAsync(documentId, editedPeriods, shared.TemplateVersionsOf(documentId, editedPeriods), ct)
+                .ConfigureAwait(false);
         }
     }
 

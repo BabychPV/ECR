@@ -186,6 +186,10 @@ public static class DependencyInjection
         services.AddScoped<GetDocumentListSummaryHandler>();
         services.AddScoped<StepApproversResolver>();
         services.AddScoped<GetDocumentHandler>();
+        services.AddScoped<Documents.CalcStatus.DocumentStaleMonths>();               // D-577 (L3)
+        services.AddScoped<Documents.CalcStatus.GetDocumentCalcStatusHandler>();      // D-577 (L3)
+        services.AddScoped<Documents.RequiredInputs.RequiredInputsScanner>();         // D-577 (L6)
+        services.AddScoped<Documents.RequiredInputs.GetRequiredInputsHandler>();      // D-577 (L6)
         services.AddScoped<GetTableSliceHandler>();
         services.AddScoped<CreateRowHandler>();
         services.AddScoped<DeleteRowHandler>();
@@ -505,6 +509,7 @@ public static class DependencyInjection
         services.AddScoped<Calculations.SaveMethodologyCategoryHandler>();
         services.AddScoped<Calculations.DeleteMethodologyCategoryHandler>();
         services.AddScoped<Calculations.ListMethodologyRequiredInputsHandler>();
+        services.AddScoped<Calculations.ListDerivedRequiredInputsHandler>(); // D-578
         services.AddScoped<Calculations.SaveMethodologyRequiredInputHandler>();
         services.AddScoped<Calculations.DeleteMethodologyRequiredInputHandler>();
         services.AddScoped<Calculations.ListMethodologyOutputsHandler>();

@@ -7109,6 +7109,80 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/calc-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Стан розрахунку документа за період: застарілі місяці (і які з них перерахунок перерахує), перерахунки в черзі й у
+         *     роботі (місце, орієнтовний старт, «місяць k з N»), останній актуальний прогін і останній провал. Право
+         *     `Document.View` у проєкті документа; невидимий документ — 404.
+         * @description `resultsStale` — лише місяці, які можна перерахувати (Q3): закриті, ще не відкриті, затверджені місяці й
+         *     архівований проєкт ідуть у `staleMonths` з `recalculable = false` і `lockedReason`. Документ річної
+         *     розкладки — `year` заповнено, `staleMonths` — по місяцях року. `Cache-Control: no-store`: клієнт опитує,
+         *     поки `activeJobs` не порожній.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Період на екрані (рік*100+номер). */
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentCalcStatusDto"];
+                        "text/json": components["schemas"]["DocumentCalcStatusDto"];
+                        "text/plain": components["schemas"]["DocumentCalcStatusDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/calculation-issues": {
         parameters: {
             query?: never;
@@ -9139,6 +9213,62 @@ export interface paths {
                         "application/json": components["schemas"]["TableStatusDto"][];
                         "text/json": components["schemas"]["TableStatusDto"][];
                         "text/plain": components["schemas"]["TableStatusDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/tables/{tableInstanceId}/required-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Комірки таблиці, де порожній обов'язковий вхід методології (`ECR-CALC-0437`): рядки з хоч одним введеним
+         *     значенням і наперед задані рядки шаблону. `level = block` не дасть подати аркуш (Q6) і зберегти рядок. Право
+         *     `Document.View`; доступ як у зрізу (схована таблиця й чужий екземпляр — 404, сховані колонки відсутні). */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                    /** @description Екземпляр таблиці. */
+                    tableInstanceId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RequiredInputsDto"];
+                        "text/json": components["schemas"]["RequiredInputsDto"];
+                        "text/plain": components["schemas"]["RequiredInputsDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -13593,6 +13723,62 @@ export interface paths {
                         "application/json": components["schemas"]["MethodologyCoverageDto"];
                         "text/json": components["schemas"]["MethodologyCoverageDto"];
                         "text/plain": components["schemas"]["MethodologyCoverageDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/derived-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** ✎ D-578: ВИВЕДЕНІ обов'язкові входи версії — поля, які читає її скрипт, з винятком методолога (Block/Warn/Optional), якщо
+         *     він заведений у `required-inputs`. Лише читання; право `Calculation.View`. `status` ≠ `available` —
+         *     автоматичного переліку немає (діє лише перелік методолога). */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DerivedRequiredInputsDto"];
+                        "text/json": components["schemas"]["DerivedRequiredInputsDto"];
+                        "text/plain": components["schemas"]["DerivedRequiredInputsDto"];
                     };
                 };
                 /** @description Not Found */
@@ -32760,6 +32946,97 @@ export interface components {
              */
             registryDefId: null | number;
         };
+        /** @description Перерахунок документа в черзі чи той, що виконується. */
+        CalcActiveJobDto: {
+            /**
+             * Format: int32
+             * @description Місяць, який рахується зараз (або найближчий у плані); `null` — невідомо.
+             */
+            currentPeriodKey: null | number;
+            /**
+             * Format: date-time
+             * @description ОРІЄНТОВНИЙ старт (D-564c); `null` — оцінити нема з чого.
+             */
+            estimatedStartAt: null | string;
+            /** @description Задача (опитування — `GET /jobs/{id}` лише для свого; чип опитує цей ресурс). */
+            jobId: string;
+            /** @description Звідки задача (CalcJobKinds): `manual` — кнопка людини, `auto` — автоперерахунок після правки чи
+             *     збору даних, `cascade` — залежні від джерела чи довідника, `scheduled` — нічний розклад, перерахунок проєкту,
+             *     правка шапки. */
+            kind: string;
+            /** @description Задачу поставив сам читач. */
+            own: boolean;
+            /**
+             * Format: int32
+             * @description Прогрес 0..100.
+             */
+            percent: number;
+            /**
+             * Format: int32
+             * @description Місце в черзі перерахунку (D-564c); `null` — виконується чи черга без позицій (Quartz).
+             */
+            queuePosition: null | number;
+            /**
+             * Format: date-time
+             * @description Перша постановка, UTC.
+             */
+            queuedAt: null | string;
+            /**
+             * Format: date-time
+             * @description Старт виконання, UTC; `null` — ще в черзі.
+             */
+            startedAt: null | string;
+            /** @description Хто поставив; `null` — системна задача або читачеві з обмеженнями не показується. */
+            startedByDisplayName: null | string;
+            /** @description `Queued` або `Running`. */
+            state: string;
+            /**
+             * Format: int32
+             * @description Ланцюжок року: скільки місяців уже зроблено («місяць k з N»: k = StepDone + 1); `null` — не ланцюжок.
+             */
+            stepDone: null | number;
+            /**
+             * Format: int32
+             * @description Ланцюжок року: скільки місяців разом; `null` — невідомо.
+             */
+            stepTotal: null | number;
+        };
+        /** @description Провалений перерахунок документа. */
+        CalcFailureDto: {
+            /** @description Кореляція для підтримки. */
+            correlationId: null | string;
+            /** @description Код каталогу помилок (`err.{code}…` у клієнта); `null` — невідомий. */
+            errorCode: null | string;
+            /**
+             * Format: date-time
+             * @description Коли провалився, UTC.
+             */
+            failedAt: string;
+            /** @description Задача. */
+            jobId: string;
+            /** @description Як у string CalcActiveJobDto.Kind. */
+            kind: string;
+            /** @description Задачу поставив сам читач. */
+            own: boolean;
+        };
+        /** @description Застарілий місяць документа. */
+        CalcStaleMonthDto: {
+            /** @description Чому не перерахує (CalcLockedReasons): `closed`, `notOpen`, `approved`, `archived`;
+             *     `null` — bool CalcStaleMonthDto.Recalculable. */
+            lockedReason: null | string;
+            /**
+             * Format: int32
+             * @description Місяць (`yyyyMM`).
+             */
+            periodKey: number;
+            /** @description Перерахунок цей місяць перерахує (ручний чи автоматичний). */
+            recalculable: boolean;
+            /**
+             * Format: date-time
+             * @description Відколи застаріло (перша правка входу чи зміна довідника після прогону), UTC.
+             */
+            since: null | string;
+        };
         /** @description Прив'язка виходу методології до колонки документа (`D-69`). */
         CalculationBindingDto: {
             /** @description Код колонки-приймача (F-21); як і код таблиці — лише в переліку. */
@@ -34215,6 +34492,7 @@ export interface components {
         };
         /** @description Опис колонки для клієнта. */
         ColumnDto: {
+            calculatedBy?: null | components["schemas"]["ColumnMethodologyDto"][];
             code: string;
             dataType: string;
             defaultValue: null | string;
@@ -34236,6 +34514,7 @@ export interface components {
             ordinal: number;
             /** Format: uint8 */
             precision?: null | number;
+            readBy?: null | components["schemas"]["ColumnMethodologyDto"][];
             /** Format: uint8 */
             scale?: null | number;
             style?: null | components["schemas"]["CellStyleDto"];
@@ -34266,6 +34545,19 @@ export interface components {
              * @description Батько; `null` — корінь.
              */
             parentId: null | number;
+        };
+        /** @description ✎ D-577 (інспектор комірки): методологія, що пише колонку (`calculatedBy`, з кодом виходу-кроку) або читає її як
+         *     обов'язковий вхід (`readBy`, `required = true`). Рівень КОЛОНКИ (не комірки): з прив'язок таблиці й чинних версій
+         *     методологій на період — без трасування прогону (D-565). `null` у колонки — немає. */
+        ColumnMethodologyDto: {
+            /** @description Код методології. */
+            methodologyCode: string;
+            /** @description Назва мовою читача (або код). */
+            methodologyName: string;
+            /** @description Для `readBy`: обов'язковий вхід (`ECR-CALC-0437`); для `calculatedBy` — `false`. */
+            required: boolean;
+            /** @description Код виходу (кроку) методології, що пише колонку; `null` для `readBy`. */
+            step: null | string;
         };
         /** @description Обчислена комірка перегляду рядково-локальних формул (HSE401). */
         ComputedCellDto: {
@@ -35329,6 +35621,28 @@ export interface components {
              *     відповідь. */
             reason: string;
         };
+        /** @description Поле, яке читає скрипт. */
+        DerivedRequiredInputDto: {
+            exceptionSeverity: null | components["schemas"]["RequiredInputSeverity"];
+            /** @description Код поля (колонки таблиці, до якої прив'язано методологію). */
+            fieldCode: string;
+            /** @description Стає вимогою (поточний місяць); `false` — етап 2. */
+            inScope: boolean;
+            /** @description Читається за інший місяць. */
+            otherMonths: boolean;
+        };
+        /** @description ✎ D-578: виведені обов'язкові входи версії. */
+        DerivedRequiredInputsDto: {
+            /** @description Поля, які читає скрипт, за кодом. */
+            fields: components["schemas"]["DerivedRequiredInputDto"][];
+            /**
+             * Format: int32
+             * @description Версія.
+             */
+            methodologyVersionId: number;
+            /** @description Стан переліку (DerivedRequiredInputsStatus). */
+            status: string;
+        };
         /** @description Проблема публікації у відповіді API. */
         DiagnosticInfo: {
             /** @description Код помилки з каталогу. */
@@ -35354,6 +35668,47 @@ export interface components {
              * @description Зсув у тексті виразу.
              */
             position: number;
+        };
+        /** @description ✎ D-577 (UX-огляд екрана документа, L3): стан розрахунку документа за період — один об'єкт для чипа «Calculated / Out of
+         *     date / Queued / Recalculating / Failed» (`GET /documents/{id}/calc-status`). Стан береться із сервера, тож
+         *     переживає перезавантаження сторінки й показує чужі, нічні та автоматичні перерахунки. */
+        DocumentCalcStatusDto: {
+            /** @description Перерахунки документа в черзі й ті, що виконуються (спершу виконувані); порожньо — немає. */
+            activeJobs: components["schemas"]["CalcActiveJobDto"][];
+            /**
+             * Format: date-time
+             * @description Кінець останнього актуального прогону документа за періоди статусу; `null` — прогону немає.
+             */
+            calculatedAt: null | string;
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            lastFailure: null | components["schemas"]["CalcFailureDto"];
+            /**
+             * Format: int32
+             * @description Період запиту (місяць на екрані).
+             */
+            periodKey: number;
+            /** @description Застаріло хоч в одному місяці, який МОЖНА перерахувати (Q3, рішення людини 26.11): застарілість закритих, ще не
+             *     відкритих, затверджених місяців і архівованого проєкту — не попередження, а довідка (IReadOnlyList&lt;CalcStaleMonthDto&gt; DocumentCalcStatusDto.StaleMonths з
+             *     `recalculable = false`). `null` — не визначено (ResultsStaleUndeterminedReason? DocumentCalcStatusDto.ResultsStaleUndetermined). */
+            resultsStale: null | boolean;
+            /**
+             * Format: date-time
+             * @description Найраніший момент застарілості серед місяців, які можна перерахувати; `null` — не застаріло.
+             */
+            resultsStaleSince: null | string;
+            resultsStaleUndetermined: null | components["schemas"]["ResultsStaleUndeterminedReason"];
+            /** @description Застарілі місяці (за зростанням); порожньо — застарілих немає чи не визначено. */
+            staleMonths: components["schemas"]["CalcStaleMonthDto"][];
+            /**
+             * Format: int32
+             * @description Рік, якщо документ річної розкладки (`YearWithMonthColumns`, місячний проєкт): IReadOnlyList&lt;CalcStaleMonthDto&gt; DocumentCalcStatusDto.StaleMonths охоплює всі
+             *     місяці року з актуальним прогоном; `null` — лише int DocumentCalcStatusDto.PeriodKey.
+             */
+            year: null | number;
         };
         /** @description Різниця двох версій документа. `ToVersionId = null` — порівняння з поточним станом;
          *     `Truncated` — хоч один перелік обрізано стелею int CompareDocumentVersionsHandler.MaxItems
@@ -43606,13 +43961,49 @@ export interface components {
                 [key: string]: components["schemas"]["RoleValidityWindow"];
             };
         };
+        /** @description Порожній обов'язковий вхід. */
+        RequiredInputCellDto: {
+            /** @description Колонка. */
+            columnCode: string;
+            /**
+             * @description ✎ D-578: вимогу виведено з полів, які читає скрипт (а не заведено методологом).
+             * @default false
+             */
+            derived: boolean;
+            /** @description `block` — не дасть подати (Q6); `warn` — попередження. Зберегти рядок не дасть лише заведений методологом Block
+             *             (Derived = `false`); виведений (D-578) блокує тільки подання. */
+            level: string;
+            /** @description Текст мовою читача (як у відповіді PATCH, `ECR-CALC-0437`). */
+            message: string;
+            /** @description Коди методологій, що вимагають колонку. */
+            methodologies: string[];
+            /** @description Рядок. */
+            rowKey: string;
+        };
         /**
          * @description Критичність незаповненої обов'язкової вхідної колонки методології
          *     (директива «обов'язкові вхідні колонки методології», gate перед
          *     збереженням).
          * @enum {unknown}
          */
-        RequiredInputSeverity: "Block" | "Warn";
+        RequiredInputSeverity: "Block" | "Warn" | "Optional";
+        /** @description ✎ D-577 (L6): порожні обов'язкові входи методологій таблиці. */
+        RequiredInputsDto: {
+            /** @description Комірки (рядки за порядком на екрані, до int GetRequiredInputsHandler.MaxCells). */
+            cells: components["schemas"]["RequiredInputCellDto"][];
+            /**
+             * Format: int64
+             * @description Екземпляр.
+             */
+            tableInstanceId: number;
+            /**
+             * Format: int32
+             * @description Скільки всього.
+             */
+            total: number;
+            /** @description Перелік обрізано стелею. */
+            truncated: boolean;
+        };
         /** @description Адміністративне скидання пароля (BE-12). */
         ResetPasswordRequest: {
             /** @description Разовий пароль; власник змінить його при першому вході. */

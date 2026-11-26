@@ -280,7 +280,7 @@ async function axe(page: Page): Promise<string[]> {
     const run = (window as unknown as {
       axe: { run: (c: Element, o: object) => Promise<{ violations: { id: string; nodes: { target: unknown[] }[] }[] }> };
     }).axe;
-    const scope = document.querySelector('[data-required-inputs]')?.closest('.mantine-Group-root') ?? document.body;
+    const scope = document.querySelector('[data-needs-input-counter]')?.closest('.mantine-Group-root') ?? document.body;
     const result = await run.run(scope, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] } });
 
     return result.violations.flatMap((v) => v.nodes.map((n) => `${v.id}: ${String(n.target.join(' '))}`));
@@ -337,15 +337,15 @@ async function savedPatches(page: Page, count: number, act: () => Promise<void>)
 }
 
 async function openList(page: Page): Promise<string[]> {
-  const toggle = page.locator('[data-required-inputs="warning"]');
+  const toggle = page.locator('[data-needs-input-count]');
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
-  const list = page.locator('[data-required-inputs-list]');
+  const list = page.locator('[data-needs-input-list]');
   await expect(list).toBeVisible({ timeout: 10_000 });
 
   return list.locator('li').allTextContents();
 }
 
-test('required-columns warning: collapsed, deduplicated, live, named, localized, grid does not move', async ({ page, browser }) => {
+test('required cells (DOCUX L2): word in the cell, cell counter, F8, live, named, localized, grid does not move', async ({ page, browser }) => {
   await signIn(page);
   await page.setViewportSize({ width: 1920, height: 1000 });
   const created = await createEditor(page.request, browser);
@@ -357,18 +357,20 @@ test('required-columns warning: collapsed, deduplicated, live, named, localized,
     await page.goto(`/documents/${String(arranged.documentId)}?periodKey=${String(arranged.anchor)}`);
     const grid = page.locator('revo-grid').first();
     await expect(grid).toBeVisible({ timeout: 60_000 });
-    await expect(page.locator('[data-required-inputs]')).toHaveCount(0);
+    await expect(page.locator('[data-needs-input-counter]')).toHaveCount(0);
     const gridTop = async (): Promise<number> => (await grid.boundingBox())?.y ?? -1;
     const top0 = await gridTop();
 
     // Рядок 1: назва → сервер повертає вимоги двох методологій до KIND і A.
     await savedPatches(page, 1, () => type(page, Headers.NAME, 0, 'Boiler'));
-    const toggle = page.locator('[data-required-inputs="warning"]');
+    const toggle = page.locator('[data-needs-input-count]');
     await expect(toggle).toBeVisible({ timeout: 30_000 });
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await expect(page.locator('[data-required-inputs-list]')).toHaveCount(0);
+    await expect(page.locator('[data-needs-input-list]')).toHaveCount(0);
     await expect(page.locator('.mantine-Alert-root', { hasText: /required/i })).toHaveCount(0);
-    await expect(toggle).toHaveText(/^2 required column\(s\) not filled yet/);
+    // Лічильник КОМІРОК (рядок 1 × KIND, A), жовтий (Warn — запис пройшов).
+    await expect(toggle).toHaveText(/^2 required cell\(s\) empty/);
+    await expect(page.locator('[data-needs-input-counter]')).toHaveAttribute('data-needs-input-counter', 'warn');
     expect(await gridTop(), 'сітка зрушила від попередження').toBe(top0);
     await shot(page, 'required-collapsed-light');
 
@@ -377,29 +379,35 @@ test('required-columns warning: collapsed, deduplicated, live, named, localized,
     await savedPatches(page, 1, () => type(page, Headers.NAME, 0, 'Boiler 2'));
     await savedPatches(page, 1, () => type(page, Headers.NAME, 1, 'Heater 2'));
     let items = await openList(page);
-    expect(items).toHaveLength(2);
-    await expect(toggle).toHaveText(/^2 required column\(s\)/);
-    const codes = [...arranged.methodologies].sort().join(', ');
-    expect(items).toEqual([
-      `${Headers.KIND} · rows: 1, 2 · needed by ${codes}`,
-      `${Headers.A} · rows: 1, 2 · needed by ${codes}`,
-    ]);
+    expect(items).toHaveLength(4);
+    await expect(toggle).toHaveText(/^4 required cell\(s\)/);
+    expect(items.filter((item) => item.startsWith(`${Headers.KIND} · `))).toHaveLength(2);
+    expect(items.filter((item) => item.startsWith(`${Headers.A} · `))).toHaveLength(2);
     expect(items.join(' ')).not.toMatch(/[Ѐ-ӿ]|\bKIND\b|\bA ·/);
     expect(await gridTop(), 'сітка зрушила від розкриття переліку').toBe(top0);
-    expect(await page.locator('revo-grid .rgCell.ecr-cell-required-input-warning').count(), 'позначки на порожніх комірках').toBeGreaterThanOrEqual(4);
+    const marked = page.locator('revo-grid .rgCell.ecr-cell-needs-input--warn');
+    expect(await marked.count(), 'позначки на порожніх комірках').toBeGreaterThanOrEqual(4);
+    // Слово «Required» — у самій комірці (не крихітний «!»), і вимога — для читалки.
+    expect(await marked.first().evaluate((node) => getComputedStyle(node, '::before').content)).toContain('Required');
+    await expect(marked.first()).toHaveAttribute('aria-required', 'true');
     await shot(page, 'required-expanded-light');
     expect(await axe(page), 'axe light').toEqual([]);
     await page.keyboard.press('Escape');
 
+    // F8 — до першої порожньої обов'язкової комірки (підсвітка цілі переходу).
+    await page.locator('body').click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press('F8');
+    await expect(page.locator('revo-grid .rgCell.ecr-cell-nav-target.ecr-cell-needs-input')).toHaveCount(1, { timeout: 10_000 });
+
     // Заповнити KIND у рядку 1 — рядок 1 зникає з «Type of fuel»; у обох — колонка зникає зовсім.
     await savedPatches(page, 1, () => type(page, Headers.KIND, 0, 'Diesel'));
     items = await openList(page);
-    expect(items[0]).toBe(`${Headers.KIND} · rows: 2 · needed by ${codes}`);
+    expect(items).toHaveLength(3);
     await page.keyboard.press('Escape');
     await savedPatches(page, 1, () => type(page, Headers.KIND, 1, 'Gas'));
     items = await openList(page);
-    expect(items).toEqual([`${Headers.A} · rows: 1, 2 · needed by ${codes}`]);
-    await expect(toggle).toHaveText(/^1 required column\(s\)/);
+    expect(items.every((item) => item.startsWith(`${Headers.A} · `))).toBe(true);
+    await expect(toggle).toHaveText(/^2 required cell\(s\)/);
     await page.keyboard.press('Escape');
 
     // Темна тема: той самий стан після перезавантаження (вимоги — з наступного збереження).
@@ -419,9 +427,10 @@ test('required-columns warning: collapsed, deduplicated, live, named, localized,
     await page.reload();
     await expect(grid).toBeVisible({ timeout: 60_000 });
     await savedPatches(page, 1, () => type(page, `${Headers.NAME} (ru)`, 0, 'Котёл'));
-    await expect(toggle).toHaveText(/^Не заполнено обязательных столбцов: 1/, { timeout: 30_000 });
+    await expect(toggle).toHaveText(/^Не заполнено обязательных ячеек: \d/, { timeout: 30_000 });
     items = await openList(page);
-    expect(items).toEqual([`${Headers.A} (ru) · строки: 1 · требуется для ${codes}`]);
+    expect(items.some((item) => item.startsWith(`${Headers.A} (ru) · `))).toBe(true);
+    expect(items.join(' ')).toContain('Требуется для методологии');
     expect(items.join(' ')).not.toMatch(/обов'язкова|Колонка «/);
     await shot(page, 'required-expanded-ru-light');
   } finally {

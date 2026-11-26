@@ -1,3 +1,4 @@
+import { NoticeSlot } from '@/features/documents/notices/NoticeSlot';
 import { useRef, useState, type JSX } from 'react';
 import { Button, Group, Paper, Popover, Stack, Text } from '@mantine/core';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
@@ -56,7 +57,16 @@ export function ExecutorStrip({ documentId, periodKey }: ExecutorStripProps): JS
     });
   };
 
+  // ✎ DOCUX L7 (пріоритет 5): «місяць передано вам» — у рядку повідомлень; «Mark as filled» і коментарі — у Status.
+  const open = items.filter((item) => item.status !== 'Filled').length;
   return (
+    <NoticeSlot
+      id="executor-strip"
+      priority={5}
+      tone="info"
+      text={t('document.notices.assignedToYou', { count: Math.max(open, items.length) })}
+      testId="notice-executor"
+    >
     <Paper
       ref={host}
       tabIndex={-1}
@@ -137,6 +147,7 @@ export function ExecutorStrip({ documentId, periodKey }: ExecutorStripProps): JS
         })}
       </Stack>
     </Paper>
+    </NoticeSlot>
   );
 }
 

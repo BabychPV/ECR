@@ -2,6 +2,7 @@ import { useState, type JSX } from 'react';
 import { Popover, UnstyledButton } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import './gridKeyHint.css';
+import { CellLegend } from './CellLegend';
 
 /** Рядок довідки: клавіші (не перекладаються) і що вони роблять. */
 interface ShortcutRow {
@@ -29,6 +30,8 @@ function rows(): ShortcutRow[] {
     { keys: 'Ctrl+Z · Ctrl+Y', what: t('grid.keys.undo'), edit: true },
     { keys: 'Ctrl+S', what: t('grid.keys.save'), edit: true },
     { keys: 'F9', what: t('grid.keys.recalc'), edit: true },
+    // ✎ DOCUX L2: F8 / Shift+F8 — `needsInputStepKey` (`needsInputStore.ts`).
+    { keys: 'F8 · Shift+F8', what: t('grid.keys.nextRequired'), edit: true },
     { keys: 'Shift+F5', what: t('grid.keys.refresh') },
     { keys: 'Ctrl+K', what: t('grid.keys.palette') },
     { keys: 'Ctrl+Shift+Enter', what: t('grid.keys.fullscreen') },
@@ -57,6 +60,8 @@ export function GridKeyHint({ readOnly }: { readonly readOnly: boolean }): JSX.E
       <span className="ecr-keyhint-text" title={hint}>
         {hint}
       </span>
+      {/* ✎ DOCUX: легенда позначок комірок — поруч із довідкою клавіш. */}
+      <CellLegend />
       <Popover opened={opened} onChange={setOpened} position="top-end" withArrow shadow="md" width={380}>
         <Popover.Target>
           <UnstyledButton

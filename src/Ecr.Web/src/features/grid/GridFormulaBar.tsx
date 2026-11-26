@@ -90,6 +90,8 @@ export function GridFormulaBar(props: GridFormulaBarProps): JSX.Element {
       isCalculated: model.isCalculated,
       isReadOnly: column.isReadOnly,
       value: model.value,
+      // ✎ DOCUX: «Calculated by / Read by» — походження колонки зі зрізу (D-577).
+      provenance: { calculatedBy: column.calculatedBy ?? null, readBy: column.readBy ?? null },
     });
   });
 

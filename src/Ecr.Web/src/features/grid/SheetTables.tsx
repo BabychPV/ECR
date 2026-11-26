@@ -1,4 +1,7 @@
-import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
+import { clearNeedsInput, publishNeedsInput, publishUnmountedTables } from './needsInputStore';
+import { getRequiredInputs, requiredInputsKey } from './requiredInputsServer';
+import { QueryClientContext, useQueries } from '@tanstack/react-query';
+import { useContext, useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 import { Box, Button, Group, Skeleton, Stack, Text } from '@mantine/core';
 import type { DocumentTableDto } from '@/api/types';
 import { focusSoon } from '@/shared/a11y/focus';
@@ -197,6 +200,8 @@ export function SheetTables({
    * комітом — і кожна йшла по свій зріз.
    */
   const [mounted, setMounted] = useState<ReadonlySet<number>>(() => new Set<number>());
+  // ✎ DOCUX L6-клієнт: переліки обов'язкових входів сервера — окремим вузлом (без клієнта запитів — тест, інший екран — немає).
+  const hasQueryClient = useContext(QueryClientContext) !== undefined;
 
   useEffect(() => {
     const present = new Set(tables.map((table) => table.tableInstanceId));
@@ -368,6 +373,7 @@ export function SheetTables({
 
   return (
     <>
+      {hasQueryClient && <RequiredInputsPublisher documentId={documentId} periodKey={periodKey} tables={tables} mounted={mounted} />}
       {tables.map((table) => {
         const id = table.tableInstanceId;
         const isMounted = mounted.has(id);
@@ -506,4 +512,70 @@ export function LazyTablePlaceholder({
       )}
     </Box>
   );
+}
+
+/**
+ * ✎ DOCUX L6-клієнт (контракт doc-ux-server): порожні обов'язкові входи КОЖНОЇ таблиці аркуша — з сервера, по всіх рядках.
+ * Змонтована сітка публікує власну модель (сервер + миттєві правки); за незмонтовані таблиці публікує цей вузол —
+ * лічильник «Submit», F8 і вкладка аркуша бачать увесь аркуш. Таблиця, чий перелік ще не прийшов чи не прочитався, —
+ * «ще не перевірено» (рядок «Cannot submit…» каже про неї прямо).
+ */
+function RequiredInputsPublisher({
+  documentId,
+  periodKey,
+  tables,
+  mounted,
+}: {
+  readonly documentId: number;
+  readonly periodKey: number;
+  readonly tables: readonly DocumentTableDto[];
+  readonly mounted: ReadonlySet<number>;
+}): null {
+  const required = useQueries({
+    queries: tables.map((table) => ({
+      queryKey: requiredInputsKey(documentId, table.tableInstanceId),
+      queryFn: () => getRequiredInputs(documentId, table.tableInstanceId),
+      retry: false,
+      staleTime: 30_000,
+    })),
+  });
+  const requiredSignature = required.map((query) => query.dataUpdatedAt).join(',');
+  const mountedSignature = [...mounted].sort((a, b) => a - b).join(',');
+  useEffect(() => {
+    let unknown = 0;
+    tables.forEach((table, index) => {
+      if (mounted.has(table.tableInstanceId)) return;
+      const raw = required[index]?.data;
+      // Відповідь без очікуваної форми (старший сервер, заглушка) — «не перевірено», а не збій сторінки.
+      const data = raw !== null && raw !== undefined && Array.isArray(raw.cells) ? raw : undefined;
+      if (data === undefined) {
+        unknown += 1;
+        clearNeedsInput(table.tableInstanceId, periodKey);
+        return;
+      }
+      publishNeedsInput({
+        tableInstanceId: table.tableInstanceId,
+        tableDefId: table.tableDefId,
+        periodKey,
+        order: table.tableInstanceId,
+        labelOffset: 0,
+        cells: data.cells.map((cell, position) => ({
+          rowKey: cell.rowKey,
+          columnCode: cell.columnCode,
+          level: cell.level === 'block' ? ('block' as const) : ('warn' as const),
+          source: 'methodology' as const,
+          methodologies: cell.methodologies,
+          rowIndex: position,
+          columnIndex: 0,
+        })),
+      });
+      // ✎ Сервер обрізав перелік (стеля відповіді) — таблицю перевірено не до кінця: рядок «Cannot submit…» це каже.
+      if (data.truncated) unknown += 1;
+    });
+    publishUnmountedTables(unknown);
+    // `required` — масив нового посилання щорендеру; підпис — час даних кожного запиту.
+  }, [requiredSignature, mountedSignature, tables, periodKey]);
+  useEffect(() => () => publishUnmountedTables(0), []);
+
+  return null;
 }
