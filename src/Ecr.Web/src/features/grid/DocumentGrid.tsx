@@ -144,12 +144,11 @@ import { GridAriaPlugin } from './gridAria';
 import { attachStickyGroupLabels, withHeaderGroups } from './headerGroups';
 import { installTruncationTooltip } from './truncationTooltip';
 import { mergePatchNotices, PatchNoticesAlert, type PatchNotice } from './patchNotices';
-import {
-  dedupeRequiredInputs,
-  liveRequiredInputs,
-  RequiredInputsBlockedAlert,
-  RequiredInputsSummary,
-} from './requiredInputsAlert';
+import { dedupeRequiredInputs, RequiredInputsBlockedAlert } from './requiredInputsAlert';
+import { needsInputByColumn, needsInputCells, needsInputMaps, type NeedsInputCell } from './needsInput';
+import { clearNeedsInput, installNeedsInputKeys, publishNeedsInput } from './needsInputStore';
+import { NeedsInputCounter } from './NeedsInputCounter';
+import { calculationIssuesKey, calculationIssuesYearKey, getCalculationIssues } from '@/features/calculationIssues/api';
 // ⚠ Ключ комірки СХОВИЩА під власним іменем: у цьому файлі вже є `cellKey`
 // з `permissions.ts`, і хоч обидва дають `rowKey:columnCode`, ключем мапи
 // правок має бути рівно той, яким її будує сам сховищний модуль.
@@ -189,6 +188,7 @@ import {
   NavigationHighlightMs,
   cellCoordinateOf,
   completeCellNavigation,
+  requestCellNavigation,
   revealGridCell,
   type CellNavigationRequest,
 } from './cellNavigation';
@@ -1129,18 +1129,6 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [pending, rounded],
   );
 
-  // ⚠ Директива «обов'язкові вхідні колонки методології»: за ключем комірки,
-  // а не станом `cellStateOf` — цей маркер ДОДАЄТЬСЯ поверх будь-якого стану
-  // (dirty, readOnly, ...), а не змагається з ним за пріоритет.
-  const requiredInputByCell = useMemo(() => {
-    const blocked = new Map<string, string>();
-    for (const cell of requiredInputBlocked) blocked.set(cellKey(cell.rowKey, cell.columnCode), cell.message);
-
-    const warning = new Map<string, string>();
-    for (const cell of requiredInputWarnings) warning.set(cellKey(cell.rowKey, cell.columnCode), cell.message);
-
-    return { blocked, warning };
-  }, [requiredInputBlocked, requiredInputWarnings]);
 
   // ⛔ Q-30x (High): той самий взірець, що й обов'язкові вхідні колонки вище
   // — маркер ЗА КЛЮЧЕМ комірки, що ДОДАЄТЬСЯ поверх будь-якого стану
@@ -1501,6 +1489,89 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [decisionView, columnMonths, documentId, sheetDefId],
   );
 
+  const shownOverrides = useMemo(() => {
+    if (rejections.size === 0 && pending.size === 0) return overrides;
+
+    const merged = new Map(overrides);
+    // ⛔ X2-02: незбережена правка — НОВІША за підтверджену підставу: підстава ставиться
+    // лише при підтвердженні одиничної правки/протягування, а вставка й Undo/Redo
+    // пишуть у сховище повз неї. Тут стояло `if (!merged.has(key))`, і після
+    // «підтвердив 5 → вставив 7» екран показував 5, хоча піде 7 (суми колонок
+    // — `gridTotals` — вже віддавали перевагу правці, тож екран і підсумок розходились).
+    for (const edit of pending.values()) {
+      const key = cellKey(edit.rowKey, edit.columnCode);
+      merged.set(key, edit.isEmpty || edit.value === null ? '' : edit.value);
+    }
+    for (const rejection of rejections.values()) {
+      const key = cellKey(rejection.edit.rowKey, rejection.edit.columnCode);
+      if (!merged.has(key)) merged.set(key, rejection.edit.value);
+    }
+
+    return merged;
+  }, [overrides, rejections, pending]);
+
+  // ⛔ PSS-18: модель рядка — з кешу на рядок (`gridRowModels.ts`): правка однієї комірки перебудовує лише свій
+  // рядок, а не 30 000 комірок таблиці 500×60 на кожне натискання.
+  const [rowsCache] = useState(() => createGridRowsCache());
+  const rows = useMemo(
+    () => (data === undefined ? [] : rowsCache(data, shownOverrides)),
+    [data, shownOverrides],
+  );
+
+  /*
+   * ✎ DOCUX L2: «тут потрібне значення» — колонки шаблону `isRequired`, входи методологій із відповіді збереження
+   * (`ECR-CALC-0437`) і «Missing input» з переліку проблем розрахунку — з ПОТОЧНИХ значень (`needsInput.ts`). Перелік
+   * проблем читається з кешу сторінки (той самий ключ), без власного запиту сітки (`enabled: false`).
+   */
+  const issuesMonth = useQuery({
+    queryKey: calculationIssuesKey(documentId, periodKey, sheetCopyId),
+    queryFn: () => getCalculationIssues(documentId, periodKey, sheetCopyId),
+    enabled: false,
+  });
+  const issuesYear = useQuery({
+    queryKey: calculationIssuesYearKey(documentId, periodKey, sheetCopyId),
+    queryFn: () => getCalculationIssues(documentId, periodKey, sheetCopyId, true),
+    enabled: false,
+  });
+  const needsCells = useMemo<readonly NeedsInputCell[]>(() => {
+    if (data === undefined || readOnly) return [];
+    const byCode = new Map(data.columns.map((column) => [column.code, column]));
+    const ownCopy = (issue: { readonly sheetCopyId?: number | null }): boolean => (issue.sheetCopyId ?? null) === sheetCopyId;
+
+    return needsInputCells({
+      columns: data.columns,
+      rows: data.rows,
+      shown: rows,
+      blocked: requiredInputBlocked,
+      warnings: requiredInputWarnings,
+      issues: [...(issuesMonth.data?.items ?? []), ...(issuesYear.data?.items ?? [])].filter(ownCopy),
+      editable: (rowKey, code) => {
+        const column = byCode.get(code);
+        if (column === undefined || !decide(data, rowKey, column).editable) return false;
+        const state = cellStateOf(data, rowKey, column, flags, readOnly);
+        return state !== 'calculated' && state !== 'readOnly';
+      },
+    });
+  }, [data, readOnly, rows, requiredInputBlocked, requiredInputWarnings, issuesMonth.data, issuesYear.data, sheetCopyId, flags]);
+  const needsMaps = useMemo(() => needsInputMaps(needsCells), [needsCells]);
+  const needsByColumn = useMemo(() => needsInputByColumn(needsCells), [needsCells]);
+  const labeledForNeeds = data !== undefined && hasRowLabels(data);
+  useEffect(() => {
+    publishNeedsInput({ tableInstanceId, tableDefId, periodKey, order: tableInstanceId, labelOffset: labeledForNeeds ? 1 : 0, cells: needsCells });
+  }, [needsCells, tableInstanceId, tableDefId, periodKey, labeledForNeeds]);
+  useEffect(() => () => clearNeedsInput(tableInstanceId, periodKey), [tableInstanceId, periodKey]);
+  useEffect(() => installNeedsInputKeys(), []);
+  const needsHeader = useMemo(
+    () => ({
+      counts: needsByColumn,
+      goTo: (columnCode: string) => {
+        const first = needsCells.find((cell) => cell.columnCode === columnCode);
+        if (first !== undefined) requestCellNavigation({ tableDefId, tableInstanceId, rowKey: first.rowKey, columnCode });
+      },
+    }),
+    [needsByColumn, needsCells, tableDefId, tableInstanceId],
+  );
+
   const columns = useMemo(
     () =>
       data === undefined
@@ -1510,7 +1581,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             readOnly,
             flags,
             widths,
-            requiredInputByCell,
+            needsMaps,
             saveErrorByCell,
             lookupEntriesByRegistryId,
             totalsView,
@@ -1524,13 +1595,15 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             rowWarnings,
             tableDefId,
             monthDecision,
+            needsHeader,
           ),
     [
       data,
       readOnly,
       flags,
       widths,
-      requiredInputByCell,
+      needsMaps,
+      needsHeader,
       saveErrorByCell,
       lookupEntriesByRegistryId,
       totalsView,
@@ -1656,40 +1729,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // незбережене зникало з екрана. Людина бачила старе й вводила/вставляла
   // вдруге. Ціна — та сама, що вже платять `flags`/`columns`/`totals`: усі
   // вони й так перебудовуються на кожну зміну `pending`.
-  const shownOverrides = useMemo(() => {
-    if (rejections.size === 0 && pending.size === 0) return overrides;
+  // ✎ DOCUX L2: `shownOverrides` і `rows` перенесено вище — модель «потрібне значення» читає поточні значення до `columns`.
 
-    const merged = new Map(overrides);
-    // ⛔ X2-02: незбережена правка — НОВІША за підтверджену підставу: підстава ставиться
-    // лише при підтвердженні одиничної правки/протягування, а вставка й Undo/Redo
-    // пишуть у сховище повз неї. Тут стояло `if (!merged.has(key))`, і після
-    // «підтвердив 5 → вставив 7» екран показував 5, хоча піде 7 (суми колонок
-    // — `gridTotals` — вже віддавали перевагу правці, тож екран і підсумок розходились).
-    for (const edit of pending.values()) {
-      const key = cellKey(edit.rowKey, edit.columnCode);
-      merged.set(key, edit.isEmpty || edit.value === null ? '' : edit.value);
-    }
-    for (const rejection of rejections.values()) {
-      const key = cellKey(rejection.edit.rowKey, rejection.edit.columnCode);
-      if (!merged.has(key)) merged.set(key, rejection.edit.value);
-    }
-
-    return merged;
-  }, [overrides, rejections, pending]);
-
-  // ⛔ PSS-18: модель рядка — з кешу на рядок (`gridRowModels.ts`): правка однієї комірки перебудовує лише свій
-  // рядок, а не 30 000 комірок таблиці 500×60 на кожне натискання.
-  const [rowsCache] = useState(() => createGridRowsCache());
-  const rows = useMemo(
-    () => (data === undefined ? [] : rowsCache(data, shownOverrides)),
-    [data, shownOverrides],
-  );
-
-  // ✎ 25.11 (документ 100 LAND_UI: уже заповнена «Land_TypeFuel» лишалась у переліку): Warn — з ПОТОЧНИХ даних.
-  const liveRequiredWarnings = useMemo(
-    () => liveRequiredInputs(requiredInputWarnings, data === undefined ? null : rows),
-    [requiredInputWarnings, rows, data],
-  );
 
   /**
    * Закріплений рядок підсумків — `UI-08`.
@@ -3079,7 +3120,15 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           </Text>
         )}
         {/* ✎ 25.11: незаповнені обов'язкові колонки (Warn) — одна кнопка тут, перелік у спливаючому вікні. */}
-        <RequiredInputsSummary cells={liveRequiredWarnings} columns={data?.columns ?? []} rows={data?.rows ?? []} />
+        {/* ✎ DOCUX L2: «N required cells empty ‹ ›» — лічить комірки (шаблон, методології, проблеми розрахунку); F8 / Shift+F8. */}
+        <NeedsInputCounter
+          cells={needsCells}
+          tableDefId={tableDefId}
+          tableInstanceId={tableInstanceId}
+          periodKey={periodKey}
+          columnHeader={(code) => data?.columns.find((column) => column.code === code)?.header ?? code}
+          rowLabel={(rowKey) => (data === undefined ? rowKey : rowDisplayName(data, rowKey))}
+        />
         {/* ⚠ AN-123: нейтральний, як «зберігається», — не колір відмови. */}
         {busyWaiting && (
           <Text size="xs" c="dimmed" role="status" aria-live="polite" data-save-status="waiting">
@@ -3308,7 +3357,12 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         />
       )}
 
-      <div ref={gridContainerRef} className={sheetLockClass(sheetState)} style={{ display: 'contents' }}>
+      {/* ✎ DOCUX L2: слово «Required» у порожній обов'язковій комірці — мовою інтерфейсу, змінною CSS (`content: var(…)`). */}
+      <div
+        ref={gridContainerRef}
+        className={sheetLockClass(sheetState)}
+        style={{ display: 'contents', ['--ecr-required-label' as string]: JSON.stringify(t('grid.needsInput.label')) }}
+      >
         <RevoGrid
           {...RevoGridDefaults}
           theme="compact"
@@ -3521,6 +3575,9 @@ export function gridColumns(
 
   // ✎ D-6: ціль рішень над місяцем (колонка-ціль підсвічується, позначка стану доступного місяця — кнопка).
   monthDecision?: MonthDecision,
+
+  // ✎ DOCUX L2: скільки порожніх обов'язкових комірок у колонці (лічильник поруч із зірочкою) і перехід до першої.
+  needsHeader?: { readonly counts: ReadonlyMap<string, number>; readonly goTo: (columnCode: string) => void },
 ): ColumnRegular[] {
   // ⚠ Тип оголошений ЯВНО, а не виведений із `map`. Без нього лямбди
   // всередині (`readonly`, `cellProperties`, `cellTemplate`) втрачають
@@ -3535,7 +3592,14 @@ export function gridColumns(
     // — оператору однаково байдуже ЗВІДКИ вимога, важливо лише «заповни це
     // до подання».
     const isRequired = column.isRequired || column.isRequiredByMethodology;
-    const requiredHint = isRequired ? t('grid.columnRequiredHint') : null;
+    // ✎ DOCUX L2 (BUG-13): «This column is required.» — лише колонці шаблону; обов'язкова для ЧАСТИНИ рядків (методологія)
+    // каже саме це.
+    const requiredHint = column.isRequired
+      ? t('grid.columnRequiredHint')
+      : column.isRequiredByMethodology
+        ? t('grid.columnRequiredSomeRows')
+        : null;
+    const needsCount = needsHeader?.counts.get(column.code) ?? 0;
     const monthState = monthStatus.get(column.code) ?? null;
     // ✎ D-6: період колонки й чи вона — ціль рішення / чи її можна зробити ціллю.
     const monthPeriod = monthDecision?.periodOf.get(column.code)?.periodKey ?? null;
@@ -3574,7 +3638,7 @@ export function gridColumns(
       requiredHint === null && !isNumeric && headerStyled === null && !decisionTarget
         ? null
         : {
-            ...(requiredHint === null ? {} : { title: requiredHint }),
+            ...(requiredHint === null ? {} : { title: requiredHint, 'aria-required': 'true' }),
             ...(isNumeric || headerStyled !== null || decisionTarget
               ? {
                   class: [
@@ -3635,15 +3699,17 @@ export function gridColumns(
       // читалки лишається прихованою, тож озвучується «Назва, одиниця».
       // ✎ D-441: стан періоду місячної колонки («Подано»/«Затверджено») — у рядку назви, після неї; читалка
       // чує «Назва, Подано». Колонка без позначки і без одиниці лишається звичайним заголовком.
-      ...(column.unitSymbol === null && monthState === null
+      // ✎ DOCUX L2 (§4.3): зірочка — окремий знак кольору «потрібне значення» (`aria-hidden`: вимогу читалці каже
+      // `aria-required` заголовка і підказка), поруч — кількість порожніх обов'язкових комірок колонки (кнопка — до першої).
+      ...(column.unitSymbol === null && monthState === null && !isRequired
         ? {}
         : {
             columnTemplate: (h) =>
               h('span', { class: 'ecr-header-two-line' }, [
                 monthState === null
-                  ? h('span', { class: 'ecr-header-name' }, column.header + (isRequired ? ' *' : ''))
+                  ? h('span', { class: 'ecr-header-name' }, requiredHeaderParts(h, column.header, isRequired, needsCount, column.code, needsHeader))
                   : h('span', { class: 'ecr-header-name' }, [
-                      h('span', {}, column.header + (isRequired ? ' *' : '')),
+                      h('span', {}, requiredHeaderParts(h, column.header, isRequired, needsCount, column.code, needsHeader)),
                       h('span', { class: 'ecr-header-sr' }, ', '),
                       decisionKind === undefined || monthPeriod === null || monthDecision === undefined
                         ? h(
@@ -3825,12 +3891,11 @@ export function gridColumns(
         // беруть участі в пріоритеті `cellStateOf` (`ФВ-14.18` рахує лише
         // п'ять виміряних станів; переробляти ту палітру заради двох нових —
         // окрема задача, не ця).
+        // ✎ DOCUX L2 (§4.2): слово «Required» у самій порожній комірці + внутрішня рамка кольору рівня (`cell-states.css`,
+        // `ecr-cell-needs-input--block|--warn`); старий «!» 10 px прибрано. Модель уже лишила лише порожні редаговні комірки.
         const requiredInputMessage = requiredInput.blocked.get(key) ?? requiredInput.warning.get(key);
-        const requiredInputClass = requiredInput.blocked.has(key)
-          ? 'ecr-cell-required-input-blocked'
-          : requiredInput.warning.has(key)
-            ? 'ecr-cell-required-input-warning'
-            : null;
+        const needsLevel = requiredInput.blocked.has(key) ? 'block' : requiredInput.warning.has(key) ? 'warn' : null;
+        const requiredInputClass = needsLevel === null ? null : `ecr-cell-needs-input ecr-cell-needs-input--${needsLevel}`;
 
         // ⛔ Q-30x (High): той самий взірець маркера, що й обов'язкові вхідні
         // колонки вище — ДОДАЄТЬСЯ до класу стану, а не змагається з ним за
@@ -3983,6 +4048,8 @@ export function gridColumns(
           // ⚠ Атрибут окремо від класу: тест читає саме його і тому доводить
           // розрізнення станів, не залежачи від жодного кольору (`ФВ-14.18`).
           ...(state === null ? {} : { 'data-cell-state': state }),
+          // ✎ DOCUX L2: вимога — і для читалки (`aria-required`/`aria-invalid`), не лише кольором і словом.
+          ...(needsLevel === null ? {} : { 'data-needs-input': needsLevel, 'aria-required': 'true', 'aria-invalid': 'true' }),
           ...(isOutOfWindow ? { 'data-out-of-window': 'true' } : {}),
           ...(manual === null ? {} : { 'data-formula-manual': 'true' }),
           ...(calcError === null ? {} : { 'data-calc-error': calcError.kind }),
@@ -4153,6 +4220,47 @@ function discardRows<V>(
   }
 
   return next.size === current.size ? current : next;
+}
+
+/**
+ * ✎ DOCUX L2: назва колонки в заголовку — з окремою зірочкою (`ecr-header-required`, колір «потрібне значення») і, коли
+ * в колонці є порожні обов'язкові комірки, їхньою кількістю — кнопкою, що веде до першої (клік не доходить до сортування).
+ */
+function requiredHeaderParts(
+  h: Parameters<NonNullable<ColumnRegular['columnTemplate']>>[0],
+  header: string,
+  isRequired: boolean,
+  count: number,
+  columnCode: string,
+  needsHeader: { readonly goTo: (columnCode: string) => void } | undefined,
+): ReturnType<Parameters<NonNullable<ColumnRegular['columnTemplate']>>[0]>[] {
+  if (!isRequired) return [h('span', {}, header)];
+
+  return [
+    h('span', {}, header),
+    h('span', { class: 'ecr-header-required', 'aria-hidden': 'true' }, ' *'),
+    ...(count === 0 || needsHeader === undefined
+      ? []
+      : [
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'ecr-header-required-count',
+              'aria-label': t('grid.needsInput.columnCount', { count }),
+              title: t('grid.needsInput.columnCount', { count }),
+              'data-needs-input-column': columnCode,
+              onClick: (event: Event) => {
+                event.stopPropagation();
+                needsHeader.goTo(columnCode);
+              },
+              onKeyDown: (event: Event) => event.stopPropagation(),
+              onMouseDown: (event: Event) => event.stopPropagation(),
+            },
+            String(count),
+          ),
+        ]),
+  ];
 }
 
 /**

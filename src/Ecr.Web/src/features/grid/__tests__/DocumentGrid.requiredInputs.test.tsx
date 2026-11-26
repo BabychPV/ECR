@@ -7,6 +7,7 @@ import type { TableSliceDto } from '@/api/types';
 import { cancelAutosave } from '../autosave';
 import { resetPending } from '../pendingStore';
 import { DocumentGrid } from '../DocumentGrid';
+import { allNeedsInput, resetNeedsInput } from '../needsInputStore';
 
 /**
  * ✎ 25.11, живий прохід (документ 100 LAND_UI, таблиця 3.00): попередження «обов'язкові колонки методології»
@@ -110,6 +111,7 @@ function show(): void {
 afterEach(() => {
   cancelAutosave();
   resetPending();
+  resetNeedsInput();
   vi.unstubAllGlobals();
 });
 
@@ -120,7 +122,7 @@ async function patches(n: number): Promise<void> {
 }
 
 describe('DocumentGrid: попередження обов’язкових колонок під час введення', () => {
-  it('згорнуте, рядок на колонку, назви колонок, лічильник = перелік; повторне збереження не додає рядків', async () => {
+  it('DOCUX L2: Warn — лічильник КОМІРОК у тулбарі (не банер), перелік — посилання з назвами колонок; повторне збереження не додає', async () => {
     mockServer(Legacy);
     show();
     await screen.findByTestId('revogrid-stub');
@@ -128,15 +130,16 @@ describe('DocumentGrid: попередження обов’язкових ко�
 
     await user.click(screen.getByRole('button', { name: 'simulate-edit' }));
     await patches(1);
-    const summary = await waitFor(() => {
-      const node = document.querySelector<HTMLElement>('[data-required-inputs="warning"]');
+    const counter = await waitFor(() => {
+      const node = document.querySelector<HTMLElement>('[data-needs-input-count]');
       expect(node).not.toBeNull();
       return node as HTMLElement;
     });
 
-    // Згорнуто: ні переліку, ні українського тексту, ні alert-банера над сіткою.
-    expect(summary.getAttribute('aria-expanded')).toBe('false');
-    expect(summary.textContent).toContain('grid.requiredInput.summary (count=2)');
+    // Згорнуто: ні переліку, ні українського тексту, ні alert-банера над сіткою; жовтий (Warn), 2 комірки.
+    expect(counter.getAttribute('aria-expanded')).toBe('false');
+    expect(counter.textContent).toContain('grid.needsInput.counter (count=2)');
+    expect(document.querySelector('[data-needs-input-counter]')?.getAttribute('data-needs-input-counter')).toBe('warn');
     expect(screen.queryByRole('list')).toBeNull();
     expect(document.body.textContent).not.toMatch(/обов'язкова|Колонка/);
     expect(document.querySelector('.mantine-Alert-root')).toBeNull();
@@ -145,15 +148,57 @@ describe('DocumentGrid: попередження обов’язкових ко�
     await user.click(screen.getByRole('button', { name: 'simulate-edit' }));
     await patches(2);
 
-    const toggle = document.querySelector<HTMLElement>('[data-required-inputs="warning"]') as HTMLElement;
+    const toggle = document.querySelector<HTMLElement>('[data-needs-input-count]') as HTMLElement;
     expect(toggle.textContent).toContain('(count=2)');
     await user.click(toggle);
     const list = await screen.findByRole('list', {}, { timeout: 5_000 });
     const items = within(list).getAllByRole('listitem');
     expect(items).toHaveLength(2);
-    expect(items[0]?.textContent).toContain('column=Type of equipment');
-    expect(items[0]?.textContent).toContain('rows=1');
-    expect(items[1]?.textContent).toContain('column=Type of fuel');
+    expect(items[0]?.textContent).toContain('Type of equipment · ⟦permits.history.rowPosition (n=1)⟧');
+    expect(items[1]?.textContent).toContain('Type of fuel · ⟦permits.history.rowPosition (n=1)⟧');
+    expect(list.querySelectorAll('[data-needs-input-link]')).toHaveLength(2);
     expect(list.textContent).not.toMatch(/Land_|[Ѐ-ӿ]/);
   });
 });
+
+/** Зріз із колонкою шаблону `isRequired` (NAME) і порожньою коміркою в наперед заданому рядку. */
+function requiredSlice(): TableSliceDto {
+  const base = sliceFixture();
+  return {
+    ...base,
+    columns: base.columns.map((column) => ({ ...column, isRequired: column.code === 'NAME', isRequiredByMethodology: false })),
+    rows: [{ cells: {}, isOrphaned: false, label: null, ordinal: 0, rowKey: 'r1', rowKind: 'Item', rowVersion: 'v1' }],
+  };
+}
+
+describe('DocumentGrid: «Required» одразу при відкритті (DOCUX L2-1, L2-2)', () => {
+  it('порожня обов’язкова комірка шаблону — лічильник «1 required cell» червоний БЕЗ збереження; набрали значення — зник', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_path: string, init?: RequestInit) =>
+        init?.method === 'PATCH'
+          ? new Response(JSON.stringify({ appliedCells: 1, rowVersions: { r1: 'v2' }, validation: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+          : new Response(JSON.stringify(requiredSlice()), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+      ),
+    );
+    show();
+    await screen.findByTestId('revogrid-stub');
+
+    const counter = await waitFor(() => {
+      const node = document.querySelector<HTMLElement>('[data-needs-input-count]');
+      expect(node).not.toBeNull();
+      return node as HTMLElement;
+    });
+    expect(counter.textContent).toContain('grid.needsInput.counter (count=1)');
+    expect(document.querySelector('[data-needs-input-counter]')?.getAttribute('data-needs-input-counter')).toBe('block');
+    expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(0);
+    // Сховище аркуша бачить ту саму комірку (F8, лічильник «Submit»).
+    expect(allNeedsInput().map((entry) => `${entry.cell.rowKey}:${entry.cell.columnCode}:${entry.cell.level}`)).toEqual(['r1:NAME:block']);
+
+    // L2-2: набрали значення (ще не збережено) — позначка зникла одразу.
+    await userEvent.setup().click(screen.getByRole('button', { name: 'simulate-edit' }));
+    await waitFor(() => expect(document.querySelector('[data-needs-input-count]')).toBeNull());
+    expect(allNeedsInput()).toHaveLength(0);
+  });
+});
+

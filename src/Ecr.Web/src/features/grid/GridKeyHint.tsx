@@ -29,6 +29,8 @@ function rows(): ShortcutRow[] {
     { keys: 'Ctrl+Z · Ctrl+Y', what: t('grid.keys.undo'), edit: true },
     { keys: 'Ctrl+S', what: t('grid.keys.save'), edit: true },
     { keys: 'F9', what: t('grid.keys.recalc'), edit: true },
+    // ✎ DOCUX L2: F8 / Shift+F8 — `needsInputStepKey` (`needsInputStore.ts`).
+    { keys: 'F8 · Shift+F8', what: t('grid.keys.nextRequired'), edit: true },
     { keys: 'Shift+F5', what: t('grid.keys.refresh') },
     { keys: 'Ctrl+K', what: t('grid.keys.palette') },
     { keys: 'Ctrl+Shift+Enter', what: t('grid.keys.fullscreen') },

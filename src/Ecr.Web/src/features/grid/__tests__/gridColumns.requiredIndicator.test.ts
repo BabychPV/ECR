@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ColumnDto, TableSliceDto } from '@/api/types';
 import { gridColumns } from '../DocumentGrid';
 import { NoLocalFlags } from '../cellState';
@@ -135,3 +135,82 @@ describe('gridColumns — індикатор обов\'язковості кол
     expect(String(found?.name ?? '')).not.toContain('*');
   });
 });
+
+/** Мінімальний `h` (сніпдом) для `columnTemplate`: вузол із класом, атрибутами й дітьми. */
+interface Node {
+  readonly tag: string;
+  readonly props: Record<string, unknown>;
+  readonly children: unknown;
+}
+const h = (tag: string, props: Record<string, unknown>, children: unknown): Node => ({ tag, props, children });
+
+function walk(node: unknown, found: Node[] = []): Node[] {
+  if (Array.isArray(node)) node.forEach((child) => walk(child, found));
+  else if (node !== null && typeof node === 'object' && 'tag' in node) {
+    found.push(node as Node);
+    walk((node as Node).children, found);
+  }
+  return found;
+}
+
+function headerOf(columns: ReturnType<typeof gridColumns>, code: string): Node[] {
+  const found = columns.find((c) => c.prop === code);
+  const template = found?.columnTemplate as ((hh: typeof h, column: unknown) => unknown) | undefined;
+  if (template === undefined) throw new Error('немає columnTemplate');
+  return walk(template(h, found));
+}
+
+function cellProps(columns: ReturnType<typeof gridColumns>, code: string, rowKey: string): Record<string, unknown> {
+  const found = columns.find((c) => c.prop === code);
+  return (found?.cellProperties as (p: never) => Record<string, unknown>)({ model: { __rowKey: rowKey }, prop: code } as never);
+}
+
+describe('DOCUX L2: заголовок і комірка «потрібне значення»', () => {
+  it('BUG-13: колонка, обов’язкова лише для частини рядків (методологія), — своя підказка, не «This column is required.»', () => {
+    const columns = gridColumns(slice({ columns: [column({ isRequiredByMethodology: true })] }), false, NoLocalFlags, {}, noRequiredInput);
+    const props = (columns.find((c) => c.prop === 'C1')?.columnProperties as (p: never) => Record<string, unknown>)(undefined as never);
+
+    expect(String(props['title'])).toContain('columnRequiredSomeRows');
+    expect(props['aria-required']).toBe('true');
+  });
+
+  it('зірочка — окремий знак `ecr-header-required` (aria-hidden); з порожніми комірками — кнопка з кількістю, що веде до першої', () => {
+    const goTo = vi.fn();
+    const columns = gridColumns(
+      slice({ columns: [column({ isRequired: true })] }),
+      false,
+      NoLocalFlags,
+      {},
+      noRequiredInput,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      { counts: new Map([['C1', 3]]), goTo },
+    );
+    const nodes = headerOf(columns, 'C1');
+    const star = nodes.find((node) => node.props['class'] === 'ecr-header-required');
+    expect(star?.children).toBe(' *');
+    expect(star?.props['aria-hidden']).toBe('true');
+
+    const count = nodes.find((node) => node.props['class'] === 'ecr-header-required-count');
+    expect(count?.children).toBe('3');
+    expect(String(count?.props['aria-label'])).toContain('grid.needsInput.columnCount');
+    (count?.props['onClick'] as (event: Event) => void)(new Event('click'));
+    expect(goTo).toHaveBeenCalledWith('C1');
+  });
+
+  it('L2-1: порожня обов’язкова комірка — клас `ecr-cell-needs-input--block`, aria-required/aria-invalid, пояснення в title; старого «!» немає', () => {
+    const needs = { blocked: new Map([['R1:C1', 'Required — hint']]), warning: new Map<string, string>() };
+    const columns = gridColumns(slice({ columns: [column({ isRequired: true })] }), false, NoLocalFlags, {}, needs);
+    const props = cellProps(columns, 'C1', 'R1');
+
+    expect(String(props['class'])).toContain('ecr-cell-needs-input ecr-cell-needs-input--block');
+    expect(String(props['class'])).not.toContain('required-input');
+    expect(props['data-needs-input']).toBe('block');
+    expect(props['aria-required']).toBe('true');
+    expect(props['aria-invalid']).toBe('true');
+    expect(String(props['title'])).toContain('Required — hint');
+
+    const warn = gridColumns(slice(), false, NoLocalFlags, {}, { blocked: new Map(), warning: new Map([['R1:C1', 'w']]) });
+    expect(String(cellProps(warn, 'C1', 'R1')['class'])).toContain('ecr-cell-needs-input--warn');
+  });
+});
+

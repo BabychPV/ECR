@@ -42,6 +42,10 @@
   --ecr-cell-orphaned-line: #7a0f08;
   --ecr-cell-rounded-bg: #f3e8fd;
   --ecr-cell-rounded-line: #8844ff;
+
+  /* ✎ DOCUX L2: «тут потрібне значення» — ті самі значення, що `cellRequired` у `theme.ts` (звіряє `contrast.test.ts`). */
+  --ecr-cell-required-block: #b3170c;
+  --ecr-cell-required-warn: #8a6100;
 }
 
 /*
@@ -68,6 +72,9 @@
   --ecr-cell-orphaned-line: #e85c48;
   --ecr-cell-rounded-bg: #2e2438;
   --ecr-cell-rounded-line: #a855f7;
+
+  --ecr-cell-required-block: #ff9a8f;
+  --ecr-cell-required-warn: #ffd24d;
 }
 
 /*
@@ -237,7 +244,7 @@
 
 /*
  * ✎ F13-p210: попередження перевірки на рядку (дозвіл не покриває місяці лише з обчисленими значеннями) — НЕ
- * помилка: жовтий тон попередження (той самий, що в маркера `ecr-cell-required-input-warning`), квадратна форма
+ * помилка: жовтий тон попередження (той самий, що в токена `--ecr-cell-required-warn`), квадратна форма
  * і знак «⚠» замість червоного кола зі «!» — відрізняється й без кольору.
  */
 .ecr-row-label--warning {
@@ -285,41 +292,83 @@
  */
 
 /*
- * ── обов'язкові вхідні колонки методології (директива «обов'язкові вхідні
- *    колонки методології») ─────────────────────────────────────────────────
+ * ── потрібне значення (DOCUX L2, docs/build/UX-REVIEW-document-screen.md §4.2) ──────────────────────────────
  *
- * ⚠ ДОДАТКОВИЙ маркер, не шостий/сьомий пункт виміряної палітри вище: він
- * накладається на будь-який стан (порожню комірку, dirty, readOnly, ...),
- * а не змагається з ним за пріоритет `cellStateOf`. Тому й куток інший —
- * лівий нижній, вільний від решти чотирьох маркерів, — і немає вимоги
- * ΔE00 ≥ 20 проти п'яти станів вище: причина завжди продубльована текстом
- * (`title`), а не лише кольором.
+ * Людина 26.11: колишній «!» 10 px у лівому нижньому куті «ледь видно і незрозуміло». Тепер порожня обов'язкова комірка
+ * несе СЛОВО «Required» (мовою інтерфейсу: `--ecr-required-label` на корені сітки) шрифтом сітки і внутрішню рамку
+ * кольору рівня: `block` — без значення аркуш не подати (червоний), `warn` — рядок не порахується (жовтий).
+ *
+ * ⚠ ДОДАТКОВИЙ шар поверх будь-якого стану (dirty, orphaned…), не шостий пункт палітри `cellStateOf`. Колір — токени
+ * `--ecr-cell-required-*` (`cellRequired` у `theme.ts`), виміряні ≥ 4.5:1 проти ВСІХ заливок станів і поверхні сітки в
+ * обох темах (`contrast.test.ts`). Рамка — `box-shadow`, бо ліву межу тримають стани.
+ * ⚠ Слово — `::before` на всю висоту комірки: обчислених комірок (`ƒ` у `::before`) модель не позначає, а з помилкою
+ * збереження (`×` у `::before`) — одне правило нижче показує обидва знаки разом (BUG-11).
  */
-.ecr-cell-required-input-blocked::before,
-.ecr-cell-required-input-warning::before {
-  content: '!';
+.ecr-cell-needs-input {
+  box-shadow: inset 0 0 0 1px var(--ecr-needs-line);
+}
+
+.ecr-cell-needs-input--block {
+  --ecr-needs-line: var(--ecr-cell-required-block);
+}
+
+.ecr-cell-needs-input--warn {
+  --ecr-needs-line: var(--ecr-cell-required-warn);
+}
+
+/* Після спроби подати / відмови збереження — рамка 2 px (L9). */
+.ecr-cell-needs-input--strong {
+  box-shadow: inset 0 0 0 2px var(--ecr-needs-line);
+}
+
+.ecr-cell-needs-input::before {
+  content: var(--ecr-required-label, 'Required');
   position: absolute;
-  left: 2px;
+  top: 0;
   bottom: 0;
-  font-size: 10px;
+  left: 6px;
+  display: flex;
+  align-items: center;
+  font-style: italic;
   line-height: 1;
+  color: var(--ecr-needs-line);
+  pointer-events: none;
+}
+
+/* Числова колонка — слово там, де стоятиме число. */
+.ecr-cell-needs-input.ecr-cell-numeric::before {
+  left: auto;
+  right: 12px;
+}
+
+.ecr-cell-needs-input.ecr-cell-save-error::before {
+  content: '× ' var(--ecr-required-label, 'Required');
   font-weight: 700;
 }
 
-.ecr-cell-required-input-blocked::before {
-  color: #b3170c;
+/* Заголовок колонки: зірочка — окремий знак кольору «потрібне», поруч — скільки порожніх. */
+.ecr-header-required {
+  color: var(--ecr-cell-required-block);
+  font-weight: 700;
 }
 
-.ecr-cell-required-input-warning::before {
-  color: #8a6100;
+.ecr-header-required-count {
+  min-width: 24px;
+  height: 24px;
+  margin-left: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--ecr-cell-required-block);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ecr-cell-required-block);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
 }
 
-:root[data-mantine-color-scheme='dark'] .ecr-cell-required-input-blocked::before {
-  color: #f07369;
-}
-
-:root[data-mantine-color-scheme='dark'] .ecr-cell-required-input-warning::before {
-  color: #ffd24d;
+.ecr-header-required-count:focus-visible {
+  outline: 2px solid var(--ecr-cell-required-block);
+  outline-offset: 1px;
 }
 
 /*
@@ -341,11 +390,8 @@
   font-size: 12px;
   font-weight: 700;
   line-height: 1;
-  color: #b3170c;
-}
-
-:root[data-mantine-color-scheme='dark'] .ecr-cell-save-error::before {
-  color: #f07369;
+  /* ✎ DOCUX L2 (BUG-12): токен замість літералів #b3170c / #f07369 (темний давав 4.40:1 на «dirty»). */
+  color: var(--ecr-cell-required-block);
 }
 
 /*
@@ -365,9 +411,9 @@
   box-shadow: inset 0 -2px 0 #8a6100;
 }
 
-.ecr-cell-out-of-window:not(.ecr-cell-save-error):not(.ecr-cell-required-input-blocked):not(
-    .ecr-cell-required-input-warning
-  ):not(.ecr-cell--calculated):not(.ecr-cell-formula-manual)::before {
+.ecr-cell-out-of-window:not(.ecr-cell-save-error):not(.ecr-cell-needs-input):not(.ecr-cell--calculated):not(
+    .ecr-cell-formula-manual
+  )::before {
   content: '◷';
   position: absolute;
   top: 0;
@@ -411,9 +457,7 @@
     inset 0 -2px 0 #ffd24d;
 }
 
-.ecr-cell-formula-manual:not(.ecr-cell-save-error):not(.ecr-cell-required-input-blocked):not(
-    .ecr-cell-required-input-warning
-  )::before {
+.ecr-cell-formula-manual:not(.ecr-cell-save-error):not(.ecr-cell-needs-input)::before {
   content: '✎';
   position: absolute;
   top: 1px;

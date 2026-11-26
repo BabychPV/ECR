@@ -212,6 +212,21 @@ export const cellState = {
 } as const;
 
 /**
+ * ✎ DOCUX L2 (план `docs/build/UX-REVIEW-document-screen.md` §4.2): «тут потрібне значення» — слово «Required» у
+ * порожній комірці, її внутрішня рамка і зірочка заголовка. `block` — без значення аркуш не подати; `warn` — рядок не
+ * порахується. Дзеркало — `--ecr-cell-required-*` у `cell-states.css`.
+ *
+ * ⛔ Колір несе ТЕКСТ (слово в комірці), тож поріг — 4.5:1 проти КОЖНОЇ заливки станів (`cellState.*.bg`) і поверхні
+ * сітки (`themeSurface.*.body`) в обох темах (`contrast.test.ts`). Найгірші пари: світла `block` 5.84 (на `rounded`),
+ * `warn` 4.69 (на `rounded`); темна `block` 6.13 (на `dirty`), `warn` 8.71 (на `dirty`). Колишній темний `#f07369`
+ * давав 4.40:1 на «dirty» (BUG-12).
+ */
+export const cellRequired = {
+  block: { light: '#b3170c', dark: '#ff9a8f' },
+  warn: { light: '#8a6100', dark: '#ffd24d' },
+} as const;
+
+/**
  * Поверхні й текст макета (`UI-01`, директива №15 §1, рядки `--ground…--hatch`).
  *
  * ⛔ Чому окремий об'єкт, а не набір полів у `createTheme`: Mantine не має
