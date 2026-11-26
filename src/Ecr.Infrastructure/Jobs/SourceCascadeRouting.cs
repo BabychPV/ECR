@@ -31,9 +31,13 @@ internal static class SourceCascadeRouting
     /// <param name="month">Місяць зміни 1–12; інше — увесь рік.</param>
     /// <param name="onCycle">Споживач у циклі з джерелом (не ставиться): шаблон-джерело, шаблон-споживач.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="anyPeriodState">
+    /// ✎ D-581: і періоди будь-якого стану (політика зв'язки — затверджений закритий місяць теж застаріє); лише зі сховищем
+    /// <see cref="Persistence.RegistryImpactStore"/>. Каскад — <c>false</c> (відкриті й пільгові).
+    /// </param>
     internal static async Task<IReadOnlyList<ConsumerRouting>> ConsumersAsync(
         DependencyGraphSnapshot snapshot, IRegistryImpactStore impact, int bindingId, int year, int? month,
-        Action<int, int>? onCycle, CancellationToken ct)
+        Action<int, int>? onCycle, CancellationToken ct, bool anyPeriodState = false)
     {
         var edges = snapshot.TemplateDependencies.Where(d => d.BindingId == bindingId).ToList();
         if (edges.Count == 0)
@@ -79,9 +83,13 @@ internal static class SourceCascadeRouting
             var monthScope = scope.Kind == PeriodScopeKind.Month;
             var routedVersions = reason is null && !monthScope ? Persistence.MonthOwnerRouting.OwnedVersions(consumerEdges) : null;
             int? routedMonth = reason is null && !monthScope ? month : null;
-            var found = await impact
-                .ListTemplateConsumersRoutedAsync([consumer.Key], first, last, onlyMonth, routedMonth, routedVersions, ct)
-                .ConfigureAwait(false);
+            var found = anyPeriodState && impact is Persistence.RegistryImpactStore store
+                ? await store
+                    .ListRoutedConsumersAsync([consumer.Key], first, last, onlyMonth, routedMonth, routedVersions, anyPeriodState: true, ct)
+                    .ConfigureAwait(false)
+                : await impact
+                    .ListTemplateConsumersRoutedAsync([consumer.Key], first, last, onlyMonth, routedMonth, routedVersions, ct)
+                    .ConfigureAwait(false);
             result.Add(new ConsumerRouting(consumer.Key, scope, reason, routedVersions, found));
         }
 

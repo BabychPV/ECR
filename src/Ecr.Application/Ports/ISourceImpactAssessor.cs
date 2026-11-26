@@ -36,7 +36,7 @@ public sealed record SourceImpactConsumer(
     /// </summary>
     public bool WillRecalculate { get; init; } = !Approved;
 
-    /// <summary>Чому каскад період не порахує: <c>approved</c> | <c>dependentsOff</c> | <c>notWritable</c>; <c>null</c> — порахує.</summary>
+    /// <summary>Чому каскад період не порахує: <c>approved</c> | <c>closed</c> | <c>dependentsOff</c> | <c>notWritable</c>; <c>null</c> — порахує.</summary>
     public string? SkipReason { get; init; } = Approved ? "approved" : null;
 
     /// <summary>
@@ -50,6 +50,13 @@ public sealed record SourceImpactConsumer(
 
     /// <summary>Для <c>crossMonth</c> — місяць плану, числа якого читає період; інакше <c>null</c>.</summary>
     public int? ReadsPeriodKey { get; init; }
+
+    /// <summary>
+    /// ✎ D-581 (огляд H2): період — факт політики D-554 (ціль відображення будь-якого стану чи затверджений/закритий пізніший
+    /// читач): лише такі лічаться в <see cref="SourceImpact.ApprovedCount"/> і йдуть у відбиток. <c>false</c> — лише план
+    /// каскаду (відкритий незатверджений читач, прохід читача, якір).
+    /// </summary>
+    public bool PolicyRelevant { get; init; } = true;
 }
 
 /// <summary>Коди причин оцінки впливу (діалог показує їх людині, <c>sourceImpact.reason.*</c>, <c>sourceImpact.wholeYear.*</c>).</summary>
@@ -75,6 +82,9 @@ public static class SourceImpactReasons
 
     /// <summary>Пропуск: затверджено всі аркуші.</summary>
     public const string SkipApproved = "approved";
+
+    /// <summary>Пропуск: період закритий — каскад його не чіпає, затверджені дані в ньому застаріють.</summary>
+    public const string SkipClosed = "closed";
 
     /// <summary>Пропуск: у період писати не можна (архівний проєкт, період поза скоупом задачі).</summary>
     public const string SkipNotWritable = "notWritable";
@@ -134,7 +144,7 @@ public sealed record SourceImpact(
     public string? WholeYearReason { get; init; }
 
     /// <summary>Скільки залежних періодів мають затверджені аркуші (їх перерахунок не чіпає; період, затверджений частково, теж рахується).</summary>
-    public int ApprovedCount => Consumers.Count(c => c.HasApprovedSheets);
+    public int ApprovedCount => Consumers.Count(c => c.PolicyRelevant && c.HasApprovedSheets);
 
     /// <summary>
     /// Дія потребує рішення людини (підтвердження чи відмови): політика не <c>None</c> і є хоч один затверджений залежний

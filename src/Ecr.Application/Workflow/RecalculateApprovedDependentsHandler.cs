@@ -128,7 +128,9 @@ public sealed class RecalculateApprovedDependentsHandler(
         var queued = approved.Count == 0
             ? 0
             : await trigger.RequestApprovedDependentsRecalculationAsync(
-                    documentId, sheetDefId, periodKey, impact.CascadeMonths, new ApprovedRecalculationOverride(userId, trimmed), ct)
+                    // ✎ D-581 (огляд H1): явне «перерахувати й затверджені» — УВЕСЬ рік, не місяці першої правки: після неї людина
+                    // могла правити й інші місяці, а затверджені пізніші читачі ([Period:-1]) теж мають отримати нові числа.
+                    documentId, sheetDefId, periodKey, cascadeMonths: null, new ApprovedRecalculationOverride(userId, trimmed), ct)
                 .ConfigureAwait(false);
         return new RecalculateApprovedDependentsResult(queued, approved.Count);
     }
