@@ -209,67 +209,30 @@ public sealed partial class RegistryImpactRecalculationJob(
         }
 
         var snapshot = await graph.GetAsync(ct).ConfigureAwait(false);
-        var edges = snapshot.TemplateDependencies.Where(d => d.BindingId == request.BindingId).ToList();
-        if (edges.Count == 0)
-        {
-            return [];
-        }
-
-        var source = edges[0].SourceTemplateId;
-        var cycle = snapshot.Cycles.FirstOrDefault(c => c.Contains(source)) ?? [];
         var year = request.Year!.Value;
         var month = request.Month is >= 1 and <= 12 ? request.Month : null;
+        var routed = await SourceCascadeRouting
+            .ConsumersAsync(
+                snapshot, impact, request.BindingId!.Value, year, month,
+                (source, consumer) => LogCycleSkipped(_logger, request.BindingId!.Value, source, consumer), ct)
+            .ConfigureAwait(false);
 
         var rows = new List<RegistryImpactRow>();
-        foreach (var consumer in edges.GroupBy(e => e.ConsumerTemplateId))
+        foreach (var consumer in routed)
         {
-            if (cycle.Contains(consumer.Key))
-            {
-                LogCycleSkipped(_logger, request.BindingId!.Value, source, consumer.Key);
-                continue;
-            }
-
-            var scope = consumer.Select(e => e.Scope).Aggregate((a, b) => a.Join(b));
-            if (scope.Kind == PeriodScopeKind.Year && scope.MonthMask != 0 && month is { } m && (scope.MonthMask & (1 << m)) == 0)
-            {
-                continue;
-            }
-
-            var (first, last) = scope.Kind == PeriodScopeKind.All ? (int.MinValue, int.MaxValue) : (year * 100, (year * 100) + 99);
-            var onlyMonth = scope.Kind == PeriodScopeKind.Month ? month : null;
-
-            // ✎ PERF-06b (D-572): «рік з літеральними місяцями», де КОЖНЕ читання — комірка періоду-власника свого місяця
-            // (TemplateDependency.MonthOwned, без методологій) — зміна місяця m будить у місячному проєкті лише період m.
-            // Пізніших читачів його чисел будить прогін цього періоду (CrossPeriodFanOut, RecalculationJob.FormulasAsync).
-            // ✎ W15z M1: звуження — по версії шаблону (TemplateDependency.OwnedVersions): старі версії, що читають довідник поза
-            // власником, не відкочують увесь шаблон до року — лише свої періоди. Рішення й причина — у журнал.
-            var consumerEdges = consumer.ToList();
-            // Обсяг ребра «місяць» звужує сам (onlyMonth); «усе» — будь-який період; «рік» — рішення по версіях і методологіях
-            // (маска не потрібна: версія з OwnedVersions читає лише літеральні місяці в комірках їхніх власників; «рік» без маски
-            // дають старі версії — їхні періоди однаково на весь рік).
-            var reason = scope.Kind == PeriodScopeKind.All
-                ? "edge scope covers any period (derived registry or unrecognised period key)"
-                : scope.Kind == PeriodScopeKind.Month
-                    ? month is null ? "edited months unknown (whole year)" : null
-                    : month is null
-                        ? "edited months unknown (whole year)"
-                        : Persistence.MonthOwnerRouting.RefusalReason(consumerEdges);
-            var monthScope = scope.Kind == PeriodScopeKind.Month;
-            var routedVersions = reason is null && !monthScope ? Persistence.MonthOwnerRouting.OwnedVersions(consumerEdges) : null;
-            int? routedMonth = reason is null && !monthScope ? month : null;
-            var found = await impact
-                .ListTemplateConsumersRoutedAsync([consumer.Key], first, last, onlyMonth, routedMonth, routedVersions, ct)
-                .ConfigureAwait(false);
             if (_logger.IsEnabled(LogLevel.Information))
             {
+                var monthScope = consumer.Scope.Kind == PeriodScopeKind.Month;
                 var monthText = month?.ToString(CultureInfo.InvariantCulture) ?? "-";
-                var why = reason ?? (monthScope ? "edge scope is month" : "owned versions " + string.Join(",", routedVersions!));
-                var periods = string.Join(",", found.Select(r => r.PeriodKey).Distinct().Order());
+                var why = consumer.WholeYearReason
+                          ?? (monthScope ? "edge scope is month" : "owned versions " + string.Join(",", consumer.RoutedVersions!));
+                var periods = string.Join(",", consumer.Rows.Select(r => r.PeriodKey).Distinct().Order());
                 LogRouting(
-                    _logger, request.BindingId!.Value, consumer.Key, year, monthText,
-                    reason is null ? "month owner" : "whole year", why, found.Count, periods);
+                    _logger, request.BindingId!.Value, consumer.ConsumerTemplateId, year, monthText,
+                    consumer.WholeYearReason is null ? "month owner" : "whole year", why, consumer.Rows.Count, periods);
             }
-            rows.AddRange(found);
+
+            rows.AddRange(consumer.Rows);
         }
 
         return rows;

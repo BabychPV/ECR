@@ -511,6 +511,8 @@ public static class DependencyInjection
         services.AddScoped<ISourceCascadePendingGate>(sp => new Jobs.SourceCascadePendingGate(
             sp.GetRequiredService<EcrDbContext>(), sp.GetRequiredService<Jobs.SourceBindingGateCache>(),
             sp.GetRequiredService<IDependencyGraphProvider>())); // F5: Submit/Approve споживача — не поки місяць чекає каскаду джерела (і ланок до нього)
+        // ✎ Прогноз каскаду — окремий екземпляр задачі (кеш читачів не ділиться з прогоном у тій самій області).
+        services.AddScoped<Jobs.ISourceCascadePlanner>(sp => ActivatorUtilities.CreateInstance<Jobs.RecalculationJob>(sp));
         services.AddScoped<ISourceImpactAssessor, SourceImpactAssessor>(); // B80 N5 (D-554): вплив Approve/Reopen джерела на залежні + підтвердження
         services.AddScoped<IFormulaRecalculationJob, Jobs.FormulaRecalculationJob>();
         // WW-03: постановка перерахунку в періоди-читачі (міжперіодні посилання).

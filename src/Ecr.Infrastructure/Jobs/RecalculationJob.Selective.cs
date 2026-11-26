@@ -947,7 +947,11 @@ public sealed partial class RecalculationJob
     }
 
     /// <summary>Залежності формул документа, що читають ОБЧИСЛЕНІ числа іншого місяця (кеш на виконання задачі).</summary>
+    /// <remarks>Ключ — документ: прогноз каскаду (<see cref="ISourceCascadePlanner.PlanSourceCascadeAsync"/>) питає кілька документів одним екземпляром.</remarks>
     private Func<int, int, bool>? _crossReads;
+
+    /// <summary>Документ, для якого обчислено <see cref="_crossReads"/>.</summary>
+    private long _crossReadsDocumentId;
 
     /// <summary>
     /// ✎ Огляд H1: чи місяць <c>reader</c> читає обчислені числа ранішого місяця <c>owner</c> (обидва — ключі одного року) — за
@@ -971,10 +975,12 @@ public sealed partial class RecalculationJob
     /// </remarks>
     private async Task<Func<int, int, bool>> CrossReadsAsync(long documentId, CancellationToken ct)
     {
-        if (_crossReads is not null)
+        if (_crossReads is not null && _crossReadsDocumentId == documentId)
         {
             return _crossReads;
         }
+
+        _crossReadsDocumentId = documentId;
 
         var versionIds = await (
                 from i in DocumentInstancesQuery(db, documentId)
