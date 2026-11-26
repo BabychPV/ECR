@@ -92,6 +92,21 @@ public interface IRegistrySnapshot
     /// </remarks>
     public IReadOnlyList<long>? FindReferencing(string registryCode, string lookupFieldCode, long targetEntryId);
 
+    /// <summary>
+    /// ✎ SGF-flaring (вимір 26.11): записи, у яких ОБИДВА <c>Lookup</c>-поля вказують на свої цілі — індекс умови
+    /// <c>ROW.A == a &amp;&amp; ROW.B == b</c> (склад газу: кейс + компонент), щоб агрегат не перебирав усі рядки кейсу.
+    /// </summary>
+    /// <param name="registryCode">Код довідника.</param>
+    /// <param name="firstLookupFieldCode">Перше <c>Lookup</c>-поле.</param>
+    /// <param name="firstTarget">Його ціль.</param>
+    /// <param name="secondLookupFieldCode">Друге <c>Lookup</c>-поле.</param>
+    /// <param name="secondTarget">Його ціль.</param>
+    /// <returns>Записи в порядку <see cref="GetEntries"/>; <c>null</c> — індексу немає (викликач бере один індекс).</returns>
+    /// <remarks>⛔ Як і <see cref="FindReferencing"/>, лише звужує перегляд: умову викликач однаково рахує на кожному кандидаті.</remarks>
+    public IReadOnlyList<long>? FindReferencingBoth(
+        string registryCode, string firstLookupFieldCode, long firstTarget, string secondLookupFieldCode, long secondTarget)
+        => null;
+
     /// <summary>Значення поля запису — один крок шляху <c>ROW.a.b</c> чи <c>REGFIELD</c>.</summary>
     /// <param name="entryId">Запис (видимий у знімку).</param>
     /// <param name="fieldCode">Код поля.</param>

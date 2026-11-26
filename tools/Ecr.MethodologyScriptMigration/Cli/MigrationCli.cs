@@ -55,6 +55,7 @@ public static class MigrationCli
         Використання:
           Ecr.MethodologyScriptMigration convert --connection <рядок> --out <тека> [--methodology <код>] [--include-drafts] [--full-life]
           Ecr.MethodologyScriptMigration shadow  --connection <рядок> --in <тека> [--i-know-this-is-a-copy]
+          Ecr.MethodologyScriptMigration sgf-provision --connection <рядок> [--apply]   (довідники факелів SGF; типово сухий прогін)
           Ecr.MethodologyScriptMigration pack    --connection <рядок> --in <тека> --out <package.json>
           Ecr.MethodologyScriptMigration parity  --connection <рядок> --out <report.json> [--methodology <код>] [--document <id>] [--allow-unproven] [--eligible-out <ids.json>]
           Ecr.MethodologyScriptMigration parity-cases --connection <рядок> --in <cases.json> --out <report.json> [--eligible-out <f>] [--golden-out <f>] [--golden-all]
@@ -120,6 +121,19 @@ public static class MigrationCli
                 return await ScriptVersionCommand.RunAsync(args, output, error, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is SqlException or InvalidOperationException or IOException or JsonException)
+            {
+                await error.WriteLineAsync($"Помилка середовища: {ex.Message}").ConfigureAwait(false);
+                return UsageOrEnvironment;
+            }
+        }
+
+        if (command == "sgf-provision")
+        {
+            try
+            {
+                return await SgfProvisionCommand.RunAsync(args, output, error, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is SqlException or InvalidOperationException or Domain.Abstractions.DomainException)
             {
                 await error.WriteLineAsync($"Помилка середовища: {ex.Message}").ConfigureAwait(false);
                 return UsageOrEnvironment;

@@ -58,6 +58,8 @@ public sealed class ExternalRegistryManualEditGuardTests
             "Синк із зовнішнього джерела — і є шлях master-даних AF у External/Hybrid-довідник (D-49, S7).",
         ["Ecr.Infrastructure.Jobs.FlertCompositionSyncJob"] =
             "Разовий імпорт складу газу з FLERT у STREAM/STREAM_CASE/GAS_COMPOSITION (D-476; D-NEW: лише в порожню базу).",
+        ["Ecr.Infrastructure.Jobs.FlaringRegistryProvisioner"] =
+            "SGF-flaring §5.7: системна провізія FLARE_LOCATION/LP_SOUR_SPLIT/TOX_GAS_STREAM (Local) у транзакції імпорту; пише лише в довідник, щойно створений цим викликом.",
         ["Ecr.Application.GasComposition.GasCompositionService"] =
             "D-NEW: сторінка «Склад газу» — єдиний шлях запису складу газу (шкала версій, замкнені періоди, Σ); гард відмовляє саме ЗАГАЛЬНИМ редакторам цих довідників.",
     };

@@ -468,7 +468,7 @@ public static class RegistryForms
         IEvaluationContext context,
         Func<AstNode, IEvaluationContext, ExpressionValue> evaluate)
     {
-
+        (string Field, long Target, IReadOnlyList<long> Children)? first = null;
         foreach (var conjunct in TopConjuncts(filter))
         {
             if (conjunct is not BinaryNode { Operator: BinaryOperator.Equal } equality)
@@ -491,11 +491,24 @@ public static class RegistryForms
             if (AsEntryId(evaluate(target, context)) is { } targetId
                 && snapshot.FindReferencing(code, field, targetId) is { } children)
             {
-                return children;
+                // ✎ SGF-flaring (вимір 26.11): ДРУГИЙ індексний кон'юнкт — індекс пари полів (склад газу: кейс + компонент),
+                // кандидатів 0–1 замість усіх рядків кейсу. Без індексу пари (інший знімок) — як досі, перший.
+                if (first is null)
+                {
+                    if (children.Count <= 1)
+                    {
+                        return children;
+                    }
+
+                    first = (field, targetId, children);
+                    continue;
+                }
+
+                return snapshot.FindReferencingBoth(code, first.Value.Field, first.Value.Target, field, targetId) ?? first.Value.Children;
             }
         }
 
-        return snapshot.GetEntries(code);
+        return first is { } only ? only.Children : snapshot.GetEntries(code);
     }
 
     /// <summary>Верхні кон'юнкти умови: гілки <c>AND</c> зліва направо.</summary>

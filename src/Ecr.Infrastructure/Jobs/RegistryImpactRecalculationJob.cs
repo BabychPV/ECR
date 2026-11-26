@@ -68,9 +68,17 @@ public sealed partial class RegistryImpactRecalculationJob(
         else if (request.IsSourceChange)
         {
             // FLERT F6 (і задачі старої форми «довідник × рік» у черзі): залежні — за результатами методологій року.
-            rows = await impact
-                .ListImpactedForYearAsync(request.RegistryDefId, request.Year!.Value, ct)
-                .ConfigureAwait(false);
+            // ✎ SGF-flaring AC-3: правка складу газу — ОДНА постановка на рік для кейсу й складу; залежні — об'єднання по всіх
+            // довідниках постановки, документ × період нижче ставиться раз (Distinct), а не раз на довідник.
+            var union = new List<RegistryImpactRow>();
+            foreach (var registryDefId in request.AllRegistryDefIds)
+            {
+                union.AddRange(await impact
+                    .ListImpactedForYearAsync(registryDefId, request.Year!.Value, ct)
+                    .ConfigureAwait(false));
+            }
+
+            rows = union;
             wanted = [.. rows.Select(r => r.DocumentId)];
         }
         else

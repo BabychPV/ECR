@@ -388,4 +388,60 @@ public sealed class ScriptEnvironmentCheckerTests
         Assert.Empty(environment.Diagnostics);
         Assert.Empty(environment.RowTables);
     }
+    // ───── D-580 / огляд M5: поля ROW.<поле> у REG* — перевірка середовища при збереженні й публікації ─────
+
+    [Theory]
+    [InlineData("var x = REGSUM(\"GAS\", ROW.CASE == 1, ROW.MOL_PCT);", null)]
+    [InlineData("var x = REGSUM(\"GAS\", ROW.CASE == 1, ROW.NO_SUCH);", "NO_SUCH")]
+    [InlineData("var x = REGCOUNT(\"GAS\", ROW.CASE.CASE_NAME == \"A\");", null)]
+    [InlineData("var x = REGCOUNT(\"GAS\", ROW.MOL_PCT.CASE_NAME == \"A\");", "MOL_PCT.CASE_NAME")]
+    [InlineData("var x = REGCOUNT(\"GAS\", ROW.CASE.NOPE == \"A\");", "CASE.NOPE")]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "SGF-FLARING-REVIEW-M5")]
+    public async Task ROW_поле_в_REG__неіснуюче_чи_не_Lookup__registryFieldUnknown(string body, string? bad)
+    {
+        var table = ScriptTestKit.Table("T1", [ScriptTestKit.Column(1, "Hours")]);
+        var registries = Substitute.For<IRegistryStore>();
+        var gas = Registry(41, "GAS");
+        var gasCase = Registry(42, "CASE");
+        gasCase.AddField(Field(42, 421, "CASE_NAME", CellDataType.String));
+        var link = Field(41, 411, "CASE", CellDataType.Lookup);
+        link.PointTo(42);
+        gas.AddField(link);
+        gas.AddField(Field(41, 412, "MOL_PCT", CellDataType.Decimal));
+        registries.FindDefinitionAsync("GAS", Arg.Any<CancellationToken>()).Returns(gas);
+        registries.FindDefinitionByIdAsync(42, Arg.Any<CancellationToken>()).Returns(gasCase);
+        var text = "rows from T1;\n" + body + "\noutput OUT_A : t = 1;";
+
+        var environment = await CheckAsync(text, ScriptTestKit.Checker(ScriptTestKit.Store(table), registries: registries));
+
+        var found = environment.Diagnostics.Where(d => d.Code == ScriptDiagnosticCodes.RegistryFieldUnknown).ToList();
+        if (bad is null)
+        {
+            Assert.Empty(found);
+        }
+        else
+        {
+            var d = Assert.Single(found);
+            Assert.Equal(bad, d.Params["field"]);
+            Assert.Equal("GAS", d.Params["registry"]);
+            Assert.Equal(2, d.Line);
+        }
+    }
+
+    private static RegistryDef Registry(int id, string code)
+    {
+        var def = new RegistryDef(Ecr.Domain.ValueObjects.EcrCode.Create(code), Text(code), false);
+        typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(def, id);
+        return def;
+    }
+
+    private static RegistryFieldDef Field(int registry, int id, string code, CellDataType type)
+    {
+        var field = new RegistryFieldDef(registry, Ecr.Domain.ValueObjects.EcrCode.Create(code), Text(code), type, id);
+        typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(field, id);
+        return field;
+    }
+
+    private static Ecr.Domain.ValueObjects.LocalizedText Text(string value) => new(new Dictionary<string, string> { ["en"] = value });
 }

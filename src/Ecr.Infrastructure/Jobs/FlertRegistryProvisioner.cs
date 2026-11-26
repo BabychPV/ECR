@@ -244,13 +244,13 @@ public const string ProvisionOperation = "ProvisionFlert";
         return new FlertRegistrySet(stream, @case, composition, component, created, added, problems, warnings);
     }
 
-    private async Task<RegistryDef?> FindAsync(string code, CancellationToken ct)
+    internal async Task<RegistryDef?> FindAsync(string code, CancellationToken ct)
         => await db.RegistryDefs
             .Include(d => d.Fields)
             .FirstOrDefaultAsync(d => d.Code == code, ct)
             .ConfigureAwait(false);
 
-    private async Task<RegistryDef> CreateAsync(
+    internal async Task<RegistryDef> CreateAsync(
         string code,
         string en,
         string ru,
@@ -290,7 +290,7 @@ public const string ProvisionOperation = "ProvisionFlert";
         return (await FindAsync(code, ct).ConfigureAwait(false))!;
     }
 
-    private async Task AddKeyAsync(
+    internal async Task AddKeyAsync(
         RegistryDef def, string code, string name, bool isPrimary, string[] fieldCodes, int userId, CancellationToken ct)
     {
         var fields = fieldCodes.Select(f => def.Fields.Single(x => x.Code == f)).ToList();

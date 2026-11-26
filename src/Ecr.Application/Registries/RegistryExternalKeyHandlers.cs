@@ -74,7 +74,8 @@ public sealed class BindRegistryExternalKeyHandler(
     IAuditWriter audit,
     IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    FlaringRegistryLock? flaring = null)
 {
     /// <summary>Стеля ідентифікатора — ширина колонки <c>dic.RegistryExternalKey.ExternalId</c>.</summary>
     public const int MaxExternalIdLength = 200;
@@ -134,6 +135,15 @@ public sealed class BindRegistryExternalKeyHandler(
                 });
         }
 
+        // ✎ SGF-flaring AC-5 (огляд b13, F1-5): прив'язка запису довідника факелів до зовнішнього ключа — теж зміна наявного
+        // запису під запобіжником закритих місяців (право GasComposition.Edit; запис, який читав замкнений період, — 409).
+        await ExternalRegistryGuard.EnsureFlaringEditAllowedAsync(
+                definition,
+                () => Task.FromResult<IReadOnlyCollection<FlaringRegistryEdit>>([FlaringRegistryEdit.Change(entry.Window)]),
+                flaring,
+                ct)
+            .ConfigureAwait(false);
+
         var dataSource = await ListDataSourcesHandler
             .FindAsync(dataSources, command.DataSourceId, ct)
             .ConfigureAwait(false);
@@ -186,7 +196,8 @@ public sealed class UnbindRegistryExternalKeyHandler(
     IAuditWriter audit,
     IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    FlaringRegistryLock? flaring = null)
 {
     /// <summary>Відв'язує.</summary>
     /// <param name="registryCode">Довідник зі шляху запиту.</param>
@@ -221,6 +232,14 @@ public sealed class UnbindRegistryExternalKeyHandler(
                     ["registryCode"] = definition.Code,
                 });
         }
+
+        // ✎ SGF-flaring AC-5 (F1-5): відв'язка — та сама зміна запису довідника факелів, що й прив'язка.
+        await ExternalRegistryGuard.EnsureFlaringEditAllowedAsync(
+                definition,
+                () => Task.FromResult<IReadOnlyCollection<FlaringRegistryEdit>>([FlaringRegistryEdit.Change(entry.Window)]),
+                flaring,
+                ct)
+            .ConfigureAwait(false);
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {

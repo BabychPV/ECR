@@ -98,6 +98,38 @@ public sealed class FlaringRegistryLockGuardTests
         }
     }
 
+    /// <summary>
+    /// ✎ SGF-flaring AC-5 (огляд b13, F1-5): прив'язка й відв'язка зовнішнього ключа запису — теж писачі запису довідника, але
+    /// <c>EnsureManualEditAllowed</c> не кличуть (зв'язок, а не дані AF), тож загальне сито їх не бачить. Окреме правило: обидва
+    /// кличуть запобіжник факелів.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [Trait("Requirement", "SGF-FLARING-AC-5")]
+    public void Прив_язка_й_відв_язка_зовнішнього_ключа_кличуть_запобіжник_факелів()
+    {
+        var calls = Calls().ToList();
+
+        Assert.Empty(ExternalKeyViolations(calls));
+
+        // Мутаційний доказ правила: без виклику в одному з обробників — червоне.
+        foreach (var writer in ExternalKeyWriters)
+        {
+            var without = calls.Where(c => !(c.Owner == writer && c.Kind == Kind.Flaring)).ToList();
+            Assert.Contains(writer, ExternalKeyViolations(without));
+        }
+    }
+
+    private static readonly string[] ExternalKeyWriters =
+    [
+        "Ecr.Application.Registries.BindRegistryExternalKeyHandler",
+        "Ecr.Application.Registries.UnbindRegistryExternalKeyHandler",
+    ];
+
+    private static List<string> ExternalKeyViolations(IReadOnlyList<Call> calls)
+        => [.. ExternalKeyWriters.Where(w => !calls.Any(c => c.Owner == w && c.Kind == Kind.Flaring))];
+
     private const string DefinitionHandler = "Ecr.Application.Registries.SaveRegistryDefinitionHandler";
 
     /// <summary>

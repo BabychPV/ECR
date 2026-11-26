@@ -990,8 +990,75 @@ public sealed partial class GasCompositionService(
         GasRegistryIds ids, GasDateRange? affected, IReadOnlyList<int> registryIds, int userId, string reason, CancellationToken ct)
     {
         var dependents = await store.ListDependentYearsAsync(ids, ct).ConfigureAwait(false);
+        return await EnqueueImpactAsync(
+                jobs, dependents, affected, registryIds, [ids.Case, ids.Composition], userId, reason,
+                (ex, registryId, year) => LogEnqueueFailed(_logger, ex, registryId, year), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ SGF-flaring AC-3 (+ огляд L2): ОДНА злита постановка на рік. Правка, що зачіпає кейс чи склад, нормалізується до ПАРИ
+    /// (кейс + склад): ціль черги однакова для «нова версія» (кейс + склад) і пізнішої «лише кейс», тож вони зливаються, а не
+    /// перераховують документ двічі. Payload — довідники пари із залежними в цьому році (від правки не залежить).
+    /// </summary>
+    /// <param name="jobs">Черга.</param>
+    /// <param name="dependents">Довідник → роки з відкритими залежними.</param>
+    /// <param name="affected">Зачеплені дати; <c>null</c> — усі роки.</param>
+    /// <param name="registryIds">Довідники правки.</param>
+    /// <param name="pair">Кейс і склад газу.</param>
+    /// <param name="userId">Автор.</param>
+    /// <param name="reason">Причина.</param>
+    /// <param name="onFailed">Журнал збою постановки (довідник, рік).</param>
+    /// <param name="ct">Скасування.</param>
+    internal static async Task<(IReadOnlyList<int> Queued, IReadOnlyList<int> Failed)> EnqueueImpactAsync(
+        IBackgroundJobScheduler jobs,
+        IReadOnlyDictionary<int, IReadOnlyList<int>> dependents,
+        GasDateRange? affected,
+        IReadOnlyList<int> registryIds,
+        IReadOnlyList<int> pair,
+        int userId,
+        string reason,
+        Action<Exception, int, int> onFailed,
+        CancellationToken ct)
+    {
+        var normalized = registryIds.Intersect(pair).Any() ? [.. registryIds.Union(pair)] : registryIds;
         var queued = new SortedSet<int>();
         var failed = new SortedSet<int>();
+        foreach (var (year, registriesOfYear) in ImpactYears(dependents, affected, normalized))
+        {
+            try
+            {
+                await jobs.EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(
+                        RegistryImpactRecalculationTarget.ForYear(normalized, year),
+                        new RegistryImpactRecalculationRequest(
+                            registriesOfYear[0], [], reason, year,
+                            AlsoRegistryDefIds: registriesOfYear.Count > 1 ? [.. registriesOfYear.Skip(1)] : null),
+                        ct,
+                        createdByUserId: userId)
+                    .ConfigureAwait(false);
+                queued.Add(year);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                failed.Add(year);
+                onFailed(ex, registriesOfYear[0], year);
+            }
+        }
+
+        return ([.. queued], [.. failed]);
+    }
+
+    /// <summary>
+    /// ✎ SGF-flaring AC-3: роки перерахунку → довідники правки з відкритими залежними в цьому році (порядок довідників — як у
+    /// правці, без дублів). Рік без жодного залежного не ставиться; зачеплені дати звужують роки (як досі).
+    /// </summary>
+    /// <param name="dependents">Довідник → роки з відкритими залежними (<c>ListDependentYearsAsync</c>).</param>
+    /// <param name="affected">Зачеплені дати правки; <c>null</c> — усі роки залежних.</param>
+    /// <param name="registryIds">Довідники правки.</param>
+    internal static IReadOnlyList<(int Year, IReadOnlyList<int> Registries)> ImpactYears(
+        IReadOnlyDictionary<int, IReadOnlyList<int>> dependents, GasDateRange? affected, IReadOnlyList<int> registryIds)
+    {
+        var byYear = new SortedDictionary<int, List<int>>();
         foreach (var registryId in registryIds.Distinct())
         {
             if (!dependents.TryGetValue(registryId, out var years) || years.Count == 0)
@@ -1002,25 +1069,16 @@ public sealed partial class GasCompositionService(
             var hit = affected is null ? years : GasCompositionRules.YearsOf(affected, years.Max()).Intersect(years).ToList();
             foreach (var year in hit)
             {
-                try
+                if (!byYear.TryGetValue(year, out var list))
                 {
-                    await jobs.EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(
-                            RegistryImpactRecalculationTarget.ForYear(registryId, year),
-                            new RegistryImpactRecalculationRequest(registryId, [], reason, year),
-                            ct,
-                            createdByUserId: userId)
-                        .ConfigureAwait(false);
-                    queued.Add(year);
+                    byYear[year] = list = [];
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    failed.Add(year);
-                    LogEnqueueFailed(_logger, ex, registryId, year);
-                }
+
+                list.Add(registryId);
             }
         }
 
-        return ([.. queued], [.. failed]);
+        return [.. byYear.Select(p => (p.Key, (IReadOnlyList<int>)p.Value))];
     }
 
     private async Task<GasStreamDetailDto> DetailAsync(GasRegistryIds ids, long streamEntryId, bool canEdit, CancellationToken ct)
