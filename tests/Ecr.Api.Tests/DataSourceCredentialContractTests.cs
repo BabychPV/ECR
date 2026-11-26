@@ -1,12 +1,17 @@
 // tests/Ecr.Api.Tests/DataSourceCredentialContractTests.cs
 using System.Reflection;
 using System.Text.Json;
+using System.Security.Claims;
+using Ecr.Api.Auth;
 using Ecr.Api.Controllers;
+using Ecr.Api.Security;
 using Ecr.Api.Startup;
 using Ecr.Application.Common;
 using Ecr.Application.Integration;
 using Ecr.Domain.Enums;
 using Ecr.TestKit;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -47,8 +52,8 @@ public sealed class DataSourceCredentialContractTests
     [Trait("Finding", "P-1126-SRCCRED")]
     public void Жодна_відповідь_не_має_властивості_з_паролем_чи_його_похідною()
     {
-        // ⛔ R-15: пароль, блоб, довжина чи «маска» фіксованої довжини — однаково витік. Дозволена лише булева ознака
-        // (hasPassword, hasSecret, mustChangePassword). Усі типи відповідей Application і Api, не лише DataSourceView: наступна
+        // ⛔ R-15: пароль, блоб, довжина чи «маска» фіксованої довжини — однаково витік. Дозволений лише СТАН: ознака,
+        // перелік чи момент (hasPassword, mustChangePassword, credentialsState, credentialsRejectedAt). Усі типи відповідей Application і Api, не лише DataSourceView: наступна
         // відповідь із джерелом усередині інакше пройшла б повз.
         var outbound = new[] { typeof(DataSourceView).Assembly, typeof(DataSourcesController).Assembly }
             .SelectMany(a => a.GetExportedTypes())
@@ -60,11 +65,30 @@ public sealed class DataSourceCredentialContractTests
         var offenders = outbound
             .SelectMany(t => t.GetProperties(BindingFlags.Public | BindingFlags.Instance).Select(p => (Type: t, Property: p)))
             .Where(x => SecretWords.Any(w => x.Property.Name.Contains(w, StringComparison.OrdinalIgnoreCase)))
-            .Where(x => x.Property.PropertyType != typeof(bool))
+            .Where(x => !IsStateOnly(x.Property.PropertyType))
             .Select(x => $"{x.Type.FullName}.{x.Property.Name} : {x.Property.PropertyType.Name}")
             .ToList();
 
         Assert.True(offenders.Count == 0, "Відповідь несе секрет: " + string.Join(", ", offenders));
+    }
+
+    [Fact]
+    [Trait("Finding", "P-1126-SRCCRED")]
+    public void Відповідь_джерела_несе_стан_облікових_даних_без_секрету()
+    {
+        // Стан для значка в переліку (R-03): перелік станів і момент відмови — не секрет і не його похідна.
+        var properties = typeof(DataSourceView).GetProperties().ToDictionary(p => p.Name, p => p.PropertyType);
+
+        Assert.Equal(typeof(SourceCredentialsState), properties["CredentialsState"]);
+        Assert.Equal(typeof(DateTime?), properties["CredentialsRejectedAt"]);
+        Assert.Equal(["Ok", "Rejected", "Unreadable"], Enum.GetNames<SourceCredentialsState>());
+    }
+
+    /// <summary>Тип, що може нести лише СТАН, а не секрет чи його похідну: ознака, перелік, момент часу.</summary>
+    private static bool IsStateOnly(Type type)
+    {
+        var bare = Nullable.GetUnderlyingType(type) ?? type;
+        return bare == typeof(bool) || bare.IsEnum || bare == typeof(DateTime) || bare == typeof(DateTimeOffset);
     }
 
     [Fact]
@@ -150,5 +174,25 @@ public sealed class DataSourceCredentialContractTests
         Assert.Null(request.UserName);
         Assert.Null(request.Password);
         Assert.False(request.ClearPassword);
+    }
+
+    [Fact]
+    [Trait("Finding", "P-1126-SRCCRED")]
+    public void AC11d_шоста_перевірка_з_форми_за_хвилину_від_користувача_відхиляється()
+    {
+        var policy = new SourceTestRateLimitPolicy(new ConfigurationBuilder().Build());
+        var context = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(AuthenticationSetup.UserIdClaim, "9")], "test")),
+        };
+
+        var partition = policy.GetPartition(context);
+        using var limiter = partition.Factory(partition.PartitionKey);
+
+        var granted = Enumerable.Range(0, 6).Select(_ => limiter.AttemptAcquire().IsAcquired).ToList();
+
+        Assert.Equal([true, true, true, true, true, false], granted);
+        Assert.Equal("user:9", partition.PartitionKey);
+        Assert.Equal("err.ECR-REQ-0429.tooManySourceTests", SourceTestRateLimitPolicy.DetailKey);
     }
 }
