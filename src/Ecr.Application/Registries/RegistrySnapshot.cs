@@ -268,6 +268,28 @@ public sealed class RegistrySnapshot : IRegistrySnapshot
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Індекс пари полів будується ЛІНИВО, раз на знімок (знімок — раз на інтервал чинності, спільний для рядків прогону), з тих
+    /// самих видимих записів у порядку <see cref="GetEntries"/>.
+    /// </remarks>
+    public IReadOnlyList<long>? FindReferencingBoth(
+        string registryCode, string firstLookupFieldCode, long firstTarget, string secondLookupFieldCode, long secondTarget)
+    {
+        if (!_registries.TryGetValue(registryCode, out var registry)
+            || !registry.Fields.TryGetValue(firstLookupFieldCode, out var first)
+            || !registry.Fields.TryGetValue(secondLookupFieldCode, out var second)
+            || first.DataType != CellDataType.Lookup
+            || second.DataType != CellDataType.Lookup
+            || first.Id == second.Id)
+        {
+            return null;
+        }
+
+        var index = registry.PairIndex(first.Id, second.Id, id => _entries[id]);
+        return index.TryGetValue((firstTarget, secondTarget), out var found) ? found : None;
+    }
+
+    /// <inheritdoc />
     public ExpressionValue GetField(long entryId, string fieldCode)
     {
         if (!_entries.TryGetValue(entryId, out var entry)
@@ -459,6 +481,31 @@ public sealed class RegistrySnapshot : IRegistrySnapshot
 
             list.Add(entryId);
         }
+
+        /// <summary>Індекс пари <c>Lookup</c>-полів (ціль першого, ціль другого) → записи в порядку <see cref="Entries"/>; лінивий, потокобезпечний.</summary>
+        public IReadOnlyDictionary<(long First, long Second), IReadOnlyList<long>> PairIndex(int firstFieldId, int secondFieldId, Func<long, EntryData> entry)
+            => _pairs.GetOrAdd((firstFieldId, secondFieldId), key => new Lazy<IReadOnlyDictionary<(long, long), IReadOnlyList<long>>>(() =>
+            {
+                var index = new Dictionary<(long, long), List<long>>();
+                foreach (var id in Entries)
+                {
+                    var values = entry(id).Values;
+                    if (values.TryGetValue(key.First, out var a) && a.RefEntryId is { } ta
+                        && values.TryGetValue(key.Second, out var b) && b.RefEntryId is { } tb)
+                    {
+                        if (!index.TryGetValue((ta, tb), out var list))
+                        {
+                            index[(ta, tb)] = list = [];
+                        }
+
+                        list.Add(id);
+                    }
+                }
+
+                return index.ToDictionary(p => p.Key, p => (IReadOnlyList<long>)p.Value.AsReadOnly());
+            })).Value;
+
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<(int First, int Second), Lazy<IReadOnlyDictionary<(long, long), IReadOnlyList<long>>>> _pairs = new();
 
         public bool TryGetReferencing(int fieldId, long target, out IReadOnlyList<long> found)
         {

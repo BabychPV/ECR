@@ -31,6 +31,9 @@ public sealed class SgFlaringBindingPerfTests(ITestOutputHelper output)
     private const int RowsPerCase = 23;     // ≈ 22,7 тис. рядків складу
     private const long LocationOnshore = 990_001;
 
+    /// <summary>Рівень трасування версії, як у продукті за замовчуванням (MethodologyVersion: ErrorsOnly), а не Full стенда.</summary>
+    private static readonly MethodologyDescriptor Production = ScriptStand.Descriptor(NumericMode.Legacy, Ecr.Domain.Enums.TraceLevel.ErrorsOnly);
+
     private static readonly string[] Columns = ["14", "412", "415", "416", "417", "453", "481", "999"];
 
     [Fact]
@@ -57,7 +60,7 @@ public sealed class SgFlaringBindingPerfTests(ITestOutputHelper output)
         output.WriteLine(string.Create(CultureInfo.InvariantCulture,
             $"INT month: {inputs.Count} rows, {values} output values in {elapsed.TotalMilliseconds:F0} ms ({elapsed.TotalMilliseconds / inputs.Count:F2} ms/row)"));
         Assert.Equal(inputs.Count * FlertCompositionSchema.ComponentColumns.Select(c => c.Column).Distinct().Count() * 2, values);
-        Assert.True(elapsed < TimeSpan.FromSeconds(10), $"INT month took {elapsed} (target < 10 s per monthly document)");
+        Assert.True(elapsed < TimeSpan.FromSeconds(5), $"INT month took {elapsed} (measured 0.9 s locally after the pair index; was 1.6-2.2 s)");
     }
 
     [Fact]
@@ -94,14 +97,14 @@ public sealed class SgFlaringBindingPerfTests(ITestOutputHelper output)
             $"TOX year: {inputs.Count} rows, {values} output values in {elapsed.TotalSeconds:F1} s ({elapsed.TotalMilliseconds / inputs.Count:F2} ms/row)"));
         Assert.Equal(5840, inputs.Count);
         Assert.True(values > 0);
-        Assert.True(elapsed < TimeSpan.FromMinutes(2), $"TOX year took {elapsed} (target < 2 min per full-year recalculation)");
+        Assert.True(elapsed < TimeSpan.FromSeconds(20), $"TOX year took {elapsed} (measured 6.2 s locally after the pair index; was 52-80 s)");
     }
 
     private static async Task<(TimeSpan Elapsed, int Values)> RunAsync(ScriptStand stand, List<CalculationInput> inputs)
     {
         stand.RegistryCache = new RegistrySnapshotCache(registryAsOfUtc: null);
         var binding = await stand.Module.PrepareAsync(
-            stand.Methodology, ScriptStand.DocumentId, new PeriodKey(ScriptStand.PeriodValue), stand.RegistryCache, CancellationToken.None);
+            Production, ScriptStand.DocumentId, new PeriodKey(ScriptStand.PeriodValue), stand.RegistryCache, CancellationToken.None);
         var watch = Stopwatch.StartNew();
         var values = 0;
         foreach (var input in inputs)
@@ -123,7 +126,7 @@ public sealed class SgFlaringBindingPerfTests(ITestOutputHelper output)
     private static CalculationArgument Date(string code, DateTime date) => new(code, null, null, null, null, date);
 
     private static CalculationInput Input(ScriptStand stand, string rowKey, params CalculationArgument[] arguments)
-        => new(stand.Methodology, ScriptStand.DocumentId, stand.Main.InstanceId, new PeriodKey(ScriptStand.PeriodValue), rowKey, arguments);
+        => new(Production, ScriptStand.DocumentId, stand.Main.InstanceId, new PeriodKey(ScriptStand.PeriodValue), rowKey, arguments);
 
     private static ScriptStand Stand(string text, (DateOnly, DateOnly) bounds)
     {

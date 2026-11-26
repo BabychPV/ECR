@@ -254,6 +254,7 @@ public static partial class SgFlaringBinding
         var components = FlertCompositionSchema.ComponentColumns.ToDictionary(p => p.Column, p => p.Component, StringComparer.Ordinal);
         var unknown = new List<string>();
         var guardedProperties = new HashSet<string>(StringComparer.Ordinal);
+        var readComponents = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var name in gcvNames)
         {
             if (!TrySplit(name, prefixes, out var prefix, out var x))
@@ -286,7 +287,16 @@ public static partial class SgFlaringBinding
             }
             else if (components.TryGetValue(x, out var component))
             {
-                Line(s, $"var {target} = REGSUM(\"GAS_COMPOSITION\", ROW.CASE == gas_case && ROW.COMPONENT == REGFIND(\"COMPONENT\", \"{component}\"), ROW.MOL_PCT);");
+                // ✎ вимір 26.11: компонент читається з кейсу рядка ОДИН раз; GCV_EOR_X ТОх — той самий кейс (H3), тож посилання.
+                if (readComponents.TryGetValue(component, out var already))
+                {
+                    Line(s, $"var {target} = {already};");
+                }
+                else
+                {
+                    Line(s, $"var {target} = REGSUM(\"GAS_COMPOSITION\", ROW.CASE == gas_case && ROW.COMPONENT == REGFIND(\"COMPONENT\", \"{component}\"), ROW.MOL_PCT);");
+                    readComponents[component] = target;
+                }
             }
             else
             {
