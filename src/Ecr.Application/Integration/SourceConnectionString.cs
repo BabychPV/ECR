@@ -27,6 +27,9 @@ public static class SourceConnectionString
     private static readonly HashSet<string> WindowsSignInKeys = new(StringComparer.Ordinal)
     {
         "integratedsecurity", "trustedconnection", "trusted_connection", "persistsecurityinfo",
+
+        // L6: інший спосіб входу (AAD, Kerberos-варіанти драйвера) поряд із логіном і паролем — неоднозначність.
+        "authentication",
     };
 
     /// <summary>Чи транспорт читає адресу як рядок з'єднання (а не URL).</summary>
@@ -79,6 +82,34 @@ public static class SourceConnectionString
         ArgumentNullException.ThrowIfNull(builder);
 
         return builder.Keys.Cast<string>().Any(key => WindowsSignInKeys.Contains(NormalizeKey(key)));
+    }
+
+    /// <summary>Чи рядок SqlClient вимикає шифрування чи перевірку сертифіката сервера (M3).</summary>
+    /// <param name="builder">Розібраний рядок.</param>
+    public static bool WeakensEncryption(DbConnectionStringBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        foreach (string key in builder.Keys)
+        {
+            var name = NormalizeKey(key);
+            var value = (Convert.ToString(builder[key], System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty).Trim();
+
+            if (name == "encrypt" && (value.Equals("false", StringComparison.OrdinalIgnoreCase)
+                                      || value.Equals("no", StringComparison.OrdinalIgnoreCase)
+                                      || value.Equals("optional", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+
+            if (name == "trustservercertificate" && (value.Equals("true", StringComparison.OrdinalIgnoreCase)
+                                                     || value.Equals("yes", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

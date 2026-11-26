@@ -195,4 +195,15 @@ public sealed class DataSourceCredentialContractTests
         Assert.Equal("user:9", partition.PartitionKey);
         Assert.Equal("err.ECR-REQ-0429.tooManySourceTests", SourceTestRateLimitPolicy.DetailKey);
     }
+
+    [Fact]
+    [Trait("Finding", "P-1126-SRCCRED")]
+    public void AC11d_дія_перевірки_з_форми_несе_політику_межі_частоти()
+    {
+        // ⛔ Без атрибута політика 5/хв існувала б і не діяла на жоден запит (мутація: прибрати [EnableRateLimiting]).
+        var action = typeof(DataSourcesController).GetMethod(nameof(DataSourcesController.TestConnection))!;
+        var limit = Assert.Single(action.GetCustomAttributes(typeof(Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute), inherit: true));
+
+        Assert.Equal(SourceTestRateLimitPolicy.PolicyName, ((Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute)limit).PolicyName);
+    }
 }

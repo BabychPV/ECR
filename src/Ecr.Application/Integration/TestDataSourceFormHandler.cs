@@ -82,7 +82,8 @@ public sealed partial class TestDataSourceFormHandler(
     ICurrentUser currentUser,
     IClock clock,
     ILogger<TestDataSourceFormHandler> logger,
-    IDataSourceCredentialResolver? credentials = null)
+    IDataSourceCredentialResolver? credentials = null,
+    IDataSourceCredentialRejections? rejections = null)
 {
     /// <summary>Ключ: з тіла перевіряються лише PiSqlClient і Sql.</summary>
     public const string TransportKey = "err.ECR-REQ-0422.dataSourceTestTransport";
@@ -110,6 +111,12 @@ public sealed partial class TestDataSourceFormHandler(
             throw ListDataSourcesHandler.Invalid(TransportKey, "З тіла форми перевіряються лише PiSqlClient і Sql.");
         }
 
+        // L7: невідомий режим входу — відмова, а не «Windows за замовчуванням».
+        if (!Enum.IsDefined(form.AuthMode))
+        {
+            throw Invalid(DataSourceCredentialRules.CredentialsInvalidKey, "authMode");
+        }
+
         var stored = form.SourceId is { } id ? await ListDataSourcesHandler.FindAsync(store, id, ct).ConfigureAwait(false) : null;
         var code = stored?.Code ?? "FORM_TEST";
 
@@ -117,7 +124,7 @@ public sealed partial class TestDataSourceFormHandler(
             .ValidateConnectionAsync(code, form.Transport, form.Endpoint, form.SecondaryEndpoint, form.Catalog, ct)
             .ConfigureAwait(false);
 
-        var (resolvedCredentials, userName, rejected) = Credentials(form, stored, endpoint, spare);
+        var (resolvedCredentials, userName, outcome, storedUsed) = Credentials(form, stored, endpoint, spare);
 
         var target = Fingerprint(form.Transport, endpoint, spare, userName);
         var gateKey = profile.UserId.ToString(CultureInfo.InvariantCulture) + "|" + target;
@@ -141,9 +148,9 @@ public sealed partial class TestDataSourceFormHandler(
         DataSourceTestResult result;
         try
         {
-            result = rejected
-                ? TestDataSourceConnectionHandler.Failed(TestDataSourceConnectionHandler.FailureCredentialsRejected)
-                : await ProbeAsync(form, code, endpoint, spare, resolvedCredentials, target, ct).ConfigureAwait(false);
+            result = outcome is { } failed
+                ? TestDataSourceConnectionHandler.Failed(failed)
+                : await ProbeAsync(form, code, endpoint, spare, resolvedCredentials, target, storedUsed, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -164,22 +171,28 @@ public sealed partial class TestDataSourceFormHandler(
     /// <summary>
     /// Облікові дані перевірки: з тіла; збережені — лише того самого джерела при незмінних цілі й логіні (b).
     /// </summary>
-    private (ResolvedCredentials? Credentials, string? UserName, bool Rejected) Credentials(
+    /// <returns>
+    /// Облікові дані; логін; категорія відмови без з'єднання (<c>credentialsRejected</c>/<c>credentialsUnreadable</c>)
+    /// або <c>null</c>; збережене джерело, чий пароль підставлено (йому — мітка відмови, M1).
+    /// </returns>
+    private (ResolvedCredentials? Credentials, string? UserName, string? Outcome, DataSource? StoredUsed) Credentials(
         DataSourceFormTest form, DataSource? stored, string endpoint, string? spare)
     {
         if (form.AuthMode != SourceAuthMode.UserPassword)
         {
-            return (null, null, false);
+            return (null, null, null, null);
         }
 
-        DataSourceCredentialRules.RequireNoWindowsSignIn(form.Transport, endpoint, "endpoint");
-        DataSourceCredentialRules.RequireNoWindowsSignIn(form.Transport, spare, "secondaryEndpoint");
+        DataSourceCredentialRules.RequireConnectionStringForPassword(form.Transport, endpoint, "endpoint");
+        DataSourceCredentialRules.RequireConnectionStringForPassword(form.Transport, spare, "secondaryEndpoint");
 
         var userName = form.UserName?.Trim();
         if (!DataSourceCredentialRules.IsValidUserName(userName))
         {
             throw Invalid(DataSourceCredentialRules.CredentialsInvalidKey, "userName");
         }
+
+        DataSourceCredentialRules.RequireDriverSafe(form.Transport, userName, "userName");
 
         if (form.Password is { } password)
         {
@@ -188,7 +201,9 @@ public sealed partial class TestDataSourceFormHandler(
                 throw Invalid(DataSourceCredentialRules.CredentialsInvalidKey, "password");
             }
 
-            return (new ResolvedCredentials(userName!, password), userName, false);
+            DataSourceCredentialRules.RequireDriverSafe(form.Transport, password.Reveal(), "password");
+
+            return (new ResolvedCredentials(userName!, password), userName, null, null);
         }
 
         var sameTarget = stored is { AuthMode: SourceAuthMode.UserPassword, HasPassword: true }
@@ -204,15 +219,24 @@ public sealed partial class TestDataSourceFormHandler(
         // ⛔ R-03: збережений пароль уже відхилено — до драйвера не йдемо й не розшифровуємо.
         if (stored!.CredentialsRejectedAt is not null)
         {
-            return (null, userName, true);
+            return (null, userName, TestDataSourceConnectionHandler.FailureCredentialsRejected, null);
         }
 
-        return ((credentials ?? throw new CredentialsUnreadableException(stored.Code)).Resolve(stored), userName, false);
+        // ⛔ L1: пароль не розшифровується — категорія й запис у журналі безпеки, а не 502.
+        try
+        {
+            var resolved = (credentials ?? throw new CredentialsUnreadableException(stored.Code)).Resolve(stored);
+            return (resolved, userName, null, stored);
+        }
+        catch (CredentialsUnreadableException)
+        {
+            return (null, userName, TestDataSourceConnectionHandler.FailureCredentialsUnreadable, null);
+        }
     }
 
     private async Task<DataSourceTestResult> ProbeAsync(
         DataSourceFormTest form, string code, string endpoint, string? spare, ResolvedCredentials? resolved,
-        string target, CancellationToken ct)
+        string target, DataSource? storedUsed, CancellationToken ct)
     {
         var probe = probes.FirstOrDefault(p => p.Transport == form.Transport);
         if (probe is null)
@@ -246,6 +270,12 @@ public sealed partial class TestDataSourceFormHandler(
             if (category == TestDataSourceConnectionHandler.FailureAuth)
             {
                 lockout.RecordFailure(target, clock.UtcNow);
+
+                // ⛔ M1: підставлено ЗБЕРЕЖЕНИЙ пароль — це та сама відмова, що й у збору: мітка джерелу (R-03).
+                if (storedUsed is not null)
+                {
+                    await SourceCredentialRejection.ReportAsync(rejections, storedUsed, logger).ConfigureAwait(false);
+                }
             }
 
             TestDataSourceConnectionHandler.LogProbeFailed(
@@ -255,14 +285,47 @@ public sealed partial class TestDataSourceFormHandler(
         }
     }
 
-    /// <summary>Відбиток цілі (транспорт, канонічні адреси, логін) — без самих значень у пам'яті воріт.</summary>
-    private static string Fingerprint(ExternalTransport transport, string endpoint, string? spare, string? userName)
+    /// <summary>
+    /// Відбиток цілі для паузи й воріт: НОРМАЛІЗОВАНИЙ обліковий запис і хости — без самих значень у пам'яті.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ H1: обліковий запис блокує AF, а не текст рядка з'єднання. Тому ключ — логін у нижньому регістрі без
+    /// <c>DOMAIN\</c> і <c>@realm</c> плюс хости (політикою адреси, у нижньому регістрі, без порядку). Регістр, префікс
+    /// домену чи зайвий ключ (<c>;Timeout=15</c>) паузу не обходять.
+    /// </remarks>
+    internal static string Fingerprint(ExternalTransport transport, string endpoint, string? spare, string? userName)
     {
-        var text = string.Join(
-            "\u001f", transport.ToString(), DataSourceAddress.Canonical(transport, endpoint),
-            DataSourceAddress.Canonical(transport, spare), userName);
+        var hosts = new[] { endpoint, spare }
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .SelectMany(a => (transport == ExternalTransport.Sql
+                ? DataSourceEndpointPolicy.SqlClientHostsOf(a!)
+                : DataSourceEndpointPolicy.SqlHostsOf(a!)) ?? [a!])
+            .Select(h => h.Trim().ToLowerInvariant())
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal);
+
+        var text = string.Join("\u001f", hosts) + "\u001e" + Principal(userName);
 
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+    }
+
+    /// <summary>Обліковий запис без регістру, домену (<c>DOMAIN\user</c>) і області (<c>user@realm</c>).</summary>
+    internal static string Principal(string? userName)
+    {
+        var name = (userName ?? string.Empty).Trim();
+        var slash = name.LastIndexOf('\\');
+        if (slash >= 0)
+        {
+            name = name[(slash + 1)..];
+        }
+
+        var at = name.IndexOf('@', StringComparison.Ordinal);
+        if (at >= 0)
+        {
+            name = name[..at];
+        }
+
+        return name.ToLowerInvariant();
     }
 
     private static BusinessRuleException Invalid(string messageKey, string field)

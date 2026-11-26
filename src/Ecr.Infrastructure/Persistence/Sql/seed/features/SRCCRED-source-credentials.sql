@@ -29,6 +29,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0429.tooManySourceTests', N'ru', N'Слишком много проверок подключения. Подождите минуту и повторите.'),
     (N'err.ECR-REQ-0429.sourceTestTargetPaused', N'ru', N'Источник несколько раз подряд отклонил вход. Проверки этого адреса приостановлены на 15 минут, чтобы не заблокировать учётную запись.'),
     (N'audit.eventLabel.DataSourceCredentialChanged', N'ru', N'Изменены учётные данные источника'),
+    (N'sources.credentialsRejectedBadge', N'ru', N'Пароль отклонён'),
+    (N'sources.credentialsUnreadableBadge', N'ru', N'Пароль не читается'),
+    (N'err.ECR-REQ-0422.dataSourceCredentialsCharacters', N'ru', N'Имя пользователя и пароль PI SQL Client не могут содержать символы «{», «}» и «;»: драйвер может прочитать их как часть строки подключения.'),
+    (N'err.ECR-REQ-0422.dataSourcePasswordUnencrypted', N'ru', N'Пароль SQL-логина передаётся только по зашифрованному подключению с проверкой сервера. Уберите Encrypt=false/no/optional и TrustServerCertificate=true из строки подключения.'),
+    (N'err.ECR-INT-0503.connectFailedNoRetry', N'ru', N'Подключение к источнику «{dataSource}» не установлено; при входе по имени пользователя и паролю такая ошибка не повторяется автоматически, чтобы не заблокировать учётную запись. Подробности — в журнале сервера.'),
     (N'sources.authMode', N'kz', N'Аутентификация'),
     (N'sources.authModeHint', N'kz', N'ECR көзге қалай кіреді. Windows — ECR қызметтік тіркелгісі атынан. Пайдаланушы аты мен құпиясөз — тек PI SQL Client және Sql үшін; құпиясөз шифрланып сақталады және ешқашан көрсетілмейді.'),
     (N'sources.authMode.Windows', N'kz', N'Windows (ECR қызметтік тіркелгісі)'),
@@ -54,7 +59,12 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.dataSourceTestTransport', N'kz', N'Пішіннің сақталмаған мәндерін тексеру тек PI SQL Client және Sql үшін қолжетімді. PI Web API қосылымын сақтап, содан кейін тексеріңіз.'),
     (N'err.ECR-REQ-0429.tooManySourceTests', N'kz', N'Қосылым тексерулері тым көп. Бір минут күтіп, қайталаңыз.'),
     (N'err.ECR-REQ-0429.sourceTestTargetPaused', N'kz', N'Көз кіруден бірнеше рет қатарынан бас тартты. Тіркелгі бұғатталмауы үшін осы мекенжайды тексеру 15 минутқа тоқтатылды.'),
-    (N'audit.eventLabel.DataSourceCredentialChanged', N'kz', N'Көздің тіркелгі деректері өзгертілді')
+    (N'audit.eventLabel.DataSourceCredentialChanged', N'kz', N'Көздің тіркелгі деректері өзгертілді'),
+    (N'sources.credentialsRejectedBadge', N'kz', N'Құпиясөз қабылданбады'),
+    (N'sources.credentialsUnreadableBadge', N'kz', N'Құпиясөз оқылмайды'),
+    (N'err.ECR-REQ-0422.dataSourceCredentialsCharacters', N'kz', N'PI SQL Client пайдаланушы аты мен құпиясөзінде «{», «}» және «;» таңбалары болмауы тиіс: драйвер оларды қосылым жолының бөлігі ретінде оқуы мүмкін.'),
+    (N'err.ECR-REQ-0422.dataSourcePasswordUnencrypted', N'kz', N'SQL логинінің құпиясөзі тек сервер тексерілетін шифрланған қосылым арқылы жіберіледі. Қосылым жолынан Encrypt=false/no/optional және TrustServerCertificate=true параметрлерін алып тастаңыз.'),
+    (N'err.ECR-INT-0503.connectFailedNoRetry', N'kz', N'«{dataSource}» көзіне қосылым орнатылмады; пайдаланушы аты мен құпиясөз арқылы кіргенде тіркелгі бұғатталмауы үшін мұндай қате автоматты түрде қайталанбайды. Толығырақ — сервер журналында.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -89,7 +99,12 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'err.ECR-REQ-0422.dataSourceTestTransport', N'en', N'Testing unsaved form values is available for PI SQL Client and Sql only. Save the PI Web API connection and test it.', 1),
     (N'err.ECR-REQ-0429.tooManySourceTests', N'en', N'Too many connection tests. Wait a minute and try again.', 1),
     (N'err.ECR-REQ-0429.sourceTestTargetPaused', N'en', N'The source refused the sign-in several times in a row. Tests of this address are paused for 15 minutes so that the account is not locked.', 1),
-    (N'audit.eventLabel.DataSourceCredentialChanged', N'en', N'Source credentials changed', 1)
+    (N'audit.eventLabel.DataSourceCredentialChanged', N'en', N'Source credentials changed', 1),
+    (N'sources.credentialsRejectedBadge', N'en', N'Password rejected', 1),
+    (N'sources.credentialsUnreadableBadge', N'en', N'Password unreadable', 1),
+    (N'err.ECR-REQ-0422.dataSourceCredentialsCharacters', N'en', N'The PI SQL Client user name and password cannot contain the characters "{", "}" or ";": the driver may read them as part of the connection string.', 1),
+    (N'err.ECR-REQ-0422.dataSourcePasswordUnencrypted', N'en', N'A SQL login password is only sent over an encrypted connection with a verified server. Remove Encrypt=false/no/optional and TrustServerCertificate=true from the connection string.', 1),
+    (N'err.ECR-INT-0503.connectFailedNoRetry', N'en', N'The connection to source "{dataSource}" could not be established; with a user name and password this error is not retried automatically, so that the account is not locked. The server log has the details.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

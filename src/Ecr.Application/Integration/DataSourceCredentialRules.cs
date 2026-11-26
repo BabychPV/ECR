@@ -44,6 +44,12 @@ public static class DataSourceCredentialRules
     /// <summary>Ключ: логін чи пароль відсутні або недопустимі.</summary>
     public const string CredentialsInvalidKey = "err.ECR-REQ-0422.dataSourceCredentialsInvalid";
 
+    /// <summary>Ключ: символи, які драйвер PI SQL Client може прочитати як межу ключа (M2).</summary>
+    public const string CredentialsCharactersKey = "err.ECR-REQ-0422.dataSourceCredentialsCharacters";
+
+    /// <summary>Ключ: пароль пішов би без перевіреного шифрування (Sql, M3).</summary>
+    public const string PasswordUnencryptedKey = "err.ECR-REQ-0422.dataSourcePasswordUnencrypted";
+
     /// <summary>Ключ: транспорт не вміє логіна й пароля (PiWebApi).</summary>
     public const string CredentialsTransportKey = "err.ECR-REQ-0422.dataSourceCredentialsTransport";
 
@@ -95,8 +101,8 @@ public static class DataSourceCredentialRules
             throw Invalid(CredentialsInvalidKey, "clearPassword", "Пароль стирається лише разом із переходом на Windows.");
         }
 
-        RequireNoWindowsSignIn(transport, endpoint, "endpoint");
-        RequireNoWindowsSignIn(transport, secondaryEndpoint, "secondaryEndpoint");
+        RequireConnectionStringForPassword(transport, endpoint, "endpoint");
+        RequireConnectionStringForPassword(transport, secondaryEndpoint, "secondaryEndpoint");
 
         var wasUserPassword = current == SourceAuthMode.UserPassword;
         var userName = input.UserName is not null ? input.UserName.Trim() : wasUserPassword ? existing!.UserName : null;
@@ -106,12 +112,16 @@ public static class DataSourceCredentialRules
             throw Invalid(CredentialsInvalidKey, "userName", "Логін джерела: 1..256 символів без керівних.");
         }
 
+        RequireDriverSafe(transport, userName, "userName");
+
         if (input.Password is { } password)
         {
             if (!IsValidPassword(password))
             {
                 throw Invalid(CredentialsInvalidKey, "password", "Пароль джерела: 1..256 символів без NUL.");
             }
+
+            RequireDriverSafe(transport, password.Reveal(), "password");
 
             return new SourceCredentialPlan(SourceAuthMode.UserPassword, userName, password, Changed: true);
         }
@@ -155,14 +165,41 @@ public static class DataSourceCredentialRules
     /// <c>Trusted_Connection</c>, <c>Persist Security Info</c>) — інакше драйвер може проігнорувати логін і піти службовим
     /// записом, а людина бачила б «працює під логіном».
     /// </summary>
-    internal static void RequireNoWindowsSignIn(ExternalTransport transport, string? address, string field)
+    /// <remarks>
+    /// ⛔ M3 (Sql): <c>Encrypt=false|no|optional</c> або <c>TrustServerCertificate=true</c> — пароль SQL-логіна пішов би
+    /// без шифрування чи без перевірки сервера (перехоплення посередником). Умовчання SqlClient — <c>Mandatory</c>.
+    /// </remarks>
+    internal static void RequireConnectionStringForPassword(ExternalTransport transport, string? address, string field)
     {
-        if (SourceConnectionString.Parse(transport, address) is { } builder
-            && SourceConnectionString.HasWindowsSignInKey(builder))
+        if (SourceConnectionString.Parse(transport, address) is not { } builder)
+        {
+            return;
+        }
+
+        if (SourceConnectionString.HasWindowsSignInKey(builder))
         {
             throw Invalid(
                 CredentialsInvalidKey, field,
-                "У режимі логіна й пароля рядок з'єднання не має нести Integrated Security / Trusted_Connection.");
+                "У режимі логіна й пароля рядок з'єднання не має нести Integrated Security / Trusted_Connection / Authentication.");
+        }
+
+        if (transport == ExternalTransport.Sql && SourceConnectionString.WeakensEncryption(builder))
+        {
+            throw Invalid(
+                PasswordUnencryptedKey, field,
+                "Пароль SQL-логіна йде лише з перевіреним шифруванням: приберіть Encrypt=false/optional і TrustServerCertificate=true.");
+        }
+    }
+
+    /// <summary>
+    /// ⛔ M2: доки не доведено, що нативний драйвер PI SQL Client читає <c>}}</c> як <c>}</c>, логін і пароль
+    /// PiSqlClient не мають <c>{</c>, <c>}</c>, <c>;</c> — інакше значення могло б дописати ключ у рядок з'єднання.
+    /// </summary>
+    internal static void RequireDriverSafe(ExternalTransport transport, string? value, string field)
+    {
+        if (transport == ExternalTransport.PiSqlClient && value is not null && value.IndexOfAny(['{', '}', ';']) >= 0)
+        {
+            throw Invalid(CredentialsCharactersKey, field, "Логін і пароль PI SQL Client не можуть містити «{», «}» або «;».");
         }
     }
 
