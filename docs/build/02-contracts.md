@@ -5305,6 +5305,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/data-sources/{id}` | `Integration.Manage` | 7 |
 | `DELETE` | `/api/v1/data-sources/{id}` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/data-sources/{id}/test` | `Integration.Manage` | 7 |
+| `POST` | `/api/v1/data-sources/test-connection` | `Integration.Manage` (P-1126-SRCCRED §13.1: перевірка з незбережених значень форми, лише PiSqlClient/Sql; пароль з тіла або збережений за `sourceId` при тій самій цілі й логіні; 5/хв на користувача → `429 tooManySourceTests`, 3 відмови входу поспіль → пауза цілі 15 хв `429 sourceTestTargetPaused`; нічого не зберігає) | 7 |
 | `GET` | `/api/v1/data-sources/{id}/catalog` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/data-sources/{id}/probe` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/entity-field-maps` | `Integration.Manage` | 5 |

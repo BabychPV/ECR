@@ -414,6 +414,7 @@ public static class LoginRateLimiting
             // тобто вона діє лише після автентифікації (див. `Program.cs`).
             options.AddPolicy<string, SearchRateLimitPolicy>(SearchRateLimitPolicy.PolicyName);
             options.AddPolicy<string, SmtpTestRateLimitPolicy>(SmtpTestRateLimitPolicy.PolicyName);
+            options.AddPolicy<string, SourceTestRateLimitPolicy>(SourceTestRateLimitPolicy.PolicyName); // P-1126-SRCCRED
             options.AddPolicy<string, DocumentValidateRateLimitPolicy>(DocumentValidateRateLimitPolicy.PolicyName); // P1-08
             options.AddPolicy<string, TableDiscussionPostRateLimitPolicy>(TableDiscussionPostRateLimitPolicy.PolicyName); // S-6
             options.AddPolicy<string, DocumentExportRateLimitPolicy>(DocumentExportRateLimitPolicy.PolicyName); // PT-6

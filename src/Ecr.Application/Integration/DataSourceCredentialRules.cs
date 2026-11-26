@@ -155,7 +155,7 @@ public static class DataSourceCredentialRules
     /// <c>Trusted_Connection</c>, <c>Persist Security Info</c>) — інакше драйвер може проігнорувати логін і піти службовим
     /// записом, а людина бачила б «працює під логіном».
     /// </summary>
-    private static void RequireNoWindowsSignIn(ExternalTransport transport, string? address, string field)
+    internal static void RequireNoWindowsSignIn(ExternalTransport transport, string? address, string field)
     {
         if (SourceConnectionString.Parse(transport, address) is { } builder
             && SourceConnectionString.HasWindowsSignInKey(builder))

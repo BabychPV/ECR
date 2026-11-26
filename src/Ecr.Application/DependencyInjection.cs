@@ -581,6 +581,8 @@ public static class DependencyInjection
         services.AddScoped<Integration.SaveDataSourceHandler>();
         services.AddScoped<Integration.DeleteDataSourceHandler>();
         services.AddScoped<Integration.TestDataSourceConnectionHandler>();
+        services.AddSingleton<Integration.SourceTargetLockout>();
+        services.AddScoped<Integration.TestDataSourceFormHandler>();
         services.AddScoped<Integration.BrowseSourceCatalogHandler>();
 
         // ФВ-13.17: «Перевірити конфігурацію» до першого збору — пробне

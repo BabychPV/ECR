@@ -29,6 +29,7 @@ public sealed class DataSourcesController(
     SaveDataSourceHandler save,
     DeleteDataSourceHandler delete,
     TestDataSourceConnectionHandler test,
+    TestDataSourceFormHandler testForm,
     BrowseSourceCatalogHandler catalog,
     ProbeSourcePathHandler probe) : ControllerBase
 {
@@ -213,6 +214,36 @@ public sealed class DataSourcesController(
         ArgumentNullException.ThrowIfNull(request);
 
         return Ok(await test.HandleAsync(id, request.Reason, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Перевіряє з'єднання з НЕЗБЕРЕЖЕНИХ значень форми (P-1126-SRCCRED §13.1). Право <c>Integration.Manage</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Нічого не зберігає. Лише <c>PiSqlClient</c> і <c>Sql</c> (інакше <c>422 dataSourceTestTransport</c>); та сама
+    /// валідація адреси, що при збереженні. Пароль — з тіла; збережений підставляється лише за <c>sourceId</c> при тій
+    /// самій цілі й логіні, інакше <c>422 dataSourcePasswordReentryRequired</c>. Не більше 5 на хвилину на користувача
+    /// (<c>429 tooManySourceTests</c>); після 3 відмов входу поспіль ціль на паузі 15 хв (<c>429 sourceTestTargetPaused</c>).
+    /// Відповідь — як у <c>POST …/{id}/test</c>: лише категорія; у журналі безпеки — без адреси й пароля.
+    /// </remarks>
+    [HttpPost("test-connection")]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting(Ecr.Api.Security.SourceTestRateLimitPolicy.PolicyName)]
+    [ProducesResponseType<DataSourceTestResult>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<IActionResult> TestConnection(
+        [FromBody] TestDataSourceConnectionRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await testForm.HandleAsync(
+            new DataSourceFormTest(
+                request.SourceId, request.Transport, request.Endpoint, request.SecondaryEndpoint, request.Catalog,
+                request.AuthMode, request.UserName, request.Password, request.Reason),
+            ct).ConfigureAwait(false));
     }
 }
 
