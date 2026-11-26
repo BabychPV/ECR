@@ -204,7 +204,8 @@ public sealed partial class PermitBindingService(
         HashSet<string> existingKeys,
         List<PermitBindingIssue> warnings,
         List<(long RowId, int ColumnId)>? changed,
-        CancellationToken ct)
+        CancellationToken ct,
+        int author = SystemUserId)
     {
         var fresh = plan.Rows.Where(r => !existingKeys.Contains(r.RowKey)).ToList();
         if (fresh.Count == 0)
@@ -279,7 +280,7 @@ public sealed partial class PermitBindingService(
                 upserts.Add(new CellRecord(address, tableDefId, data));
                 audits.Add(new CellChangeRecord(
                     now, address, documentId, planned.RowKey, OldValue: null, NewValue: Describe(data),
-                    SystemUserId, CellChangeOrigins.Permit, IsLateEdit: false, CorrelationId: null));
+                    author, CellChangeOrigins.Permit, IsLateEdit: false, CorrelationId: null));
             }
         }
 
@@ -289,7 +290,7 @@ public sealed partial class PermitBindingService(
         if (upserts.Count > 0)
         {
             await cells.ApplyAsync(
-                new CellChangeSet(instanceId, upserts, Deletes: [], TouchedRowIds: [], SystemUserId, IsLateEdit: false), ct)
+                new CellChangeSet(instanceId, upserts, Deletes: [], TouchedRowIds: [], author, IsLateEdit: false), ct)
                 .ConfigureAwait(false);
             await audit.WriteCellChangesAsync(audits, ct).ConfigureAwait(false);
         }
@@ -299,8 +300,10 @@ public sealed partial class PermitBindingService(
 
     /// <inheritdoc />
     public async Task<PermitRefreshResult> RefreshAsync(
-        long documentId, PeriodKey periodKey, long tableInstanceId, PermitBindingView view, PermitBindingPlan plan, CancellationToken ct)
+        long documentId, PeriodKey periodKey, long tableInstanceId, PermitBindingView view, PermitBindingPlan plan, CancellationToken ct,
+        int? actorUserId = null)
     {
+        var author = actorUserId ?? SystemUserId;
         ArgumentNullException.ThrowIfNull(view);
         ArgumentNullException.ThrowIfNull(plan);
 
@@ -337,10 +340,10 @@ public sealed partial class PermitBindingService(
             .ToList();
 
         var added = await InsertRowsAsync(
-                documentId, periodKey, tableInstanceId, view, plan.Rows, existingKeys, warnings, changed, ct)
+                documentId, periodKey, tableInstanceId, view, plan.Rows, existingKeys, warnings, changed, ct, author)
             .ConfigureAwait(false);
         var updated = await UpdateExistingAsync(
-                documentId, periodKey, tableInstanceId, view, plan.Rows, existing, warnings, changed, ct)
+                documentId, periodKey, tableInstanceId, view, plan.Rows, existing, warnings, changed, ct, author)
             .ConfigureAwait(false);
 
         return new PermitRefreshResult(added, updated, removed, warnings, changed);
@@ -362,7 +365,8 @@ public sealed partial class PermitBindingService(
         List<ExistingRow> existing,
         List<PermitBindingIssue> warnings,
         List<(long RowId, int ColumnId)> changed,
-        CancellationToken ct)
+        CancellationToken ct,
+        int author = SystemUserId)
     {
         var live = existing.Where(r => !r.IsDeleted).ToDictionary(r => r.Key, r => r.Id, StringComparer.Ordinal);
         var targets = plan.Rows.Where(p => live.ContainsKey(p.RowKey)).ToList();
@@ -458,7 +462,7 @@ public sealed partial class PermitBindingService(
                     now, address, documentId, target.RowKey,
                     OldValue: existingValue is null ? null : Describe(existingValue),
                     NewValue: desired is null ? null : Describe(desired),
-                    SystemUserId, CellChangeOrigins.Permit, IsLateEdit: false, CorrelationId: null));
+                    author, CellChangeOrigins.Permit, IsLateEdit: false, CorrelationId: null));
                 changed.Add((rowId, column.Id));
                 touchedRows.Add(rowId);
             }
@@ -477,7 +481,7 @@ public sealed partial class PermitBindingService(
         }
 
         await cells.ApplyAsync(
-            new CellChangeSet(instanceId, upserts, deletes, [.. touchedRows], SystemUserId, IsLateEdit: false), ct)
+            new CellChangeSet(instanceId, upserts, deletes, [.. touchedRows], author, IsLateEdit: false), ct)
             .ConfigureAwait(false);
         await audit.WriteCellChangesAsync(audits, ct).ConfigureAwait(false);
 

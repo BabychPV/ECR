@@ -239,7 +239,7 @@ public sealed class RefreshPermitBindingHandler(
         }
 
         var result = await service
-            .RefreshAsync(documentId, periodKey, instance.TableInstanceId, view, plan, ct)
+            .RefreshAsync(documentId, periodKey, instance.TableInstanceId, view, plan, ct, profile.UserId)
             .ConfigureAwait(false);
 
         if (result.Added > 0 || result.Updated > 0)

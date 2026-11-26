@@ -87,6 +87,54 @@ public sealed class SheetChangesApiTests(SqlServerFixture sql)
         Assert.Equal(s.Bob.Id, byBob.GetProperty("lastChangedByUserId").GetInt32());
     }
 
+    /// <summary>
+    /// ✎ D-577 (L5-1/L5-2, BUG-7 UX-огляду): власні «Add row» і «Delete row» не будять банер самого автора; для іншого
+    /// користувача — банер з автором (журнал рядків <c>aud.RowChange</c>).
+    /// </summary>
+    /// <remarks>
+    /// Мутація (локально, не комітити): прибрати гілку <c>UNION ALL … aud.RowChange</c> з <c>SheetChangeStore.AttributeSql</c> —
+    /// тест червоніє на першому ж опитуванні Alice після додавання рядка (<c>changed = true</c> без автора).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-577")]
+    public async Task L5_власні_додавання_й_видалення_рядка_не_будять_банер_а_для_іншого_будять_з_автором()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var alice = await SignedInAsync(app, s.Alice.UserName).ConfigureAwait(true);
+        using var bob = await SignedInAsync(app, s.Bob.UserName).ConfigureAwait(true);
+
+        var aliceMarker = (await ChangesAsync(alice, s, null).ConfigureAwait(true)).GetProperty("marker").GetString()!;
+        var bobMarker = (await ChangesAsync(bob, s, null).ConfigureAwait(true)).GetProperty("marker").GetString()!;
+
+        var rowKey = $"X{Guid.NewGuid():N}"[..12];
+        var created = await alice.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{Num(s.DocumentId)}/rows", UriKind.Relative),
+            new { tableInstanceId = s.Table1InstanceId, rowKey }).ConfigureAwait(true);
+        Assert.True(created.IsSuccessStatusCode, $"{created.StatusCode}: {await created.Content.ReadAsStringAsync().ConfigureAwait(true)} {app.ErrorsText}");
+
+        var ownAdd = await ChangesAsync(alice, s, aliceMarker).ConfigureAwait(true);
+        Assert.False(ownAdd.GetProperty("changed").GetBoolean(), ownAdd.ToString());
+
+        var foreignAdd = await ChangesAsync(bob, s, bobMarker).ConfigureAwait(true);
+        Assert.True(foreignAdd.GetProperty("changed").GetBoolean(), foreignAdd.ToString());
+        Assert.Equal(s.Alice.Id, foreignAdd.GetProperty("lastChangedByUserId").GetInt32());
+        Assert.Equal(JsonValueKind.String, foreignAdd.GetProperty("lastChangedAt").ValueKind);
+
+        aliceMarker = ownAdd.GetProperty("marker").GetString()!;
+        bobMarker = foreignAdd.GetProperty("marker").GetString()!;
+        var deleted = await alice.DeleteAsync(new Uri(
+            $"/api/v1/documents/{Num(s.DocumentId)}/tables/{Num(s.Table1InstanceId)}/rows/{rowKey}", UriKind.Relative)).ConfigureAwait(true);
+        Assert.True(deleted.IsSuccessStatusCode, $"{deleted.StatusCode}: {await deleted.Content.ReadAsStringAsync().ConfigureAwait(true)}");
+
+        var ownDelete = await ChangesAsync(alice, s, aliceMarker).ConfigureAwait(true);
+        Assert.False(ownDelete.GetProperty("changed").GetBoolean(), ownDelete.ToString());
+        var foreignDelete = await ChangesAsync(bob, s, bobMarker).ConfigureAwait(true);
+        Assert.True(foreignDelete.GetProperty("changed").GetBoolean(), foreignDelete.ToString());
+        Assert.Equal(s.Alice.Id, foreignDelete.GetProperty("lastChangedByUserId").GetInt32());
+    }
+
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Схована_таблиця_не_потрапляє_в_зміни_а_схований_аркуш_404()

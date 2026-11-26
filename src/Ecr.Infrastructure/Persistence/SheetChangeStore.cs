@@ -80,6 +80,11 @@ public sealed class SheetChangeStore(EcrDbContext db) : ISheetChangeStore
     /// рядка), плюс ознака «видима колонка перерахована». Рядок без жодного запису — відсутній у відповіді.
     /// </summary>
     /// <remarks>
+    /// ✎ D-577 (L5, BUG-7 UX-огляду): і журнал РЯДКІВ <c>aud.RowChange</c> (додано/видалено рядок — <c>CreateRowHandler</c>,
+    /// <c>DeleteRowHandler</c>, новий рядок PATCH): рядок без запису значень, але з записом «додав/видалив X», має автора.
+    /// Доти власні Add row / Delete row давали самій людині «This sheet was updated by another user» без автора. Пошук —
+    /// <c>IX_RowChange_Document (DocumentId, PeriodKey, ChangedAt DESC)</c> у партиціях вікна; видимість — уже в пробі (рядки
+    /// лише видимих таблиць), схованих колонок у журналі рядків немає.
     /// ⚠ Саме ОСТАННЯ, а не «будь-яка чужа у вікні»: інакше власна правка рядка, який хтось правив за хвилину ДО
     /// маркера (вже показане), будила б банер — вікно має запас у 15 хв назад на довгі транзакції. Серед змін одного
     /// моменту (один PATCH) перевага — видимій колонці: схована зміна мовчить, видима тієї ж правки — ні.
@@ -94,7 +99,12 @@ public sealed class SheetChangeStore(EcrDbContext db) : ISheetChangeStore
               LEFT JOIN OPENJSON(@hidden) WITH (value int '$') h ON h.value = c.ColumnDefId
              WHERE c.DocumentId = @doc AND c.ChangedAt >= @from
                AND c.TableRowId IN (SELECT r.value FROM OPENJSON(@rows) WITH (value bigint '$') r)
-               AND c.Origin NOT IN (N'CalcError', N'CalcErrorResolved')),
+               AND c.Origin NOT IN (N'CalcError', N'CalcErrorResolved')
+            UNION ALL
+            SELECT rc.TableRowId, rc.ChangedByUserId, rc.ChangedAt, rc.Id, 0 AS IsRecalc, 0 AS IsHidden
+              FROM aud.RowChange rc
+             WHERE rc.DocumentId = @doc AND rc.ChangedAt >= @from
+               AND rc.TableRowId IN (SELECT r.value FROM OPENJSON(@rows) WITH (value bigint '$') r)),
         ranked AS (
             SELECT c.*,
                    ROW_NUMBER() OVER (PARTITION BY c.TableRowId ORDER BY c.IsRecalc, c.ChangedAt DESC, c.IsHidden, c.Id DESC) AS Rn,
