@@ -113,7 +113,7 @@ describe('templateApi: адреса й метод кожної дії картк
     expect(calls[1]?.body).toStrictEqual({ singleDocumentPerProject: false });
   });
 
-  it('b14 (D-577): вікно року — той самий PUT …/document-policy, прапорець B151 передається поточним', async () => {
+  it('b14 (D-579): вікно року — той самий PUT …/document-policy, прапорець B151 передається поточним', async () => {
     const { calls } = mockServer();
 
     await setTemplateYearEditWindow(card({ id: 9, singleDocumentPerProject: true }), true);

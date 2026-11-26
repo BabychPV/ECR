@@ -29994,7 +29994,7 @@ export interface paths {
          * ✎ B151: скільки документів шаблону дозволено в проєкті — один чи скільки завгодно. Право `Template.Edit`.
          * @description Увімкнення «один документ на проєкт», коли в якомусь проєкті документів шаблону вже кілька, —
          *     `409 ECR-TMPL-0409` (`singleDocumentDuplicates`) з переліком видимих дублікатів.
-         *     ✎ b14 (D-577): `yearEditWindow` — «вікно редагування = рік проєкту + зміщення» (не передано — без змін).
+         *     ✎ b14 (D-579): `yearEditWindow` — «вікно редагування = рік проєкту + зміщення» (не передано — без змін).
          */
         put: {
             parameters: {
@@ -45227,7 +45227,7 @@ export interface components {
         SetTemplateDocumentPolicyRequest: {
             /** @description `true` — один документ шаблону на проєкт; `false` — скільки завгодно. */
             singleDocumentPerProject: boolean;
-            /** @description ✎ b14 (D-577): `true` — річні дані правляться у вікні «рік проєкту + зміщення»; `false` — за станом періоду;
+            /** @description ✎ b14 (D-579): `true` — річні дані правляться у вікні «рік проєкту + зміщення»; `false` — за станом періоду;
              *     `null` (не передано) — без змін. */
             yearEditWindow?: null | boolean;
         };
@@ -47019,7 +47019,7 @@ export interface components {
              */
             singleDocumentPerProject: boolean;
             /**
-             * @description ✎ b14 (D-577): `true` — річні дані документів шаблону в місячному проєкті правляться у вікні «рік проєкту +
+             * @description ✎ b14 (D-579): `true` — річні дані документів шаблону в місячному проєкті правляться у вікні «рік проєкту +
              *     зміщення», а не за станом місяця-якоря.
              * @default false
              */

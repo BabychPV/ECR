@@ -1,4 +1,4 @@
--- B14:year-edit-window ── ru/kz: b14 document-move (D-577, рішення людини 25.11) — «вікно редагування = рік проєкту + зміщення» шаблону; власна порція ──
+-- B14:year-edit-window ── ru/kz: b14 document-move (D-579, рішення людини 25.11) — «вікно редагування = рік проєкту + зміщення» шаблону; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES

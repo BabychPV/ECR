@@ -26,7 +26,7 @@ public sealed class TemplateConfiguration : IEntityTypeConfiguration<Template>
         // ✎ B151: типово — скільки завгодно документів на проєкт (поведінка до B151; Land).
         builder.Property(x => x.SingleDocumentPerProject).HasDefaultValue(false, "DF_Template_SingleDocumentPerProject");
 
-        // ✎ b14 (D-577): типово — стан періоду, як доти (Land, HSE400); HSE401 вмикає міграція B14.
+        // ✎ b14 (D-579): типово — стан періоду, як доти (Land, HSE400); HSE401 вмикає міграція B14.
         builder.Property(x => x.YearEditWindow).HasDefaultValue(false, "DF_Template_YearEditWindow");
         builder.LocalizedText(x => x.NameL10n);
         builder.Property(x => x.ArchivedAt).HasColumnType("datetime2(3)");

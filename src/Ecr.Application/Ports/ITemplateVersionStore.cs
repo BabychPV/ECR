@@ -497,7 +497,7 @@ public sealed record TemplateDuplicateDocument(int ProjectId, long DocumentId);
 /// ✎ B151: <c>true</c> — у проєкті щонайбільше один документ цього шаблону.
 /// </param>
 /// <param name="YearEditWindow">
-/// ✎ b14 (D-577): <c>true</c> — річні дані документів шаблону в місячному проєкті правляться у вікні «рік проєкту +
+/// ✎ b14 (D-579): <c>true</c> — річні дані документів шаблону в місячному проєкті правляться у вікні «рік проєкту +
 /// зміщення», а не за станом місяця-якоря.
 /// </param>
 public sealed record TemplateCard(

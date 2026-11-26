@@ -1,4 +1,4 @@
-﻿# b14 document-move T2 (D-577, review H6): which HSE400 document of a year is the working one.
+﻿# b14 document-move T2 (D-579, review H6): which HSE400 document of a year is the working one.
 # Land reads the HSE400 composition of a year from the document with the LARGEST id (B80, any project except
 # HSE400_GOLD). A second working document of the same year would silently become Land's source - so the builder
 # never creates one: after the 26.11 move the working document lives in LANDUI2026 (monthly, together with Land).

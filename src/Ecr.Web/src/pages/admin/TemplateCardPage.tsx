@@ -154,7 +154,7 @@ export function TemplateCardPage(): JSX.Element {
     onError: showApiError,
   });
 
-  /* ✎ b14 (D-577): «вікно редагування = рік проєкту + зміщення» — той самий ендпоінт, прапорець B151 передається поточним. */
+  /* ✎ b14 (D-579): «вікно редагування = рік проєкту + зміщення» — той самий ендпоінт, прапорець B151 передається поточним. */
   const yearEditWindow = useMutation({
     mutationFn: ({ current, enabled }: { current: TemplateCard; enabled: boolean }) =>
       setTemplateYearEditWindow(current, enabled),
@@ -353,7 +353,7 @@ export function TemplateCardPage(): JSX.Element {
                   hint: t('templates.documentsPerProjectHint'),
                 },
                 {
-                  // ✎ b14 (D-577): до коли правляться річні дані документів шаблону в місячному проєкті.
+                  // ✎ b14 (D-579): до коли правляться річні дані документів шаблону в місячному проєкті.
                   label: t('templates.yearEditWindow'),
                   value: loaded.yearEditWindow
                     ? t('templates.yearEditWindowProjectYear')

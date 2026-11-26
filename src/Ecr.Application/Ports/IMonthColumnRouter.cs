@@ -59,7 +59,7 @@ public interface IMonthColumnRouter
     public bool RoutesComputedVersion(int templateVersionId) => false;
 
     /// <summary>
-    /// Таблиця підпадає під маршрутизацію: не видалена і <c>LayoutKind = MonthsInColumns</c> або ✎ b14 (D-577)
+    /// Таблиця підпадає під маршрутизацію: не видалена і <c>LayoutKind = MonthsInColumns</c> або ✎ b14 (D-579)
     /// <c>PerPeriodInstance</c> версії з розкладкою <c>YearWithMonthColumns</c> («річна» таблиця: одна копія на рік, усі
     /// комірки — у якорі року; спадковий прапор «усі версії» її не вмикає).
     /// </summary>

@@ -27,7 +27,7 @@ param(
     [switch]$SkipCompare,
     [ValidateSet('Scratch', 'Live')][string]$Target = 'Scratch', [string]$BaseUrl, [string]$Database, [string]$ConfirmStand, [string]$CredentialFile,
     [switch]$PreviewOnly, [switch]$AcceptNaePreview,
-    # ✎ b14 (D-577): проєкт документа HSE401. Порожньо - LANDUI2026 на live (після перенесення 26.11), HSE401_2026 на scratch.
+    # ✎ b14 (D-579): проєкт документа HSE401. Порожньо - LANDUI2026 на live (після перенесення 26.11), HSE401_2026 на scratch.
     # Вікно W-1 (v14 ДО перенесення) передає -ProjectCode HSE401_2026 явно.
     [string]$ProjectCode
 )

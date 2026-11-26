@@ -130,7 +130,7 @@ public sealed class SetTemplateDocumentPolicyHandler(
     /// <param name="templateId">Шаблон.</param>
     /// <param name="single"><c>true</c> — один документ на проєкт; <c>false</c> — скільки завгодно.</param>
     /// <param name="yearEditWindow">
-    /// ✎ b14 (D-577): «вікно редагування = рік проєкту + зміщення»; <c>null</c> — без змін.
+    /// ✎ b14 (D-579): «вікно редагування = рік проєкту + зміщення»; <c>null</c> — без змін.
     /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="NotFoundException"><c>ECR-TMPL-0404</c> — шаблону немає.</exception>

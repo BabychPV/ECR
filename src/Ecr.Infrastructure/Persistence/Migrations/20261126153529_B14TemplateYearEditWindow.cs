@@ -19,7 +19,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 defaultValue: false)
                 .Annotation("Relational:DefaultConstraintName", "DF_Template_YearEditWindow");
 
-            // ✎ b14 document-move (D-577, людина 25.11): HSE401 — таблиця вводу без подання й погодження; її річні дані
+            // ✎ b14 document-move (D-579, людина 25.11): HSE401 — таблиця вводу без подання й погодження; її річні дані
             // правляться у вікні «рік проєкту + зміщення». Діє лише в місячному проєкті (річний HSE401_2026 — як доти).
             // Немає шаблону HSE401 (свіжа база) — нічого.
             migrationBuilder.Sql(Hse401YearWindowSql);

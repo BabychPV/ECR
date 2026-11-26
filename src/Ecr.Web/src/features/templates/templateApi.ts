@@ -63,7 +63,7 @@ export function setTemplateDocumentPolicy(templateId: number, singleDocumentPerP
 }
 
 /**
- * ✎ b14 (D-577): «вікно редагування = рік проєкту + зміщення» для річних даних шаблону (`true`) або стан періоду
+ * ✎ b14 (D-579): «вікно редагування = рік проєкту + зміщення» для річних даних шаблону (`true`) або стан періоду
  * (`false`). Правило «один документ на проєкт» передається поточним — той самий ендпоінт, без зміни прапорця B151.
  */
 export function setTemplateYearEditWindow(card: TemplateCard, yearEditWindow: boolean): Promise<TemplateCard> {

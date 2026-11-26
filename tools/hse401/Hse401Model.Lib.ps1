@@ -32,7 +32,7 @@ $script:HseYearDays = 'IF([Period].Year % 4 = 0, 366, 365)'
 
 function Get-Hse401Columns {
     <# Колонки в порядку шаблону. Kind: Input (вводиться), Formula (рахується), NewInput (нова вхідна, якої нема в Excel). #>
-    # ✎ b14 N1 (D-577, HSE401 v14): довжина року з [Period].Year замість [Period].Days - таблиця 775 одна на рік (якір 202601);
+    # ✎ b14 N1 (D-579, HSE401 v14): довжина року з [Period].Year замість [Period].Days - таблиця 775 одна на рік (якір 202601);
     # [Period].Days там 365 у річному HSE401_2026 і 31 у січні місячного LANDUI2026 (x11.8). Межа: вікові роки (2100).
     param([string]$RateExpr = ('[H_LIMIT_T] / IF([H_BASIS] = NULL, {0}, [H_BASIS])' -f $script:HseYearDays))
     $c = New-Object System.Collections.Generic.List[object]
