@@ -20,6 +20,25 @@ function periodState(c: SourceImpact['consumers'][number]): 'approved' | 'partia
   return c.sheets.some((s) => !s.willRecalculate) ? 'partial' : 'pending';
 }
 
+/** Ключ статусу періоду: затверджений чи «не буде перераховано» з іншої причини (`skipReason`). */
+function statusKey(c: SourceImpact['consumers'][number]): string {
+  const state = periodState(c);
+  if (state !== 'approved') return `sourceImpact.status.${state}`;
+
+  return c.skipReason === 'dependentsOff' || c.skipReason === 'notWritable' ? `sourceImpact.status.${c.skipReason}` : 'sourceImpact.status.approved';
+}
+
+/**
+ * ✎ Чому період у переліку (людина: «змінила січень, а вікно показало ще 2 місяці» — без пояснення). Причину дає сервер тим
+ * самим правилом, що й каскад: власник зміненого місяця, увесь рік (чому — `wholeYearReason`), шаблон читає рік, міжмісячна
+ * формула (який місяць читає), якір року, прохід читача методології.
+ */
+function whyText(c: SourceImpact['consumers'][number]): string {
+  return c.reason === 'crossMonth' && c.readsPeriodKey !== null && c.readsPeriodKey !== undefined
+    ? t('sourceImpact.why.crossMonth', { period: formatPeriodKey(c.readsPeriodKey) })
+    : t(`sourceImpact.why.${c.reason}`);
+}
+
 /**
  * B80 N5 (D-554): діалог впливу затвердження / повернення аркуша-джерела на залежні документи.
  *
@@ -87,6 +106,12 @@ export function SourceImpactModal({
             : t(`sourceImpact.intro.info.${action}`, { total: impact.dependentCount })}
         </Text>
 
+        {impact.wholeYearReason !== null && impact.wholeYearReason !== undefined && impact.dependentCount > 0 ? (
+          <Text size="sm" data-testid="source-impact-whole-year">
+            {t(`sourceImpact.wholeYear.${impact.wholeYearReason}`)}
+          </Text>
+        ) : null}
+
         {impact.consumers.length > 0 ? (
           <Stack gap="xs" component="section" aria-label={t('sourceImpact.list')}>
             <Text size="sm" fw={600}>
@@ -112,15 +137,12 @@ export function SourceImpactModal({
                       {c.projectCode} · {c.documentKey} · {formatPeriodKey(c.periodKey)}
                     </Text>
                     <Badge size="sm" variant="light" color={periodState(c) === 'pending' ? 'statusInfo' : 'statusWarning'}>
-                      {t(
-                        periodState(c) === 'approved'
-                          ? 'sourceImpact.status.approved'
-                          : periodState(c) === 'partial'
-                            ? 'sourceImpact.status.partial'
-                            : 'sourceImpact.status.pending',
-                      )}
+                      {t(statusKey(c))}
                     </Badge>
                   </Group>
+                  <Text size="xs" c="dimmed" data-testid="source-impact-why">
+                    {whyText(c)}
+                  </Text>
                   {c.sheets.length > 1 ? (
                     <Group gap="xs" wrap="wrap" data-testid="source-impact-sheets">
                       {c.sheets.slice(0, MAX_SHEET_BADGES).map((sh) => (

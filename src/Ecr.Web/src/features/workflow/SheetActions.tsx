@@ -20,6 +20,7 @@ import { can, useSession, type MeDto } from '@/shared/session/useSession';
 import { LazyConfirmModal, LazyReasonModal, LazySourceImpactModal } from './lazyDialogs';
 import { pendingSlices, usePendingCount } from '@/features/grid/pendingStore';
 import {
+  editedMonths,
   editedPeriods,
   fetchSourceImpact,
   impactRefusal,
@@ -1092,11 +1093,11 @@ export function useSheetActions({
   // сторінки: річний шаблон показує місяці колонками, і сторінка завжди стоїть на січні (зріз правок теж якірний). Місяць питається раз за життя екрана.
   const checkedEditPeriods = useRef(new Set<number>());
   const editCheckRunning = useRef(false);
-  const [editNoticeState, setEditNotice] = useState<{ impact: SourceImpact; periodKey: number } | null>(null);
+  const [editNoticeState, setEditNotice] = useState<{ impact: SourceImpact; periodKey: number; months: number[] | undefined } | null>(null);
   const editNotice = editNoticeState?.impact ?? null;
-  const approvedRecalcRequest = useRef<{ hash: string; reason: string; sheetDefId: number; periodKey: number } | null>(null);
+  const approvedRecalcRequest = useRef<{ hash: string; reason: string; sheetDefId: number; periodKey: number; months: number[] | undefined } | null>(null);
 
-  const runApprovedRecalc = (request: { hash: string; reason: string; sheetDefId: number; periodKey: number }): void => {
+  const runApprovedRecalc = (request: { hash: string; reason: string; sheetDefId: number; periodKey: number; months: number[] | undefined }): void => {
     approvedRecalcRequest.current = null;
     recalculateApprovedDependents(documentId, request, request.hash, request.reason).then(
       (result) => showDone(t('sourceImpact.approved.queued', { queued: result.queued })),
@@ -1117,6 +1118,11 @@ export function useSheetActions({
         // Без зрізів (не має бути при pendingCount > 0) — період сторінки, як було до D-5.
         return (edited.length > 0 ? edited : [periodKey]).find((p) => !checkedEditPeriods.current.has(p));
       };
+      // ✎ Місяці правки (річний HSE400: місяць — колонка): сервер покаже ті місяці споживачів, які порахує каскад (D-572).
+      const monthsOfEdits = (): number[] | undefined => {
+        const target = queryClient.getQueryData<SubmissionTarget>(submissionTargetKey(documentId, sheetDefId, periodKey, sheetCopyId));
+        return editedMonths(pendingSlices(), target?.monthColumnCodes);
+      };
       if (nextPeriod() !== undefined) {
         editCheckRunning.current = true;
         void (async () => {
@@ -1124,9 +1130,10 @@ export function useSheetActions({
             for (let p = nextPeriod(); p !== undefined; p = nextPeriod()) {
               checkedEditPeriods.current.add(p);
               if (isEditNoticeSuppressed(documentId, sheetDefId)) break;
-              const impact = await fetchSourceImpact(documentId, { sheetDefId, periodKey: p, sheetCopyId }, 'edit');
+              const months = monthsOfEdits();
+              const impact = await fetchSourceImpact(documentId, { sheetDefId, periodKey: p, sheetCopyId, months }, 'edit');
               if (impact !== null && impact.dependentCount > 0) {
-                setEditNotice({ impact, periodKey: p });
+                setEditNotice({ impact, periodKey: p, months });
                 break;
               }
             }
@@ -1665,7 +1672,13 @@ export function useSheetActions({
         onConfirm={(confirmed, extras) => {
           if (extras.suppress) suppressEditNotice(documentId, sheetDefId);
           if (confirmed.recalculateApproved === true && confirmed.hash !== null) {
-            const request = { hash: confirmed.hash, reason: confirmed.reason ?? '', sheetDefId, periodKey: editNoticeState?.periodKey ?? periodKey };
+            const request = {
+              hash: confirmed.hash,
+              reason: confirmed.reason ?? '',
+              sheetDefId,
+              periodKey: editNoticeState?.periodKey ?? periodKey,
+              months: editNoticeState?.months,
+            };
             // Правки вже збережено — виконуємо одразу; ні — після збереження (див. ефект вище).
             if (pendingCount === 0) runApprovedRecalc(request);
             else approvedRecalcRequest.current = request;

@@ -45,8 +45,9 @@ function impact(overrides: Partial<Impact> = {}): Impact {
     dependentCount: 1,
     approvedCount: 1,
     canRecalculateApproved: false,
+    wholeYearReason: null,
     consumers: [
-      { bindingCode: 'B', templateCode: 'LAND', documentId: 5, projectCode: 'LAND-26', documentKey: 'DOC-LAND', periodKey: 202601, approved: true, willRecalculate: false, skipReason: 'approved', sheets: [] },
+      { bindingCode: 'B', templateCode: 'LAND', documentId: 5, projectCode: 'LAND-26', documentKey: 'DOC-LAND', periodKey: 202601, approved: true, willRecalculate: false, skipReason: 'approved', sheets: [], reason: 'sourceMonth', readsPeriodKey: null },
     ],
     ...overrides,
   };
@@ -66,6 +67,8 @@ function show(options: {
   impactFor?: (periodKey: number) => Impact;
   /** D-5: місячні колонки аркуша (`submission-target.monthColumns`) — як їх повертає сервер для річного шаблону. */
   monthColumns?: { columnCode: string; monthNumber: number; periodKey: number; sheetStatus: string; tableDefId: number }[];
+  /** ✎ Річний проєкт HSE400: статусів місяців немає, лише місяць кожної місячної колонки (`monthColumnCodes`). */
+  monthColumnCodes?: { columnCode: string; monthNumber: number; tableDefId: number }[];
   refusals?: { status: number; errorCode: string; messageKey: string }[];
 }): void {
   posts.length = 0;
@@ -89,6 +92,9 @@ function show(options: {
         if (next === 'fail') return json({ title: 'boom', status: 500, errorCode: 'ECR-SYS-0500' }, 500);
 
         return json(next);
+      }
+      if (url.includes('/submission-target') && options.monthColumnCodes !== undefined) {
+        return json({ periods: [], monthColumns: [], monthColumnCodes: options.monthColumnCodes });
       }
       if (url.includes('/submission-target') && options.monthColumns !== undefined) {
         return json({ periods: [], monthColumns: options.monthColumns });
@@ -468,6 +474,33 @@ describe('SheetActions: перша правка аркуша-джерела — 
     await screen.findByTestId('source-impact-confirm');
     expect(impactUrls).toHaveLength(1);
     expect(impactUrls[0]).toContain('periodKey=202601');
+  });
+
+  it('s) річний HSE400 (статусів місяців немає): правка січневої колонки питає вплив з months=1 і несе місяці в перерахунок затверджених', async () => {
+    show({
+      state: 'Draft' as 'Submitted',
+      impacts: [editImpact({ canRecalculateApproved: true, impactHash: 'jan-1', sourceMonths: [202601] })],
+      monthColumnCodes: [{ columnCode: 'M01', monthNumber: 1, tableDefId: 3 }, { columnCode: 'M05', monthNumber: 5, tableDefId: 3 }],
+    });
+    openDocument(1);
+    await waitFor(() => expect((fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.some((c) => String(c[0]).includes('/submission-target'))).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const JanuaryCell = { ...EditCell, columnCode: 'M01' };
+    act(() => putPendingEdit(7, 202601, JanuaryCell));
+
+    await screen.findByTestId('source-impact-confirm');
+    expect(impactUrls).toHaveLength(1);
+    expect(impactUrls[0]).toContain('periodKey=202601');
+    expect(impactUrls[0]).toContain('&months=1');
+
+    fireEvent.click(screen.getByTestId('source-impact-approved'));
+    fireEvent.change(screen.getByLabelText(/sourceImpact\.reason\.label/), { target: { value: 'Акт 1' } });
+    fireEvent.click(screen.getByTestId('source-impact-confirm'));
+    act(() => discardPendingEdit(7, 202601, JanuaryCell));
+
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]?.body).toEqual({ sheetDefId: 42, periodKey: 202601, hash: 'jan-1', reason: 'Акт 1', months: [1] });
   });
 
   it('q) D-5: звичайний документ — правка в періоді сторінки питає саме його, один запит', async () => {
