@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import type { components } from '@/api/schema';
 import { t } from '@/shared/i18n';
 
 /**
@@ -6,37 +6,34 @@ import { t } from '@/shared/i18n';
  * «Calculated by: <методологія> · step <крок>», для вхідної — «Read by: <методології>» (з «required», коли методологія
  * вимагає значення).
  *
- * ⚠ ТИМЧАСОВИЙ типізований адаптер: поле дає сервер (lane doc-ux-server), і доки його контракту немає, `provenanceSource`
- * — `null`: запиту немає, рядків немає (жодного вигаданого шляху — сторож споживачів дій сервера). Коли контракт
- * зведено — сюди підставляється читання згенерованого типу; форма `ProvenanceSource` — те, що узгоджено з сервером.
+ * Джерело — зріз (контракт doc-ux-server, D-577): `ColumnDto.calculatedBy[]` / `ColumnDto.readBy[]`
+ * `{methodologyCode, methodologyName, step, required}`. Сітка кладе їх у комірку інспектора (`GridFormulaBar`), окремого
+ * запиту немає.
  */
-export interface ProvenanceMethodology {
-  readonly methodologyCode: string;
-  readonly methodologyName?: string | null;
-}
+export type ColumnMethodology = components['schemas']['ColumnMethodologyDto'];
 
 export interface ProvenanceSource {
-  /** Обчислена комірка: методологія й крок, що її пишуть; `null` — не обчислена. */
-  readonly calculatedBy?: (ProvenanceMethodology & { readonly stepCode?: string | null }) | null;
-  /** Вхідна комірка: методології, що її читають; `required` — методологія вимагає значення. */
-  readonly readBy?: readonly (ProvenanceMethodology & { readonly required?: boolean | null })[] | null;
+  readonly calculatedBy?: readonly ColumnMethodology[] | null;
+  readonly readBy?: readonly ColumnMethodology[] | null;
 }
 
 export type CellProvenance =
-  | { readonly kind: 'calculated'; readonly methodology: string; readonly step: string | null }
+  | { readonly kind: 'calculated'; readonly by: readonly { readonly methodology: string; readonly step: string | null }[] }
   | { readonly kind: 'input'; readonly readBy: readonly { readonly methodology: string; readonly required: boolean }[] };
 
-const nameOf = (m: ProvenanceMethodology): string =>
-  m.methodologyName !== undefined && m.methodologyName !== null && m.methodologyName.trim() !== '' ? m.methodologyName : m.methodologyCode;
+const nameOf = (m: ColumnMethodology): string => (m.methodologyName.trim() !== '' ? m.methodologyName : m.methodologyCode);
 
-/** Відповідь сервера → модель; нічого сказати — `null` (рядків немає, а не «—»). */
+/** Колонка зрізу → модель; нічого сказати — `null` (рядків немає, а не «—»). */
 export function provenanceFrom(source: ProvenanceSource | null | undefined): CellProvenance | null {
   if (source === null || source === undefined) return null;
-  if (source.calculatedBy !== null && source.calculatedBy !== undefined) {
-    const step = source.calculatedBy.stepCode;
-    return { kind: 'calculated', methodology: nameOf(source.calculatedBy), step: step === undefined || step === null || step === '' ? null : step };
+  const calculated = source.calculatedBy ?? [];
+  if (calculated.length > 0) {
+    return {
+      kind: 'calculated',
+      by: calculated.map((m) => ({ methodology: nameOf(m), step: m.step === null || m.step === '' ? null : m.step })),
+    };
   }
-  const readBy = (source.readBy ?? []).map((m) => ({ methodology: nameOf(m), required: m.required === true }));
+  const readBy = (source.readBy ?? []).map((m) => ({ methodology: nameOf(m), required: m.required }));
 
   return readBy.length === 0 ? null : { kind: 'input', readBy };
 }
@@ -48,10 +45,11 @@ export function provenanceLines(provenance: CellProvenance | null): { readonly l
     return [
       {
         label: t('inspector.info.calculatedBy'),
-        value:
-          provenance.step === null
-            ? provenance.methodology
-            : t('inspector.info.calculatedByStep', { methodology: provenance.methodology, step: provenance.step }),
+        value: provenance.by
+          .map((entry) =>
+            entry.step === null ? entry.methodology : t('inspector.info.calculatedByStep', { methodology: entry.methodology, step: entry.step }),
+          )
+          .join('; '),
       },
     ];
   }
@@ -64,36 +62,4 @@ export function provenanceLines(provenance: CellProvenance | null): { readonly l
         .join(', '),
     },
   ];
-}
-
-/** Адреса комірки для запиту «звідки число». */
-export interface ProvenanceCell {
-  readonly documentId: number;
-  readonly tableInstanceId: number;
-  readonly periodKey: number;
-  readonly rowKey: string;
-  readonly columnCode: string;
-}
-
-/** Джерело даних; `null` — сервер ще не віддає поле (до зведення контракту doc-ux-server). */
-export type ProvenanceFetcher = (cell: ProvenanceCell) => Promise<ProvenanceSource | null>;
-
-let provenanceSource: ProvenanceFetcher | null = null;
-
-/** Для тестів і для зведення з контрактом: підставити джерело. */
-export function setProvenanceSource(fetcher: ProvenanceFetcher | null): void {
-  provenanceSource = fetcher;
-}
-
-/** «Звідки число» для комірки інспектора; без джерела — `null` без запиту. */
-export function useCellProvenance(cell: ProvenanceCell | null): CellProvenance | null {
-  const fetcher = provenanceSource;
-  const query = useQuery({
-    queryKey: ['cell-provenance', cell?.documentId, cell?.tableInstanceId, cell?.periodKey, cell?.rowKey, cell?.columnCode],
-    queryFn: () => (fetcher === null || cell === null ? Promise.resolve(null) : fetcher(cell)),
-    enabled: fetcher !== null && cell !== null,
-    retry: false,
-  });
-
-  return provenanceFrom(query.data);
 }

@@ -52,7 +52,7 @@ import {
 import { LockedRows } from './LockedRows';
 import { SheetLog, type InspectorSheet, type SheetLogTarget } from './SheetLog';
 import './inspector.css';
-import { provenanceLines, useCellProvenance } from './cellProvenance';
+import { provenanceFrom, provenanceLines } from './cellProvenance';
 import { NoticeList, useNoticeCount } from '../notices/NoticeLine';
 import { useStatusRequests } from '../notices/useOpenStatus';
 
@@ -1020,10 +1020,8 @@ function InfoTab({
 }): JSX.Element {
   // ⚠ Той самий ключ запиту, що в `SheetFillSummary`: зайвого запиту немає.
   const status = useTableStatus(documentId, periodKey);
-  // ✎ DOCUX: «Calculated by» / «Read by» — з контракту doc-ux-server (до зведення — без джерела, без рядків).
-  const provenance = useCellProvenance(
-    cell === null ? null : { documentId, tableInstanceId: cell.tableInstanceId, periodKey: cell.periodKey, rowKey: cell.rowKey, columnCode: cell.columnCode },
-  );
+  // ✎ DOCUX: «Calculated by» / «Read by» — походження колонки зі зрізу (контракт doc-ux-server, D-577).
+  const provenance = provenanceFrom(cell?.provenance);
 
   if (cell === null || table === undefined) {
     return <Empty title={t('inspector.noCellTitle')} hint={t('inspector.noCellHint')} />;
