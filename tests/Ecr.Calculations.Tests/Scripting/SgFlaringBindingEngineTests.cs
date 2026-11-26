@@ -217,7 +217,7 @@ public sealed class SgFlaringBindingEngineTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Requirement", "SGF-FLARING-BRIDGE")]
-    public async Task Компонент_без_рядка_в_наявному_кейсі__0__порожня_T_C__0_і_рядок_рахується()
+    public async Task Компонент_без_рядка_в_наявному_кейсі__0__T_C_кейсу_на_дату_події()
     {
         var stand = IntStand();
 
@@ -226,7 +226,23 @@ public sealed class SgFlaringBindingEngineTests
 
         Assert.Equal(10m, ScriptStand.Value(before, "TotalSulphurContent"));   // COS — рядка немає → 0
         Assert.Equal(30m + 273, ScriptStand.Value(before, "EC_Wzv"));
-        Assert.Equal(0m + 273, ScriptStand.Value(after, "EC_Wzv"));             // T_C порожня → 0, як стара система
+        Assert.Equal(35m + 273, ScriptStand.Value(after, "EC_Wzv"));
+    }
+
+    /// <summary>D-580 (людина 26.11, огляд M3): порожня T_C кейсу, яку читає формула, — відхилення з причиною, не 0 °C.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "SGF-FLARING-REVIEW-M3")]
+    public async Task Порожня_T_C_кейсу__рядок_відхилено__а_властивість_яку_ніхто_не_читає__не_заважає()
+    {
+        var error = await Assert.ThrowsAsync<DomainException>(() => IntStand().RunAsync("NO_TC"));
+        Assert.Contains("case_has_no_temperature", string.Join(" ", error.Details!.Values), StringComparison.Ordinal);
+
+        // Тіло без Temperature — той самий кейс без T_C рахується.
+        var text = SgFlaringBinding.Bind("output H2S : one = row.GCV_H2S;", SgFlaringConsumer.IntOnshore);
+        Assert.DoesNotContain("case_has_no_temperature", text, StringComparison.Ordinal);
+        var (output, _) = await IntStand(text).RunAsync("NO_TC");
+        Assert.Equal(7m, ScriptStand.Value(output, "H2S"));
     }
 
     // ───── AC-2: бракує складу/кейсу → відхилено з причиною, ніколи не 0 ─────
@@ -380,6 +396,7 @@ public sealed class SgFlaringBindingEngineTests
             .Column("STREAM_TYPE", CellDataType.String).Column("TOTAL")
             .Row("BEFORE", Event(new DateTime(2099, 1, 10, 19, 30, 0), Registries.OnshoreHp, 26, "KE01"))
             .Row("AFTER", Event(new DateTime(2099, 1, 15), Registries.OnshoreHp, 26, "KE01"))
+            .Row("NO_TC", Event(new DateTime(2099, 1, 10), Registries.OnshoreHp, 26, "No T"))
             .Row("NO_STREAM", Event(new DateTime(2099, 1, 10), Registries.OnshoreHp, 404, "KE01"))
             .Row("NO_CASE", Event(new DateTime(2099, 1, 10), Registries.OnshoreHp, 26, "KE01 typo"))
             .Row("NO_COMPOSITION", Event(new DateTime(2099, 1, 10), Registries.OnshoreHp, 26, "No composition"))
@@ -489,7 +506,8 @@ public sealed class SgFlaringBindingEngineTests
 
             var boundary = new DateOnly(2099, 1, 15);
             CaseWith(s26, "KE01", null, boundary, 30m, components, ("H2S", 10m), ("Methane", 80m));
-            CaseWith(s26, "KE01", boundary, null, null, components, ("H2S", 20m), ("Methane", 70m));
+            CaseWith(s26, "KE01", boundary, null, 35m, components, ("H2S", 20m), ("Methane", 70m));
+            CaseWith(s26, "No T", null, null, null, components, ("H2S", 7m));
             CaseWith(s26, "No composition", null, null, 30m, components, ("H2S", 1m)).NoComposition();
             CaseWith(s26, "Empty", null, null, 30m, components);
             CaseWith(s19, "370 Summer", null, null, 30m, components, ("H2S", 6m)).Fcid(996);

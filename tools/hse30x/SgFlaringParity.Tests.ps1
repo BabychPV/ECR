@@ -67,3 +67,14 @@ Describe 'SGF parity: tolerance and known classes' {
         ($out | Where-Object Kind -eq 'TOX').Known | Should Be 'L6'
     }
 }
+
+Describe 'SGF parity: D-580 / M3 cases without temperature' {
+    It 'classifies a legacy INT/CONT row of a no-temperature case missing in ECR as known M3-noTemperature' {
+        $legacy = @(
+            [pscustomobject]@{ Kind = 'INT'; Key = 'EF-7'; Column = 'EC_Wzv'; Value = 273; Fcid = '1581' },
+            [pscustomobject]@{ Kind = 'INT'; Key = 'EF-8'; Column = 'EC_Wzv'; Value = 300; Fcid = '2044' })
+        $out = @(Compare-SgParity -Legacy $legacy -Ecr @() -NoTemperatureFcids @('1581'))
+        ($out | Where-Object Key -eq 'EF-7').Known | Should Be 'M3-noTemperature'
+        ($out | Where-Object Key -eq 'EF-8').Known | Should BeNullOrEmpty
+    }
+}

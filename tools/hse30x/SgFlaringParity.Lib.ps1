@@ -48,7 +48,11 @@ function Find-SgDuplicates {
 
 function Compare-SgParity {
     <# Compares legacy and ECR rows; returns rows with Status equal|different|missingInEcr|missingInLegacy and Known class. #>
-    param([object[]]$Legacy, [object[]]$Ecr, [double]$RelTolerance = 1e-6)
+    # D-580 (human 26.11, review M3): a case without temperature is missing data in ECR (row rejected); legacy computed it at 0 C.
+    # Legacy INT/CONT rows whose FCID is such a case are a KNOWN difference "M3-noTemperature", not a defect.
+    param([object[]]$Legacy, [object[]]$Ecr, [double]$RelTolerance = 1e-6, [string[]]$NoTemperatureFcids = @())
+    $noTemperature = @{}
+    foreach ($id in $NoTemperatureFcids) { $noTemperature[[string]$id] = $true }
     $byKey = @{}
     foreach ($r in $Ecr) { $byKey["$($r.Kind)|$($r.Key)|$($r.Column)"] = $r }
     $seen = @{}
@@ -64,6 +68,8 @@ function Compare-SgParity {
         $known = ''
         if ($status -ne 'equal' -and $l.Kind -eq 'TOX' -and $l.Key -match '\|Train 1\|' -and $l.Key -match '\|481') { $known = 'L6' }
         if ($status -ne 'equal' -and $l.Kind -eq 'TOX' -and $l.Key -match '\|EOR\|') { $known = 'H3/L1' }
+        $fcid = if ($l.PSObject.Properties['Fcid']) { [string]$l.Fcid } else { $null }
+        if ($status -ne 'equal' -and $l.Kind -in @('INT', 'CONT') -and $fcid -and $noTemperature.ContainsKey($fcid)) { $known = 'M3-noTemperature' }
         [pscustomobject]@{ Kind = $l.Kind; Key = $l.Key; Column = $l.Column; Legacy = $l.Value
             Ecr = $(if ($e) { $e.Value } else { $null }); Status = $status; Known = $known }
     }

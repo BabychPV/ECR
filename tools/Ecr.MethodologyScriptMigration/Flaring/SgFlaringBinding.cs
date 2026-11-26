@@ -87,6 +87,15 @@ public static partial class SgFlaringBinding
         ["Z_CompressibilityFactor"] = FlertCompositionSchema.CaseZ,
     };
 
+    /// <summary>D-580 (огляд M3): змінна-умова «у кейсу немає властивості» — вона ж причина відхилення рядка.</summary>
+    public static IReadOnlyDictionary<string, string> CasePropertyGuards { get; } = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["Temperature"] = "case_has_no_temperature",
+        ["Density"] = "case_has_no_density",
+        ["Molecular_Weight"] = "case_has_no_molecular_weight",
+        ["Z_CompressibilityFactor"] = "case_has_no_compressibility_factor",
+    };
+
     /// <summary>Коди <see cref="LocationRegistry"/> гілки споживача (5 значень AF, DESIGN §5.4).</summary>
     /// <param name="consumer">Споживач.</param>
     public static IReadOnlyList<string> LocationsOf(SgFlaringConsumer consumer) => consumer switch
@@ -244,6 +253,7 @@ public static partial class SgFlaringBinding
 
         var components = FlertCompositionSchema.ComponentColumns.ToDictionary(p => p.Column, p => p.Component, StringComparer.Ordinal);
         var unknown = new List<string>();
+        var guardedProperties = new HashSet<string>(StringComparer.Ordinal);
         foreach (var name in gcvNames)
         {
             if (!TrySplit(name, prefixes, out var prefix, out var x))
@@ -262,7 +272,17 @@ public static partial class SgFlaringBinding
             }
             else if (CaseProperties.TryGetValue(x, out var field))
             {
-                Line(s, $"var {target} = REGFIELD(gas_case, \"{field}\") == null ? 0 : REGFIELD(gas_case, \"{field}\");");
+                // ✎ D-580 (людина 26.11, огляд M3): порожня властивість кейсу, яку ЧИТАЄ формула (T_C, …), — відсутні дані: рядок
+                // відхилено з причиною «case_has_no_<властивість>», а не розрахунок при 0 °C. Властивість, якої тіло не читає, не
+                // генерується й нічого не відхиляє.
+                var guard = CasePropertyGuards[x];
+                if (guardedProperties.Add(x))
+                {
+                    Line(s, $"var {guard} = REGFIELD(gas_case, \"{field}\") == null;");
+                    Line(s, $"reject when {guard};");
+                }
+
+                Line(s, $"var {target} = REGFIELD(gas_case, \"{field}\");");
             }
             else if (components.TryGetValue(x, out var component))
             {

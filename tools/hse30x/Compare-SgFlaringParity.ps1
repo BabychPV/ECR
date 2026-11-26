@@ -65,7 +65,7 @@ function Invoke-Select($conn, [string]$sql, [hashtable]$p) {
 }
 
 # Legacy: unpivot every numeric column (decimal/float/int/real/money) of a result table except ids into (Kind, Key, Column, Value, Month).
-function Get-LegacyRows($conn, [string]$table, [string]$kind, [string]$keySql, [string]$dateColumn, [string]$filter) {
+function Get-LegacyRows($conn, [string]$table, [string]$kind, [string]$keySql, [string]$dateColumn, [string]$filter, [string]$fcidSql = 'NULL') {
     $cols = Invoke-Select $conn @"
 SELECT c.name FROM sys.columns c JOIN sys.types t ON t.user_type_id = c.user_type_id
 WHERE c.object_id = OBJECT_ID(@t) AND t.name IN ('decimal','numeric','float','real','int','bigint','money')
@@ -74,7 +74,7 @@ WHERE c.object_id = OBJECT_ID(@t) AND t.name IN ('decimal','numeric','float','re
     if ($cols.Rows.Count -eq 0) { return @() }
     $values = ($cols.Rows | ForEach-Object { "('$($_.name)', CAST([$($_.name)] AS float))" }) -join ', '
     $sql = @"
-SELECT '$kind' AS Kind, $keySql AS [Key], v.Col AS [Column], v.Val AS [Value], CONVERT(char(7), [$dateColumn], 126) AS [Month]
+SELECT '$kind' AS Kind, $keySql AS [Key], v.Col AS [Column], v.Val AS [Value], CONVERT(char(7), [$dateColumn], 126) AS [Month], CAST($fcidSql AS nvarchar(20)) AS Fcid
 FROM dbo.$table WITH (NOLOCK) CROSS APPLY (VALUES $values) v(Col, Val)
 WHERE [$dateColumn] >= @from AND [$dateColumn] < @to AND v.Val IS NOT NULL $filter
 "@
@@ -89,8 +89,8 @@ $legacy = Open-ReadOnly $LegacyConnection
 $ecr = Open-ReadOnly $EcrConnection
 try {
     $legacyRows = @()
-    $legacyRows += Get-LegacyRows $legacy 'CalcResult_FlaringsIntermittent_SG' 'INT' "CAST(EFID AS nvarchar(100))" 'DateTime' ''
-    $legacyRows += Get-LegacyRows $legacy 'CalcResult_FlaringsContinuous_SG' 'CONT' "CAST(EFID AS nvarchar(100)) + '|' + CAST(FCID AS nvarchar(20))" 'DateTime' ''
+    $legacyRows += Get-LegacyRows $legacy 'CalcResult_FlaringsIntermittent_SG' 'INT' "CAST(EFID AS nvarchar(100))" 'DateTime' '' 'FCID'
+    $legacyRows += Get-LegacyRows $legacy 'CalcResult_FlaringsContinuous_SG' 'CONT' "CAST(EFID AS nvarchar(100)) + '|' + CAST(FCID AS nvarchar(20))" 'DateTime' '' 'FCID'
     $legacyRows += Get-LegacyRows $legacy 'CalcResult_FlaringThermaloxidizerDaily' 'TOX' $ToxKeySql 'Date' 'AND IsSour = 1'
 
     # review H4: window [From, To) without the off-by-one; yearly periods (YYYY00) only when the whole year is inside; only declared
@@ -123,7 +123,19 @@ WHERE m.Code IN ($codes) AND r.Kind = 0 AND $($window.Sql)
         exit 3
     }
 
-    $out = @(Compare-SgParity -Legacy @($legacyRows) -Ecr $ecrRows -RelTolerance $RelTolerance)
+    # D-580 / review M3: cases without temperature (STREAM_CASE.T_C empty) - ECR rejects their rows, legacy computed at 0 C.
+    $noTemperature = @((Invoke-Select $ecr @"
+SELECT DISTINCT CAST(CAST(fid.ValueNumeric AS bigint) AS nvarchar(20)) AS Fcid
+FROM dic.RegistryEntry e
+JOIN cfg.RegistryDef d ON d.Id = e.RegistryDefId AND d.Code = N'STREAM_CASE'
+JOIN cfg.RegistryFieldDef ff ON ff.RegistryDefId = d.Id AND ff.Code = N'LEGACY_COMPOSITION_ID'
+JOIN dic.RegistryValue fid ON fid.RegistryEntryId = e.Id AND fid.RegistryFieldDefId = ff.Id AND fid.ValueNumeric IS NOT NULL
+JOIN cfg.RegistryFieldDef ft ON ft.RegistryDefId = d.Id AND ft.Code = N'T_C'
+WHERE e.IsDeleted = 0
+  AND NOT EXISTS (SELECT 1 FROM dic.RegistryValue t WHERE t.RegistryEntryId = e.Id AND t.RegistryFieldDefId = ft.Id AND t.ValueNumeric IS NOT NULL)
+"@ @{}).Rows | ForEach-Object { $_.Fcid })
+    Write-Host "Cases without temperature (known difference M3-noTemperature): $($noTemperature.Count)"
+    $out = @(Compare-SgParity -Legacy @($legacyRows) -Ecr $ecrRows -RelTolerance $RelTolerance -NoTemperatureFcids $noTemperature)
     $csv = Join-Path $OutDir 'sgf-parity.csv'
     $out | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $csv
     $summary = $out | Group-Object Kind, Status, Known | Sort-Object Name | ForEach-Object { "| $($_.Name -replace ', ', ' | ') | $($_.Count) |" }
