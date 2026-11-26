@@ -78,7 +78,8 @@ public sealed class SourceCredentialFailureTests
 
         Assert.IsType<SourceAuthenticationException>(error);
         await _rejections.Received(1).ReportRejectedAsync(Arg.Is<DataSource>(s => ReferenceEquals(s, source)), Arg.Any<CancellationToken>());
-        Assert.NotNull(source.CredentialsRejectedAt);
+        Assert.True(source.CredentialsRejectedInProcess);
+        Assert.Null(source.CredentialsRejectedAt);
     }
 
     [Fact]
@@ -90,7 +91,8 @@ public sealed class SourceCredentialFailureTests
 
         Assert.IsType<SourceAuthenticationException>(error);
         await _rejections.Received(1).ReportRejectedAsync(Arg.Is<DataSource>(s => ReferenceEquals(s, source)), Arg.Any<CancellationToken>());
-        Assert.NotNull(source.CredentialsRejectedAt);
+        Assert.True(source.CredentialsRejectedInProcess);
+        Assert.Null(source.CredentialsRejectedAt);
     }
 
     [Theory]
@@ -104,7 +106,23 @@ public sealed class SourceCredentialFailureTests
         await SqlAdapter().FailOpenAsync(source, stored, userPassword, [18456], 18456, new InvalidOperationException("denied"), []);
 
         await _rejections.DidNotReceiveWithAnyArgs().ReportRejectedAsync(default!, default);
-        Assert.Null(source.CredentialsRejectedAt);
+        Assert.False(source.CredentialsRejectedInProcess);
+    }
+
+    [Fact]
+    public async Task L2_після_відмови_повторне_взяття_зєднання_в_тому_ж_прогоні_до_драйвера_не_йде()
+    {
+        var source = Source(ExternalTransport.PiSqlClient);
+        var store = Substitute.For<ICollectionStore>();
+        store.FindDataSourceAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(source);
+        var resolver = Substitute.For<IDataSourceCredentialResolver>();
+        var adapter = new PiSqlClientDataSource(
+            store, Substitute.For<ISecretProvider>(), logger: _piLog, credentials: resolver, rejections: _rejections);
+
+        await adapter.FailOpenAsync(source, true, true, ["28000"], new InvalidOperationException("denied"), []);
+
+        await Assert.ThrowsAsync<CredentialsRejectedException>(() => adapter.DiscoverAsync(1, CancellationToken.None));
+        resolver.DidNotReceiveWithAnyArgs().Resolve(default!);
     }
 
     // ── L10 ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -119,7 +137,8 @@ public sealed class SourceCredentialFailureTests
         var error = await SqlAdapter().FailOpenAsync(source, true, true, [18456], 18456, new InvalidOperationException("denied"), [_sentinel]);
 
         Assert.IsType<SourceAuthenticationException>(error);
-        Assert.NotNull(source.CredentialsRejectedAt);
+        Assert.True(source.CredentialsRejectedInProcess);
+        Assert.Null(source.CredentialsRejectedAt);
         Assert.Contains(_sqlLog.Entries, e => e.Level == LogLevel.Error && e.Exception is null);
         Assert.DoesNotContain(_sqlLog.Entries, e => e.Text.Contains(_sentinel, StringComparison.Ordinal));
     }

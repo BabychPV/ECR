@@ -39,6 +39,10 @@ public sealed class DataSourceConfiguration : IEntityTypeConfiguration<DataSourc
         builder.Property(x => x.PasswordProtected).HasColumnType("varbinary(max)");
         builder.Property(x => x.CredentialsRejectedAt).HasColumnType("datetime2(3)");
         builder.Ignore(x => x.HasPassword);
+
+        // ⛔ Лише в пам'яті прогону (L2): мітка в базі — тільки через IDataSourceCredentialRejections з умовою на версію.
+        builder.Ignore(x => x.CredentialsRejectedInProcess);
+        builder.Ignore(x => x.CredentialsBlocked);
         builder.HasIndex(x => x.Code).IsUnique().HasDatabaseName("UQ_DataSource");
     }
 }

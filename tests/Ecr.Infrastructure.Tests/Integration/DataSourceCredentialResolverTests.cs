@@ -168,4 +168,45 @@ public sealed class DataSourceCredentialRejectionsTests(Ecr.TestKit.SqlServerFix
             await db.SaveChangesAsync();
         }
     }
+
+    [Fact]
+    [Trait(Ecr.TestKit.TestCategories.Category, Ecr.TestKit.TestCategories.Integration)]
+    public async Task Ознака_відмови_в_прогоні_не_зберігається_SaveChanges_збору()
+    {
+        // ⛔ L2/L3: збір зберігає відстежувану сутність джерела; ознака відмови в пам'яті не має потрапити в базу (в обхід
+        // умови на версію) і не має давати конфлікту версії.
+        var code = "RIP_" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+        int id;
+        await using (var db = sql.CreateContext())
+        {
+            var source = new DataSource(
+                EcrCode.Create(code), new LocalizedText(new Dictionary<string, string> { ["en"] = "R" }),
+                ExternalTransport.Sql, "Server=db", "DataSource." + code);
+            source.ReplaceCredentials(SourceAuthMode.UserPassword, "reader", [1, 2, 3]);
+            db.DataSources.Add(source);
+            await db.SaveChangesAsync();
+            id = source.Id;
+        }
+
+        await using (var db = sql.CreateContext())
+        {
+            var tracked = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(
+                db.DataSources.Where(s => s.Id == id));
+            tracked.MarkCredentialsRejectedInProcess();
+
+            Assert.True(tracked.CredentialsBlocked);
+            Assert.Equal(Microsoft.EntityFrameworkCore.EntityState.Unchanged, db.Entry(tracked).State);
+            Assert.Equal(0, await db.SaveChangesAsync());
+        }
+
+        await using (var db = sql.CreateContext())
+        {
+            var after = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(
+                db.DataSources.Where(s => s.Id == id));
+            Assert.Null(after.CredentialsRejectedAt);
+            Assert.False(after.CredentialsBlocked);
+            db.DataSources.Remove(after);
+            await db.SaveChangesAsync();
+        }
+    }
 }

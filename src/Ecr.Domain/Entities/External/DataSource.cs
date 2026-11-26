@@ -90,6 +90,20 @@ public sealed class DataSource : Entity<int>
     /// </summary>
     public DateTime? CredentialsRejectedAt { get; private set; }
 
+    /// <summary>
+    /// Відмову входу збереженим паролем отримано В ЦЬОМУ ПРОЦЕСІ (прогоні) — ознака лише в пам'яті, у базу не йде.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Не <see cref="CredentialsRejectedAt"/>: та колонка ставиться лише окремим <c>UPDATE</c> з умовою на версію рядка
+    /// (L3). Якби прогін ставив її на відстежуваній сутності, наступний <c>SaveChanges</c> збору записав би її в обхід
+    /// цієї умови (або впав би конфліктом версії).
+    /// </remarks>
+    public bool CredentialsRejectedInProcess { get; private set; }
+
+    /// <summary>Чи збереженим паролем до джерела ходити не можна (мітка в базі або відмова в цьому прогоні).</summary>
+    public bool CredentialsBlocked
+        => AuthMode == SourceAuthMode.UserPassword && (CredentialsRejectedAt is not null || CredentialsRejectedInProcess);
+
     /// <summary>Чи заданий пароль — єдине, що про нього дозволено показувати.</summary>
     public bool HasPassword => PasswordProtected is { Length: > 0 };
 
@@ -168,6 +182,7 @@ public sealed class DataSource : Entity<int>
         UserName = windows ? null : userName;
         PasswordProtected = windows ? null : protectedPassword;
         CredentialsRejectedAt = null;
+        CredentialsRejectedInProcess = false;
     }
 
     /// <summary>Джерело відмовило в автентифікації збереженим паролем: збір і перевірка за id далі не ходять (R-03).</summary>
@@ -177,6 +192,15 @@ public sealed class DataSource : Entity<int>
         if (AuthMode == SourceAuthMode.UserPassword)
         {
             CredentialsRejectedAt = utcNow;
+        }
+    }
+
+    /// <summary>Відмова входу збереженим паролем у цьому прогоні: далі прогін до джерела не ходить (L2), у базу не пишеться.</summary>
+    public void MarkCredentialsRejectedInProcess()
+    {
+        if (AuthMode == SourceAuthMode.UserPassword)
+        {
+            CredentialsRejectedInProcess = true;
         }
     }
 

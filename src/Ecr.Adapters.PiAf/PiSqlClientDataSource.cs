@@ -1159,7 +1159,7 @@ public sealed partial class PiSqlClientDataSource(
     {
         // ⛔ R-03: джерело вже відмовило збереженим паролем — до драйвера не йдемо зовсім (і не розшифровуємо), доки
         // пароль не замінено: кожна повторна спроба наближає блокування облікового запису.
-        if (source is { AuthMode: SourceAuthMode.UserPassword, CredentialsRejectedAt: not null })
+        if (source.CredentialsBlocked)
         {
             throw new CredentialsRejectedException(source.Code);
         }

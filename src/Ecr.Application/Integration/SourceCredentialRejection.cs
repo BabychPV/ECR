@@ -17,7 +17,7 @@ public static partial class SourceCredentialRejection
     /// <param name="source">Відстежувана сутність прогону.</param>
     /// <param name="logger">Журнал.</param>
     /// <remarks>
-    /// ⛔ L2: мітка й на сутності в пам'яті — повторне взяття з'єднання в тому самому прогоні (оренда, повтор збирача)
+    /// ⛔ L2: ознака відмови й на сутності в пам'яті (`CredentialsRejectedInProcess`, EF її не зберігає) — повторне взяття з'єднання в тому самому прогоні (оренда, повтор збирача)
     /// бачить її й до драйвера не йде. ⛔ L10: збій запису мітки не підміняє відмову автентифікації — її тип і далі
     /// вирішує, що бачить людина й що робить наздоганяння.
     /// </remarks>
@@ -40,7 +40,7 @@ public static partial class SourceCredentialRejection
             }
         }
 
-        source.MarkCredentialsRejected(DateTime.UtcNow);
+        source.MarkCredentialsRejectedInProcess();
     }
 
     [LoggerMessage(

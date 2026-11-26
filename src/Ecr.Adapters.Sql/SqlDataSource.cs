@@ -524,7 +524,7 @@ public sealed partial class SqlDataSource(
     private Task<SqlConnection> OpenAsync(Domain.Entities.External.DataSource source, CancellationToken ct)
     {
         // ⛔ R-03: джерело вже відмовило збереженим паролем — до сервера не йдемо, доки пароль не замінено.
-        if (source is { AuthMode: SourceAuthMode.UserPassword, CredentialsRejectedAt: not null })
+        if (source.CredentialsBlocked)
         {
             throw new CredentialsRejectedException(source.Code);
         }
