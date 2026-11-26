@@ -415,7 +415,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'err.ECR-INT-0404.dataSource',                      N'en', N'Data source {id} does not exist.', 1),
     (N'err.ECR-REQ-0422.dataSourceInvalid',               N'en', N'A data source needs a name in at least one language, a known transport, an address of up to 400 characters and a parallelism ceiling between 1 and 32.', 1),
     (N'err.ECR-REQ-0422.dataSourceCodeTaken',             N'en', N'A data source with code "{code}" already exists.', 1),
-    (N'err.ECR-REQ-0422.dataSourceEndpointCarriesSecret', N'en', N'The address of a data source must not carry credentials: sources connect under the service account.', 1),
+    (N'err.ECR-REQ-0422.dataSourceEndpointCarriesSecret', N'en', N'The address of a data source must not carry credentials. Enter the user name and password in the Authentication fields instead (PI SQL Client and Sql).', 1),
     (N'err.ECR-REQ-0422.dataSourceTestReason',            N'en', N'A reason of up to 400 characters is required to test the connection: the attempt is recorded in the security journal.', 1),
     (N'err.ECR-JOB-0409.dataSourceInUse',                 N'en', N'This data source still carries {sourceEntities} collection entities and {collectionSchedules} schedules: disable it instead of deleting it.', 1),
     (N'err.ECR-JOB-0409.dataSourceTestRunning',           N'en', N'A connection test for data source "{code}" is already running: wait for it to finish.', 1),
@@ -1902,7 +1902,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     -- відмови, а не текст винятку (інакше кнопка — сканер внутрішньої мережі);
     -- сирий текст лише в серверному журналі. Нова адреса джерела, під яке
     -- середовище дає секрет, вимагає ввести секрет повторно.
-    (N'integration.test.failed.auth',        N'en', N'The source refused the credentials of the service account.', 1),
+    (N'integration.test.failed.auth',        N'en', N'The source refused the credentials (the service account, or the user name and password of the connection).', 1),
     (N'integration.test.failed.unreachable', N'en', N'The source could not be reached, or it answered with an error.', 1),
     (N'integration.test.failed.tls',         N'en', N'A secure (TLS) connection to the source could not be established.', 1),
     (N'integration.test.failed.timeout',     N'en', N'The source did not answer in time.', 1),

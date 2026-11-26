@@ -33,6 +33,11 @@ namespace Ecr.Application.Integration;
 /// стану СЕРЕДОВИЩА: <c>true</c> означає, що секрет під це джерело все-таки
 /// заданий у конфігурації процесу, і адміністратор має це бачити, не бачачи
 /// значення.
+/// <para>
+/// ⛔ P-1126-SRCCRED: облікові дані джерела, задані адміністратором, видно ЛИШЕ як <see cref="AuthMode"/>,
+/// <see cref="UserName"/> (не секрет) і <see cref="HasPassword"/>. Ні пароля, ні блоба, ні довжини, ні «маски»
+/// фіксованої довжини — сторож <c>DataSourceCredentialContractTests</c> перевіряє це рефлексією.
+/// </para>
 /// </remarks>
 public sealed record DataSourceView(
     int Id,
@@ -47,7 +52,10 @@ public sealed record DataSourceView(
     bool HasSecret,
     int SourceEntities,
     int CollectionSchedules,
-    string RowVersion);
+    string RowVersion,
+    SourceAuthMode AuthMode,
+    string? UserName,
+    bool HasPassword);
 
 /// <summary>Наслідок перевірки з'єднання; <c>Entities</c> — розмір каталогу джерела.</summary>
 /// <remarks>
@@ -103,7 +111,10 @@ public sealed class ListDataSourcesHandler(
             secrets.Find(source.SecretName) is not null,
             usage.SourceEntities,
             usage.CollectionSchedules,
-            Convert.ToBase64String(source.RowVersion));
+            Convert.ToBase64String(source.RowVersion),
+            source.AuthMode,
+            source.UserName,
+            source.HasPassword);
 
     /// <summary>
     /// Звіряє <c>If-Match</c> із версією рядка — той самий контракт, що в розкладах

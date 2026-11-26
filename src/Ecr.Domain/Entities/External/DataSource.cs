@@ -68,6 +68,31 @@ public sealed class DataSource : Entity<int>
     public int MaxParallel { get; private set; }
     public bool IsActive { get; private set; }
 
+    /// <summary>Найбільша довжина логіна джерела (домен разом з іменем); та сама, що в стовпці.</summary>
+    public const int UserNameMaxLength = 256;
+
+    /// <summary>Як джерело входить у зовнішню систему; наявні рядки — <see cref="SourceAuthMode.Windows"/>.</summary>
+    public SourceAuthMode AuthMode { get; private set; }
+
+    /// <summary>Логін джерела (не секрет); лише за <see cref="SourceAuthMode.UserPassword"/>.</summary>
+    public string? UserName { get; private set; }
+
+    /// <summary>
+    /// ⛔ Пароль джерела, УЖЕ зашифрований шаром, що володіє DataProtection (як SMTP, <c>D-263</c>). Назовні —
+    /// лише <see cref="HasPassword"/>: ні значення, ні довжини.
+    /// </summary>
+    public byte[]? PasswordProtected { get; private set; }
+
+    /// <summary>
+    /// Коли джерело востаннє відмовило в автентифікації збереженим паролем; <c>null</c> — не відмовляло або пароль
+    /// відтоді замінено. Поки задано, збір і перевірка за id до джерела не ходять (захист облікового запису від
+    /// блокування, R-03).
+    /// </summary>
+    public DateTime? CredentialsRejectedAt { get; private set; }
+
+    /// <summary>Чи заданий пароль — єдине, що про нього дозволено показувати.</summary>
+    public bool HasPassword => PasswordProtected is { Length: > 0 };
+
     /// <summary>Версія рядка: дві правки одного з'єднання не затирають одна одну.</summary>
     public byte[] RowVersion { get; private set; } = [];
 

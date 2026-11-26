@@ -640,6 +640,20 @@ public enum ExternalTransport : byte
     Sql = 2
 }
 
+/// <summary>Як джерело входить у зовнішню систему (P-1126-SRCCRED). Числа лежать у базі — не перенумеровувати.</summary>
+/// <remarks>
+/// ⛔ <see cref="Windows"/> = 0 — умовчання колонки <c>ext.DataSource.AuthMode</c>: наявні рядки після міграції
+/// ходять так само, як до неї (обліковим записом служби ECR), без жодного <c>UPDATE</c>.
+/// </remarks>
+public enum SourceAuthMode : byte
+{
+    /// <summary>Windows-автентифікація облікового запису служби ECR (як до P-1126-SRCCRED).</summary>
+    Windows = 0,
+
+    /// <summary>Логін і пароль, задані адміністратором (лише <c>PiSqlClient</c> і <c>Sql</c>).</summary>
+    UserPassword = 1,
+}
+
 /// <summary>Режим роботи з редакцією SQL Server (АРХ-7).</summary>
 public enum SqlEditionMode : byte
 {

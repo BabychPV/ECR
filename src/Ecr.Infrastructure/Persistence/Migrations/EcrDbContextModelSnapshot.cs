@@ -4813,6 +4813,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<byte>("AuthMode")
+                        .HasColumnType("tinyint");
+
                     b.Property<string>("Catalog")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)")
@@ -4822,6 +4825,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime?>("CredentialsRejectedAt")
+                        .HasColumnType("datetime2(3)");
 
                     b.Property<string>("Endpoint")
                         .IsRequired()
@@ -4842,6 +4848,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<byte[]>("PasswordProtected")
+                        .HasColumnType("varbinary(max)");
+
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .IsRequired()
@@ -4859,6 +4868,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.Property<byte>("Transport")
                         .HasColumnType("tinyint");
+
+                    b.Property<string>("UserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
 
                     b.HasKey("Id");
 

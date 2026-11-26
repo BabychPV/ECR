@@ -197,6 +197,7 @@ builder.Services.AddOpenApi(options =>
 {
     options.AddSchemaTransformer<Ecr.Api.Startup.DictionarySchemaTransformer>();
     options.AddSchemaTransformer<Ecr.Api.Startup.NumericSchemaTransformer>();
+    options.AddSchemaTransformer<Ecr.Api.Startup.SecretStringSchemaTransformer>();
 
     // ⛔ `/health/*` — middleware, а не контролер: генератор його не бачить,
     // і саме тому клієнт описував відповідь руками — звідси `A7-04`/`A7-36`.

@@ -31,6 +31,14 @@ public sealed class DataSourceConfiguration : IEntityTypeConfiguration<DataSourc
         builder.Property(x => x.MaxParallel).HasDefaultValue(4);
         builder.Property(x => x.IsActive).HasDefaultValue(true);
         builder.Property(x => x.RowVersion).IsRowVersion();
+
+        // P-1126-SRCCRED: облікові дані джерела. ⚠ AuthMode без HasDefaultValue у моделі (як D-212): умовчання
+        // Windows = 0 = CLR-умовчання, EF кладе DEFAULT 0 в AddColumn сам — наявні рядки стають Windows без UPDATE.
+        builder.Property(x => x.AuthMode).HasColumnType("tinyint");
+        builder.Property(x => x.UserName).HasMaxLength(DataSource.UserNameMaxLength);
+        builder.Property(x => x.PasswordProtected).HasColumnType("varbinary(max)");
+        builder.Property(x => x.CredentialsRejectedAt).HasColumnType("datetime2(3)");
+        builder.Ignore(x => x.HasPassword);
         builder.HasIndex(x => x.Code).IsUnique().HasDatabaseName("UQ_DataSource");
     }
 }
