@@ -6,6 +6,7 @@ import { queryKeys } from '@/api/queryKeys';
 import type { TableSliceDto } from '@/api/types';
 import { Banner } from '@/shared/ui/Banner';
 import { t } from '@/shared/i18n';
+import { isOpaqueRowKey } from './rowKeyText';
 import {
   clearLostEdits,
   peekLostEdits,
@@ -148,7 +149,7 @@ export function RestoreEditsBanner({ documentId, userId }: RestoreEditsBannerPro
     }
   }
 
-  if (lost === null) return outcomeBanner(outcome, () => setOutcome(null));
+  if (lost === null) return outcomeBanner(outcome, () => setOutcome(null), queryClient);
 
   const stored = restorableCount(lost);
 
@@ -197,13 +198,27 @@ export function RestoreEditsBanner({ documentId, userId }: RestoreEditsBannerPro
 }
 
 /**
+ * ✎ integ-row-label-messages: рядок конфлікту для речення «Row {rowKey}, column …»: короткий код — як є; службовий
+ * GUID — номер рядка зі свіжого зрізу (його щойно прочитала перевірка версій), немає — «…», не 32 символи.
+ */
+function conflictRowText(queryClient: QueryClient, conflict: RestoreConflict): string {
+  const rowKey = conflict.edit.rowKey;
+  if (!isOpaqueRowKey(rowKey)) return rowKey;
+
+  const slice = queryClient.getQueryData<TableSliceDto>(queryKeys.slices.one(conflict.tableInstanceId, conflict.periodKey));
+  const index = slice?.rows.findIndex((row) => row.rowKey === rowKey) ?? -1;
+
+  return index >= 0 ? String(index + 1) : '…';
+}
+
+/**
  * Підсумок відновлення: скільки повернуто і що пропущено.
  *
  * ⛔ Конфлікти показуються ОКРЕМО й поіменно. «Відновлено 2 з 3» без переліку
  * не веде до жодної дії: людина не знає, яку саме комірку вводити заново, і
  * шукати її доведеться очима по всьому аркушу.
  */
-function outcomeBanner(outcome: RestoreOutcome | null, dismiss: () => void): JSX.Element {
+function outcomeBanner(outcome: RestoreOutcome | null, dismiss: () => void, queryClient: QueryClient): JSX.Element {
   if (outcome === null) return <></>;
 
   const conflicts = outcome.conflicts;
@@ -228,7 +243,7 @@ function outcomeBanner(outcome: RestoreOutcome | null, dismiss: () => void): JSX
                     ? 'document.restoreEdits.conflictRow'
                     : 'document.restoreEdits.unavailableRow',
                   {
-                    rowKey: conflict.edit.rowKey,
+                    rowKey: conflictRowText(queryClient, conflict),
                     columnCode: conflict.edit.columnCode,
                     // ⚠ Версії — рядки оптимістичного блокування, не дати; людині
                     // вони нічого не кажуть, і тому в тексті їх немає. Те, що

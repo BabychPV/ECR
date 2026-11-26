@@ -165,6 +165,7 @@ import {
   usePendingSlice,
 } from './pendingStore';
 import { rowDisplayName } from '@/features/permits/history/rowName';
+import { isOpaqueRowKey } from './rowKeyText';
 import { installF2Edit } from './f2Edit';
 import { installEnterKeyCompat } from './keyboardCompat';
 import {
@@ -3343,7 +3344,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         <List size="sm">
           {rounded.map((cell) => (
             <List.Item key={cellKey(cell.rowKey, cell.columnCode)}>
-              {cell.rowKey} · {cell.columnCode} — {cell.original} → {cell.applied}
+              {isOpaqueRowKey(cell.rowKey) ? rowDisplayName(data, cell.rowKey) : cell.rowKey} · {cell.columnCode} — {cell.original} →{' '}
+              {cell.applied}
             </List.Item>
           ))}
         </List>

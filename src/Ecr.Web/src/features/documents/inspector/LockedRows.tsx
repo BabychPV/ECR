@@ -4,6 +4,7 @@ import { useQueries } from '@tanstack/react-query';
 import type { ValidationFindingDto } from '@/api/types';
 import type { LockedRowItem } from '@/features/grid/rowAttentionStore';
 import { getDocumentPeriodReopen, periodReopenKey } from '@/features/documents/periodReopen/api';
+import { isOpaqueRowKey, rowKeyText } from '@/features/grid/rowKeyText';
 import { formatMonthName } from '@/shared/format/period';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { language, t } from '@/shared/i18n';
@@ -39,9 +40,17 @@ export function monthsText(months: readonly number[]): string {
   return t('inspector.attention.monthList', { list: names.slice(0, -1).join(', '), last });
 }
 
-/** «LTD-A01 (Gasoline blow torch)»; без назви — код. */
-export function rowTitle(item: Pick<LockedRowItem, 'rowKey' | 'rowName'>): string {
-  return item.rowName === null ? item.rowKey : `${item.rowKey} (${item.rowName})`;
+/**
+ * «LTD-A01 (Gasoline blow torch)»; без назви — код. Службовий GUID-ключ (рядок, доданий людиною) у текст не йде:
+ * «3 (B12 diesel generator DG-1)» після слова «Row» шаблону, без назви — «3».
+ */
+export function rowTitle(item: Pick<LockedRowItem, 'rowKey' | 'rowName' | 'rowOrdinal'>): string {
+  if (!isOpaqueRowKey(item.rowKey)) return item.rowName === null ? item.rowKey : `${item.rowKey} (${item.rowName})`;
+
+  const number = item.rowOrdinal === undefined ? '' : String(item.rowOrdinal);
+  if (item.rowName === null) return number === '' ? rowKeyText(item.rowKey) : number;
+
+  return number === '' ? item.rowName : `${number} (${item.rowName})`;
 }
 
 /**

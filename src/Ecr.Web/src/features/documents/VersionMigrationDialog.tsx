@@ -6,6 +6,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { formatPeriodKey } from '@/shared/format';
 import { t } from '@/shared/i18n';
+import { rowKeyText } from '@/features/grid/rowKeyText';
 import { useSettledAction } from '@/features/grid/settleEdits';
 import { isActiveJob } from '@/features/jobs/myTasks';
 import { useJobStatus } from '@/features/jobs/useJobStatus';
@@ -463,7 +464,7 @@ function OverwriteOffer({ report, busy, onYes, onNo }: OverwriteOfferProps): JSX
                 {t('documents.migrateGuardedOverwriteItem', {
                   sheet: item.sheetCode,
                   table: item.tableCode,
-                  row: item.rowKey,
+                  row: rowKeyText(item.rowKey),
                   column: item.columnCode,
                   values: item.values,
                 })}

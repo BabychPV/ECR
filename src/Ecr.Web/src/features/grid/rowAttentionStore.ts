@@ -14,6 +14,8 @@ export interface RowAttentionItem {
   readonly periodKey: number;
   readonly rowKey: string;
   readonly rowLabel: string;
+  /** Номер рядка на екрані (1-based); службовий GUID-ключ людині показується як «Row N». */
+  readonly rowOrdinal?: number;
   /** Пояснення простими словами (без «окремого погодження»). */
   readonly reason: string;
   /**
@@ -50,6 +52,8 @@ export interface LockedRowItem {
   readonly rowKey: string;
   /** Назва рядка (`label`); `null` — немає або збігається з кодом. */
   readonly rowName: string | null;
+  /** Номер рядка на екрані (1-based): службовий GUID-ключ у тексті замінюється ним («Row 3 (назва)»). */
+  readonly rowOrdinal?: number;
   /** Місяці закритих колонок рядка, 1..12, без повторів і за порядком. */
   readonly months: readonly number[];
   /** Періоди цих місяців (`YYYYMM`), без повторів і за порядком, — для «Reopen … for this document…». */
