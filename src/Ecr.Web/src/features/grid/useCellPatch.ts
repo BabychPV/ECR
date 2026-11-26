@@ -1,3 +1,4 @@
+import { refreshRequiredInputsAfterSave } from './requiredInputsServer';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { EcrApiError, apiFetch } from '@/api/client';
@@ -366,6 +367,7 @@ export function useCellPatch(documentId: number): {
 
         applyPatchLocally(queryClient, request, response);
         refreshStaleness(queryClient, documentId, request.periodKey, request.rows.map((row) => row.rowKey));
+      refreshRequiredInputsAfterSave(queryClient, documentId, request.tableInstanceId, request.rows.map((row) => row.rowKey));
 
         // ⚠ `BE-05`: `null` у відповіді означає «перерахунку не поставлено»
         // (гілка відкладання `DAT-05`) — і тоді стеження ЗНІМАЄТЬСЯ, а не

@@ -1,3 +1,4 @@
+import { refreshRequiredInputsAfterSave } from './requiredInputsServer';
 import { useEffect, useSyncExternalStore } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { showApiError } from '@/shared/ui/notify';
@@ -653,6 +654,7 @@ async function saveOrphanSlice(
 
       applyPatchLocally(queryClient, request, response);
       refreshStaleness(queryClient, documentId, request.periodKey, request.rows.map((row) => row.rowKey));
+      refreshRequiredInputsAfterSave(queryClient, documentId, request.tableInstanceId, request.rows.map((row) => row.rowKey));
       discardPendingRows(
         slice.tableInstanceId,
         slice.periodKey,

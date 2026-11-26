@@ -151,6 +151,7 @@ import { useNoticeHost } from '@/features/documents/notices/noticeStore';
 import { useOpenStatus } from '@/features/documents/notices/useOpenStatus';
 import { NoticeRow } from '@/features/documents/notices/NoticeRow';
 import { NeedsInputCounter } from './NeedsInputCounter';
+import { getRequiredInputs, requiredInputsKey } from './requiredInputsServer';
 import { calculationIssuesKey, calculationIssuesYearKey, getCalculationIssues } from '@/features/calculationIssues/api';
 // ⚠ Ключ комірки СХОВИЩА під власним іменем: у цьому файлі вже є `cellKey`
 // з `permissions.ts`, і хоч обидва дають `rowKey:columnCode`, ключем мапи
@@ -1536,6 +1537,12 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     queryFn: () => getCalculationIssues(documentId, periodKey, sheetCopyId, true),
     enabled: false,
   });
+  // ✎ Контракт doc-ux-server: перелік сервера по всіх рядках таблиці — читає `SheetTables` (той самий ключ), тут — кеш.
+  const requiredServer = useQuery({
+    queryKey: requiredInputsKey(documentId, tableInstanceId),
+    queryFn: () => getRequiredInputs(documentId, tableInstanceId),
+    enabled: false,
+  });
   const needsCells = useMemo<readonly NeedsInputCell[]>(() => {
     if (data === undefined || readOnly) return [];
     const byCode = new Map(data.columns.map((column) => [column.code, column]));
@@ -1548,6 +1555,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       blocked: requiredInputBlocked,
       warnings: requiredInputWarnings,
       issues: [...(issuesMonth.data?.items ?? []), ...(issuesYear.data?.items ?? [])].filter(ownCopy),
+      server: Array.isArray(requiredServer.data?.cells) ? requiredServer.data.cells : [],
       editable: (rowKey, code) => {
         const column = byCode.get(code);
         if (column === undefined || !decide(data, rowKey, column).editable) return false;
@@ -1555,7 +1563,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         return state !== 'calculated' && state !== 'readOnly';
       },
     });
-  }, [data, readOnly, rows, requiredInputBlocked, requiredInputWarnings, issuesMonth.data, issuesYear.data, sheetCopyId, flags]);
+  }, [data, readOnly, rows, requiredInputBlocked, requiredInputWarnings, issuesMonth.data, issuesYear.data, requiredServer.data, sheetCopyId, flags]);
   // ✎ DOCUX L9: рамка 2 px — після спроби подати (усі порожні обов'язкові) і на комірках, через які збереження відхилено.
   const emphasized = useNeedsInputEmphasis();
   const rejectedKeys = useMemo(

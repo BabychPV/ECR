@@ -72,6 +72,8 @@ export interface NeedsInputSources {
   readonly blocked: readonly RequiredInputCell[];
   readonly warnings: readonly RequiredInputCell[];
   readonly issues: readonly MissingInputIssue[];
+  /** ✎ Контракт doc-ux-server: порожні обов'язкові входи таблиці по ВСІХ рядках (`GET …/required-inputs`). */
+  readonly server?: readonly { readonly rowKey: string; readonly columnCode: string; readonly level: string; readonly methodologies: readonly string[] }[];
   /** Чи людина може писати в комірку (права, стан аркуша, формула). */
   readonly editable: (rowKey: string, columnCode: string) => boolean;
 }
@@ -138,6 +140,11 @@ export function needsInputCells(sources: NeedsInputSources): NeedsInputCell[] {
   }
   for (const cell of sources.warnings) {
     add({ rowKey: cell.rowKey, columnCode: cell.columnCode, level: 'warn', source: 'methodology', methodologies: cell.methodologies ?? [] });
+  }
+
+  // 2б. Перелік сервера по всіх рядках (і тих, яких не правили): Block / Warn, як налаштовано у версії методології.
+  for (const cell of sources.server ?? []) {
+    add({ rowKey: cell.rowKey, columnCode: cell.columnCode, level: cell.level === 'block' ? 'block' : 'warn', source: 'methodology', methodologies: cell.methodologies });
   }
 
   // 3. «Missing input» з переліку проблем розрахунку.
