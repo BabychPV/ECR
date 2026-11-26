@@ -25,6 +25,12 @@ public enum SgFlaringConsumer
 
     /// <summary>Термальний окисник, SG-частина (стара HSE_TO_SG_&lt;SOR|EOR&gt;), рядок = поїзд × режим × день × стовпець газу.</summary>
     ToxDaily,
+
+    /// <summary>
+    /// Термальний окисник, місячна SG-частина (DESIGN §5.4, <c>TOX_SG_MONTHLY</c>): статичні рядки <c>TOX_MONTHLY</c> (поїзд × режим ×
+    /// тип × стовпець) з датою <c>MONTH</c> (1-ше число), входи — SUM денних обсягів (script §13); склад — на 1-ше число місяця.
+    /// </summary>
+    ToxMonthly,
 }
 
 /// <summary>
@@ -98,6 +104,7 @@ public static partial class SgFlaringBinding
         SgFlaringConsumer.ContOnshore => ("CONT_SG_ONSHORE", "DAY"),
         SgFlaringConsumer.ContOffshore => ("CONT_SG_DISLAND", "DAY"),
         SgFlaringConsumer.ToxDaily => ("TOX_DAILY", "DATE"),
+        SgFlaringConsumer.ToxMonthly => ("TOX_MONTHLY", "MONTH"),
         _ => throw new ArgumentOutOfRangeException(nameof(consumer)),
     };
 
@@ -121,9 +128,29 @@ public static partial class SgFlaringBinding
     public static string Bind(string body, SgFlaringConsumer consumer)
     {
         ArgumentNullException.ThrowIfNull(body);
-        var stripped = RowsClause().Replace(body, string.Empty);
+
+        // ✎ огляд L5: власний `rows from … where … active when …` тіла не відкидається мовчки — відбір рядків задає міст.
+        if (RowsClause().IsMatch(body))
+        {
+            throw new InvalidOperationException(
+                "SGF bridge: the body has its own 'rows from' clause; the bridge sets row selection itself. "
+                + "Remove it from the converted body (or merge its where/active-when into the bridge explicitly).");
+        }
+
+        var stripped = body;
         var names = ReferencedGcv(stripped);
-        var overrides = consumer == SgFlaringConsumer.ToxDaily ? Tox481Overrides(stripped) : [];
+        var isTox = consumer is SgFlaringConsumer.ToxDaily or SgFlaringConsumer.ToxMonthly;
+        var overrides = isTox ? Tox481Overrides(stripped) : [];
+
+        // ✎ огляд M2: тіло ТОх читає H2S типу, але передформули 481 цього типу немає — стовпець 481 тихо взяв би склад.
+        foreach (var type in (string[])["SOR", "EOR"])
+        {
+            if (isTox && names.Contains($"GCV_{type}_H2S") && !overrides.Exists(o => o.Type == type))
+            {
+                throw new InvalidOperationException(
+                    $"SGF bridge: the TOx body reads GCV_{type}_H2S but has no HSE_TO_SG_481_{type}_H2S pre-formula for column 481.");
+            }
+        }
         foreach (var (type, statementEnd) in overrides.OrderByDescending(o => o.StatementEnd))
         {
             var target = $"GCV_{type}_H2S";
@@ -180,7 +207,7 @@ public static partial class SgFlaringBinding
                 Line(s, $"var split_slot_not_found = REGCOUNT(\"{SplitRegistry}\", ROW.SLOT == row.SLOT) != 1;");
                 Line(s, "reject when split_slot_not_found;");
                 Line(s, $"var split_not_three_slots_or_sum_not_one = REGCOUNT(\"{SplitRegistry}\", true) != 3"
-                        + $" || Abs(REGSUM(\"{SplitRegistry}\", true, ROW.COEF) - 1) > 0.000000001;");
+                        + $" || Abs(REGSUM(\"{SplitRegistry}\", true, ROW.COEF) - 1) > {SplitSumTolerance};");
                 Line(s, "reject when split_not_three_slots_or_sum_not_one;");
                 Line(s, $"var split_slot = REGONE(\"{SplitRegistry}\", ROW.SLOT == row.SLOT);");
                 Line(s, "var split_coef = REGFIELD(split_slot, \"COEF\");");
@@ -188,9 +215,13 @@ public static partial class SgFlaringBinding
                 Line(s, "var case_name = asof.Month >= 4 && asof.Month <= 9 ? REGFIELD(split_slot, \"CASE_SUMMER\") : REGFIELD(split_slot, \"CASE_WINTER\");");
                 prefixes.Add(string.Empty);
                 break;
-            case SgFlaringConsumer.ToxDaily:
+            case SgFlaringConsumer.ToxDaily or SgFlaringConsumer.ToxMonthly:
                 Line(s, "var tox_row_without_column_train_or_type = row.GAS_COLUMN == null || row.TRAIN == null || row.TYPE == null;");
                 Line(s, "reject when tox_row_without_column_train_or_type;");
+                Line(s, "var tox_train_unknown = row.TRAIN in (\"Train 1\", \"Train 2\") ? false : true;");
+                Line(s, "reject when tox_train_unknown;");
+                Line(s, "var tox_type_unknown = row.TYPE in (\"SOR\", \"EOR\") ? false : true;");
+                Line(s, "reject when tox_type_unknown;");
                 Line(s, $"var stream_pin_not_found = REGCOUNT(\"{PinRegistry}\", ROW.COLUMN == row.GAS_COLUMN && ROW.TRAIN == row.TRAIN) != 1;");
                 Line(s, "reject when stream_pin_not_found;");
                 Line(s, $"var gas_pin = REGONE(\"{PinRegistry}\", ROW.COLUMN == row.GAS_COLUMN && ROW.TRAIN == row.TRAIN);");
@@ -282,16 +313,29 @@ public static partial class SgFlaringBinding
         return found;
     }
 
+    /// <summary>
+    /// ✎ огляд H1: кожен рядок події відбирає РІВНО ОДНА методологія INT — порожнє/незіставлене місце AF відбирає гілка суші
+    /// (<c>null</c> у переліку), і її <c>reject when flare_location_not_mapped</c> робить рядок видимо відхиленим. ТОх відсіює
+    /// лише сміття старого Excel <c>Train = '0'</c> (DESIGN §5.4); порожній чи інший поїзд/тип відбирається й відхиляється.
+    /// </summary>
     private static string Where(SgFlaringConsumer consumer)
     {
         var locations = LocationsOf(consumer);
         if (locations.Count > 0)
         {
-            return " where row.LOCATION in (" + string.Join(", ", locations.Select(l => $"entry(\"{LocationRegistry}\", \"{l}\")")) + ")";
+            var nullFirst = consumer == SgFlaringConsumer.IntOnshore ? "null, " : string.Empty;
+            return " where row.LOCATION in (" + nullFirst
+                   + string.Join(", ", locations.Select(l => $"entry(\"{LocationRegistry}\", \"{l}\")")) + ")";
         }
 
-        return consumer == SgFlaringConsumer.ToxDaily ? " where row.TRAIN in (\"Train 1\", \"Train 2\")" : string.Empty;
+        return consumer is SgFlaringConsumer.ToxDaily or SgFlaringConsumer.ToxMonthly ? " where row.TRAIN != \"0\"" : string.Empty;
     }
+
+    /// <summary>
+    /// ✎ огляд H2: допуск Σ коефіцієнтів розподілу — значення AF 2024 (0.4285714 + 0.4285714 + 0.1428571 = 0.9999999) мусять
+    /// проходити; той самий допуск — у генераторі й у провізії.
+    /// </summary>
+    public const string SplitSumTolerance = "0.000001";
 
     private static bool TrySplit(string name, List<string> prefixes, out string prefix, out string x)
     {

@@ -25,7 +25,6 @@ namespace Ecr.Calculations.Tests.Scripting;
 public sealed class SgFlaringBindingEngineTests
 {
     private const string IntBody = """
-        rows from ANY;
         output MolecularWeight : one = row.GCV_Methane * 16 + row.GCV_H2S * 34;
         output TotalSulphurContent : one = row.GCV_H2S + row.GCV_COS;
         output EC_Wzv : one = row.GCV_Temperature + 273;
@@ -33,8 +32,10 @@ public sealed class SgFlaringBindingEngineTests
         """;
 
     private const string ToxBody = """
-        output HSE_TO_SG_SOR_H2S : one = row.GCV_SOR_H2S + row.GCV_SOR_Helium;
-        output HSE_TO_SG_EOR_H2S : one = row.GCV_EOR_H2S + row.GCV_EOR_C2H6S;
+        output HSE_TO_SG_481_SOR_H2S : one = 100 - row.GCV_SOR_Methane;
+        output HSE_TO_SG_481_EOR_H2S : one = 100 - row.GCV_EOR_Methane;
+        output HSE_TO_SG_SOR_CH4 : one = row.GCV_SOR_Methane + row.GCV_SOR_Helium;
+        output HSE_TO_SG_EOR_CH4 : one = row.GCV_EOR_Methane + row.GCV_EOR_C2H6S;
         """;
 
     private const string Tox481Body = """
@@ -52,13 +53,13 @@ public sealed class SgFlaringBindingEngineTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Requirement", "SGF-FLARING-BRIDGE")]
-    public void Міст_прибирає_rows_тіла_і_row_GCV_стає_змінною_складу()
+    public void Міст_ставить_свій_відбір_і_row_GCV_стає_змінною_складу()
     {
         var text = SgFlaringBinding.Bind(IntBody, SgFlaringConsumer.IntOnshore);
 
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(text, @"^rows from", System.Text.RegularExpressions.RegexOptions.Multiline));
         Assert.StartsWith("// SGF bridge", text, StringComparison.Ordinal);
-        Assert.Contains("rows from INT_SG_EVENTS where row.LOCATION in (entry(\"FLARE_LOCATION\", \"ONSHORE_HP\")", text, StringComparison.Ordinal);
+        Assert.Contains("rows from INT_SG_EVENTS where row.LOCATION in (null, entry(\"FLARE_LOCATION\", \"ONSHORE_HP\")", text, StringComparison.Ordinal);
         Assert.Contains("registry as of row.EVENT_START;", text, StringComparison.Ordinal);
         Assert.DoesNotContain("row.GCV_", text, StringComparison.Ordinal);
         Assert.DoesNotContain("??", text, StringComparison.Ordinal);
@@ -84,6 +85,115 @@ public sealed class SgFlaringBindingEngineTests
         var text = SgFlaringBinding.Bind("output X : one = row.GCV_Carbon_Monoxide;", SgFlaringConsumer.IntOnshore);
 
         Assert.Contains("REGFIND(\"COMPONENT\", \"CO\")", text, StringComparison.Ordinal);
+    }
+
+    /// <summary>Огляд L5: власний відбір тіла не відкидається мовчки.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "SGF-FLARING-REVIEW-L5")]
+    public void Тіло_з_власним_rows_from__генератор_відмовляє()
+    {
+        var error = Assert.Throws<InvalidOperationException>(() => SgFlaringBinding.Bind(
+            "rows from ANY where row.X == \"a\" active when row.Y == \"b\";\noutput A : one = row.GCV_H2S;\n", SgFlaringConsumer.IntOnshore));
+
+        Assert.Contains("rows from", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>Огляд M2: тіло ТОх читає H2S типу, а передформули 481 цього типу немає — генератор відмовляє.</summary>
+    [Theory]
+    [InlineData("SOR")]
+    [InlineData("EOR")]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "SGF-FLARING-REVIEW-M2")]
+    public void ТОх__H2S_без_передформули_481__генератор_відмовляє(string type)
+    {
+        var other = type == "SOR" ? "EOR" : "SOR";
+        var body = $"output HSE_TO_SG_481_{other}_H2S : one = 100 - row.GCV_{other}_Methane;\n"
+                   + $"output A : one = row.GCV_{type}_H2S;\n";
+
+        var error = Assert.Throws<InvalidOperationException>(() => SgFlaringBinding.Bind(body, SgFlaringConsumer.ToxDaily));
+
+        Assert.Contains($"HSE_TO_SG_481_{type}_H2S", error.Message, StringComparison.Ordinal);
+    }
+
+    // ───── огляд H1: відбір рядків — кожен рядок бере рівно одна методологія, порожнє місце/поїзд видно ─────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "SGF-FLARING-REVIEW-H1")]
+    public async Task INT__порожнє_місце_відбирає_гілка_суші_і_відхиляє__гілка_островів_не_бере()
+    {
+        var onshore = IntStand();
+        var offshore = IntStand(SgFlaringBinding.Bind(IntBody, SgFlaringConsumer.IntOffshore));
+
+        var onshoreRows = (await onshore.SelectAsync()).Matches.Select(m => m.RowKey).ToList();
+        var offshoreRows = (await offshore.SelectAsync()).Matches.Select(m => m.RowKey).ToList();
+
+        Assert.Contains("NULL_LOCATION", onshoreRows);
+        Assert.Contains("BEFORE", onshoreRows);
+        Assert.DoesNotContain("NULL_LOCATION", offshoreRows);
+        Assert.Contains("D_ISLAND", offshoreRows);
+        Assert.DoesNotContain("D_ISLAND", onshoreRows);
+        Assert.Empty(onshoreRows.Intersect(offshoreRows));
+
+        // Відібраний рядок без місця — видимо відхилений, а не пропущений.
+        var error = await Assert.ThrowsAsync<DomainException>(() => onshore.RunAsync("NULL_LOCATION"));
+        Assert.Contains("flare_location_not_mapped", string.Join(" ", error.Details!.Values), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("NULL_TRAIN", "tox_row_without_column_train_or_type")]
+    [InlineData("TRAIN_3", "tox_train_unknown")]
+    [InlineData("TYPE_XOR", "tox_type_unknown")]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "SGF-FLARING-REVIEW-H1-M1")]
+    public async Task ТОх__порожній_чи_невідомий_поїзд_тип__відібрано_і_відхилено__сміття_Train_0_не_відбирається(string row, string reason)
+    {
+        var stand = ToxStand();
+
+        var selected = (await stand.SelectAsync()).Matches.Select(m => m.RowKey).ToList();
+        var error = await Assert.ThrowsAsync<DomainException>(() => stand.RunAsync(row));
+
+        Assert.Contains(row, selected);
+        Assert.DoesNotContain("JUNK_TRAIN_0", selected);
+        Assert.Contains(reason, string.Join(" ", error.Details!.Values), StringComparison.Ordinal);
+    }
+
+    // ───── огляд H2 + L3: розподіл 2024 зі значень провізії проходить перевірку Σ ─────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "SGF-FLARING-REVIEW-H2")]
+    public async Task Острів_D__розподіл_2024_зі_значень_AF_провізії__рядок_рахується()
+    {
+        var coefs = Ecr.Infrastructure.Jobs.FlaringRegistryProvisioner.Slots.Select(s => s.Coef2024).ToArray();
+        Assert.NotEqual(1m, coefs.Sum());
+
+        var stand = ContStand(coefs: coefs);
+        var (_, values) = await stand.RunAsync("APRIL");
+
+        Assert.Equal(coefs[0].ToString(System.Globalization.CultureInfo.InvariantCulture), values.Single(v => v.Name == "Coef").Text);
+    }
+
+    // ───── огляд L6: місячний ТОх ─────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "SGF-FLARING-REVIEW-L6")]
+    public async Task ТОх_місячний__статичний_рядок_місяця_читає_кейс_типу_на_1_число()
+    {
+        var text = SgFlaringBinding.Bind(ToxBody, SgFlaringConsumer.ToxMonthly);
+        var stand = Stand(text, new Registries(), (new DateOnly(2099, 1, 1), new DateOnly(2099, 1, 31)));
+        stand.AddTable("TOX_MONTHLY")
+            .Column("MONTH", CellDataType.Date).Column("TRAIN", CellDataType.String).Column("TYPE", CellDataType.String)
+            .Column("GAS_COLUMN", CellDataType.String)
+            .Row("M_T2_EOR", ("MONTH", new DateTime(2099, 1, 1)), ("TRAIN", "Train 2"), ("TYPE", "EOR"), ("GAS_COLUMN", "481"));
+
+        var (output, _) = await stand.RunAsync("M_T2_EOR");
+
+        Assert.Contains("rows from TOX_MONTHLY", text, StringComparison.Ordinal);
+        Assert.Contains("registry as of row.MONTH;", text, StringComparison.Ordinal);
+        Assert.Equal(68m, ScriptStand.Value(output, "HSE_TO_SG_EOR_CH4"));
     }
 
     // ───── H4/H11: версія — на дату початку події ─────
@@ -144,10 +254,10 @@ public sealed class SgFlaringBindingEngineTests
     // ───── ТОх: H3 (EOR — склад EOR), H10 (поїзд → свій 481), Helium/C2H6S = 0 ─────
 
     [Theory]
-    [InlineData("T1_SOR", 41, 0)]
-    [InlineData("T1_EOR", 0, 42)]
-    [InlineData("T2_SOR", 31, 0)]
-    [InlineData("T2_EOR", 0, 32)]
+    [InlineData("T1_SOR", 50, 0)]
+    [InlineData("T1_EOR", 0, 58)]
+    [InlineData("T2_SOR", 69, 0)]
+    [InlineData("T2_EOR", 0, 68)]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Requirement", "SGF-FLARING-H3-H10")]
     public async Task ТОх__тип_рядка_обирає_кейс_SOR_EOR__поїзд_обирає_потік_481(string row, int sor, int eor)
@@ -158,8 +268,8 @@ public sealed class SgFlaringBindingEngineTests
 
         // Обидві родини формул читають кейс ТИПУ РЯДКА: SOR-рядок — склад SOR, EOR-рядок — склад EOR (не SOR, як L1).
         var expected = sor + eor;
-        Assert.Equal(expected, ScriptStand.Value(output, "HSE_TO_SG_SOR_H2S"));
-        Assert.Equal(expected, ScriptStand.Value(output, "HSE_TO_SG_EOR_H2S"));
+        Assert.Equal(expected, ScriptStand.Value(output, "HSE_TO_SG_SOR_CH4"));
+        Assert.Equal(expected, ScriptStand.Value(output, "HSE_TO_SG_EOR_CH4"));
     }
 
     [Fact]
@@ -257,11 +367,13 @@ public sealed class SgFlaringBindingEngineTests
 
     // ───── стенди ─────
 
-    private static ScriptStand IntStand()
+    private static ScriptStand IntStand(string? text = null)
     {
         var registries = new Registries();
-        var stand = Stand(SgFlaringBinding.Bind(IntBody, SgFlaringConsumer.IntOnshore), registries, (new DateOnly(2099, 1, 1), new DateOnly(2099, 1, 31)));
-        stand.WithEntry("FLARE_LOCATION", "ONSHORE_HP", Registries.OnshoreHp).WithEntry("FLARE_LOCATION", "ONSHORE_LP", 99_001);
+        var stand = Stand(text ?? SgFlaringBinding.Bind(IntBody, SgFlaringConsumer.IntOnshore), registries, (new DateOnly(2099, 1, 1), new DateOnly(2099, 1, 31)));
+        stand.WithEntry("FLARE_LOCATION", "ONSHORE_HP", Registries.OnshoreHp).WithEntry("FLARE_LOCATION", "ONSHORE_LP", 99_001)
+            .WithEntry("FLARE_LOCATION", "A_ISLAND_HP", 99_002).WithEntry("FLARE_LOCATION", "D_ISLAND_HP", Registries.DIslandHp)
+            .WithEntry("FLARE_LOCATION", "D_ISLAND_LP", 99_004);
         stand.AddTable("INT_SG_EVENTS")
             .Column("EVENT_START", CellDataType.Date).Column("LOCATION", CellDataType.Lookup).Column("GAS_COMPOSITION_ID")
             .Column("STREAM_TYPE", CellDataType.String).Column("TOTAL")
@@ -273,7 +385,8 @@ public sealed class SgFlaringBindingEngineTests
             .Row("EMPTY_SUM", Event(new DateTime(2099, 1, 10), Registries.OnshoreHp, 26, "Empty"))
             .Row("NULL_ID", Event(new DateTime(2099, 1, 10), Registries.OnshoreHp, null, "KE01"))
             .Row("NULL_LOCATION", Event(new DateTime(2099, 1, 10), null, 26, "KE01"))
-            .Row("ONSHORE_MISMATCH", Event(new DateTime(2099, 1, 10), Registries.OnshoreHp, 19, "370 Summer"));
+            .Row("ONSHORE_MISMATCH", Event(new DateTime(2099, 1, 10), Registries.OnshoreHp, 19, "370 Summer"))
+            .Row("D_ISLAND", Event(new DateTime(2099, 1, 10), Registries.DIslandHp, 19, "370 Summer"));
         return stand;
     }
 
@@ -294,13 +407,17 @@ public sealed class SgFlaringBindingEngineTests
             .Row("T2_EOR", ("DATE", new DateTime(2099, 1, 5)), ("TRAIN", "Train 2"), ("TYPE", "EOR"), ("GAS_COLUMN", "481"))
             .Row("NO_PIN", ("DATE", new DateTime(2099, 1, 5)), ("TRAIN", "Train 1"), ("TYPE", "SOR"), ("GAS_COLUMN", "999"))
             .Row("T1_481", ("DATE", new DateTime(2099, 1, 5)), ("TRAIN", "Train 1"), ("TYPE", "SOR"), ("GAS_COLUMN", "481"))
-            .Row("T1_417", ("DATE", new DateTime(2099, 1, 5)), ("TRAIN", "Train 1"), ("TYPE", "SOR"), ("GAS_COLUMN", "417"));
+            .Row("T1_417", ("DATE", new DateTime(2099, 1, 5)), ("TRAIN", "Train 1"), ("TYPE", "SOR"), ("GAS_COLUMN", "417"))
+            .Row("NULL_TRAIN", ("DATE", new DateTime(2099, 1, 5)), ("TYPE", "SOR"), ("GAS_COLUMN", "481"))
+            .Row("TRAIN_3", ("DATE", new DateTime(2099, 1, 5)), ("TRAIN", "Train 3"), ("TYPE", "SOR"), ("GAS_COLUMN", "481"))
+            .Row("TYPE_XOR", ("DATE", new DateTime(2099, 1, 5)), ("TRAIN", "Train 1"), ("TYPE", "XOR"), ("GAS_COLUMN", "481"))
+            .Row("JUNK_TRAIN_0", ("DATE", new DateTime(2099, 1, 5)), ("TRAIN", "0"), ("TYPE", "SOR"), ("GAS_COLUMN", "481"));
         return stand;
     }
 
-    private static ScriptStand ContStand(int slots = 3)
+    private static ScriptStand ContStand(int slots = 3, decimal[]? coefs = null)
     {
-        var registries = new Registries { SplitSlots = slots };
+        var registries = new Registries { SplitSlots = slots, SplitCoefs = coefs ?? [0.4m, 0.4m, 0.2m] };
         var stand = Stand(SgFlaringBinding.Bind(ContBody, SgFlaringConsumer.ContOffshore), registries, (new DateOnly(2099, 1, 1), new DateOnly(2099, 12, 31)));
         stand.AddTable("CONT_SG_DISLAND").Column("DAY", CellDataType.Date).Column("SLOT")
             .Row("MARCH", ("DAY", new DateTime(2099, 3, 31)), ("SLOT", 1))
@@ -324,6 +441,8 @@ public sealed class SgFlaringBindingEngineTests
     {
         public const long OnshoreHp = 99_000;
 
+        public const long DIslandHp = 99_003;
+
         private const int Stream = 1, Case = 2, Component = 3, Composition = 4, Location = 5, Pin = 6, Split = 7;
 
         private readonly List<RegistryDef> _defs = [];
@@ -334,6 +453,8 @@ public sealed class SgFlaringBindingEngineTests
         private long _next = 10_000;
 
         public int SplitSlots { get; init; } = 3;
+
+        public decimal[] SplitCoefs { get; init; } = [0.4m, 0.4m, 0.2m];
 
         public RegistrySnapshotSource Build()
         {
@@ -375,17 +496,27 @@ public sealed class SgFlaringBindingEngineTests
             CaseWith(s574, "481A SOR", null, null, null, components, ("H2S", 41m), ("Methane", 50m));
             CaseWith(s575, "417 SOR", null, null, null, components, ("H2S", 17m), ("Methane", 70m));
             CaseWith(s575, "417 EOR", null, null, null, components, ("H2S", 18m));
-            CaseWith(s574, "481A EOR", null, null, null, components, ("H2S", 42m));
-            CaseWith(s573, "481B SOR", null, null, null, components, ("H2S", 31m));
-            CaseWith(s573, "481B EOR", null, null, null, components, ("H2S", 32m));
+            CaseWith(s574, "481A EOR", null, null, null, components, ("H2S", 42m), ("Methane", 58m));
+            CaseWith(s573, "481B SOR", null, null, null, components, ("H2S", 31m), ("Methane", 69m));
+            CaseWith(s573, "481B EOR", null, null, null, components, ("H2S", 32m), ("Methane", 68m));
 
-            Entry(Location, "ONSHORE_HP", OnshoreHp, ("IS_ONSHORE", true));
+            // Огляд L3: місця й закріплення — з тих самих сталих, що пише провізія (FlaringRegistryProvisioner), без дублювання.
+            foreach (var (code, _, onshore, _, _) in Ecr.Infrastructure.Jobs.FlaringRegistryProvisioner.Locations)
+            {
+                Entry(Location, code, code switch { "ONSHORE_HP" => OnshoreHp, "D_ISLAND_HP" => DIslandHp, _ => (long?)null }, ("IS_ONSHORE", onshore));
+            }
 
-            Entry(Pin, "P481_T1", null, ("COLUMN", "481"), ("TRAIN", "Train 1"), ("STREAM", new Ref(s574)), ("CASE_SOR", "481A SOR"), ("CASE_EOR", "481A EOR"));
-            Entry(Pin, "P417_T1", null, ("COLUMN", "417"), ("TRAIN", "Train 1"), ("STREAM", new Ref(s575)), ("CASE_SOR", "417 SOR"), ("CASE_EOR", "417 EOR"));
-            Entry(Pin, "P481_T2", null, ("COLUMN", "481"), ("TRAIN", "Train 2"), ("STREAM", new Ref(s573)), ("CASE_SOR", "481B SOR"), ("CASE_EOR", "481B EOR"));
+            var pinStreams = new Dictionary<int, (long Entry, string Case)> { [574] = (s574, "481A"), [573] = (s573, "481B"), [575] = (s575, "417") };
+            foreach (var (column, train, streamId) in Ecr.Infrastructure.Jobs.FlaringRegistryProvisioner.Pins)
+            {
+                if (pinStreams.TryGetValue(streamId, out var pin) && (column != "417" || train == "Train 1"))
+                {
+                    Entry(Pin, Ecr.Infrastructure.Jobs.FlaringRegistryProvisioner.PinCode(column, train), null, ("COLUMN", column), ("TRAIN", train),
+                        ("STREAM", new Ref(pin.Entry)), ("CASE_SOR", pin.Case + " SOR"), ("CASE_EOR", pin.Case + " EOR"));
+                }
+            }
 
-            var coefs = new[] { 0.4m, 0.4m, 0.2m };
+            var coefs = SplitCoefs;
             for (var slot = 1; slot <= SplitSlots; slot++)
             {
                 Entry(Split, $"SLOT{slot}", null, ("SLOT", (decimal)slot), ("STREAM", new Ref(s19)), ("COEF", coefs[slot - 1]),

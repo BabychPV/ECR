@@ -65,8 +65,10 @@ public sealed class SgFlaringBindingPerfTests(ITestOutputHelper output)
     [Trait("Requirement", "SGF-FLARING-PERF")]
     public async Task Рік_TOX_DAILY__5840_рядків_на_повному_довіднику_складу()
     {
-        var body = string.Join('\n', FlertCompositionSchema.ComponentColumns.Select(c => c.Column).Distinct()
-            .Select(c => $"output S_{c} : one = row.GCV_SOR_{c} + row.GCV_EOR_{c};"));
+        // Передформули 481 обох типів — без них генератор відмовляє (тіло читає H2S), як у справжньому Thermaloxidizer.
+        var body = "output HSE_TO_SG_481_SOR_H2S : one = 100 - row.GCV_SOR_Methane;\noutput HSE_TO_SG_481_EOR_H2S : one = 100 - row.GCV_EOR_Methane;\n"
+                   + string.Join('\n', FlertCompositionSchema.ComponentColumns.Select(c => c.Column).Distinct()
+                       .Select(c => $"output S_{c} : one = row.GCV_SOR_{c} + row.GCV_EOR_{c};"));
         var stand = Stand(SgFlaringBinding.Bind(body, SgFlaringConsumer.ToxDaily), (new DateOnly(2099, 1, 1), new DateOnly(2099, 12, 31)));
         stand.AddTable("TOX_DAILY");
 
