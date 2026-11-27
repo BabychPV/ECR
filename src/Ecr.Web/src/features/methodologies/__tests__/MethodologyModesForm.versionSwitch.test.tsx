@@ -207,10 +207,10 @@ describe('MethodologyModesForm: перемикання версії перема
       for (const value of values) {
         const option = await screen.findByRole('option', { name: Label[value] });
         expect(option.getAttribute('value')).toBe(value);
-      }
 
-      // Сирих значень на кшталт «ErrorsOnly» серед підписів немає.
-      expect(screen.queryByRole('option', { name: values[values.length - 1] })).toBeNull();
+        // Сирого значення на кшталт «ErrorsOnly» серед підписів немає.
+        expect(screen.queryByRole('option', { name: value })).toBeNull();
+      }
     }
   });
 });
