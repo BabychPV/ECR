@@ -102,9 +102,14 @@ public sealed class AuditReaderChangedColumnsTests(SqlServerFixture sql, ITestOu
             CancellationToken.None);
 
         Assert.Equal(2, page.Items.Count);
-        Assert.Equal(row.Ordinal, Assert.Single(page.Items, c => c.RowKey == row.RowKeyValue).RowOrdinal);
-        Assert.Equal(2, row.Ordinal);
-        Assert.Null(Assert.Single(page.Items, c => c.RowKey == "FOREIGN-KEY").RowOrdinal);
+        // ✎ DOCUX b19: номер рядка на екрані рахує CellChangeRowPositions (рівень застосунку) — читач несе екземпляр таблиці,
+        // а не TableRow.Ordinal (у доданих людиною рядків він 0 → «Row 0»). Чужий ключ екземпляра не отримує — номера не буде.
+        var own = Assert.Single(page.Items, c => c.RowKey == row.RowKeyValue);
+        Assert.Null(own.RowOrdinal);
+        Assert.NotNull(own.TableInstanceId);
+        var foreign = Assert.Single(page.Items, c => c.RowKey == "FOREIGN-KEY");
+        Assert.Null(foreign.RowOrdinal);
+        Assert.Null(foreign.TableInstanceId);
     }
 
     private static async Task InsertAsync(SqlConnection connection, TestDocument doc, long rowId, string rowKey, DateTime at)
