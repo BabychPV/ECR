@@ -140,6 +140,12 @@ export interface DataTableProps<Row> {
   /** Підпис таблиці (`<caption>`). */
   readonly caption?: string | undefined;
 
+  /**
+   * ✎ DOCUX (огляд UI 27.11): підпис лише для читалки — коли назву таблиці вже показує заголовок сторінки (Projects:
+   * «Projects» під таблицею читався як забутий рядок).
+   */
+  readonly captionHidden?: boolean | undefined;
+
   /** Висота області прокручування; без неї — висота за вмістом (`auto`). */
   readonly height?: number | string | undefined;
 
@@ -498,6 +504,7 @@ function DataTableView<Row>({
   rowLabel,
   selectedKey,
   caption,
+  captionHidden,
   height,
   sort,
   onSortChange,
@@ -612,7 +619,9 @@ function DataTableView<Row>({
               {/* ⚠ Підсвітка рядка — токен `--ecr-hover`, а не сірий Mantine (`dark-5` = #3b3b3b): на ньому
                   приглушений другий рядок мав 4.34:1 (живий прогін batch-2-a, дефект 5). */}
               <Table striped highlightOnHover highlightOnHoverColor="var(--ecr-hover)" className="ecr-sticky-head">
-                {caption !== undefined && <Table.Caption>{caption}</Table.Caption>}
+                {caption !== undefined && (
+                  <Table.Caption {...(captionHidden === true ? { className: 'mantine-visually-hidden' } : {})}>{caption}</Table.Caption>
+                )}
 
                 <Table.Thead>
                   <Table.Tr>

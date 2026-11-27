@@ -80,4 +80,26 @@ describe('SheetLog: значення комірок', () => {
     expect(await screen.findByText('12.5000')).toBeTruthy();
     expect(screen.getByText('—')).toBeTruthy();
   });
+
+  // ✎ DOCUX (огляд UI 27.11): довідникова комірка — назвою запису (id — у підказці), рядок без мітки — «Row N», не ключ.
+  it('довідникова колонка — назва запису; рядок без мітки — «Row N» замість ключа p1-T3_00-0020', async () => {
+    mount([
+      {
+        ...Item,
+        rowKey: 'p1-T3_00-0020',
+        rowOrdinal: 20,
+        columnDataType: 'Lookup',
+        oldValue: '12',
+        newValue: '37',
+        oldValueLabelL10n: { values: { en: 'Generator' } },
+        newValueLabelL10n: { values: { en: 'Diesel' } },
+      },
+    ]);
+
+    expect((await screen.findByText('Diesel')).getAttribute('title')).toBe('37');
+    expect(screen.getByText('Generator').getAttribute('title')).toBe('12');
+    const where = document.querySelector('[data-inspector-cell-where]')?.textContent ?? '';
+    expect(where).toContain('⟦grid.rowLabelHeader⟧ 20');
+    expect(where).not.toContain('p1-T3_00-0020');
+  });
 });

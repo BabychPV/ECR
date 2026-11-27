@@ -5,11 +5,10 @@ import { cellAuthorHint, cellAuthorName } from '@/features/audit/authorOptions';
 import { DefaultAuditSort, type AuditSort } from '@/features/audit/api';
 import { SortableTh } from '@/features/audit/SortableTh';
 import { decimalDelta } from '@/features/audit/changeDelta';
-import { NumericTypes, auditValueText } from '@/features/audit/auditValue';
+import { NumericTypes, auditValueText, rowText } from '@/features/audit/auditValue';
 import { cellChangeReasonText } from '@/features/audit/cellChangeReason';
 import { AuditChangedAt } from '@/features/audit/AuditChangedAt';
 import { TwoLine } from '@/shared/ui/TwoLine';
-import { isOpaqueRowKey } from '@/features/grid/rowKeyText';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { formatDecimal, formatPeriodKey } from '@/shared/format';
@@ -29,7 +28,7 @@ import './auditTable.css';
 
 export type CellChange = CellChangePage['items'][number];
 
-export { auditValueText };
+export { auditValueText, rowText };
 
 /**
  * Δ для показу: зі знаком «+» для зростання, мовою інтерфейсу; `null` — не число або немає «було».
@@ -67,26 +66,6 @@ function columnText(change: CellChange): string {
   if (header.length > 0) return code === null ? header : `${header} (${code})`;
 
   return code ?? t('audit.columnGone', { id: change.columnDefId });
-}
-
-/**
- * ✎ audit-filters-followup AC-12: рядок комірки для людини. Джерело мітки — `cfg.RowDef.LabelL10n` фіксованого рядка
- * шаблону (`rowLabelL10n` рядка журналу); у динамічного (доданого людиною) рядка мітки немає ніде, а його ключ —
- * GUID. Тоді «Row» + початок ключа (повний — у підказці), а не 32 символи. Короткі коди («LTD-A02») — як були.
- * ✎ AC-13: для такого рядка — його номер на екрані «Row N» (`rowOrdinal`, `doc.TableRow.Ordinal`); номера немає (рядок
- * видалено, період в архіві) — як раніше, «Row» + початок ключа.
- */
-export function rowText(change: Pick<CellChange, 'rowKey' | 'rowLabelL10n' | 'rowOrdinal'>): string {
-  const label = localized(change.rowLabelL10n);
-  if (label.length > 0) return label;
-  if (isOpaqueRowKey(change.rowKey)) {
-    const ordinal = change.rowOrdinal;
-    return typeof ordinal === 'number'
-      ? `${t('grid.rowLabelHeader')} ${String(ordinal)}`
-      : `${t('grid.rowLabelHeader')} ${change.rowKey.slice(0, 8)}…`;
-  }
-
-  return change.rowKey;
 }
 
 /** Походження зміни: піктограма + слово макета (`ORIGIN_LABEL`/`ORIGIN_ICON`). */
@@ -152,14 +131,14 @@ function WasBecomes({ change }: { readonly change: CellChange }): JSX.Element {
         td={first ? undefined : 'line-through'}
         data-audit-was=""
       >
-        {auditValueText(change.oldValue, change.columnDataType, change.columnScale)}
+        {auditValueText(change.oldValue, change.columnDataType, change.columnScale, change.oldValueLabelL10n)}
       </Text>
       <Box component="span" c="var(--ecr-faint)" display="inline-flex">
         <Glyph d={ArrowPath} />
       </Box>
       <VisuallyHidden>{t('import.becomes')}</VisuallyHidden>
-      <Text span inherit fw={500} data-audit-becomes="">
-        {auditValueText(change.newValue, change.columnDataType, change.columnScale)}
+      <Text span inherit fw={500} data-audit-becomes="" title={change.newValueLabelL10n == null ? undefined : `id ${change.newValue ?? ''}`}>
+        {auditValueText(change.newValue, change.columnDataType, change.columnScale, change.newValueLabelL10n)}
       </Text>
       {first ? (
         <Badge size="xs" variant="light" color="brand" data-audit-new="">

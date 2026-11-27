@@ -63,10 +63,12 @@ describe('row keys in human text', () => {
   it('attention rows and chips carry no key', () => {
     expect(addressChip(Guid, 'C1')).not.toMatch(Hex32);
     expect(addressChip('LTD-A01', 'C1')).toBe('LTD-A01 · C1');
-    // Адреса інспектора: службовий ключ → підпис рядка з сітки, кодовий ключ підписом не підміняється.
+    // Адреса інспектора: службовий ключ → підпис рядка з сітки.
     expect(addressChip(Guid, 'C1', 'Row 3')).toBe('Row 3 · C1');
     expect(addressChip(Guid, 'C1', 'row 3')).toBe('Row 3 · C1');
-    expect(addressChip('LTD-A01', 'C1', 'Row 3')).toBe('LTD-A01 · C1');
+    // ✎ DOCUX 27.11: підпис сітки — завжди, коли є (як у рядку формули): згенерований ключ «p1-T3_00-0018» теж не код для людини.
+    expect(addressChip('LTD-A01', 'C1', 'Row 3')).toBe('Row 3 · C1');
+    expect(addressChip('p1-T3_00-0018', 'Type of fuel', 'row 18')).toBe('Row 18 · Type of fuel');
     expect(calcErrorSourceText({ tableCode: 'T', columnCode: 'C', rowKey: Guid } as never)).toBe('T · C');
   });
 });

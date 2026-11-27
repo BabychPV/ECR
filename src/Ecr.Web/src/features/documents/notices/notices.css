@@ -69,7 +69,36 @@
   text-overflow: ellipsis;
 }
 
+/*
+ * ✎ DOCUX (живий прохід 27.11): колонка сітки — `minmax(0, 1fr)`, а не `auto`. Доти мінімальна ширина колонки дорівнювала
+ * ширині тексту в один рядок (`nowrap`): рядок над сіткою виходив за край і обрізався посеред слова без «…» («148 no calcula»),
+ * а вкладка Status отримувала горизонтальну прокрутку.
+ */
 .ecr-notice-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--mantine-spacing-xs);
+}
+
+.ecr-notice-list > * {
+  min-width: 0;
+}
+
+/*
+ * ✎ DOCUX: вкладка Status — ПОВНИЙ текст кожного повідомлення: переноситься, а не обрізається (рядок над сіткою лишається
+ * одним рядком з «…» і повним текстом у підказці). Кнопки дій переходять на наступний рядок, якщо не вміщаються.
+ */
+.ecr-notice-list--full .ecr-notice-row,
+.ecr-notice-list--full .ecr-calc-strip-line {
+  height: auto;
+  min-height: 32px;
+  flex-wrap: wrap;
+  padding-block: 4px;
+}
+
+.ecr-notice-list--full .ecr-notice-text,
+.ecr-notice-list--full .ecr-calc-strip-text {
+  flex: 1 1 12rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }

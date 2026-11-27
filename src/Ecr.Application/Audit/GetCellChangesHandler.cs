@@ -24,7 +24,9 @@ public sealed class GetCellChangesHandler(
     TimeProvider? clock = null,
     IMonthColumnRouter? monthRouter = null,
     IMetadataCache? metadata = null,
-    IColumnPathMapper? columns = null)
+    IColumnPathMapper? columns = null,
+    // ✎ DOCUX (огляд UI 27.11): назви записів довідника для довідникових колонок (LookupValueLabels).
+    IRegistryStore? registries = null)
 {
     /// <summary>Право, без якого ЗАГАЛЬНИЙ журнал не віддається.</summary>
     public const string Permission = "Security.ViewAudit";
@@ -142,7 +144,10 @@ public sealed class GetCellChangesHandler(
             ? result.Items
             : [.. result.Items.Where(c => visibleSet.Contains(c.ColumnDefId))];
 
-        return result with { Items = shown, TotalCount = total };
+        // ✎ DOCUX: довідникова комірка — назвою запису поруч із id (одне пакетне звернення на сторінку).
+        var labelled = await LookupValueLabels.WithLabelsAsync(shown, registries, ct).ConfigureAwait(false);
+
+        return result with { Items = labelled, TotalCount = total };
     }
 
     /// <summary>Підсумок журналу за вікном (UI-38, C2): ті самі права, вікно й видимість, що й у <see cref="HandleAsync"/>.</summary>

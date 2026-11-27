@@ -162,6 +162,13 @@ export function needsInputCells(sources: NeedsInputSources): NeedsInputCell[] {
 /** Пояснення комірки словами (підказка, рядок формул, живий регіон) — ключі літералами (сторож каталогу). */
 export function needsInputHint(cell: NeedsInputCell): string {
   if (cell.source === 'template') return t('grid.needsInput.hintTemplate');
+  // ✎ DOCUX (живий прохід 27.11): попередження (амбра) — без «…і аркуш не подати»: подання воно не блокує. Напр. порожній
+  // ключ правил методології («Type of fuel»): рядок не рахується, але подати можна.
+  if (cell.level === 'warn') {
+    return cell.methodologies.length === 0
+      ? t('grid.legend.requiredWarn')
+      : t('grid.needsInput.hintMethodologyWarn', { methodologies: cell.methodologies.join(', ') });
+  }
   if (cell.methodologies.length === 0) return t('grid.needsInput.hintMethodologyUnnamed');
 
   return t('grid.needsInput.hintMethodology', { methodologies: cell.methodologies.join(', ') });

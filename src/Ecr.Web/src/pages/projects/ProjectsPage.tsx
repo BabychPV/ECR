@@ -189,6 +189,7 @@ export function ProjectsPage(): JSX.Element {
 
       <DataTable<Row>
         caption={t('nav.projects')}
+        captionHidden
         columns={columns}
         rows={projects.isPending ? undefined : rows}
         rowKey={(row) => String(row.project.id)}

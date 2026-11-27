@@ -53,7 +53,7 @@ export function NoticeList(): JSX.Element {
   }
 
   return (
-    <div className="ecr-notice-list" data-testid="document-notice-list">
+    <div className="ecr-notice-list ecr-notice-list--full" data-testid="document-notice-list">
       {notices.map((notice) => (
         <div key={notice.id} data-notice-id={notice.id}>
           {(notice.renderFull ?? notice.render)()}

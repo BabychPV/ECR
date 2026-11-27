@@ -61,6 +61,11 @@ namespace Ecr.Application.Ports;
 /// мітки шаблону, ключ — GUID), читався «Row N». <c>null</c> — рядка вже немає в <c>doc.TableRow</c> (видалено фізично,
 /// період в архіві).
 /// </param>
+/// <param name="OldValueLabelL10n">
+/// ✎ DOCUX (огляд UI 27.11): довідникова колонка — назва запису старого значення (як у комірці); <c>null</c> — не
+/// довідник, порожньо або запису вже немає. Сирий id — у значенні (CSV-експорт — лише він).
+/// </param>
+/// <param name="NewValueLabelL10n">Те саме для нового значення.</param>
 public sealed record CellChangeView(
     DateTime ChangedAt,
     int PeriodKey,
@@ -89,7 +94,9 @@ public sealed record CellChangeView(
     [property: System.Text.Json.Serialization.JsonIgnore] long Id = 0,
     string? Reason = null,
     int? ColumnScale = null,
-    int? RowOrdinal = null);
+    int? RowOrdinal = null,
+    Ecr.Domain.ValueObjects.LocalizedText? OldValueLabelL10n = null,
+    Ecr.Domain.ValueObjects.LocalizedText? NewValueLabelL10n = null);
 
 /// <summary>
 /// ✎ AC-8: колонка, яку змінювали в документі у вікні, — варіант фільтра «Column» (незалежно від завантажених сторінок

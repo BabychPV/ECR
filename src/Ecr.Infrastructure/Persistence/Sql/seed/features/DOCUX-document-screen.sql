@@ -130,7 +130,17 @@ SELECT v.[Key], v.Lang, v.Val
     (N'document.notices.submitWaitsRecalc', N'ru', N'Ваши правки пересчитываются — лист можно будет подать сразу после окончания пересчёта (обычно в течение минуты)'),
     (N'document.notices.submitWaitsRecalc', N'kz', N'Түзетулеріңіз қайта есептелуде — қайта есептеу аяқталған соң парақты бірден тапсыруға болады (әдетте бір минут ішінде)'),
     (N'document.notices.submitAgain', N'ru', N'Подать снова'),
-    (N'document.notices.submitAgain', N'kz', N'Қайта тапсыру')
+    (N'document.notices.submitAgain', N'kz', N'Қайта тапсыру'),
+    (N'calcStatus.upToDateIssues', N'ru', N'Рассчитано с проблемами {time}'),
+    (N'calcStatus.upToDateIssues', N'kz', N'Ақаулармен есептелді {time}'),
+    (N'calcStatus.issuesHint', N'ru', N'Последний расчёт завершён, но часть строк не рассчитана. Причины — в сообщении над таблицей и во вкладке «Статус».'),
+    (N'calcStatus.issuesHint', N'kz', N'Соңғы есеп аяқталды, бірақ кейбір жолдар есептелмеді. Себептері — кесте үстіндегі хабарламада және «Күйі» қойындысында.'),
+    (N'grid.needsInput.hintMethodologyWarn', N'ru', N'Нужно методологии «{methodologies}» — без этого значения строка не рассчитывается'),
+    (N'grid.needsInput.hintMethodologyWarn', N'kz', N'«{methodologies}» әдістемесіне қажет — бұл мәнсіз жол есептелмейді'),
+    (N'inspector.info.technicalAddress', N'ru', N'Технический адрес'),
+    (N'inspector.info.technicalAddress', N'kz', N'Техникалық мекенжай'),
+    (N'inspector.info.valueWithId', N'ru', N'{label} (id {id})'),
+    (N'inspector.info.valueWithId', N'kz', N'{label} (id {id})')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -203,8 +213,32 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'calcStatus.startedBy', N'en', N'started by {name}', 1),
     (N'workflow.recalculateLocked', N'en', N'Nothing here can be recalculated: the changed months are closed, not open yet or archived. Reopen a month to recalculate it.', 1),
     (N'document.notices.submitWaitsRecalc', N'en', N'Your edits are being recalculated — the sheet can be submitted as soon as the recalculation finishes (usually within a minute)', 1),
-    (N'document.notices.submitAgain', N'en', N'Submit again', 1)
+    (N'document.notices.submitAgain', N'en', N'Submit again', 1),
+    (N'calcStatus.upToDateIssues', N'en', N'Calculated with issues {time}', 1),
+    (N'calcStatus.issuesHint', N'en', N'The last calculation finished, but some rows were not calculated. The reasons are in the message above the table and in the Status tab.', 1),
+    (N'grid.needsInput.hintMethodologyWarn', N'en', N'Needed by methodology “{methodologies}” — without this value the row is not calculated', 1),
+    (N'inspector.info.technicalAddress', N'en', N'Technical address', 1),
+    (N'inspector.info.valueWithId', N'en', N'{label} (id {id})', 1)
        ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- DOCUX:document-screen ── кінець секції ──
+
+-- DOCUX:document-screen ── змінений текст наявного ключа (живий прохід 27.11): прогін ЗАВЕРШИВСЯ, але з проблемами — «not finished»
+-- суперечив чипу «✓ Calculated». Епілог оновлює, лише поки в базі старе (випущене, b14) значення. ──
+INSERT INTO #UiChanged ([Key], Lang, OldVal, NewVal)
+SELECT v.[Key], v.Lang, v.OldVal, v.NewVal
+  FROM (VALUES
+    (N'document.notices.calcTitleBlocked', N'en',
+     N'Calculation not finished in {months} · submission may be refused',
+     N'Calculation finished with problems in {months} · submission may be refused'),
+    (N'document.notices.calcTitleBlocked', N'ru',
+     N'Расчёт не завершён в {months} · подача может быть отклонена',
+     N'Расчёт завершён с проблемами в {months} · подача может быть отклонена'),
+    (N'document.notices.calcTitleBlocked', N'kz',
+     N'{months} ішінде есеп аяқталмады · жіберу қабылданбауы мүмкін',
+     N'{months} ішінде есеп ақаулармен аяқталды · жіберу қабылданбауы мүмкін')
+       ) AS v ([Key], Lang, OldVal, NewVal)
 OPTION (RECOMPILE);
 GO
 -- DOCUX:document-screen ── кінець секції ──

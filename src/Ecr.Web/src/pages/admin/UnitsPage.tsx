@@ -387,7 +387,7 @@ export function UnitsPage(): JSX.Element {
       filters={
         <FilterBar
           search={{ label: t('units.search'), placeholder: t('units.searchPlaceholder') }}
-          filters={[{ id: 'dimension', label: t('units.dimension'), options: dimensionOptions }]}
+          filters={[{ id: 'dimension', label: t('units.dimension'), placeholder: t('units.dimensionAll'), options: dimensionOptions }]}
           clearLabel={t('filters.clear')}
         />
       }

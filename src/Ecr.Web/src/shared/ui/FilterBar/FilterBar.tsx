@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, type JSX, type ReactNode } from 'react';
 import { Button, Select, TextInput } from '@mantine/core';
 import { useSearchParams } from 'react-router-dom';
+import { t } from '@/shared/i18n';
 import { useFieldDraft } from '../useFieldDraft';
 import { useUrlParamsSetter, useUrlState } from '../useUrlState';
 import { FilterInline, FilterRow } from './FilterRow';
@@ -252,7 +253,9 @@ function SelectField({
   return (
     <Select
       label={spec.label}
-      placeholder={spec.placeholder}
+      // ✎ DOCUX (огляд UI 27.11): порожнє поле фільтра виглядало незаповненим — «All …» сторінки, інакше загальне «All»
+      // (як «All projects / All states» у Documents).
+      placeholder={spec.placeholder ?? t('filters.all')}
       data={[...spec.options]}
       value={value}
       onChange={(next) => {

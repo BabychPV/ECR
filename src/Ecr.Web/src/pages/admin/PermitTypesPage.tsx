@@ -106,6 +106,7 @@ export function PermitTypesPage(): JSX.Element {
               {
                 id: 'category',
                 label: t('permits.types.filter.category'),
+                placeholder: t('permits.types.filter.categoryAll'),
                 options: categoryOptions(all).map((value) => ({ value, label: categoryLabel(value) })),
               },
             ]}

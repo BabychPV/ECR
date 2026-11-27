@@ -1,3 +1,5 @@
+import { routes } from '@/app/routes';
+import { noSourcesYet, SourcesSetupLink } from '@/features/integration/SourcesSetupLink';
 import { Suspense, lazy, useMemo, useState, type JSX } from 'react';
 import { Anchor, Button, Card, Group, SegmentedControl, Select, Skeleton, Stack, Text, Title } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
@@ -86,7 +88,9 @@ export function PiDataPage(): JSX.Element {
     <>
       <PageHeader
         title={t('piData.title')}
+        // ✎ DOCUX (огляд UI 27.11): джерел немає — ні вибору сутності, ні тегу, ні діапазону (порожній стан веде до Sources).
         actions={
+          noSourcesYet(sources.data) ? undefined : (
           <FilterRow>
             <Select
               size="xs"
@@ -140,6 +144,7 @@ export function PiDataPage(): JSX.Element {
             />
             {view === 'series' && ref !== null && <ExportButton series={ref} />}
           </FilterRow>
+          )
         }
       />
 
@@ -150,12 +155,13 @@ export function PiDataPage(): JSX.Element {
         isEmpty={(all) => all.length === 0}
         emptyTitle={t('sources.empty')}
         emptyHint={t('sources.emptyHint')}
+        emptyAction={<SourcesSetupLink href={routes.adminSources.path} />}
         onRetry={() => void sources.refetch()}
       >
         {() => null}
       </AsyncBoundary>
 
-      {entityId === null ? (
+      {noSourcesYet(sources.data) ? null : entityId === null ? (
         <Text c="dimmed">{t('piData.pickHint')}</Text>
       ) : (
         <AsyncBoundary<RawDataTagsView>

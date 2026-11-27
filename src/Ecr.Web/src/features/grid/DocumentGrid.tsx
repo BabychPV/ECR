@@ -1326,6 +1326,22 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [unlistedDetailsByRegistryId],
   );
 
+  // ✎ DOCUX (живий прохід 27.11): рядок формули й інспектор показують довідникову комірку ТАК САМО, як вона сама
+  // («Diesel»), а не збережений id запису («Value: 7»). Те саме правило, що `cellTemplate` колонки нижче.
+  const displayOf = useCallback(
+    (columnCode: string, value: unknown): string | null => {
+      const column = data?.columns.find((candidate) => candidate.code === columnCode);
+      if (column === undefined || column.dataType !== 'Lookup' || column.lookupRegistryDefId === null) return null;
+
+      return lookupCellDisplay(
+        value,
+        entriesOfLevel(lookupEntriesByRegistryId.get(column.lookupRegistryDefId) ?? [], column.lookupFilter),
+        unlistedLabelsByRegistryId.get(column.lookupRegistryDefId),
+      );
+    },
+    [data, lookupEntriesByRegistryId, unlistedLabelsByRegistryId],
+  );
+
   // ✎ UAT 08.11 (F13-p209 P2-2): рядок з утраченим посиланням — ЯКЕ значення й чому («дозвіл KZ…, чинний
   // 01.03.2026 – …, не покриває January 2026»). Дані вже на клієнті: перелік на дату і добрані закриті записи.
   const rowLookupProblems = useMemo(() => {
@@ -3491,6 +3507,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           labelProp={RowLabelProp}
           pending={pending}
           columnMonths={columnMonths}
+          displayOf={displayOf}
         />
       )}
 

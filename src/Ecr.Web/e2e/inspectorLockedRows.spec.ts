@@ -125,14 +125,19 @@ test.describe('Locked rows', () => {
 
     // Клік веде в рядок: інспектор показує адресу вибраної комірки цього рядка.
     await item.click();
-    // ✎ b17: службовий ключ в адресі не показується — «Row N»; кодовий — як є.
+    // ✎ b17: службовий ключ в адресі не показується — «Row N».
+    // ✎ DOCUX 27.11: адреса — ТОЙ САМИЙ підпис рядка, що в рядку формули (із великої літери), для будь-якого ключа: і
+    // згенерований ключ динамічного рядка («p1-T3_00-0018»), і код шаблону — лише в Info («Technical address»).
     const address = page.locator('[data-inspector-address]');
     if (/^[0-9a-f]{24,}$/i.test(rowKey)) {
       await expect(address).toContainText(/Row \d+/, { timeout: 30_000 });
       await expect(address).not.toContainText(rowKey);
-    } else {
-      await expect(address).toContainText(rowKey, { timeout: 30_000 });
     }
+    const bar = page.locator('[data-formula-bar="cell"] [data-formula-bar-address]').first();
+    await expect(bar).toBeVisible({ timeout: 30_000 });
+    const barRow = ((await bar.textContent()) ?? '').split(' · ')[0] ?? '';
+    expect(barRow.length).toBeGreaterThan(0);
+    await expect(address).toContainText(`${barRow} · `, { timeout: 30_000 });
 
     // Дія відкриття — для того, кому сервер дозволяє (оператор має Period.Reopen у своєму проєкті).
     const reopen = page.locator(`[data-inspector-reopen="${String(periodKey)}"]`);

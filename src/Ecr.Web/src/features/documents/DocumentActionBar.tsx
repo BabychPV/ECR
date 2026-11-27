@@ -61,6 +61,8 @@ interface DocumentActionBarProps {
   readonly resultsStale?: boolean | null;
   /** Відколи застаріло (UTC ISO); `null`/відсутнє — без дати. */
   readonly resultsStaleSince?: string | null;
+  /** ✎ DOCUX: є проблеми розрахунку (рядок повідомлень) — чип «Calculated with issues», а не «✓ Calculated». */
+  readonly calcIssues?: boolean;
   /** Власник нагадування «вихід із застарілим» - сторінка (N3-08); без нього нагадує сам рядок. */
   readonly staleReminderHost?: RefObject<StaleReminderState>;
   /** ✎ UAT-recalc-ux: поданий аркуш перераховано після подання — позначка в банері для погоджувача. */
@@ -109,6 +111,7 @@ export function DocumentActionBar({
   status,
   resultsStale,
   resultsStaleSince,
+  calcIssues = false,
   staleReminderHost,
   periodAction = null,
   yearLayout = false,
@@ -295,6 +298,7 @@ export function DocumentActionBar({
                 documentId={documentId}
                 periodKey={periodKey}
                 card={{ resultsStale: resultsStale ?? null, resultsStaleSince: resultsStaleSince ?? null }}
+                issues={calcIssues}
                 local={{
                   running: actions.recalculate?.running === true && actions.recalculate.queued !== true,
                   queued: actions.recalculate?.queued === true,
