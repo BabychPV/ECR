@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+import { useId, type JSX } from 'react';
 import { Alert, Badge, Group, Popover, Stack, Text, VisuallyHidden } from '@mantine/core';
 import { badgeLook } from '@/shared/ui/StatusBadge';
 import { periodLabel } from '@/features/workflow/SheetActions';
@@ -236,6 +236,9 @@ function SheetStateChip({
 }): JSX.Element {
   const look = badgeLook(state === 'Submitted' ? 'warning' : 'info');
   const warn = badgeLook('warning');
+  // ✎ DOCUX (RC b18, keyboardPath): пояснення — ОПИС кнопки (`aria-describedby`), а не частина її назви: інакше назва чипа
+  // («… approve or reject») збігалася з дією «Approve», і клавіатурний шлях потрапляв у чип замість кнопки.
+  const detailId = useId();
 
   return (
     <Group gap="xs" wrap="nowrap" data-testid="document-sheet-banner" data-document-lock={lock} data-banner-period={bannerPeriod} data-sheet-state-chip={state}>
@@ -250,13 +253,9 @@ function SheetStateChip({
             c={look.text}
             bg={look.bg}
             styles={{ root: { textTransform: 'none', letterSpacing: 'normal', fontWeight: 500, cursor: 'pointer' } }}
+            aria-describedby={detailId}
           >
             {`${title} ⓘ`}
-            <VisuallyHidden>
-              {detail.map((part) => (
-                <span key={part}> {part}</span>
-              ))}
-            </VisuallyHidden>
           </Badge>
         </Popover.Target>
         <Popover.Dropdown>
@@ -272,6 +271,11 @@ function SheetStateChip({
           </Stack>
         </Popover.Dropdown>
       </Popover>
+      <VisuallyHidden id={detailId}>
+        {detail.map((part) => (
+          <span key={part}> {part}</span>
+        ))}
+      </VisuallyHidden>
       {recalculatedAfterSubmission && (
         <Badge
           size="sm"

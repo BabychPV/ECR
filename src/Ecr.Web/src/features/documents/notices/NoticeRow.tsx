@@ -17,15 +17,17 @@ interface NoticeRowProps {
   readonly actions?: readonly NoticeAction[];
   readonly onDismiss?: () => void;
   readonly testId?: string;
+  /** Додаткові `data-*` рядка (тести й інструменти: стан, таблиці). */
+  readonly data?: Readonly<Record<`data-${string}`, string>>;
 }
 
 /**
  * ✎ DOCUX L7: ОДИН рядок повідомлення (32 px): знак тону, текст (обрізається, повністю — у підказці), головна дія,
  * хрестик, якщо повідомлення можна закрити. Колір — лише разом із знаком і словом (`!` / `i`).
  */
-export function NoticeRow({ tone, text, actions = [], onDismiss, testId }: NoticeRowProps): JSX.Element {
+export function NoticeRow({ tone, text, actions = [], onDismiss, testId, data }: NoticeRowProps): JSX.Element {
   return (
-    <div className="ecr-notice-row" data-tone={tone} data-testid={testId} role={tone === 'error' ? 'alert' : 'status'}>
+    <div className="ecr-notice-row" data-tone={tone} data-testid={testId} role={tone === 'error' ? 'alert' : 'status'} {...data}>
       <span className="ecr-notice-icon" aria-hidden="true">
         {tone === 'info' ? 'i' : '!'}
       </span>

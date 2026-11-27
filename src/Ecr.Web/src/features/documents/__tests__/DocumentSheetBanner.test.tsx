@@ -190,5 +190,16 @@ describe('DocumentSheetBanner', () => {
     show('Rejected', null, false, null, false, 'alerts');
     expect((await screen.findByTestId('document-sheet-banner')).closest('.mantine-Alert-root')).not.toBeNull();
   });
+
+  it('RC b18 (keyboardPath): назва кнопки-чипа — лише заголовок; пояснення й крок — її опис (aria-describedby), не назва', async () => {
+    stubHistory(History);
+    show('Submitted', 'sheetSubmitted', true, null, false, 'chips');
+
+    const chip = (await screen.findByText(/document\.banner\.submittedBy/)).closest('button') as HTMLElement;
+    expect(chip.textContent).not.toContain('submittedDecide');
+    const described = document.getElementById(chip.getAttribute('aria-describedby') ?? '');
+    expect(described?.textContent).toContain('⟦document.banner.submittedDecide⟧');
+    expect(screen.queryByRole('button', { name: /submittedDecide/ })).toBeNull();
+  });
 });
 

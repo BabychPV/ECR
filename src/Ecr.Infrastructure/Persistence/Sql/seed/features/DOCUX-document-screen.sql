@@ -126,7 +126,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'calcStatus.startedBy', N'ru', N'запустил(а) {name}'),
     (N'calcStatus.startedBy', N'kz', N'{name} іске қосты'),
     (N'workflow.recalculateLocked', N'ru', N'Здесь нечего пересчитывать: изменённые месяцы закрыты, ещё не открыты или в архиве. Чтобы пересчитать месяц, откройте его заново.'),
-    (N'workflow.recalculateLocked', N'kz', N'Мұнда қайта есептейтін ештеңе жоқ: өзгерген айлар жабық, әлі ашылмаған немесе мұрағатта. Айды қайта есептеу үшін оны қайта ашыңыз.')
+    (N'workflow.recalculateLocked', N'kz', N'Мұнда қайта есептейтін ештеңе жоқ: өзгерген айлар жабық, әлі ашылмаған немесе мұрағатта. Айды қайта есептеу үшін оны қайта ашыңыз.'),
+    (N'document.notices.submitWaitsRecalc', N'ru', N'Ваши правки пересчитываются — лист можно будет подать сразу после окончания пересчёта (обычно в течение минуты)'),
+    (N'document.notices.submitWaitsRecalc', N'kz', N'Түзетулеріңіз қайта есептелуде — қайта есептеу аяқталған соң парақты бірден тапсыруға болады (әдетте бір минут ішінде)'),
+    (N'document.notices.submitAgain', N'ru', N'Подать снова'),
+    (N'document.notices.submitAgain', N'kz', N'Қайта тапсыру')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -197,7 +201,9 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'calcStatus.kind.cascade', N'en', N'after a source document changed', 1),
     (N'calcStatus.kind.scheduled', N'en', N'scheduled', 1),
     (N'calcStatus.startedBy', N'en', N'started by {name}', 1),
-    (N'workflow.recalculateLocked', N'en', N'Nothing here can be recalculated: the changed months are closed, not open yet or archived. Reopen a month to recalculate it.', 1)
+    (N'workflow.recalculateLocked', N'en', N'Nothing here can be recalculated: the changed months are closed, not open yet or archived. Reopen a month to recalculate it.', 1),
+    (N'document.notices.submitWaitsRecalc', N'en', N'Your edits are being recalculated — the sheet can be submitted as soon as the recalculation finishes (usually within a minute)', 1),
+    (N'document.notices.submitAgain', N'en', N'Submit again', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

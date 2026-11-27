@@ -16,6 +16,8 @@ interface NoticeSlotProps {
   readonly actions?: readonly NoticeAction[];
   readonly onDismiss?: () => void;
   readonly testId?: string;
+  /** Додаткові `data-*` рядка підсумку. */
+  readonly data?: Readonly<Record<`data-${string}`, string>>;
   /** Повний вміст — як і доти (банер, перелік, кнопки): у вкладці Status або на місці, коли рядка немає. */
   readonly children: ReactNode;
 }
@@ -25,7 +27,7 @@ interface NoticeSlotProps {
  * рядку — підсумок із головною дією й «Details», повний вміст — у вкладці Status. Деінде (інший екран, одиничний тест) —
  * вміст на місці, як і раніше.
  */
-export function NoticeSlot({ id, priority, blocking, tone, text, actions = [], onDismiss, testId, children }: NoticeSlotProps): JSX.Element | null {
+export function NoticeSlot({ id, priority, blocking, tone, text, actions = [], onDismiss, testId, data, children }: NoticeSlotProps): JSX.Element | null {
   const openStatus = useOpenStatus();
   const hosted = useNoticeHost(id, {
     priority,
@@ -37,6 +39,7 @@ export function NoticeSlot({ id, priority, blocking, tone, text, actions = [], o
         actions={[...actions, { label: t('document.notices.details'), run: openStatus }]}
         {...(onDismiss === undefined ? {} : { onDismiss })}
         {...(testId === undefined ? {} : { testId })}
+        {...(data === undefined ? {} : { data })}
       />
     ),
     renderFull: () => <>{children}</>,

@@ -56,7 +56,8 @@ import { GrantOrder, meetsGrant, type GrantLevelName } from './grantLevels';
 import { t } from '@/shared/i18n';
 import { formatPeriodKey } from '@/shared/format';
 import { DisabledReason } from '@/features/common/DisabledReason';
-import { guardSubmitNeedsInput } from './submitGuide';
+import { guardSubmitNeedsInput, isOwnRecalculationPending, showSubmitWaitsRecalc, SubmitWaitsRecalcNoticeId } from './submitGuide';
+import { withdrawNotice } from '@/features/documents/notices/noticeStore';
 import { isRequiredInputsRefusal, refreshAllRequiredInputs } from '@/features/grid/requiredInputsServer';
 
 /**
@@ -779,6 +780,7 @@ export function useSheetActions({
     onSuccess: async (_result, at) => {
       setWarnings(null);
       closeSubmitConfirm();
+      withdrawNotice(SubmitWaitsRecalcNoticeId);
       await refresh(at);
       // ✎ D-441: попередження «наступний — …» стоїть поруч із кнопкою ДО подання (`SubmitPeriodPicker`); після
       // нього кнопка сама переходить на наступний період.
@@ -792,6 +794,13 @@ export function useSheetActions({
       closeSubmitConfirm();
       // ✎ DOCUX L9 (Q6): сервер відмовив через порожні обов'язкові входи — не тост, а перехід до першої комірки з поясненням
       // (переліки таблиць перечитуються: сервер знає й рядки, яких людина не правила, і таблиці, яких ще не відкрито).
+      // ✎ DOCUX (RC b18): правки щойно збережено, тихий перерахунок ще йде — не тупик і не тост помилки: рядок повідомлень
+      // каже, що подання чекає перерахунку (чип показує стан), і дає «Submit again».
+      if (isOwnRecalculationPending(error)) {
+        void queryClient.invalidateQueries({ queryKey: calcStatusKey(documentId, at.periodKey) });
+        showSubmitWaitsRecalc(() => void settled.run(() => submit.mutateAsync({ ...at, acknowledgeWarnings: false })));
+        return;
+      }
       if (isRequiredInputsRefusal(error)) {
         void refreshAllRequiredInputs(queryClient, documentId).then(() =>
           window.setTimeout(() => {

@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+import { useId, type JSX } from 'react';
 import { Badge, Button, Group, Popover, Stack, Text, VisuallyHidden } from '@mantine/core';
 import { formatDateTime, formatTime } from '@/shared/format/datetime';
 import { formatMonthName } from '@/shared/format';
@@ -64,6 +64,8 @@ function originText(origin: JobOrigin | null): string {
  */
 export function CalcStatusChip({ documentId, periodKey, card, local, recalculate }: CalcStatusChipProps): JSX.Element | null {
   const server = useDocumentCalcStatus(documentId, periodKey, local.queued || local.running);
+  // Пояснення — опис чипа (`aria-describedby`), не частина назви: «Recalculate» лишається назвою лише кнопки дії.
+  const detailId = useId();
   const view = calcStatusOf(server, card, local);
   const { status } = view;
 
@@ -126,9 +128,9 @@ export function CalcStatusChip({ documentId, periodKey, card, local, recalculate
               bg={look.bg}
               styles={{ root: { textTransform: 'none', letterSpacing: 'normal', fontWeight: 500, cursor: detail === null ? 'default' : 'pointer', border: `1px solid ${look.border}` } }}
               data-testid="calc-status-chip"
+              aria-describedby={detail === null ? undefined : detailId}
             >
               {label}
-              {detail !== null && <VisuallyHidden>{` ${detail}`}</VisuallyHidden>}
             </Badge>
           </Popover.Target>
           {detail !== null && (
@@ -143,6 +145,7 @@ export function CalcStatusChip({ documentId, periodKey, card, local, recalculate
           )}
         </Popover>
       )}
+      {detail !== null && <VisuallyHidden id={detailId}>{detail}</VisuallyHidden>}
       {action !== null && recalculate !== null && (
         <DisabledReason reason={recalculate.blockedReason}>
           <Button size="xs" variant="subtle" loading={recalculate.loading} onClick={recalculate.run} aria-keyshortcuts="F9" data-testid="calc-status-action">

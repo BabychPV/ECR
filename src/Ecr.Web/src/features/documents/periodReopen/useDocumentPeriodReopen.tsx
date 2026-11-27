@@ -1,5 +1,5 @@
 import { badgeLook } from '@/shared/ui/StatusBadge';
-import { lazy, Suspense, useEffect, useState, type JSX } from 'react';
+import { lazy, Suspense, useEffect, useId, useState, type JSX } from 'react';
 import { Badge, Button, Group, Popover, Text, VisuallyHidden } from '@mantine/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
@@ -129,8 +129,11 @@ export function useDocumentPeriodReopen({ documentId, periodKey, periodState, ti
   }
 
   // ✎ DOCUX L8 (№9): «відкрито для документа до …» — ЧИП у рядку стану (хто, чому — у ⓘ і для читалки), а не банер.
+  // Пояснення чипа — опис (`aria-describedby`), не частина назви кнопки.
+  const reopenDetailId = useId();
   const banner =
     active === null ? null : (
+      <span data-testid="document-period-reopened">
       <Popover position="bottom-start" withArrow shadow="md" width={360}>
         <Popover.Target>
           <Badge
@@ -142,12 +145,9 @@ export function useDocumentPeriodReopen({ documentId, periodKey, periodState, ti
             c={badgeLook('info').text}
             bg={badgeLook('info').bg}
             styles={{ root: { textTransform: 'none', letterSpacing: 'normal', fontWeight: 500, cursor: 'pointer' } }}
-            data-testid="document-period-reopened"
+            aria-describedby={reopenDetailId}
           >
             {`${t('document.reopen.activeTitle', { until: untilText(active.openUntil, timeZoneId) })} ⓘ`}
-            <VisuallyHidden>
-              {` ${t('document.reopen.activeBody', { period, reason: active.reason, by: active.openedByName ?? String(active.openedByUserId) })}`}
-            </VisuallyHidden>
           </Badge>
         </Popover.Target>
         <Popover.Dropdown>
@@ -156,6 +156,10 @@ export function useDocumentPeriodReopen({ documentId, periodKey, periodState, ti
           </Text>
         </Popover.Dropdown>
       </Popover>
+      <VisuallyHidden id={reopenDetailId}>
+        {` ${t('document.reopen.activeBody', { period, reason: active.reason, by: active.openedByName ?? String(active.openedByUserId) })}`}
+      </VisuallyHidden>
+      </span>
     );
 
   const dialog =

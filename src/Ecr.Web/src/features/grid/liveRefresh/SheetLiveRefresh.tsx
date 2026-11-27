@@ -114,9 +114,18 @@ export function useSheetLiveRefresh({ documentId, periodKey, tables }: SheetLive
   const change = changes.change;
   const banner = (
     <div className="ecr-live-host" role="status" aria-live="polite" aria-atomic="true" data-testid="sheet-live-host">
-      {/* ✎ DOCUX L7 (пріоритет 7): чужий перехід стану й чужа зміна — у рядку повідомлень сторінки, не банерами. */}
+      {/* ✎ DOCUX L7: чужий перехід стану й чужа зміна — у рядку повідомлень сторінки, не банерами. Пріоритет 5 (вище за
+          проблеми розрахунку): дані на екрані застаріли — людина має побачити це до наступної правки (RC b18). */}
       {status.notice !== null && (
-        <NoticeSlot id={`live-status:${String(sheetDefId)}`} priority={7} tone="info" text={statusBannerText(status.notice)} onDismiss={status.dismiss} testId="notice-live-status">
+        <NoticeSlot
+          id={`live-status:${String(sheetDefId)}`}
+          priority={5}
+          tone="info"
+          text={statusBannerText(status.notice)}
+          onDismiss={status.dismiss}
+          testId="notice-live-status"
+          data={{ 'data-live-status': status.notice.state }}
+        >
         <div className="ecr-live-banner" data-testid="sheet-status-banner" data-live-status={status.notice.state}>
           <span className="ecr-live-banner-text">{statusBannerText(status.notice)}</span>
           <button
@@ -133,7 +142,8 @@ export function useSheetLiveRefresh({ documentId, periodKey, tables }: SheetLive
       {change !== null && (
         <NoticeSlot
           id={`live-change:${String(sheetDefId)}`}
-          priority={7}
+          priority={5}
+          data={{ 'data-live-tables': [...change.tables.keys()].join(',') }}
           tone="info"
           text={bannerText(change)}
           actions={[{ label, run: () => void run(change.tables.keys()), keys: 'Shift+F5', testId: 'notice-live-refresh' }]}

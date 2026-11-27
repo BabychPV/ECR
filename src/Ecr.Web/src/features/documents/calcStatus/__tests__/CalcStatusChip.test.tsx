@@ -123,7 +123,10 @@ describe('CalcStatusChip', () => {
       dto({ resultsStale: true, lastFailure: { jobId: 'f', failedAt: '2026-11-26T13:00:00Z', errorCode: 'ECR-SYS-0500', correlationId: '7f3a', kind: 'manual', own: true } }),
     ]);
     await waitFor(() => expect(kind()).toBe('failed'));
-    expect(screen.getByTestId('calc-status-chip').textContent).toContain('ECR-SYS-0500 · 7f3a');
+    // Код і кореляція — опис чипа (aria-describedby), не його назва (RC b18: назви дій не збігаються з назвою чипа).
+    const chip = screen.getByTestId('calc-status-chip');
+    expect(chip.textContent).not.toContain('ECR-SYS-0500');
+    expect(document.getElementById(chip.getAttribute('aria-describedby') ?? '')?.textContent).toContain('ECR-SYS-0500 · 7f3a');
     fireEvent.click(screen.getByTestId('calc-status-action'));
     expect(run).toHaveBeenCalledTimes(1);
   });

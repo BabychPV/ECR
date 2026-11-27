@@ -1,5 +1,6 @@
 import { useEffect, type JSX } from 'react';
 import { t } from '@/shared/i18n';
+import { EcrApiError } from '@/api/client';
 import { NoticeRow } from '@/features/documents/notices/NoticeRow';
 import { publishNotice, withdrawNotice } from '@/features/documents/notices/noticeStore';
 import {
@@ -62,4 +63,34 @@ function CannotSubmitNotice({ month }: { readonly month: number | null }): JSX.E
       }}
     />
   );
+}
+
+/** Ідентифікатор повідомлення «подання чекає власного перерахунку». */
+export const SubmitWaitsRecalcNoticeId = 'submit-waits-recalc';
+
+/** Відмова подання, бо власний перерахунок після правок ще йде (`ECR-SUB-4221` ownRecalculationPending, ворота Q2). */
+export function isOwnRecalculationPending(error: unknown): boolean {
+  return error instanceof EcrApiError && error.problem.extensions2?.['messageKey'] === 'err.ECR-SUB-4221.ownRecalculationPending';
+}
+
+/**
+ * ✎ DOCUX (RC b18): людина правила й одразу подає — сервер свідомо чекає тихого перерахунку її правок (Q2). Це не тупик і
+ * не помилка: рядок повідомлень каже, що відбувається (чип показує «Queued / Recalculating»), і дає «Submit again»;
+ * знімається після успішного подання чи хрестиком.
+ */
+export function showSubmitWaitsRecalc(retry: () => void): void {
+  publishNotice({
+    id: SubmitWaitsRecalcNoticeId,
+    priority: 4,
+    blocking: true,
+    render: () => (
+      <NoticeRow
+        tone="info"
+        text={t('document.notices.submitWaitsRecalc')}
+        testId="notice-submit-waits-recalc"
+        actions={[{ label: t('document.notices.submitAgain'), run: retry, testId: 'notice-submit-again' }]}
+        onDismiss={() => withdrawNotice(SubmitWaitsRecalcNoticeId)}
+      />
+    ),
+  });
 }
