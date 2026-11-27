@@ -1,6 +1,6 @@
 import { useState, type JSX } from 'react';
 import { Badge, Box, Button, Checkbox, Group, Text } from '@mantine/core';
-import { auditValueText } from '@/features/audit/auditValue';
+import { auditValueText, rowText } from '@/features/audit/auditValue';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { useSheetActivity, type SheetActivityItem } from '@/features/workflow/api';
 import { t } from '@/shared/i18n';
@@ -212,7 +212,8 @@ function CellEditRow({
   const tableCode = item.tableCode ?? '';
   const where = [
     localized(item.tableNameL10n),
-    localized(item.rowLabelL10n) || rowKey,
+    // ✎ DOCUX (огляд UI 27.11): рядок без мітки — «Row N» (як рядок формули), не ключ «p1-T3_00-0020».
+    rowText({ rowKey, rowLabelL10n: item.rowLabelL10n ?? null, rowOrdinal: item.rowOrdinal ?? null }),
     localized(item.columnHeaderL10n) || columnCode,
   ]
     .filter((part) => part.length > 0)
@@ -237,7 +238,9 @@ function CellEditRow({
         {item.oldValue === null ? (
           <Text span c="dimmed">—</Text>
         ) : (
-          <s title={item.oldValue} data-inspector-old="">{auditValueText(item.oldValue, item.columnDataType, item.columnScale)}</s>
+          <s title={item.oldValue} data-inspector-old="">
+            {auditValueText(item.oldValue, item.columnDataType, item.columnScale, item.oldValueLabelL10n)}
+          </s>
         )}
         <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
           <path d="M5 12h14M13 6l6 6-6 6" />
@@ -245,7 +248,7 @@ function CellEditRow({
         {/* ⛔ Значення — за правилом показу колонки (`auditValueText`, як вкладка Audit і сітка), а не у форматі сховища
             (`437.6311000000000000`); точне значення лишається в `title`. Нечислові колонки — без змін. */}
         <span title={item.newValue ?? undefined} data-inspector-new="">
-          {item.newValue === null ? '—' : auditValueText(item.newValue, item.columnDataType, item.columnScale)}
+          {item.newValue === null ? '—' : auditValueText(item.newValue, item.columnDataType, item.columnScale, item.newValueLabelL10n)}
         </span>
       </div>
       <Group gap="xs">

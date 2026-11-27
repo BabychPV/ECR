@@ -53,14 +53,14 @@ function job(over: Partial<CalcActiveJob> = {}): CalcActiveJob {
 
 const json = (body: unknown): Response => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
-function show(responses: DocumentCalcStatus[], local: LocalRecalc = Idle, run = vi.fn()): { run: typeof run; calls: () => number } {
+function show(responses: DocumentCalcStatus[], local: LocalRecalc = Idle, run = vi.fn(), issues = false): { run: typeof run; calls: () => number } {
   let index = 0;
   const fetchMock = vi.fn(async (_input: RequestInfo | URL) => json(responses[Math.min(index++, responses.length - 1)]));
   vi.stubGlobal('fetch', fetchMock);
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <CalcStatusChip documentId={96} periodKey={202601} card={NoCard} local={local} recalculate={{ run, loading: false, blockedReason: null }} />
+        <CalcStatusChip documentId={96} periodKey={202601} card={NoCard} local={local} recalculate={{ run, loading: false, blockedReason: null }} issues={issues} />
       </QueryClientProvider>
     </MantineProvider>,
   );
@@ -159,5 +159,24 @@ describe('CalcStatusChip', () => {
     await waitFor(() => expect(kind()).toBe('upToDate'));
     expect(screen.getByTestId('calc-status-locked').textContent).toContain('calcStatus.lockedMonths');
     expect(screen.queryByTestId('calc-status-action')).toBeNull();
+  });
+
+  // ✎ DOCUX (живий прохід 27.11): чип «✓ Calculated 6:58 PM» поруч із рядком «Calculation not finished…» суперечили одне одному.
+  it('прогін завершився з проблемами — «Calculated with issues» у тоні попередження, пояснення веде до рядка й Status', async () => {
+    show([dto()], Idle, vi.fn(), true);
+    await waitFor(() => expect(kind()).toBe('upToDate'));
+    const chip = screen.getByTestId('calc-status-chip');
+    expect(chip.textContent).toMatch(/^⚠ ⟦calcStatus\.upToDateIssues \(time=.+\)⟧$/);
+    expect(chip.textContent).not.toContain('✓');
+    expect(screen.getByTestId('calc-status').getAttribute('data-calc-issues')).toBe('true');
+    expect(document.getElementById(chip.getAttribute('aria-describedby') ?? '')?.textContent).toContain('calcStatus.issuesHint');
+    expect(screen.queryByTestId('calc-status-action')).toBeNull();
+  });
+
+  it('проблеми розрахунку не перекривають «рахується» / «застаріло» — ті важливіші', async () => {
+    show([dto({ resultsStale: true, staleMonths: [{ periodKey: 202601, since: null, recalculable: true, lockedReason: null }] })], Idle, vi.fn(), true);
+    await waitFor(() => expect(kind()).toBe('stale'));
+    expect(screen.getByTestId('calc-status').getAttribute('data-calc-issues')).toBeNull();
+    expect(screen.getByTestId('calc-status-chip').textContent).toContain('calcStatus.stale');
   });
 });

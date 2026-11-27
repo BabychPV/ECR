@@ -37,6 +37,8 @@ export interface InspectedCell {
   readonly isReadOnly: boolean;
   /** Значення в канонічному записі; порожній рядок — не заповнено. */
   readonly value: string;
+  /** ✎ DOCUX: показ комірки, коли він не збігається із записом (`Lookup`: назва запису, а запис — id); `null` — збігається. */
+  readonly valueLabel?: string | null;
   /** ✎ DOCUX: походження колонки зі зрізу (D-577) — «Calculated by» / «Read by» в Info. */
   readonly provenance?: ProvenanceSource | null;
 }

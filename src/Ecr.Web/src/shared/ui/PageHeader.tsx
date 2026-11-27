@@ -290,7 +290,15 @@ export function PageHeader({
             (`ФВ-14.19`) лишаються на заголовку, читалка доходить до пояснення
             наступним рядком. Дві строки й ~70 знаків — макет (`.page-sub`). */}
         {shown(explanation) && (
-          <Text size="sm" c="dimmed" maw="70ch" lineClamp={2} data-testid="page-description">
+          <Text
+            size="sm"
+            c="dimmed"
+            maw="70ch"
+            lineClamp={2}
+            // ✎ DOCUX (огляд UI 27.11, Permit types): обрізане двома рядками пояснення — повністю в підказці.
+            {...(typeof explanation === 'string' ? { title: explanation } : {})}
+            data-testid="page-description"
+          >
             {explanation}
           </Text>
         )}

@@ -212,3 +212,13 @@ describe('onChange і D15-06', () => {
     expect(container.querySelector('[data-filter-bar]')).toBeNull();
   });
 });
+
+// ✎ DOCUX (огляд UI 27.11): порожній фільтр показував порожнє поле; у Documents — «All projects / All states».
+describe('Порожній фільтр каже «All …»', () => {
+  it('власна підказка сторінки — як є; без неї — загальне «All» з каталогу', () => {
+    show(<FilterBar filters={[{ ...states, placeholder: 'Усі стани' }, { id: 'kind', label: 'Вид', options: [] }]} />);
+
+    expect(screen.getByLabelText('Стан').getAttribute('placeholder')).toBe('Усі стани');
+    expect(screen.getByLabelText('Вид').getAttribute('placeholder')).toBe('⟦filters.all⟧');
+  });
+});

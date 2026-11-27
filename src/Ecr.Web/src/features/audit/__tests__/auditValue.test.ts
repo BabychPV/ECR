@@ -53,3 +53,12 @@ describe('auditValueText', () => {
     expect(auditValueText('not a date', 'Date')).toBe('not a date');
   });
 });
+
+// ✎ DOCUX (огляд UI 27.11): журнал показував довідникову комірку сирим id («— → 37» для Type of fuel = Diesel).
+describe('auditValueText: довідникова колонка', () => {
+  it('назва запису від сервера замість id; без назви (запис видалено) — id як є', () => {
+    expect(auditValueText('37', 'Lookup', null, { values: { en: 'Diesel' } })).toBe('Diesel');
+    expect(auditValueText('37', 'Lookup', null, null)).toBe('37');
+    expect(auditValueText(null, 'Lookup', null, { values: { en: 'Diesel' } })).toBe('—');
+  });
+});

@@ -297,8 +297,10 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                     // Масштаб колонки — щоб клієнт показав значення за правилом сітки (не менше Scale знаків, U-05).
                     reader.IsDBNull(26) ? null : Convert.ToInt32(reader.GetValue(26), CultureInfo.InvariantCulture),
 
-                    // ✎ AC-13: номер рядка на екрані — для рядка без мітки шаблону («Row N» замість початку GUID).
-                    reader.IsDBNull(27) ? null : reader.GetInt32(27))));
+                    // ⛔ DOCUX (b19, живий прохід): НЕ `doc.TableRow.Ordinal` — у рядка, доданого людиною, він 0, і журнал казав
+                    // «Row 0». Номер на екрані рахує Application (`CellChangeRowPositions`, порядок зрізу); тут — екземпляр.
+                    RowOrdinal: null,
+                    TableInstanceId: reader.IsDBNull(27) ? null : reader.GetInt64(27))));
         }
 
         return rows;
@@ -494,7 +496,7 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                    a.OldValue, a.NewValue, a.ChangedByUserId, a.Origin, a.IsLateEdit,
                    u.DisplayName, d.BusinessKey, d.NameL10n, c.Code, c.HeaderL10n, c.DataType,
                    a.IsOutOfWindow, sd.Code, sd.NameL10n, td.Code, td.NameL10n, rd.LabelL10n,
-                   {fromArchive}, a.IsOverwrite, a.Reason, c.Scale, tr.Ordinal
+                   {fromArchive}, a.IsOverwrite, a.Reason, c.Scale, tr.TableInstanceId
               FROM (
                     {pageSource}
                    ) AS a

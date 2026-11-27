@@ -41,11 +41,19 @@ export function SearchLauncher({ groups = NoGroups }: { groups?: readonly Palett
   // Палітра монтується з першим відкриттям і далі лишається (анімація закриття).
   const [requested, setRequested] = useState(false);
   const returnTo = useRef<HTMLElement | null>(null);
+  // ✎ DOCUX (огляд UI 27.11): набране одразу після Ctrl+K, поки лінивий чанк палітри вантажиться й поле ще не у фокусі.
+  const typed = useRef('');
+  const takeTyped = useCallback((): string => {
+    const text = typed.current;
+    typed.current = '';
+    return text;
+  }, []);
 
   const open = useCallback((): void => {
     const current = document.activeElement;
     returnTo.current =
       current instanceof HTMLElement && current !== document.body ? current : null;
+    typed.current = '';
     setRequested(true);
     setOpened(true);
   }, []);
@@ -75,6 +83,24 @@ export function SearchLauncher({ groups = NoGroups }: { groups?: readonly Palett
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [open]);
+
+  // ✎ DOCUX: поки палітра відкривається, а її поле ще не у фокусі, символи не мають іти в сітку чи губитися — вони
+  // накопичуються тут і дописуються в поле, щойно воно отримає фокус (`takeTyped`).
+  useEffect(() => {
+    if (!opened) return undefined;
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest('[data-palette-input]') != null) return;
+      if (event.key.length === 1) typed.current += event.key;
+      else if (event.key === 'Backspace') typed.current = typed.current.slice(0, -1);
+      else return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [opened]);
 
   const label = t('search.open');
 
@@ -108,6 +134,7 @@ export function SearchLauncher({ groups = NoGroups }: { groups?: readonly Palett
             onClose={() => finish(true)}
             onPicked={() => finish(false)}
             groups={groups}
+            takeTyped={takeTyped}
           />
         </Suspense>
       )}

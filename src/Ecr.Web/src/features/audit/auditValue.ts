@@ -1,4 +1,7 @@
 import { displayPaddingOf, formatDate, formatDecimal } from '@/shared/format';
+import { localized, type LocalizedText } from '@/shared/i18n/localized';
+import { t } from '@/shared/i18n';
+import { isOpaqueRowKey } from '@/features/grid/rowKeyText';
 
 /** Типи колонок, чиє значення — число (`U-05`: одне правило подачі числа). */
 export const NumericTypes: readonly string[] = ['Decimal', 'Int', 'Formula', 'Calculated'];
@@ -24,8 +27,15 @@ export function auditValueText(
   value: string | null | undefined,
   dataType: string | null | undefined,
   scale?: number | null,
+  /**
+   * ✎ DOCUX (огляд UI 27.11): довідникова колонка — назва запису від сервера (`oldValueLabelL10n`/`newValueLabelL10n`), як у
+   * самій комірці; id запису лишається в підказці викликача. Немає назви (запис видалено) — як доти, сирий id.
+   */
+  label?: LocalizedText | null,
 ): string {
   if (value === null || value === undefined) return '—';
+  const named = label === undefined || label === null ? '' : localized(label);
+  if (named.length > 0) return named;
   if (dataType === null || dataType === undefined) return value;
 
   if (NumericTypes.includes(dataType)) {
@@ -40,4 +50,25 @@ export function auditValueText(
   }
 
   return value;
+}
+
+/**
+ * ✎ audit-filters-followup AC-12: рядок комірки для людини. Джерело мітки — `cfg.RowDef.LabelL10n` фіксованого рядка
+ * шаблону (`rowLabelL10n` рядка журналу); у динамічного (доданого людиною) рядка мітки немає ніде, а його ключ —
+ * GUID. Тоді «Row» + початок ключа (повний — у підказці), а не 32 символи. Короткі коди («LTD-A02») — як були.
+ * ✎ AC-13: для такого рядка — його номер на екрані «Row N» (`rowOrdinal`, `doc.TableRow.Ordinal`); номера немає (рядок
+ * видалено, період в архіві) — як раніше, «Row» + початок ключа.
+ */
+export function rowText(change: { readonly rowKey: string; readonly rowLabelL10n?: LocalizedText | null; readonly rowOrdinal?: number | null }): string {
+  const label = localized(change.rowLabelL10n);
+  if (label.length > 0) return label;
+  const ordinal = change.rowOrdinal;
+  // ✎ DOCUX (огляд UI 27.11): рядок без мітки — «Row N», ЯК У РЯДКУ ФОРМУЛИ й інспекторі, для будь-якого ключа: згенерований
+  // ключ динамічного рядка («p1-T3_00-0020») — теж не код для людини. Ключ лишається в підказці рядка.
+  // ⛔ b19: номер — позиція на екрані від 1 (сервер, порядок зрізу); 0 чи менше — не номер (колишній `TableRow.Ordinal`
+  // доданого рядка), «Row 0» не показується ніколи.
+  if (typeof ordinal === 'number' && ordinal > 0) return `${t('grid.rowLabelHeader')} ${String(ordinal)}`;
+  if (isOpaqueRowKey(change.rowKey)) return `${t('grid.rowLabelHeader')} ${change.rowKey.slice(0, 8)}…`;
+
+  return change.rowKey;
 }

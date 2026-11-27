@@ -33880,8 +33880,10 @@ export interface components {
             isOverwrite: boolean;
             /** @description Нове значення. */
             newValue: null | string;
+            newValueLabelL10n?: null | components["schemas"]["LocalizedText"];
             /** @description Старе значення. */
             oldValue: null | string;
+            oldValueLabelL10n?: null | components["schemas"]["LocalizedText"];
             /** @description Звідки зміна: правка, імпорт, перерахунок, міграція. */
             origin: string;
             /**
@@ -33897,7 +33899,8 @@ export interface components {
             rowLabelL10n?: null | components["schemas"]["LocalizedText"];
             /**
              * Format: int32
-             * @description ✎ AC-13: порядковий номер рядка на екрані (`doc.TableRow.Ordinal`, від 1) — щоб рядок, доданий людиною (без
+             * @description ✎ AC-13 / ✎ DOCUX b19: номер рядка на екрані (від 1) — позиція в порядку зрізу (рядки шаблону за `RowDef.Ordinal`,
+             *     далі додані людиною за `TableRow.Id`), як «row N» у рядку формули; НЕ `doc.TableRow.Ordinal` (у доданого — 0) — щоб рядок, доданий людиною (без
              *     мітки шаблону, ключ — GUID), читався «Row N». `null` — рядка вже немає в `doc.TableRow` (видалено фізично,
              *     період в архіві).
              */
@@ -45833,8 +45836,10 @@ export interface components {
             kind: string;
             /** @description Лише правка: значення після. */
             newValue: null | string;
+            newValueLabelL10n?: null | components["schemas"]["LocalizedText"];
             /** @description Лише правка: значення до. */
             oldValue: null | string;
+            oldValueLabelL10n?: null | components["schemas"]["LocalizedText"];
             /** @description Правка й рядок: `UserEdit`, `Import`, `ImportOverwrite`, `ApproverEdit`. */
             origin: null | string;
             /**
@@ -45847,6 +45852,11 @@ export interface components {
             /** @description Правка й рядок: ключ рядка. */
             rowKey: null | string;
             rowLabelL10n: null | components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Лише правка: номер рядка на екрані (як int? CellChangeView.RowOrdinal).
+             */
+            rowOrdinal?: null | number;
             /** @description Правка й рядок: код таблиці. */
             tableCode: null | string;
             tableNameL10n: null | components["schemas"]["LocalizedText"];

@@ -1,3 +1,4 @@
+import { versionModes } from '@/features/methodologies/versionModeLabels';
 import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from 'react';
 import { preloadScriptEditorWhenIdle } from '@/features/methodologyScript/preloadScriptEditor';
 import { Alert, Button, Group, Select, Skeleton, Stack, Table, Text, TextInput } from '@mantine/core';
@@ -219,8 +220,9 @@ export function MethodologyVersionsPage(): JSX.Element {
                 </Table.Td>
                 <Table.Td>
                   {/* ⚠ Режими поруч зі статусом: вони визначають числа (`ФВ-9.9`, `ФВ-16.11`), і клон їх переносить. */}
-                  <Text size="sm" c="dimmed">
-                    {version.numericMode} · {version.calendarMode} · {version.traceLevel}
+                  {/* ✎ DOCUX (огляд UI 27.11): режими словами, пояснення — у підказці. */}
+                  <Text size="sm" c="dimmed" title={versionModes(version).hint} data-version-modes="">
+                    {versionModes(version).label}
                   </Text>
                 </Table.Td>
                 {/* ⚠ `dateOnly`: дата набуття чинності порівнюється з календарем періодів, а не з годинником. */}

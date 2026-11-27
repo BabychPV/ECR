@@ -180,7 +180,9 @@ describe('Water lock: Issues і шапка інспектора (UAT 08.11)', ()
     const chip = document.querySelector('[data-inspector-address]');
     expect(chip?.getAttribute('data-inspector-column')).toBe('August');
     expect(chip?.textContent).toContain('inspector.info.column');
-    expect(chip?.textContent).toContain('R7001000');
+    // ✎ DOCUX 27.11: рядок — підписом сітки, як у рядку формули; ключ рядка — лише в Info («Technical address»).
+    expect(chip?.textContent).toContain('Sea Water Intake · ');
+    expect(chip?.textContent).not.toContain('R7001000');
   });
 
   /*

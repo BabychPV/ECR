@@ -53,4 +53,11 @@ describe('PageHeader: пояснення екрана (UI-11)', () => {
     show(<PageHeader title="Jobs" />);
     expect(screen.queryByTestId('page-description')).toBeNull();
   });
+
+  // ✎ DOCUX (огляд UI 27.11, Permit types): пояснення обрізається двома рядками — повний текст у підказці.
+  it('обрізане пояснення — повністю в підказці (title)', () => {
+    const long = 'A type says what a permit contains: its fields and its tables with columns. Add a type here and its permits work everywhere.';
+    show(<PageHeader title="Permit types" description={long} />);
+    expect(screen.getByTestId('page-description').getAttribute('title')).toBe(long);
+  });
 });

@@ -2,8 +2,8 @@
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'sources.notConfiguredHint', N'ru', N'Чтобы подключить PI, администратор добавляет здесь подключение: адрес PI Web API, секрет и способ аутентификации. До этого данные вводятся вручную. См. docs/admin/admin-guide.md, раздел 5, и docs/admin/operations-runbook.md, раздел 15.'),
-    (N'sources.notConfiguredHint', N'kz', N'PI-ды қосу үшін әкімші осы жерде қосылым қосады: PI Web API мекенжайы, құпия және аутентификация тәсілі. Ол уақытқа дейін деректер қолмен енгізіледі. docs/admin/admin-guide.md құжатының 5-бөлімін және docs/admin/operations-runbook.md құжатының 15-бөлімін қараңыз.')
+    (N'sources.notConfiguredHint', N'ru', N'Чтобы подключить источник данных, администратор добавляет здесь подключение: PI Web API, PI SQL Client или SQL — с адресом и учётными данными. До этого данные вводятся вручную. Подробности — в руководстве администратора.'),
+    (N'sources.notConfiguredHint', N'kz', N'Дереккөзді қосу үшін әкімші осы жерде қосылым қосады: PI Web API, PI SQL Client немесе SQL — мекенжайы мен тіркелгі деректерімен. Ол уақытқа дейін деректер қолмен енгізіледі. Толығырақ — әкімші нұсқаулығында.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -13,7 +13,7 @@ GO
 INSERT INTO #UiEn ([Key], Lang, Val, Scope)
 SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
-    (N'sources.notConfiguredHint', N'en', N'To connect PI, an administrator adds a connection here: the PI Web API address, the secret and the authentication. Until then data is entered by hand. See docs/admin/admin-guide.md, section 5, and docs/admin/operations-runbook.md, section 15.', 1)
+    (N'sources.notConfiguredHint', N'en', N'To connect a data source, an administrator adds a connection here: PI Web API, PI SQL Client or SQL, with its address and credentials. Until then data is entered by hand. Details are in the administrator guide.', 1)
     -- ru/kz — окремою порцією `I18N` (COLL:nosource-hints).
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);

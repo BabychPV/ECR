@@ -34,6 +34,12 @@ namespace Ecr.Application.Audit;
 /// Лише правка: масштаб колонки — значення показується з НЕ МЕНШЕ стількома знаками після коми, як у сітці (U-05);
 /// <c>null</c> — масштабу немає.
 /// </param>
+/// <param name="RowOrdinal">Лише правка: номер рядка на екрані (як <see cref="Ports.CellChangeView.RowOrdinal"/>).</param>
+/// <param name="OldValueLabelL10n">
+/// ✎ DOCUX (огляд UI 27.11): довідникова колонка — назва запису старого значення (як у комірці); <c>null</c> — не
+/// довідник, порожньо або запису вже немає. Сирий id — у значенні (CSV-експорт — лише він).
+/// </param>
+/// <param name="NewValueLabelL10n">Те саме для нового значення.</param>
 public sealed record SheetActivityItem(
     string Kind,
     DateTime At,
@@ -54,7 +60,10 @@ public sealed record SheetActivityItem(
     string? FromState,
     string? ToState,
     string? Reason,
-    int? ColumnScale = null);
+    int? ColumnScale = null,
+    int? RowOrdinal = null,
+    LocalizedText? OldValueLabelL10n = null,
+    LocalizedText? NewValueLabelL10n = null);
 
 /// <summary>Сторінка журналу дій аркуша.</summary>
 /// <param name="Items">Рядки, найновіші перші.</param>
@@ -151,7 +160,8 @@ public sealed record SheetActivityPeriod(int PeriodKey, IReadOnlyList<int> Visib
 /// </para>
 /// </remarks>
 public sealed class SheetActivityQuery(
-    IAuditReader audit, IWorkflowStore workflow, TimeProvider? clock = null, IRowChangeAudit? rowChanges = null)
+    IAuditReader audit, IWorkflowStore workflow, TimeProvider? clock = null, IRowChangeAudit? rowChanges = null,
+    IRegistryStore? registries = null, IRowStore? rowStore = null, IMetadataCache? metadata = null)
 {
     /// <summary>Скільки днів назад читаються правки комірок (як вікно історії однієї комірки).</summary>
     public static readonly TimeSpan CellWindow = TimeSpan.FromDays(396);
@@ -228,8 +238,11 @@ public sealed class SheetActivityQuery(
             : null;
 
         var result = await audit.ReadCellChangesAsync(filter, new CursorRequest(limit, position), ct).ConfigureAwait(false);
+        // ✎ DOCUX (огляд UI 27.11): довідникові значення — назвою запису; рядок без підпису — номером на екрані (RowOrdinal).
+        var items = await LookupValueLabels.WithLabelsAsync(result.Items, registries, ct).ConfigureAwait(false);
+        items = await CellChangeRowPositions.WithScreenPositionsAsync(items, rowStore, metadata, ct).ConfigureAwait(false);
 
-        var rows = result.Items
+        var rows = items
             .Select(c => new Row(c.ChangedAt, CellTag, c.Id, new SheetActivityItem(
                 SheetActivityKinds.CellEdit, c.ChangedAt,
                 !Documents.CellChangeOrigins.IsHuman(c.Origin)
@@ -237,7 +250,8 @@ public sealed class SheetActivityQuery(
                     : c.ChangedByDisplayName ?? "#" + c.ChangedByUserId.ToString(CultureInfo.InvariantCulture),
                 c.Origin, c.PeriodKey, c.RowKey, c.RowLabelL10n, c.ColumnDefId, c.ColumnCode, c.ColumnHeaderL10n,
                 c.ColumnDataType, c.TableCode, c.TableNameL10n, c.OldValue, c.NewValue,
-                Action: null, FromState: null, ToState: null, Reason: null, ColumnScale: c.ColumnScale)))
+                Action: null, FromState: null, ToState: null, Reason: null, ColumnScale: c.ColumnScale,
+                RowOrdinal: c.RowOrdinal, OldValueLabelL10n: c.OldValueLabelL10n, NewValueLabelL10n: c.NewValueLabelL10n)))
             .ToList();
 
         return (rows, result.NextCursor is not null);

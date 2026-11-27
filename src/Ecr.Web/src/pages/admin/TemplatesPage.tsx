@@ -368,6 +368,7 @@ export function TemplatesPage(): JSX.Element {
                 {
                   id: 'state',
                   label: t('templates.state'),
+                  placeholder: t('templates.stateAll'),
                   // ⚠ Ключі літералами: сторож `EndpointCoverageTests` має
                   // бачити, які рядки каталогу доходять до екрана.
                   options: [

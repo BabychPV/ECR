@@ -11,6 +11,7 @@ import {
   Table,
   Text,
   TextInput,
+  Tooltip,
 } from '@mantine/core';
 import { ResizableModal } from '@/shared/ui/ResizableModal';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -34,6 +35,9 @@ import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
+import { methodologyMatches, methodologyTitle, versionModes } from '@/features/methodologies/versionModeLabels';
+import { FilterBar } from '@/shared/ui/FilterBar';
+import { useUrlState } from '@/shared/ui/useUrlState';
 
 /** Версія-скрипт, яку відкриває головна кнопка рядка: чинна сьогодні (перелік містить лише опубліковані). */
 function listedEditorTarget(methodology: MethodologyDto): MethodologyDto['versions'][number] | undefined {
@@ -66,6 +70,8 @@ export function MethodologiesPage(): JSX.Element {
   const [name, setName] = useState('');
   const [kind, setKind] = useState<MethodologyKind>('DataDriven');
   const [group, setGroup] = useState('');
+  // ✎ DOCUX (огляд UI 27.11): 100+ методологій без пошуку — поле пошуку за кодом і назвою, значення в адресі (як Registries).
+  const [query] = useUrlState('q');
 
   // Яку версію проганяємо; `null` — діалог симуляції закритий.
   const [simulating, setSimulating] = useState<{ id: number; versionId: number } | null>(null);
@@ -152,7 +158,19 @@ export function MethodologiesPage(): JSX.Element {
         skeleton="table"
         onRetry={() => void methodologies.refetch()}
       >
-        {(all) => (
+        {(all) => {
+          const shown = all.filter((methodology) => methodologyMatches(query ?? '', localized(methodology.nameL10n), methodology.code));
+          return (
+        <>
+        <FilterBar
+          search={{ label: t('methodologies.search'), placeholder: t('methodologies.searchPlaceholder') }}
+          clearLabel={t('filters.clear')}
+        />
+        {shown.length === 0 && (
+          <Text c="dimmed" data-methodologies-no-match="">
+            {t('methodologies.searchNoMatches')}
+          </Text>
+        )}
         <Table striped className="ecr-sticky-head">
           <Table.Thead>
             <Table.Tr>
@@ -161,13 +179,21 @@ export function MethodologiesPage(): JSX.Element {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {all.map((methodology) => (
-              <Table.Tr key={methodology.id}>
+            {shown.map((methodology) => {
+              // ✎ DOCUX: назва = код — код один раз, а не «ECW_C05_01 (ECW_C05_01)».
+              const title = methodologyTitle(localized(methodology.nameL10n), methodology.code);
+              return (
+              <Table.Tr key={methodology.id} data-methodology-row={methodology.code}>
                 <Table.Td>
-                  {localized(methodology.nameL10n)}{' '}
-                  <Text span c="dimmed">
-                    ({methodology.code})
-                  </Text>
+                  {title.name}
+                  {title.code !== null && (
+                    <>
+                      {' '}
+                      <Text span c="dimmed">
+                        ({title.code})
+                      </Text>
+                    </>
+                  )}
                 </Table.Td>
                 <Table.Td>
                   <Group gap="xs">
@@ -228,9 +254,17 @@ export function MethodologiesPage(): JSX.Element {
                         {/* ⚠ Режим і рівень трасування видно поруч із версією:
                             саме вони визначають, чи зміняться числа при
                             публікації, і саме їх порівнюють у diff публікації. */}
-                        <Badge variant="outline" size="sm">
-                          {version.numericMode} · {version.traceLevel}
-                        </Badge>
+                        {/* ✎ DOCUX (огляд UI 27.11): словами, а не сирі значення («LEGACY · ERRORSONLY»), пояснення — у підказці. */}
+                        {(() => {
+                          const modes = versionModes({ numericMode: version.numericMode, traceLevel: version.traceLevel });
+                          return (
+                            <Tooltip label={modes.hint} multiline w={320} withArrow disabled={modes.hint.length === 0}>
+                              <Badge variant="outline" size="sm" tt="none" tabIndex={0} data-version-modes="">
+                                {modes.label}
+                              </Badge>
+                            </Tooltip>
+                          );
+                        })()}
 
                         {/* ⚠ Прогін доступний для БУДЬ-ЯКОЇ версії, і
                             опублікованої теж: питання «що дала б ця
@@ -253,10 +287,13 @@ export function MethodologiesPage(): JSX.Element {
                   </Group>
                 </Table.Td>
               </Table.Tr>
-            ))}
+              );
+            })}
           </Table.Tbody>
         </Table>
-        )}
+        </>
+          );
+        }}
       </AsyncBoundary>
 
       <ResizableModal

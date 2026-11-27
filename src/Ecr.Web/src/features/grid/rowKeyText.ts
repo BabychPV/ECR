@@ -18,6 +18,14 @@ export function rowKeyText(rowKey: string, ordinal?: number | null): string {
   return typeof ordinal === 'number' ? `${t('grid.rowLabelHeader')} ${String(ordinal)}` : t('permits.history.rowUnknown');
 }
 
+/**
+ * ✎ DOCUX: підпис рядка на ПОЧАТКУ рядка чи чипа — з великої літери («Row 18»). Той самий ключ «row {n}» стоїть і посеред
+ * речення (історія дозволів), тож каталог лишається малим, а великою робить місце показу.
+ */
+export function atLineStart(text: string): string {
+  return text.length === 0 ? text : text.charAt(0).toLocaleUpperCase() + text.slice(1);
+}
+
 /** Підстановки серверних повідомлень, у яких лежать ключі рядків (`RowKeyText.KeyParameters` сервера). */
 const RowKeyParams: readonly string[] = ['rowKey', 'rowKeys', 'sourceRow', 'row'];
 

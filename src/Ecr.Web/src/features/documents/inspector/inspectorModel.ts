@@ -1,5 +1,5 @@
 import type { DocumentTableDto, ValidationFindingDto } from '@/api/types';
-import { isOpaqueRowKey, rowKeyText } from '@/features/grid/rowKeyText';
+import { atLineStart, rowKeyText } from '@/features/grid/rowKeyText';
 import { localized } from '@/shared/i18n/localized';
 import { isHeaderFinding } from './headerFinding';
 
@@ -162,8 +162,11 @@ export function countIssues(groups: readonly InspectorIssueGroup[]): InspectorIs
 export function addressChip(rowKey: string | null, columnCode: string | null, rowLabel?: string | null): string {
   // ✎ b17 e2e: службовий ключ без номера давав «this row»; підпис рядка з сітки («Row N»/назва) — точніша адреса.
   // Підпис сітки «row N» (середина речення в історії дозволів) — на початку чипа з великої літери: «Row N».
-  const label = rowLabel ? rowLabel.charAt(0).toLocaleUpperCase() + rowLabel.slice(1) : null;
-  const row = rowKey === null ? '—' : isOpaqueRowKey(rowKey) && label ? label : rowKeyText(rowKey);
+  // ✎ DOCUX (живий прохід 27.11): підпис сітки — ЗАВЖДИ, коли він є, а не лише для GUID: згенерований ключ динамічного
+  // рядка («p1-T3_00-0018») теж не код для людини, а рядок формули тієї самої комірки казав «Row 18». Технічний ключ —
+  // лише в Info («Technical address»).
+  const label = rowLabel ? atLineStart(rowLabel) : null;
+  const row = rowKey === null ? '—' : (label ?? rowKeyText(rowKey));
 
   return `${row} · ${columnCode ?? '—'}`;
 }

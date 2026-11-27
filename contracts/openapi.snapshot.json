@@ -3882,11 +3882,33 @@
               "string"
             ]
           },
+          "newValueLabelL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Те саме для нового значення."
+              }
+            ]
+          },
           "oldValue": {
             "description": "Старе значення.",
             "type": [
               "null",
               "string"
+            ]
+          },
+          "oldValueLabelL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "✎ DOCUX (огляд UI 27.11): довідникова колонка — назва запису старого значення (як у комірці); `null` — не\nдовідник, порожньо або запису вже немає. Сирий id — у значенні (CSV-експорт — лише він)."
+              }
             ]
           },
           "origin": {
@@ -3921,7 +3943,7 @@
             ]
           },
           "rowOrdinal": {
-            "description": "✎ AC-13: порядковий номер рядка на екрані (`doc.TableRow.Ordinal`, від 1) — щоб рядок, доданий людиною (без\nмітки шаблону, ключ — GUID), читався «Row N». `null` — рядка вже немає в `doc.TableRow` (видалено фізично,\nперіод в архіві).",
+            "description": "✎ AC-13 / ✎ DOCUX b19: номер рядка на екрані (від 1) — позиція в порядку зрізу (рядки шаблону за `RowDef.Ordinal`,\nдалі додані людиною за `TableRow.Id`), як «row N» у рядку формули; НЕ `doc.TableRow.Ordinal` (у доданого — 0) — щоб рядок, доданий людиною (без\nмітки шаблону, ключ — GUID), читався «Row N». `null` — рядка вже немає в `doc.TableRow` (видалено фізично,\nперіод в архіві).",
             "format": "int32",
             "type": [
               "null",
@@ -29718,11 +29740,33 @@
               "string"
             ]
           },
+          "newValueLabelL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Те саме для нового значення."
+              }
+            ]
+          },
           "oldValue": {
             "description": "Лише правка: значення до.",
             "type": [
               "null",
               "string"
+            ]
+          },
+          "oldValueLabelL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "✎ DOCUX (огляд UI 27.11): довідникова колонка — назва запису старого значення (як у комірці); `null` — не\nдовідник, порожньо або запису вже немає. Сирий id — у значенні (CSV-експорт — лише він)."
+              }
             ]
           },
           "origin": {
@@ -29760,6 +29804,14 @@
                 "$ref": "#/components/schemas/LocalizedText",
                 "description": "Лише правка: підпис фіксованого рядка; `null` — динамічний."
               }
+            ]
+          },
+          "rowOrdinal": {
+            "description": "Лише правка: номер рядка на екрані (як int? CellChangeView.RowOrdinal).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
             ]
           },
           "tableCode": {

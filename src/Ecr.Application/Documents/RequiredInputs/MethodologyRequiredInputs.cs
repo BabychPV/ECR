@@ -133,12 +133,19 @@ public sealed class MethodologyRequiredInputs(
     /// <param name="valueOf">Значення колонки рядка як текст; <c>null</c> — порожньо.</param>
     /// <param name="isFilled">Чи вимога заповнена (значення або дефолт колонки, C-5).</param>
     /// <param name="humanBatch">Блокує лише людині (F1-01); інтеграції — попередження.</param>
+    /// <param name="ruleKeyInput">
+    /// ✎ DOCUX (живий прохід 27.11): лише перелік таблиці (<see cref="RequiredInputsScanner"/>) для РОЗПОЧАТОГО рядка — чи колонка
+    /// є полем вводу цієї таблиці. Задано — порожній ключ правил (<c>MatchJson</c>) рядка, з яким не збіглася ЖОДНА методологія
+    /// таблиці, — попередження (<see cref="RequiredInputSeverity.Warn"/>, <see cref="RuleKeyWarnings"/>). <c>null</c> (ворота PATCH,
+    /// подання поштучно) — як доти.
+    /// </param>
     internal static RequiredInputCollector EvaluateRow(
         IReadOnlyList<ApplicableMethodology> applicable,
         IReadOnlyList<int> neededColumnIds,
         Func<int, string?> valueOf,
         Func<int, bool> isFilled,
-        bool humanBatch)
+        bool humanBatch,
+        Func<int, bool>? ruleKeyInput = null)
     {
         var matchValues = neededColumnIds.ToDictionary(
             columnId => columnId.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -149,6 +156,8 @@ public sealed class MethodologyRequiredInputs(
         // ПО КОЛОНЦІ — одне повідомлення на (рядок, колонку) з переліком методологій, а не на кожну методологію;
         // повтор тієї самої методології (дві прив'язки, обидві гілки) — один код.
         var missing = new RequiredInputCollector();
+        var anyMatched = false;
+        List<(ApplicableMethodology Applied, LocalizedRequiredInput Required)>? ruleKeys = null;
 
         foreach (var applied in applicable)
         {
@@ -180,8 +189,18 @@ public sealed class MethodologyRequiredInputs(
                     missing.Add(applied, required, humanBatch);
                 }
 
+                if (ruleKeyInput is not null)
+                {
+                    foreach (var required in RuleKeyWarnings(applied, matchValues, id => ruleKeyInput(id) && !isFilled(id)))
+                    {
+                        (ruleKeys ??= []).Add((applied, required));
+                    }
+                }
+
                 continue;
             }
+
+            anyMatched = true;
 
             foreach (var required in applied.RequiredInputs)
             {
@@ -210,7 +229,69 @@ public sealed class MethodologyRequiredInputs(
             }
         }
 
+        // ✎ DOCUX: рядок не порахує ЖОДНА методологія таблиці — назвати порожні ключі правил (амбра, лічильник), а не лише
+        // «no calculation rule» +1 у підсумку прогону. Рядок, який порахує інша методологія, — тиша (ключі цієї йому не потрібні).
+        if (!anyMatched && ruleKeys is not null)
+        {
+            foreach (var (applied, required) in ruleKeys)
+            {
+                missing.Add(applied, required, humanBatch);
+            }
+        }
+
         return missing;
+    }
+
+    /// <summary>
+    /// ✎ DOCUX (живий прохід 27.11, «Type of fuel» спорожнили — рядок мовчки випав із розрахунку): порожні ключі правил
+    /// методології, з якою рядок не збігся, — ПОПЕРЕДЖЕННЯ (D-578: блокує лише заведений чи виведений Block; тут вимога лише
+    /// пояснює, чому рядок не рахується).
+    /// </summary>
+    /// <remarks>
+    /// Те саме «рядок у межах методології», що в <see cref="MissingRuleKeyInputs"/> (1)–(2), але без умови «розпочато»: її
+    /// перевіряє викликач (перелік таблиці — лише рядки з введеним значенням), а на запис попередження не впливає. Колонка — поле
+    /// вводу цієї таблиці (<paramref name="ruleKeyInput"/>); виняток методолога <see cref="RequiredInputSeverity.Optional"/> —
+    /// тиша. Підказка — заведеної вимоги на цю колонку, якщо є.
+    /// </remarks>
+    internal static IEnumerable<LocalizedRequiredInput> RuleKeyWarnings(
+        ApplicableMethodology applied, IReadOnlyDictionary<string, string?> matchValues, Func<int, bool> ruleKeyInput)
+    {
+        var declared = new Dictionary<string, LocalizedRequiredInput>(StringComparer.Ordinal);
+        foreach (var required in applied.RequiredInputs.Where(r => r.IsMapped))
+        {
+            declared.TryAdd(required.ColumnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture), required);
+        }
+
+        var reported = new HashSet<string>(StringComparer.Ordinal);
+        for (var index = 0; index < applied.Rules.Count; index++)
+        {
+            if (applied.Rules[index].UnmappedColumnIds.Count > 0
+                || applied.ParsedRules[index] is not { Count: > 0 } pairs
+                || pairs.Any(p => matchValues.GetValueOrDefault(p.Key) is { } actual && !string.Equals(actual, p.Value, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            foreach (var (key, _) in pairs)
+            {
+                if (matchValues.GetValueOrDefault(key) is not null
+                    || !int.TryParse(key, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var columnId)
+                    || !ruleKeyInput(columnId)
+                    || !reported.Add(key))
+                {
+                    continue;
+                }
+
+                var own = declared.GetValueOrDefault(key);
+                if (own?.Severity == RequiredInputSeverity.Optional)
+                {
+                    continue;
+                }
+
+                yield return new LocalizedRequiredInput(
+                    columnId, own?.SourceColumnDefId ?? columnId, IsMapped: true, RequiredInputSeverity.Warn, own?.HintL10n, Derived: true);
+            }
+        }
     }
 
     /// <summary>

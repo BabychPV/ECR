@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import type { JSX } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
@@ -85,5 +87,33 @@ describe('NoticeLine / Status', () => {
     expect(screen.getByTestId('document-notice-line').getAttribute('data-notice-top')).toBe('a');
     act(() => withdrawNotice('b'));
     expect(screen.queryByTestId('document-notice-more')).toBeNull();
+  });
+
+  // ✎ DOCUX (живий прохід 27.11): довгий текст обрізався посеред слова без «…» (рядок над сіткою) і давав горизонтальну
+  // прокрутку інспектора (Status). Розкладку jsdom не рахує — сторож правил CSS і класів, на яких вони тримаються.
+  it('рядок — один, з «…» і повним текстом у підказці; Status — переносить повний текст', () => {
+    const long = `Calculation finished with problems in June 2026 · submission may be refused — ${'148 no calculation rule · '.repeat(6)}`;
+    publishNotice({ id: 'calc', priority: 6, render: () => <NoticeRow tone="error" text={long} testId="row-calc" /> });
+    show();
+
+    const [line, full] = screen.getAllByTestId('row-calc');
+    expect(line?.closest('.ecr-notice-list--full')).toBeNull();
+    expect(line?.querySelector('.ecr-notice-text')?.getAttribute('title')).toBe(long);
+    expect(full?.closest('.ecr-notice-list--full')).not.toBeNull();
+
+    const css = readFileSync(path.resolve(process.cwd(), 'src/features/documents/notices/notices.css'), 'utf8');
+    const rule = (selector: string): string => {
+      const start = css.indexOf(`${selector} {`);
+      return start < 0 ? '' : css.slice(start, css.indexOf('}', start));
+    };
+    // Колонка сітки не ширша за контейнер — інакше «…» не з'являється, а текст ріже край батька.
+    expect(rule('.ecr-notice-list')).toContain('grid-template-columns: minmax(0, 1fr)');
+    expect(rule('.ecr-notice-list > *')).toContain('min-width: 0');
+    expect(rule('.ecr-notice-text')).toContain('text-overflow: ellipsis');
+    // Status: переносить і рядок повідомлення, і смугу розрахунку.
+    expect(css).toMatch(/\.ecr-notice-list--full \.ecr-notice-text,\s+\.ecr-notice-list--full \.ecr-calc-strip-text \{/);
+    const wrap = rule('.ecr-notice-list--full .ecr-calc-strip-text');
+    expect(wrap).toContain('white-space: normal');
+    expect(wrap).toContain('overflow-wrap: anywhere');
   });
 });

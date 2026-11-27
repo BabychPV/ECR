@@ -171,6 +171,24 @@ public sealed class RequiredInputsScanner(
         }
 
         var predefined = table.Rows.Select(r => r.RowKeyValue).ToHashSet(StringComparer.Ordinal);
+
+        // ✎ DOCUX (живий прохід 27.11): порожній ключ правил розпочатого рядка, якого не порахує жодна методологія, —
+        // попередження (MethodologyRequiredInputs.RuleKeyWarnings). Лише поля вводу таблиці: обчислені, формульні й «лише для
+        // читання» людина не заповнює.
+        var formulaColumns = table.Formulas
+            .Where(f => !f.IsDeleted && f.ColumnDefId is not null)
+            .Select(f => f.ColumnDefId!.Value)
+            .ToHashSet();
+        var inputColumns = table.Columns
+            .Where(c => !c.IsDeleted && !c.IsComputed && !c.IsReadOnly && !formulaColumns.Contains(c.Id))
+            .Select(c => c.Id)
+            .ToHashSet();
+        Func<int, bool> ruleKeyInput = inputColumns.Contains;
+        // Службові рядки шаблону (група, підсумок, примітка, заголовок) методологія не рахує — ключів правил вони не потребують.
+        var serviceRows = table.Rows
+            .Where(r => r.RowKind != Domain.Enums.RowKind.Item)
+            .Select(r => r.RowKeyValue)
+            .ToHashSet(StringComparer.Ordinal);
         var rendered = new Dictionary<(int Column, string Codes, bool Error, bool Blocks, LocalizedText? Hint), Validation.ValidationMessage>();
         var messages = new List<Validation.ValidationMessage>();
         foreach (var (rowKey, rowId) in rowIds.OrderBy(kv => kv.Value))
@@ -192,7 +210,9 @@ public sealed class RequiredInputsScanner(
                    || ((row is null || !row.ContainsKey(columnId))
                        && Recalculation.ColumnDefaultValues.HasEffectiveDefault(table, rowKey, columnId));
 
-            var missing = MethodologyRequiredInputs.EvaluateRow(plan.Applicable, plan.ColumnIds, ValueOf, IsFilled, humanBatch: true);
+            var missing = MethodologyRequiredInputs.EvaluateRow(
+                plan.Applicable, plan.ColumnIds, ValueOf, IsFilled, humanBatch: true,
+                ruleKeyInput: started.Contains(rowId) && !serviceRows.Contains(rowKey) ? ruleKeyInput : null);
             foreach (var message in missing.Messages(table.Id, columnsById, rowKey, language, rendered))
             {
                 if (message.ColumnCode is null || !include(message))

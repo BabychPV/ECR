@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
@@ -41,5 +41,42 @@ describe('CellLegend', () => {
       for (const name of (sample.getAttribute('data-legend-sample') ?? '').split(' ')) expect(sample.classList.contains(name)).toBe(true);
       expect(sample.closest('.ecr-legend-row')?.querySelector('dd')?.textContent).toMatch(/grid\.legend\./);
     }
+  });
+
+  // ✎ DOCUX (живий прохід 27.11): довідка не закривалась клавішею Esc — фокус лишався на кнопці, а `closeOnEscape` Mantine
+  // слухає лише всередині вікна. Мутація: прибрати `usePopoverEscape` у `CellLegend` — червоний.
+  it('Esc закриває довідку і повертає фокус на кнопку', async () => {
+    render(
+      <MantineProvider theme={testTheme}>
+        <CellLegend />
+      </MantineProvider>,
+    );
+    const user = userEvent.setup();
+    const button = screen.getByRole('button', { name: /grid\.legend\.title/ });
+
+    await user.click(button);
+    await waitFor(() => expect(document.querySelector('[data-grid-legend-list]')).not.toBeNull());
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+
+    // Фокус деінде (як у сітці): Esc однаково закриває.
+    button.blur();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(document.querySelector('[data-grid-legend-list]')).toBeNull());
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(button);
+  });
+
+  it('Esc без відкритої довідки нічого не перехоплює', async () => {
+    render(
+      <MantineProvider theme={testTheme}>
+        <CellLegend />
+      </MantineProvider>,
+    );
+    const seen = vi.fn();
+    document.addEventListener('keydown', seen);
+    await userEvent.setup().keyboard('{Escape}');
+    document.removeEventListener('keydown', seen);
+    expect(seen).toHaveBeenCalledTimes(1);
+    expect((seen.mock.calls[0]?.[0] as KeyboardEvent).defaultPrevented).toBe(false);
   });
 });
