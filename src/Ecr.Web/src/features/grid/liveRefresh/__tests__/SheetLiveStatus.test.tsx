@@ -7,6 +7,9 @@ import type { DocumentTableDto } from '@/api/types';
 import { useStatusStale } from '@/features/workflow/statusStale';
 import { Catalog } from '@/test/__tests__/a11yFixtures';
 import { useSheetLiveRefresh } from '../SheetLiveRefresh';
+import { MemoryRouter } from 'react-router-dom';
+import { NoticeLine } from '@/features/documents/notices/NoticeLine';
+import { resetNotices } from '@/features/documents/notices/noticeStore';
 
 /**
  * LIVE-STATUS: a transition of the sheet by someone else (new `statusRevision` in the change marker) re-reads the
@@ -47,6 +50,8 @@ interface Answer {
   readonly revision: string;
   readonly state: string;
   readonly statusChanged?: boolean;
+  /** Чужа зміна ДАНИХ у тій самій відповіді маркера (таблиця 11). */
+  readonly dataChanged?: boolean;
 }
 
 let answers: Answer[] = [];
@@ -73,11 +78,11 @@ function install(): void {
           json(
             {
               marker: `m-${answer.revision}`,
-              changed: false,
-              lastChangedByUserId: null,
-              lastChangedBy: null,
-              lastChangedAt: null,
-              changedTables: [],
+              changed: answer.dataChanged ?? false,
+              lastChangedByUserId: answer.dataChanged === true ? 3 : null,
+              lastChangedBy: answer.dataChanged === true ? 'Alice Author' : null,
+              lastChangedAt: answer.dataChanged === true ? '2026-11-02T09:59:00Z' : null,
+              changedTables: answer.dataChanged === true ? [{ tableCode: 'T1', tableInstanceId: 11 }] : [],
               sheetStatus: answer.state,
               statusRevision: answer.revision,
               statusChanged: answer.statusChanged ?? false,
@@ -140,11 +145,14 @@ function Probe(): JSX.Element {
   );
 }
 
-function mount(): void {
+function mount(withLine = false): void {
   render(
     <MantineProvider>
       <QueryClientProvider client={client}>
-        <Probe />
+        <MemoryRouter initialEntries={['/documents/7']}>
+          {withLine && <NoticeLine />}
+          <Probe />
+        </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
   );
@@ -175,6 +183,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   cleanup();
+  resetNotices();
   client.clear();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -274,5 +283,35 @@ describe('Live status (LIVE-STATUS)', () => {
       await vi.advanceTimersByTimeAsync(10);
     });
     expect(statusBanner()?.getAttribute('data-live-status')).toBe('Submitted');
+  });
+
+  /*
+   * ✎ e2e-stand RC b18 (liveStatus.spec): правку A, помічену попереднім опитуванням («Updated by A», пріоритет 5), і перехід
+   * стану після подання публікували з ОДНАКОВИМ пріоритетом — «Status changed by A: Submitted» ховалося за «+1 more», B не
+   * бачив, що аркуш тепер чекає його рішення. Мутація: `priority={5}` у live-status — червоний.
+   */
+  it('on the page notice line a status transition wins over an earlier «Updated by» of the same user', async () => {
+    answers = [
+      { revision: 'r1', state: 'Draft' },
+      { revision: 'r1', state: 'Draft', dataChanged: true },
+      { revision: 'r2', state: 'Submitted', statusChanged: true },
+    ];
+    mount(true);
+    await tick(10);
+    await tick(30_100);
+    expect(document.querySelector('[data-notice-shown^="live-change:"]')).not.toBeNull();
+
+    sheetState = 'Submitted';
+    await tick(30_100);
+    await act(async () => {
+      releaseSummary?.();
+      await vi.advanceTimersByTimeAsync(10);
+    });
+
+    const line = document.querySelector('[data-testid="document-notice-line"]');
+    expect(line?.getAttribute('data-notice-top')).toMatch(/^live-status:/);
+    const shown = line?.querySelector('[data-testid="notice-live-status"]');
+    expect(shown?.getAttribute('data-live-status')).toBe('Submitted');
+    expect(document.querySelector('[data-testid="document-notice-more"]')).not.toBeNull();
   });
 });
