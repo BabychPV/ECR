@@ -217,14 +217,6 @@ FLERT (`Data_Lifecycle` §2.1) — зовнішня БД: часові ряди 
 тим самим `IExternalDataSource`. Ніяких синонімів і linked server у схемі ядра.
 Це джерело **не зникає після переходу** — воно єдине постачає реальні виміри.
 
-✎ 2026-11-27 (TODO-REMAINING D8): «FLERT» — це **два різні джерела**, і їх не
-можна зводити в одне:
-
-| Джерело | Що в ньому | Як читає чинна система | Цільовий стан |
-|---|---|---|---|
-| **SQL-БД FLERT** | часові ряди об'ємів, gas composition (`FlaringStream`) | синоніми (`Utility_RebindFlertSynonyms`) | абзац TO-BE вище; ⚠ транспорту `Sql` у `ExternalTransport` поки немає (лише `PiWebApi`, `PiSqlClient`) — [не реалізовано] |
-| **AF-база `FLERT_NV_0114`** | події факела — EventFrame `FlareEventFull_*`, `FlareDailyReport` | RTQP через linked server `AFServFlert` (`OPENQUERY`) | `PiSqlClient` прямим ODBC (`D-268`, без linked server) → `SourceEventSyncJob`, повна звірка за період (`D-259`), не `ext.RawDataPoint` (`D-252`) |
-
 > ✎ 2026-09-18: **зроблено.** `ExternalTransport.Sql` + проєкт
 > `Ecr.Adapters.Sql` (`SqlDataSource`), зареєстрований у `Program.cs` поруч з
 > обома транспортами PI. `Kind` виправлено на `Transport`: у моделі поле
