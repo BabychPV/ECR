@@ -65,7 +65,9 @@ export function rowText(change: { readonly rowKey: string; readonly rowLabelL10n
   const ordinal = change.rowOrdinal;
   // ✎ DOCUX (огляд UI 27.11): рядок без мітки — «Row N», ЯК У РЯДКУ ФОРМУЛИ й інспекторі, для будь-якого ключа: згенерований
   // ключ динамічного рядка («p1-T3_00-0020») — теж не код для людини. Ключ лишається в підказці рядка.
-  if (typeof ordinal === 'number') return `${t('grid.rowLabelHeader')} ${String(ordinal)}`;
+  // ⛔ b19: номер — позиція на екрані від 1 (сервер, порядок зрізу); 0 чи менше — не номер (колишній `TableRow.Ordinal`
+  // доданого рядка), «Row 0» не показується ніколи.
+  if (typeof ordinal === 'number' && ordinal > 0) return `${t('grid.rowLabelHeader')} ${String(ordinal)}`;
   if (isOpaqueRowKey(change.rowKey)) return `${t('grid.rowLabelHeader')} ${change.rowKey.slice(0, 8)}…`;
 
   return change.rowKey;

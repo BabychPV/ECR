@@ -33899,7 +33899,8 @@ export interface components {
             rowLabelL10n?: null | components["schemas"]["LocalizedText"];
             /**
              * Format: int32
-             * @description ✎ AC-13: порядковий номер рядка на екрані (`doc.TableRow.Ordinal`, від 1) — щоб рядок, доданий людиною (без
+             * @description ✎ AC-13 / ✎ DOCUX b19: номер рядка на екрані (від 1) — позиція в порядку зрізу (рядки шаблону за `RowDef.Ordinal`,
+             *     далі додані людиною за `TableRow.Id`), як «row N» у рядку формули; НЕ `doc.TableRow.Ordinal` (у доданого — 0) — щоб рядок, доданий людиною (без
              *     мітки шаблону, ключ — GUID), читався «Row N». `null` — рядка вже немає в `doc.TableRow` (видалено фізично,
              *     період в архіві).
              */

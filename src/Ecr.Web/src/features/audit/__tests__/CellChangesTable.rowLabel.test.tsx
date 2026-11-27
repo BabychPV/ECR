@@ -48,6 +48,9 @@ describe('rowText', () => {
     // (згенерований ключ «p1-T3_00-0020» — не код для людини). Доти читабельний ключ лишався ключем (AC-13).
     expect(rowText({ ...change('LTD-A02'), rowOrdinal: 3 })).toBe('⟦grid.rowLabelHeader⟧ 3');
     expect(rowText({ ...change('p1-T3_00-0020'), rowOrdinal: 20 })).toBe('⟦grid.rowLabelHeader⟧ 20');
+    // ⛔ b19: «Row 0» не показується ніколи (0 — не позиція на екрані).
+    expect(rowText({ ...change('p1-T3_00-0020'), rowOrdinal: 0 })).toBe('p1-T3_00-0020');
+    expect(rowText({ ...change(Guid), rowOrdinal: 0 })).toBe('⟦grid.rowLabelHeader⟧ f9f64b62…');
     expect(rowText({ ...change(Guid), rowOrdinal: null })).toBe('⟦grid.rowLabelHeader⟧ f9f64b62…');
   });
 });

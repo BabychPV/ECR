@@ -26,7 +26,9 @@ public sealed class GetCellChangesHandler(
     IMetadataCache? metadata = null,
     IColumnPathMapper? columns = null,
     // ✎ DOCUX (огляд UI 27.11): назви записів довідника для довідникових колонок (LookupValueLabels).
-    IRegistryStore? registries = null)
+    IRegistryStore? registries = null,
+    // ✎ DOCUX (b19): номер рядка на екрані (CellChangeRowPositions) — у порядку зрізу, не `doc.TableRow.Ordinal`.
+    IRowStore? rows = null)
 {
     /// <summary>Право, без якого ЗАГАЛЬНИЙ журнал не віддається.</summary>
     public const string Permission = "Security.ViewAudit";
@@ -146,6 +148,7 @@ public sealed class GetCellChangesHandler(
 
         // ✎ DOCUX: довідникова комірка — назвою запису поруч із id (одне пакетне звернення на сторінку).
         var labelled = await LookupValueLabels.WithLabelsAsync(shown, registries, ct).ConfigureAwait(false);
+        labelled = await CellChangeRowPositions.WithScreenPositionsAsync(labelled, rows, metadata, ct).ConfigureAwait(false);
 
         return result with { Items = labelled, TotalCount = total };
     }

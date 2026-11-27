@@ -161,7 +161,7 @@ public sealed record SheetActivityPeriod(int PeriodKey, IReadOnlyList<int> Visib
 /// </remarks>
 public sealed class SheetActivityQuery(
     IAuditReader audit, IWorkflowStore workflow, TimeProvider? clock = null, IRowChangeAudit? rowChanges = null,
-    IRegistryStore? registries = null)
+    IRegistryStore? registries = null, IRowStore? rowStore = null, IMetadataCache? metadata = null)
 {
     /// <summary>Скільки днів назад читаються правки комірок (як вікно історії однієї комірки).</summary>
     public static readonly TimeSpan CellWindow = TimeSpan.FromDays(396);
@@ -240,6 +240,7 @@ public sealed class SheetActivityQuery(
         var result = await audit.ReadCellChangesAsync(filter, new CursorRequest(limit, position), ct).ConfigureAwait(false);
         // ✎ DOCUX (огляд UI 27.11): довідникові значення — назвою запису; рядок без підпису — номером на екрані (RowOrdinal).
         var items = await LookupValueLabels.WithLabelsAsync(result.Items, registries, ct).ConfigureAwait(false);
+        items = await CellChangeRowPositions.WithScreenPositionsAsync(items, rowStore, metadata, ct).ConfigureAwait(false);
 
         var rows = items
             .Select(c => new Row(c.ChangedAt, CellTag, c.Id, new SheetActivityItem(
