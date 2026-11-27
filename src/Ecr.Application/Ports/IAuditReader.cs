@@ -71,6 +71,12 @@ namespace Ecr.Application.Ports;
 /// ✎ DOCUX (b19): екземпляр таблиці рядка (<c>doc.TableRow.TableInstanceId</c>) — лише для обчислення номера рядка на екрані
 /// (<c>CellChangeRowPositions</c>); у відповідь не йде. <c>null</c> — рядка вже немає (архів, видалено).
 /// </param>
+/// <param name="RowAddedByUser">
+/// ✎ Борги 27.11 (п. 5): ключ рядка не є рядком шаблону таблиці колонки (<c>cfg.RowDef</c>, і видалений теж) — рядок
+/// додала людина (динамічний). Клієнт показує «рядок, доданий користувачем», коли ні мітки, ні номера на екрані немає
+/// (рядок видалено, період в архіві), а не технічний ключ (GUID чи згенерований <c>p1-T3_00-0020</c>). Рядок шаблону
+/// лишає свій код; колонки вже немає — <c>false</c> (невідомо).
+/// </param>
 public sealed record CellChangeView(
     DateTime ChangedAt,
     int PeriodKey,
@@ -102,7 +108,8 @@ public sealed record CellChangeView(
     int? RowOrdinal = null,
     Ecr.Domain.ValueObjects.LocalizedText? OldValueLabelL10n = null,
     Ecr.Domain.ValueObjects.LocalizedText? NewValueLabelL10n = null,
-    [property: System.Text.Json.Serialization.JsonIgnore] long? TableInstanceId = null);
+    [property: System.Text.Json.Serialization.JsonIgnore] long? TableInstanceId = null,
+    bool RowAddedByUser = false);
 
 /// <summary>
 /// ✎ AC-8: колонка, яку змінювали в документі у вікні, — варіант фільтра «Column» (незалежно від завантажених сторінок

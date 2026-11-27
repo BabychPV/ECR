@@ -477,6 +477,42 @@ public sealed class ArchiveRun : Entity<long>
 }
 
 /// <summary>
+/// ✎ D-582: відкладена постановка Quartz, що ще чекає свого старту (<c>itg.PendingDelayedJob</c>) — автоперерахунок після
+/// правки (<c>-auto</c>, ~20 с), ланки джерел і залежні періоди (~10 с).
+/// </summary>
+/// <remarks>
+/// ⛔ Черга Quartz — у пам'яті процесу: триґер, що чекав вікна злиття, зникав разом із процесом, і споживачі лишались
+/// мовчки застарілими. Рядок пишеться ДО планування, тіло оновлюється на кожному злитті, а знімається, коли задача стартує
+/// чи її скасовано; на старті процесу рядки, чий процес-власник зник, ставляться знову (<c>QuartzDelayedJobRecovery</c>).
+/// Пише й читає лише <c>QuartzDelayedJobStore</c> сирим SQL, тому доменних методів немає.
+/// </remarks>
+public sealed class PendingDelayedJob
+{
+    private PendingDelayedJob() { }
+
+    /// <summary>Задача Quartz (<c>Тип~ціль~GUID</c>) — вона ж ключ і <c>itg.JobProgress.JobId</c>.</summary>
+    public string JobId { get; private set; } = null!;
+
+    /// <summary>Код задачі (повне ім'я маркера).</summary>
+    public string JobCode { get; private set; } = null!;
+
+    /// <summary>Актуальне (злите) тіло задачі, JSON.</summary>
+    public string Payload { get; private set; } = null!;
+
+    /// <summary>Коли задача мала стартувати, UTC.</summary>
+    public DateTime DueAt { get; private set; }
+
+    /// <summary>Хто поставив; <c>null</c> — системна.</summary>
+    public int? CreatedByUserId { get; private set; }
+
+    /// <summary>Номер злиття: пізніший запис тіла не затирається ранішим, що прийшов у базу пізніше.</summary>
+    public long Revision { get; private set; }
+
+    /// <summary>Момент першої постановки, UTC.</summary>
+    public DateTime CreatedAt { get; private set; }
+}
+
+/// <summary>
 /// Позиція відновлюваного сканування таблиці, що не вміщається в один прогін
 /// (<c>itg.ScanCursor</c>).
 /// </summary>

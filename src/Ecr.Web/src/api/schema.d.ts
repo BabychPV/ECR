@@ -33894,6 +33894,14 @@ export interface components {
             /** @description ✎ D-461: причина ручного значення замість формули (`aud.CellChange.Reason`, `Origin = FormulaOverride`);
              *     `null` — інші походження. */
             reason?: null | string;
+            /**
+             * @description ✎ Борги 27.11 (п. 5): ключ рядка не є рядком шаблону таблиці колонки (`cfg.RowDef`, і видалений теж) — рядок
+             *     додала людина (динамічний). Клієнт показує «рядок, доданий користувачем», коли ні мітки, ні номера на екрані немає
+             *     (рядок видалено, період в архіві), а не технічний ключ (GUID чи згенерований `p1-T3_00-0020`). Рядок шаблону
+             *     лишає свій код; колонки вже немає — `false` (невідомо).
+             * @default false
+             */
+            rowAddedByUser: boolean;
             /** @description Ключ рядка — щоб журнал читався без join. */
             rowKey: string;
             rowLabelL10n?: null | components["schemas"]["LocalizedText"];
@@ -45849,6 +45857,12 @@ export interface components {
             periodKey: number;
             /** @description Лише процес: коментар (причина відхилення, повернення, відкликання); звичайний текст. */
             reason: null | string;
+            /**
+             * @description ✎ Борги 27.11 (п. 5): рядок правки додала людина (ключ поза рядками шаблону) — без мітки й номера клієнт показує «рядок,
+             *     доданий користувачем», а не технічний ключ (bool CellChangeView.RowAddedByUser).
+             * @default false
+             */
+            rowAddedByUser: boolean;
             /** @description Правка й рядок: ключ рядка. */
             rowKey: null | string;
             rowLabelL10n: null | components["schemas"]["LocalizedText"];

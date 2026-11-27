@@ -118,6 +118,7 @@ public sealed class FormulaJobFixedCostTests(SqlServerFixture sql, ITestOutputHe
         {
             await ExecuteAsync(
                 $"UPDATE doc.CellValue SET ValueNumeric = {10 + round} WHERE PeriodKey = {periodKey} AND TableRowId = {first.RowIds[0]} AND ColumnDefId = {first.ColumnDefIds[0]}");
+            await RefreshTtlCachesAsync(app).ConfigureAwait(true);
             counter.Tally.Reset();
             texts.Clear();
 
@@ -162,6 +163,25 @@ public sealed class FormulaJobFixedCostTests(SqlServerFixture sql, ITestOutputHe
         Assert.True(
             warm.Min() < TimeSpan.FromMilliseconds(1500),
             $"Найкращий теплий раунд: {warm.Min().TotalMilliseconds:F0} мс (бюджет 1500 мс).");
+    }
+
+    /// <summary>
+    /// ✎ Борги 27.11 (п. 6): процесні знімки з TTL 60 с, які читає задача формул (<see cref="BoundTablesCache"/> — ворота
+    /// автоперерахунку D-577, <see cref="SourceBindingGateCache"/> — ворота хука джерела), оновлюються ПОЗА виміром перед
+    /// кожним раундом.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Чому: вимір рахував і їхнє перечитування, коли між раундом 0 (де знімки завантажено) і теплим раундом минало понад
+    /// 60 с — у великих прогонах під навантаженням: 1 звернення <c>calc.CalculationBinding</c> + 1 <c>cfg.DocumentSourceBinding</c>
+    /// (ще 2 <c>cfg.TemplateVersion</c>, коли в базі є активні зв'язки) — «22 при стелі 20». Відтворено затримкою 62 с перед
+    /// раундом: 20 → 22/24. Це не фіксована вартість задачі, а оновлення раз на хвилину на процес; стеля лишається 20.
+    /// </remarks>
+    private static async Task RefreshTtlCachesAsync(EcrApiFactory app)
+    {
+        await using var scope = app.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
+        await scope.ServiceProvider.GetRequiredService<BoundTablesCache>().GetAsync(db, CancellationToken.None).ConfigureAwait(false);
+        await scope.ServiceProvider.GetRequiredService<SourceBindingGateCache>().GetAsync(db, CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>Стеля звернень до БД теплої задачі з однією коміркою (було 21 з читанням графа).</summary>

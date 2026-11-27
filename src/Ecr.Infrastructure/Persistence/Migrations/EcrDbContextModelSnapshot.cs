@@ -6112,6 +6112,39 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.ToTable("NotificationOutbox", "itg");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Integration.PendingDelayedJob", b =>
+                {
+                    b.Property<string>("JobId")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("DueAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("JobCode")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("JobId")
+                        .HasName("PK_PendingDelayedJob");
+
+                    b.ToTable("PendingDelayedJob", "itg");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Integration.ScanCursor", b =>
                 {
                     b.Property<string>("ScanCode")

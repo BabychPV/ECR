@@ -291,10 +291,12 @@ public sealed class ScriptCalculationModule(
             // Рядок без жодного значення — назвати обов'язкові поля, яких бракує (інакше тихий нуль).
             // ✎ D-578 (Q2, рішення людини 26.11: «бракує даних — не 0»): і рядок, що дав ЧАСТИНУ виходів, — коли хоч одного
             // виходу немає, а поле, яке читає скрипт, порожнє, — рядок теж отримує названу проблему MissingInputs.
-            // ⚠ Огляд M3: у скрипті вихід не зв'язаний статично з полями (поля — на весь скрипт, `RowFields`), тож названо всі
-            // порожні обов'язкові поля скрипта, а не лише полів відсутнього виходу (у формул — лише їх, GenericCalculationModule).
+            // ✎ Борги 27.11 (п. 4, звуження огляду M3): названо лише порожні обов'язкові поля, які скрипт СПРАВДІ ПРОЧИТАВ за цей
+            // прогін рядка (гілки, що виконались), — не всі порожні поля рядка. Межа: облік — на прогін рядка, а не на вихід
+            // (вихід не зв'язаний статично з полями, а змінні — з полями, які вони читали), тож поле, прочитане для вже
+            // порахованого виходу, теж названо (у формул — лише поля відсутнього виходу, GenericCalculationModule).
             MissingArguments = script.Outputs.Count > 0 && AnyOutputAbsent(script.Outputs.Select(o => o.Code), values)
-                ? MissingArgumentsOf(runtime.Program, arguments)
+                ? MissingArgumentsOf(runtime.Program, arguments, context.ReadFields)
                 : null,
             StepError = trace.FirstFailure is { } failure
                 ? new CalculationStepError(failure.Code, failure.Error, trace.FailedStepCount)
@@ -440,7 +442,8 @@ public sealed class ScriptCalculationModule(
         return outputCodes.Any(code => !produced.Contains(code));
     }
 
-    private static List<string>? MissingArgumentsOf(LoadedProgram program, Dictionary<string, CalculationArgument> arguments)
+    private static List<string>? MissingArgumentsOf(
+        LoadedProgram program, Dictionary<string, CalculationArgument> arguments, IReadOnlySet<string> read)
     {
         var missing = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -449,7 +452,7 @@ public sealed class ScriptCalculationModule(
             foreach (var field in script.RowFields)
             {
                 // Місячне звернення розв'язується в рантаймі (§13.2): статично його не перевірити.
-                if (field.IsOptional || field.IsMonthly || !seen.Add(field.Name))
+                if (field.IsOptional || field.IsMonthly || !read.Contains(field.Name) || !seen.Add(field.Name))
                 {
                     continue;
                 }

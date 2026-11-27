@@ -84,9 +84,16 @@ test.describe('Період документа: межі проєкту (PERIODN
     await page.getByRole('button', { name: 'Previous period' }).evaluate((button) => (button as HTMLButtonElement).click());
     await page.waitForURL((url) => url.searchParams.get('periodKey') === String(before), { timeout: 30_000 });
     await expect(page.locator('[data-doc-sheet-strip]').first()).toBeVisible({ timeout: 30_000 });
-    await page.waitForTimeout(1_500);
-    const y1 = await page.evaluate(() => window.scrollY);
-    expect(Math.abs(y1 - y0), `scrollY ${String(y0)} -> ${String(y1)}`).toBeLessThanOrEqual(60);
+    // ✎ Борги 27.11 (п. 8, флейк «scrollY 120 -> 0»): зрізи сітки вантажаться ПІСЛЯ картки й переліку таблиць, і скелет сітки,
+    // нижчий за вікно, притискав прокрутку до 0 уже після утримання (40 кадрів). Утримання тепер — за часом
+    // (`holdScrollPosition`, 5 с); тут — дочекатися сітки (скелет -> сітка), а тоді позиції, а не фіксовані 1,5 с.
+    await expect(page.locator('revo-grid').first(), 'сітка періоду не намалювалась').toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(async () => Math.abs((await page.evaluate(() => window.scrollY)) - y0), {
+        message: `scrollY після перемикання далі ніж на 60 px від ${String(y0)}`,
+        timeout: 10_000,
+      })
+      .toBeLessThanOrEqual(60);
   });
 });
 
