@@ -4,6 +4,7 @@ import type { TableSliceDto } from '@/api/types';
 import { CodeText } from '@/shared/ui/CodeText';
 import { t } from '@/shared/i18n';
 import { publishInspectedCell } from '@/features/documents/inspector/inspectedCell';
+import { atLineStart } from './rowKeyText';
 import { useFocusedCell, useIsLastFocusedSlice } from './focusStore';
 import { formulaBarModel } from './formulaBar';
 import type { TotalsEdit } from './gridTotals';
@@ -46,6 +47,8 @@ interface GridFormulaBarProps {
    * `ownerPeriodKey` = період її місяця; інша колонка — `null`. Не задано — `null` для всіх (як доти).
    */
   readonly columnMonths?: ReadonlyMap<string, MonthOfColumn>;
+  /** ✎ DOCUX: показ значення тим самим правилом, що й комірка (`Lookup` — назва запису, а не id). */
+  readonly displayOf?: (columnCode: string, value: unknown) => string | null;
 }
 
 export function GridFormulaBar(props: GridFormulaBarProps): JSX.Element {
@@ -62,6 +65,7 @@ export function GridFormulaBar(props: GridFormulaBarProps): JSX.Element {
     ...(props.expressionByColumnCode === undefined
       ? {}
       : { expressionByColumnCode: props.expressionByColumnCode }),
+    ...(props.displayOf === undefined ? {} : { displayOf: props.displayOf }),
   });
 
   // `UI-25`: та сама комірка — у вкладки History/Info інспектора документа
@@ -90,6 +94,7 @@ export function GridFormulaBar(props: GridFormulaBarProps): JSX.Element {
       isCalculated: model.isCalculated,
       isReadOnly: column.isReadOnly,
       value: model.value,
+      valueLabel: model.valueLabel,
       // ✎ DOCUX: «Calculated by / Read by» — походження колонки зі зрізу (D-577).
       provenance: { calculatedBy: column.calculatedBy ?? null, readBy: column.readBy ?? null },
     });
@@ -110,10 +115,11 @@ export function GridFormulaBar(props: GridFormulaBarProps): JSX.Element {
       ) : (
         <>
           {/* Адреса комірки — те саме «де я», що й поле імені зліва від
-              рядка формул Excel: підпис рядка плюс заголовок колонки. */}
+              рядка формул Excel: підпис рядка плюс заголовок колонки.
+              ✎ DOCUX: на початку рядка — з великої літери («Row 18», а не «row 18»). */}
           <Text size="xs" c="dimmed" data-formula-bar-address="">
             {t('grid.formulaBarAddress', {
-              row: model.rowLabel,
+              row: atLineStart(model.rowLabel),
               column:
                 model.unitSymbol === null
                   ? model.columnHeader
@@ -147,7 +153,7 @@ export function GridFormulaBar(props: GridFormulaBarProps): JSX.Element {
           <Text size="xs" data-formula-bar-value="">
             {model.value.length === 0
               ? t('grid.formulaBarNoValue')
-              : t('grid.formulaBarValue', { value: model.value })}
+              : t('grid.formulaBarValue', { value: model.valueLabel ?? model.value })}
           </Text>
         </>
       )}

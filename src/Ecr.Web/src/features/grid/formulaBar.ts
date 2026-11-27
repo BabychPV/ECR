@@ -37,6 +37,11 @@ interface FormulaBarModel {
   readonly expression: string | null;
   /** Значення комірки в канонічному записі; порожній рядок — не заповнено. */
   readonly value: string;
+  /**
+   * ✎ DOCUX (живий прохід 27.11): те, що показує САМА комірка, коли запис — не текст для людини (довідникова комірка
+   * `Lookup` зберігає id запису: «7», а на екрані «Generator»). `null` — показ збігається із записом.
+   */
+  readonly valueLabel: string | null;
 }
 
 /** Звідки рядок формули бере комірку. */
@@ -53,6 +58,11 @@ interface FormulaBarInput {
   readonly pending?: ReadonlyMap<string, TotalsEdit>;
   /** Тексти виразів за кодом колонки — ззовні; порожня, доки сервер їх не віддає. */
   readonly expressionByColumnCode?: ReadonlyMap<string, string>;
+  /**
+   * ✎ DOCUX: показ значення комірки ТИМ САМИМ правилом, що й шаблон комірки сітки (`lookupCellDisplay` для `Lookup`);
+   * `null` — колонка показує запис як є.
+   */
+  readonly displayOf?: (columnCode: string, value: unknown) => string | null;
 }
 
 /**
@@ -116,5 +126,12 @@ export function formulaBarModel(input: FormulaBarInput): FormulaBarModel | null 
     // як поле вводу в Excel, — без групування розрядів і без доповнення
     // нулями до масштабу колонки. Формат показу лишається в самій комірці.
     value: cellText(value),
+    valueLabel: labelOfValue(input.displayOf?.(columnCode, value) ?? null, cellText(value)),
   };
+}
+
+/** Показ комірки, якщо він відрізняється від запису (`Lookup`: назва запису замість id); інакше `null`. */
+function labelOfValue(display: string | null, text: string): string | null {
+  const label = display?.trim() ?? '';
+  return label.length === 0 || label === text ? null : label;
 }

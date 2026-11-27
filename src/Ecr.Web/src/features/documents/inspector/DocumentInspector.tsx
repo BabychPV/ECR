@@ -49,7 +49,7 @@ import {
   tableTitleOf,
   type InspectorIssueGroup,
 } from './inspectorModel';
-import { rowKeyText } from '@/features/grid/rowKeyText';
+import { atLineStart, rowKeyText } from '@/features/grid/rowKeyText';
 import { LockedRows } from './LockedRows';
 import { SheetLog, type InspectorSheet, type SheetLogTarget } from './SheetLog';
 import './inspector.css';
@@ -330,6 +330,15 @@ export function DocumentInspector({
       : tables.find((table) => table.tableInstanceId === cell.tableInstanceId);
   // ⛔ Комірка іншого документа, періоду чи таблиці, якої тут немає, — не ця комірка.
   const shownCell = cellTable === undefined ? null : cell;
+  // ✎ UAT 08.11 (d5) / DOCUX 27.11: «<рядок, як у рядку формули> · Column: <назва>».
+  const shownAddress =
+    shownCell === null
+      ? ''
+      : addressChip(
+          shownCell.rowKey,
+          `${t('inspector.info.column')}: ${shownCell.columnHeader.length > 0 ? shownCell.columnHeader : shownCell.columnCode}`,
+          shownCell.rowLabel,
+        );
 
   // Комірки немає - режим «This cell» неможливий: перемикач повертається на журнал аркуша і лишається узгодженим,
   // а наступний вибір комірки його сам НЕ вмикає (вміст не підміняється без дії людини).
@@ -372,13 +381,10 @@ export function DocumentInspector({
                   className="ecr-insp-chip"
                   data-inspector-address=""
                   data-inspector-column={shownCell.columnCode}
-                  title={addressChip(shownCell.rowKey, shownCell.columnCode, shownCell.rowLabel)}
+                  // ✎ DOCUX: підказка — та сама людська адреса (чип обрізається «…»); технічна — в Info.
+                  title={shownAddress}
                 >
-                  {addressChip(
-                    shownCell.rowKey,
-                    `${t('inspector.info.column')}: ${shownCell.columnHeader.length > 0 ? shownCell.columnHeader : shownCell.columnCode}`,
-                    shownCell.rowLabel,
-                  )}
+                  {shownAddress}
                 </span>
               )}
             </h2>
@@ -1033,9 +1039,10 @@ function InfoTab({
   // лише прогону якоря з `tables/status`; `null` — не перевіряли (`—`).
   const tableStatus = year === undefined ? status.data?.find((row) => row.tableDefId === table.tableDefId) : yearTableIssues(year.messages, table.tableDefId);
 
+  // ✎ DOCUX (живий прохід 27.11): рядок — тим самим підписом, що в рядку формули й чипі адреси («Row 18»); технічний ключ
+  // («p1-T3_00-0018 · Land_TypeFuel») — лише останнім рядком «Technical address», моноширинним, для підтримки.
   const items: KeyValueItem[] = [
-    { label: t('inspector.info.cell'), value: addressChip(cell.rowKey, cell.columnCode, cell.rowLabel), mono: true },
-    { label: t('inspector.info.row'), value: cell.rowLabel },
+    { label: t('inspector.info.row'), value: atLineStart(cell.rowLabel) },
     {
       label: t('inspector.info.column'),
       value: cell.unitSymbol === null ? cell.columnHeader : `${cell.columnHeader}, ${cell.unitSymbol}`,
@@ -1054,7 +1061,10 @@ function InfoTab({
           : t('inspector.info.inputManual'),
     },
     ...provenanceLines(provenance).map((line) => ({ label: line.label, value: line.value })),
-    { label: t('inspector.info.value'), value: cell.value.length === 0 ? null : cell.value, mono: true },
+    // ✎ DOCUX: довідникова комірка — назва запису, як у самій комірці; id запису — поруч, для підтримки («Diesel (id 37)»).
+    cell.valueLabel == null
+      ? { label: t('inspector.info.value'), value: cell.value.length === 0 ? null : cell.value, mono: true }
+      : { label: t('inspector.info.value'), value: t('inspector.info.valueWithId', { label: cell.valueLabel, id: cell.value }) },
     // ✎ LAND-YEAR L7a: рік — ЧИЯ комірка: місячна колонка належить своєму місяцю, решта — році (якорю, річний агрегат).
     ...(year === undefined
       ? []
@@ -1073,6 +1083,7 @@ function InfoTab({
         warnings: countOrDash(tableStatus?.warningCount),
       }),
     },
+    { label: t('inspector.info.technicalAddress'), value: `${cell.rowKey} · ${cell.columnCode}`, mono: true },
   ];
 
   return (

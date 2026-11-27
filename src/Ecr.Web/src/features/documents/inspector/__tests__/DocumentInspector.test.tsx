@@ -352,9 +352,9 @@ describe('інспектор документа (UI-25)', () => {
     expect(await screen.findByText('M. Petrenko')).toBeTruthy();
     expect(screen.queryByText('Other period')).toBeNull();
     expect(document.querySelector('[data-inspector-scope]')?.textContent).toContain('inspector.history.scopeCell');
-    expect(document.querySelector('[data-inspector-scope]')?.textContent).toContain('cell=R4 · C3');
+    expect(document.querySelector('[data-inspector-scope]')?.textContent).toContain('cell=Diesel · C3');
     expect(document.querySelector('[data-inspector-scope]')?.textContent).toContain('column=Volume');
-    expect(screen.getByRole('complementary').textContent).toContain('R4 · C3');
+    expect(screen.getByRole('complementary').textContent).toContain('Diesel · ');
 
     const url = String(fetchMock.mock.calls.find(([input]) => String(input).includes('/audit/cells'))?.[0]);
     expect(url).toContain('documentId=1');
@@ -517,5 +517,40 @@ describe('Scope: роль бачить один аркуш', () => {
     // ⛔ errorCount/warningCount = null → «—», а не 0; лічильники прихованої таблиці (7/3) не протікають.
     expect(await screen.findByText('⟦inspector.info.tableIssuesValue (errors=—, warnings=—)⟧')).toBeTruthy();
     expect(screen.getByRole('complementary').textContent).not.toMatch(/errors=7|warnings=3/);
+  });
+});
+
+// ✎ DOCUX (живий прохід 27.11): Info казав «Stored value 37» (id запису довідника) і «Cell p1-T3_00-0018 · Land_TypeFuel», а
+// комірка — «Diesel», рядок формули — «row 18». Тепер Info — той самий показ і підпис рядка; технічне — останнім рядком.
+describe('Info: довідникова комірка й технічна адреса', () => {
+  it('«Diesel (id 37)», рядок — «Row 18»; ключ рядка й код колонки — лише в «Technical address» (моно)', async () => {
+    vi.stubGlobal('fetch', fetchMock);
+    render(<Harness entry="/documents/1?panel=info" />);
+    const aside = await screen.findByRole('complementary');
+
+    act(() =>
+      publishInspectedCell({
+        ...Cell,
+        rowKey: 'p1-T3_00-0018',
+        rowLabel: 'row 18',
+        columnCode: 'Land_TypeFuel',
+        columnHeader: 'Type of fuel',
+        unitSymbol: null,
+        dataType: 'Lookup',
+        scale: null,
+        value: '37',
+        valueLabel: 'Diesel',
+      }),
+    );
+
+    const info = await within(aside).findByText('⟦inspector.info.valueWithId (label=Diesel, id=37)⟧');
+    expect(info).toBeTruthy();
+    expect(within(aside).getByText('Row 18')).toBeTruthy();
+    expect(within(aside).getByText('p1-T3_00-0018 · Land_TypeFuel')).toBeTruthy();
+    expect(within(aside).queryByText('⟦inspector.info.cell⟧')).toBeNull();
+    // Чип адреси — той самий підпис рядка, що в рядку формули, без технічного ключа.
+    const chip = aside.querySelector('[data-inspector-address]');
+    expect(chip?.textContent).toContain('Row 18 · ');
+    expect(chip?.textContent).not.toContain('p1-T3_00-0018');
   });
 });
