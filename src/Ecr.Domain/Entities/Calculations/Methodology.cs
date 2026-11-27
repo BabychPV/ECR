@@ -41,9 +41,10 @@ public sealed class Methodology : Entity<int>
     /// ⚠ <see cref="MethodologyKind.Library"/> — <b>не</b> ворота спільного
     /// використання. Перехресне <c>!Name</c> дозволене будь-якій методології
     /// через <see cref="MethodologyImport"/>; <c>Common</c> просто складається
-    /// зі спільних формул цілком, а <c>ECW_C09_02_01</c> — звичайна
-    /// <see cref="MethodologyKind.DataDriven"/> методологія з однією формулою,
-    /// на яку посилаються п'ять інших.
+    /// зі спільних формул цілком, але імпортувати можна й звичайну
+    /// <see cref="MethodologyKind.DataDriven"/> методологію. (Приклад директиви
+    /// №05 — <c>ECW_C09_02_01</c> з п'ятьма споживачами — у джерелах не
+    /// підтверджено.)
     /// </para>
     /// </remarks>
     public MethodologyKind Kind { get; private set; }
