@@ -362,6 +362,9 @@ export function PeriodsPage({ projectId }: { readonly projectId: number }): JSX.
             siteDate={siteDate}
             reopenedNote={(periodKey) => reopenedSummaryText(reopensOf(periodKey), calendar.timeZoneId)}
             selectedKey={tileKey}
+            // ✎ Reopen і на плитці: той самий `openReopen` (діалог) і та сама умова `reopens`, що й у таблиці.
+            onReopen={reopens ? openReopen : undefined}
+            reopenCaption={(period) => periodCaption(period.year, period.sequence, calendar.periodKind)}
             onPick={(key) => {
               setTileKey(key);
               // Рядок таблиці — у «Details»: плитка розгортає його (без запису вибору — це не вибір людини) і веде до рядка.
