@@ -115,11 +115,14 @@ export function useSheetLiveRefresh({ documentId, periodKey, tables }: SheetLive
   const banner = (
     <div className="ecr-live-host" role="status" aria-live="polite" aria-atomic="true" data-testid="sheet-live-host">
       {/* ✎ DOCUX L7: чужий перехід стану й чужа зміна — у рядку повідомлень сторінки, не банерами. Пріоритет 5 (вище за
-          проблеми розрахунку): дані на екрані застаріли — людина має побачити це до наступної правки (RC b18). */}
+          проблеми розрахунку): дані на екрані застаріли — людина має побачити це до наступної правки (RC b18).
+          ✎ e2e-stand RC b18 (liveStatus): чужий ПЕРЕХІД СТАНУ — пріоритет 4, вище за «Updated by …» (5). Правка A, помічена
+          попереднім опитуванням, публікувалась раніше з тим самим пріоритетом 5, і «Status changed by A: Submitted» ховалося за
+          «+1 more» — B не бачив, що аркуш тепер лише для читання й чекає його рішення. */}
       {status.notice !== null && (
         <NoticeSlot
           id={`live-status:${String(sheetDefId)}`}
-          priority={5}
+          priority={4}
           tone="info"
           text={statusBannerText(status.notice)}
           onDismiss={status.dismiss}
