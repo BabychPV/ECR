@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 import { Badge, Menu, Tabs } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import { badgeLook, StatusBadge } from '@/shared/ui/StatusBadge';
-import { useNeedsInputSummary } from '@/features/grid/needsInputStore';
+import { useNeedsInputSummary } from '@/features/grid/needsInputState';
 import './documentSheetStrip.css';
 
 export interface SheetStripItem {
