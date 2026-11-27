@@ -130,7 +130,7 @@ public sealed class QuartzDelayedJobStore(EcrDbContext db)
                 ct)
             .ConfigureAwait(false);
 
-        return await db.Database
+        var claimed = await db.Database
             .SqlQuery<PendingDelayedJobRow>(
                 $"""
                 DELETE p
@@ -141,6 +141,9 @@ public sealed class QuartzDelayedJobStore(EcrDbContext db)
                 """)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        // ⚠ L3-01: SqlQuery в ad-hoc тип оминає конвертер UTC — строк приходить Unspecified.
+        return [.. claimed.Select(r => r with { DueAt = DateTime.SpecifyKind(r.DueAt, DateTimeKind.Utc) })];
     }
 
     /// <summary>Повертає рядок, який не вдалося поставити знову (наступний старт спробує ще раз).</summary>
