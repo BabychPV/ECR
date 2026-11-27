@@ -40,14 +40,14 @@ describe('PageHeader: видимість програмного фокуса з�
 
     // ⛔ Мутація «`focus()` без параметра» (стара поведінка) дає `undefined` —
     // рішення знову віддане евристиці браузера.
-    expect(mountAndCaptureFocus()).toEqual({ focusVisible: false });
+    expect(mountAndCaptureFocus()).toEqual({ focusVisible: false, preventScroll: true });
   });
 
   it('після клавіатури — рамка лишається: людина бачить, звідки продовжиться Tab', () => {
     fireEvent.keyDown(document.body, { key: 'Enter' });
 
     // ⛔ Мутація «завжди `focusVisible: false`» червоніє тут.
-    expect(mountAndCaptureFocus()).toEqual({ focusVisible: true });
+    expect(mountAndCaptureFocus()).toEqual({ focusVisible: true, preventScroll: true });
   });
 });
 
