@@ -295,8 +295,12 @@ public sealed class MethodologyRequiredInputs(
     /// </remarks>
     internal async Task<List<ApplicableMethodology>> ResolveAsync(
         IReadOnlyList<int> methodologyIds, DateOnly onDate, int templateVersionId, int tableDefId, CancellationToken ct,
-        TableDef? derivedFor = null)
+        TableDef? derivedFor = null,
+        IReadOnlySet<int>? tableColumns = null)
     {
+        // ✎ Рішення координатора 27.11: вимога (заведена чи виведена), чия колонка — НЕ в цій таблиці (методологія прив'язана
+        // до кількох таблиць шаблону, у кожної своя колонка), для цієї таблиці пропускається, а не «порожня» в кожному рядку.
+        var ownColumns = tableColumns ?? derivedFor?.Columns.Select(c => c.Id).ToHashSet();
         var result = new List<ApplicableMethodology>();
         if (methodologyIds.Count == 0)
         {
@@ -403,10 +407,13 @@ public sealed class MethodologyRequiredInputs(
             var statusColumns = activity?.ColumnsOf(tableDefId) ?? [];
 
             // ✎ D-578: виведені — лише колонки, яких немає в переліку методолога (його Block/Warn/Optional — виняток, Q3).
-            var declared = localized.RequiredInputs.Where(i => i.IsMapped).Select(i => i.ColumnDefId).ToHashSet();
+            var ownInputs = localized.RequiredInputs
+                .Where(i => !i.IsMapped || ownColumns is null || ownColumns.Contains(i.ColumnDefId))
+                .ToList();
+            var declared = ownInputs.Where(i => i.IsMapped).Select(i => i.ColumnDefId).ToHashSet();
             IReadOnlyList<LocalizedRequiredInput> requiredInputs =
             [
-                .. localized.RequiredInputs,
+                .. ownInputs,
                 .. (derived.GetValueOrDefault(version.Id) ?? [])
                     .Where(c => !declared.Contains(c))
                     // ✎ Огляд H3: версія-скрипт БЕЗ правил відбору (MatchesEveryRow) — кожен рядок таблиці «в межах», а поле, яке
