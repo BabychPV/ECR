@@ -2,8 +2,8 @@
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'permits.types.subtitle', N'ru', N'Тип описывает, что входит в разрешение: какие у него поля и какие таблицы с какими столбцами. Добавьте тип здесь — и разрешения этого типа заработают везде: без кода и без релиза.'),
-    (N'permits.types.subtitle', N'kz', N'Түр рұқсатта не бар екенін сипаттайды: қандай өрістер және қандай бағандары бар қандай кестелер. Түрді осында қосыңыз — және осы түрдегі рұқсаттар барлық жерде жұмыс істейді: кодсыз, релизсіз.'),
+    (N'permits.types.subtitle', N'ru', N'Тип описывает состав разрешения: поля и таблицы со столбцами. Добавьте тип здесь — и разрешения этого типа заработают везде, без кода и релиза.'),
+    (N'permits.types.subtitle', N'kz', N'Түр рұқсаттың құрамын сипаттайды: өрістер мен бағандары бар кестелер. Түрді осында қосыңыз — осы түрдегі рұқсаттар кодсыз әрі релизсіз барлық жерде жұмыс істейді.'),
     (N'permits.types.stats.aria', N'ru', N'Сводка по типам разрешений'),
     (N'permits.types.stats.aria', N'kz', N'Рұқсат түрлерінің жиынтығы'),
     (N'permits.types.stat.all', N'ru', N'типов'),
@@ -119,7 +119,7 @@ GO
 INSERT INTO #UiEn ([Key], Lang, Val, Scope)
 SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
-    (N'permits.types.subtitle', N'en', N'A type says what a permit contains: which fields it has and which tables, with which columns. Add a type here and permits of that type work everywhere — no code, no release.', 1),
+    (N'permits.types.subtitle', N'en', N'A type says what a permit contains: its fields and its tables with columns. Add a type here and its permits work everywhere — no code, no release.', 1),
     (N'permits.types.stats.aria', N'en', N'Permit types summary', 1),
     (N'permits.types.stat.all', N'en', N'types', 1),
     (N'permits.types.stat.tables', N'en', N'tables', 1),
