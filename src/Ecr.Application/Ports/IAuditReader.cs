@@ -57,7 +57,8 @@ namespace Ecr.Application.Ports;
 /// сітка (U-05); <c>null</c> — масштабу не задано або колонки вже немає.
 /// </param>
 /// <param name="RowOrdinal">
-/// ✎ AC-13: порядковий номер рядка на екрані (<c>doc.TableRow.Ordinal</c>, від 1) — щоб рядок, доданий людиною (без
+/// ✎ AC-13 / ✎ DOCUX b19: номер рядка на екрані (від 1) — позиція в порядку зрізу (рядки шаблону за <c>RowDef.Ordinal</c>,
+/// далі додані людиною за <c>TableRow.Id</c>), як «row N» у рядку формули; НЕ <c>doc.TableRow.Ordinal</c> (у доданого — 0) — щоб рядок, доданий людиною (без
 /// мітки шаблону, ключ — GUID), читався «Row N». <c>null</c> — рядка вже немає в <c>doc.TableRow</c> (видалено фізично,
 /// період в архіві).
 /// </param>
@@ -66,6 +67,10 @@ namespace Ecr.Application.Ports;
 /// довідник, порожньо або запису вже немає. Сирий id — у значенні (CSV-експорт — лише він).
 /// </param>
 /// <param name="NewValueLabelL10n">Те саме для нового значення.</param>
+/// <param name="TableInstanceId">
+/// ✎ DOCUX (b19): екземпляр таблиці рядка (<c>doc.TableRow.TableInstanceId</c>) — лише для обчислення номера рядка на екрані
+/// (<c>CellChangeRowPositions</c>); у відповідь не йде. <c>null</c> — рядка вже немає (архів, видалено).
+/// </param>
 public sealed record CellChangeView(
     DateTime ChangedAt,
     int PeriodKey,
@@ -96,7 +101,8 @@ public sealed record CellChangeView(
     int? ColumnScale = null,
     int? RowOrdinal = null,
     Ecr.Domain.ValueObjects.LocalizedText? OldValueLabelL10n = null,
-    Ecr.Domain.ValueObjects.LocalizedText? NewValueLabelL10n = null);
+    Ecr.Domain.ValueObjects.LocalizedText? NewValueLabelL10n = null,
+    [property: System.Text.Json.Serialization.JsonIgnore] long? TableInstanceId = null);
 
 /// <summary>
 /// ✎ AC-8: колонка, яку змінювали в документі у вікні, — варіант фільтра «Column» (незалежно від завантажених сторінок
