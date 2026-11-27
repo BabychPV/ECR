@@ -359,7 +359,21 @@ test('required cells (DOCUX L2): word in the cell, cell counter, F8, live, named
     await expect(grid).toBeVisible({ timeout: 60_000 });
     await expect(page.locator('[data-needs-input-counter]')).toHaveCount(0);
     const gridTop = async (): Promise<number> => (await grid.boundingBox())?.y ?? -1;
-    const top0 = await gridTop();
+    // ⛔ Не перший кадр після «grid visible»: у стенді (vite dev, модулі по одному) `revo-grid` видно ще ДО того, як
+    // долетіли ліниві чанки сітки (`revogr-data`, `revogr-header`) і відповіді `calc-status` / `discussions/summary`, —
+    // панель таблиці після цього сідає на 36 px нижче (RC b20, run 46012550383: 267.33 → 303.33, ще ДО першої правки:
+    // кадри трейсу 1321.8 → 1321.98 с, клік по комірці — 1323.4 с). Базу беремо, коли розкладка вляглась: перша комірка
+    // є, а позиція сітки не міняється кілька вимірів поспіль.
+    await expect(page.locator('revo-grid revogr-data[type="rgRow"] .rgCell').first()).toBeAttached({ timeout: 60_000 });
+    let top0 = await gridTop();
+    let steady = 0;
+    for (let attempt = 0; attempt < 100 && steady < 5; attempt += 1) {
+      await page.waitForTimeout(200);
+      const now = await gridTop();
+      steady = now === top0 ? steady + 1 : 0;
+      top0 = now;
+    }
+    expect(steady, 'розкладка над сіткою так і не вляглась (1 с без змін)').toBeGreaterThanOrEqual(5);
 
     // Рядок 1: назва → сервер повертає вимоги двох методологій до KIND і A.
     await savedPatches(page, 1, () => type(page, Headers.NAME, 0, 'Boiler'));
