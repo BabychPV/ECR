@@ -91,7 +91,7 @@ public sealed class LookupValueLabelsTests
             [
                 Change("Lookup", null, "37") with { RowKey = "p1-T3_00-0020", TableInstanceId = Instance },
                 Change("Lookup", null, "37") with { RowKey = "T-B", TableInstanceId = Instance },
-                Change("Lookup", null, "37") with { RowKey = "gone", TableInstanceId = Instance },
+                Change("Lookup", null, "37") with { RowKey = "gone", TableInstanceId = Instance, RowAddedByUser = true },
             ], null, null));
         var workflow = Substitute.For<IWorkflowStore>();
         workflow.GetHistoryAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
@@ -103,6 +103,8 @@ public sealed class LookupValueLabelsTests
 
         // Порядок зрізу: T-A (шаблон, 1), T-B (шаблон, 2), далі додані за Id: …0019 (Id 40), …0020 (Id 41).
         Assert.Equal([4, 2, null], page.Items.Select(i => i.RowOrdinal));
+        // ✎ Борги 27.11 (п. 5): позначка сервера «рядок додала людина» доходить до журналу аркуша (рядка вже немає — номера немає).
+        Assert.Equal([false, false, true], page.Items.Select(i => i.RowAddedByUser));
         Assert.All(page.Items, i => Assert.Equal("Diesel", i.NewValueLabelL10n?.Get("en")));
     }
 

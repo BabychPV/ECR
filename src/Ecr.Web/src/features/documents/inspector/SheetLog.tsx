@@ -213,7 +213,12 @@ function CellEditRow({
   const where = [
     localized(item.tableNameL10n),
     // ✎ DOCUX (огляд UI 27.11): рядок без мітки — «Row N» (як рядок формули), не ключ «p1-T3_00-0020».
-    rowText({ rowKey, rowLabelL10n: item.rowLabelL10n ?? null, rowOrdinal: item.rowOrdinal ?? null }),
+    rowText({
+      rowKey,
+      rowLabelL10n: item.rowLabelL10n ?? null,
+      rowOrdinal: item.rowOrdinal ?? null,
+      rowAddedByUser: item.rowAddedByUser ?? null,
+    }),
     localized(item.columnHeaderL10n) || columnCode,
   ]
     .filter((part) => part.length > 0)

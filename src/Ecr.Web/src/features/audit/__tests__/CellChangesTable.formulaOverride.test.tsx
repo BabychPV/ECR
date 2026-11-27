@@ -25,6 +25,7 @@ const Base: CellChange = {
   changedByUserId: 3,
   origin: 'FormulaOverride',
   isLateEdit: false,
+  rowAddedByUser: false,
   isOutOfWindow: false,
   fromArchive: false,
   isOverwrite: false,

@@ -300,7 +300,8 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                     // ⛔ DOCUX (b19, живий прохід): НЕ `doc.TableRow.Ordinal` — у рядка, доданого людиною, він 0, і журнал казав
                     // «Row 0». Номер на екрані рахує Application (`CellChangeRowPositions`, порядок зрізу); тут — екземпляр.
                     RowOrdinal: null,
-                    TableInstanceId: reader.IsDBNull(27) ? null : reader.GetInt64(27))));
+                    TableInstanceId: reader.IsDBNull(27) ? null : reader.GetInt64(27),
+                    RowAddedByUser: reader.GetBoolean(28))));
         }
 
         return rows;
@@ -496,7 +497,8 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                    a.OldValue, a.NewValue, a.ChangedByUserId, a.Origin, a.IsLateEdit,
                    u.DisplayName, d.BusinessKey, d.NameL10n, c.Code, c.HeaderL10n, c.DataType,
                    a.IsOutOfWindow, sd.Code, sd.NameL10n, td.Code, td.NameL10n, rd.LabelL10n,
-                   {fromArchive}, a.IsOverwrite, a.Reason, c.Scale, tr.TableInstanceId
+                   {fromArchive}, a.IsOverwrite, a.Reason, c.Scale, tr.TableInstanceId,
+                   CAST(CASE WHEN c.TableDefId IS NOT NULL AND rk.Found IS NULL THEN 1 ELSE 0 END AS bit) AS RowAddedByUser
               FROM (
                     {pageSource}
                    ) AS a
@@ -510,6 +512,10 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
               OUTER APPLY (SELECT TOP (1) r.LabelL10n
                              FROM cfg.RowDef AS r
                             WHERE r.TableDefId = c.TableDefId AND r.RowKey = a.RowKey AND r.IsDeleted = 0) AS rd
+              -- ✎ Борги 27.11 (п. 5): ключа немає серед рядків шаблону (і видалених) — рядок додала людина.
+              OUTER APPLY (SELECT TOP (1) 1 AS Found
+                             FROM cfg.RowDef AS r
+                            WHERE r.TableDefId = c.TableDefId AND r.RowKey = a.RowKey) AS rk
              ORDER BY {outerOrder}{AuditPaging.Hint(outerOrder)};
             """;
 

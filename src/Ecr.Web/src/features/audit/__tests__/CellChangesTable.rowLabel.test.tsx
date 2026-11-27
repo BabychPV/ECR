@@ -25,6 +25,7 @@ function change(rowKey: string, label?: string): CellChange {
     changedByUserId: 5,
     origin: 'UserEdit',
     isLateEdit: false,
+    rowAddedByUser: false,
     isOutOfWindow: false,
     isOverwrite: false,
     fromArchive: false,
@@ -52,6 +53,15 @@ describe('rowText', () => {
     expect(rowText({ ...change('p1-T3_00-0020'), rowOrdinal: 0 })).toBe('p1-T3_00-0020');
     expect(rowText({ ...change(Guid), rowOrdinal: 0 })).toBe('⟦grid.rowLabelHeader⟧ f9f64b62…');
     expect(rowText({ ...change(Guid), rowOrdinal: null })).toBe('⟦grid.rowLabelHeader⟧ f9f64b62…');
+  });
+
+  it('борги 27.11 (п. 5): рядка вже немає, а сервер каже «додала людина» — «Row (added by a user)», не ключ', () => {
+    // Мутація (локально): прибрати гілку `rowAddedByUser` у `rowText` — червоне (знову ключ / «Row f9f64b62…»).
+    expect(rowText({ ...change('p1-T3_00-0020'), rowAddedByUser: true })).toBe('⟦grid.rowLabelHeader⟧ ⟦row.addedByUser⟧');
+    expect(rowText({ ...change(Guid), rowAddedByUser: true })).toBe('⟦grid.rowLabelHeader⟧ ⟦row.addedByUser⟧');
+    // Номер на екрані і мітка шаблону важливіші; рядок шаблону (позначки немає) — свій код.
+    expect(rowText({ ...change('p1-T3_00-0020'), rowOrdinal: 20, rowAddedByUser: true })).toBe('⟦grid.rowLabelHeader⟧ 20');
+    expect(rowText({ ...change('LTD-A02'), rowAddedByUser: false })).toBe('LTD-A02');
   });
 });
 

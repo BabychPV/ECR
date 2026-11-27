@@ -59,7 +59,12 @@ export function auditValueText(
  * ✎ AC-13: для такого рядка — його номер на екрані «Row N» (`rowOrdinal`, `doc.TableRow.Ordinal`); номера немає (рядок
  * видалено, період в архіві) — як раніше, «Row» + початок ключа.
  */
-export function rowText(change: { readonly rowKey: string; readonly rowLabelL10n?: LocalizedText | null; readonly rowOrdinal?: number | null }): string {
+export function rowText(change: {
+  readonly rowKey: string;
+  readonly rowLabelL10n?: LocalizedText | null;
+  readonly rowOrdinal?: number | null;
+  readonly rowAddedByUser?: boolean | null;
+}): string {
   const label = localized(change.rowLabelL10n);
   if (label.length > 0) return label;
   const ordinal = change.rowOrdinal;
@@ -68,6 +73,9 @@ export function rowText(change: { readonly rowKey: string; readonly rowLabelL10n
   // ⛔ b19: номер — позиція на екрані від 1 (сервер, порядок зрізу); 0 чи менше — не номер (колишній `TableRow.Ordinal`
   // доданого рядка), «Row 0» не показується ніколи.
   if (typeof ordinal === 'number' && ordinal > 0) return `${t('grid.rowLabelHeader')} ${String(ordinal)}`;
+  // ✎ Борги 27.11 (п. 5): номера немає (рядок видалено, період в архіві), а сервер каже, що рядок додала людина (ключ поза
+  // рядками шаблону), — «Row (added by a user)», а не технічний ключ (GUID чи «p1-T3_00-0020»). Рядок шаблону — його код.
+  if (change.rowAddedByUser === true) return `${t('grid.rowLabelHeader')} ${t('row.addedByUser')}`;
   if (isOpaqueRowKey(change.rowKey)) return `${t('grid.rowLabelHeader')} ${change.rowKey.slice(0, 8)}…`;
 
   return change.rowKey;
