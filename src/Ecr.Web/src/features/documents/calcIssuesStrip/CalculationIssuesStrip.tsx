@@ -20,6 +20,11 @@ export interface CalculationIssuesStripProps {
   readonly onOpenHse400?: ((periodKey: number) => Promise<boolean>) | undefined;
   readonly onOpenSource?: ((documentId: number, periodKey: number) => void) | undefined;
   readonly narrow?: boolean;
+  /**
+   * ✎ DOCUX L1: документ, для якого пам'ятається «Details розгорнуто» (`documentId` вище — лише за правом
+   * `Calculation.View`, для технічних панелей). Без нього — `documentId`.
+   */
+  readonly memoryDocumentId?: number | undefined;
 }
 
 /** Коротка назва виду причини для смуги й матриці — ключі ЛІТЕРАЛАМИ (сторож каталогу). */
@@ -79,7 +84,7 @@ function monthHead(periodKey: number, oneYear: boolean): string {
  *
  * [Details] розгортає одну матрицю «причина × місяць» (кількість і «Show rows» — той самий перехід до першої комірки
  * причини, що в панелі B78) і, згорнуті, «Technical details» — колишні панелі місяців без змін (формули, коди, переліки,
- * дати джерела, «Open HSE400»). Розгорнуто чи ні — пам'ятається на людину (localStorage, без нього — згорнуто).
+ * дати джерела, «Open HSE400»). Розгорнуто чи ні — пам'ятається лише для відкритого документа (DOCUX L1), за замовчуванням згорнуто.
  *
  * ⚠ a11y: смуга — `section` з назвою (region), Details — кнопка з `aria-expanded`/`aria-controls`.
  */
@@ -92,9 +97,13 @@ export function CalculationIssuesStrip({
   onOpenHse400,
   onOpenSource,
   narrow = false,
+  memoryDocumentId,
 }: CalculationIssuesStripProps): JSX.Element | null {
   const summary = useMemo(() => summarizeCalcIssues(months, tables), [months, tables]);
-  const [open, setOpen] = useState(() => readDetailsOpen(userId));
+  // ✎ DOCUX L1: пам'ять Details — на документ і лише до перезавантаження вкладки (не між документами).
+  const detailsDocument = memoryDocumentId ?? documentId;
+  const [openState, setOpenState] = useState(() => ({ document: detailsDocument, open: readDetailsOpen(detailsDocument) }));
+  const open = openState.document === detailsDocument ? openState.open : readDetailsOpen(detailsDocument);
   const [technical, setTechnical] = useState(false);
   const [hse400, setHse400] = useState<'idle' | 'pending' | 'notFound' | 'failed'>('idle');
   const detailsId = useId();
@@ -113,10 +122,8 @@ export function CalculationIssuesStrip({
   const reasonsText = summary.reasons.map((reason) => `${String(reason.total)} ${kindLabel(reason.kind)}`).join(' · ');
 
   const toggle = (): void => {
-    setOpen((value) => {
-      writeDetailsOpen(userId, !value);
-      return !value;
-    });
+    writeDetailsOpen(detailsDocument, !open);
+    setOpenState({ document: detailsDocument, open: !open });
   };
 
   const openHse400 = async (periodKey: number): Promise<void> => {

@@ -1,8 +1,10 @@
 using Ecr.Application.Ports;
 using Ecr.Application.Registries;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Enums;
 using Ecr.Expressions.Evaluation;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Ecr.Infrastructure.Persistence;
 
@@ -44,7 +46,8 @@ public sealed class Hse400CompositionSnapshotLoader(
     bool? enabled,
     string registryCode = Hse400CompositionMapping.RegistryCode,
     string templateCode = Hse400CompositionMapping.TemplateCode,
-    Hse400CompositionCache? cache = null) : IRegistrySnapshotLoader
+    Hse400CompositionCache? cache = null,
+    ILogger<Hse400CompositionSnapshotLoader>? logger = null) : IRegistrySnapshotLoader
 {
     /// <summary>
     /// ✎ P-0118-31/33 («один вимикач»): ВИВЕДЕНИЙ ключ. Застосунок його НЕ читає — читання складу з документа вирішує
@@ -103,11 +106,12 @@ public sealed class Hse400CompositionSnapshotLoader(
                 where !s.IsDeleted
                 join d in db.TableDefs.AsNoTracking() on s.Id equals d.SheetDefId
                 where !d.IsDeleted
-                select new { d.Id, d.Code })
+                select new { d.Id, d.Code, YearLayout = v.Layout == TemplateLayout.YearWithMonthColumns })
             .ToListAsync(ct).ConfigureAwait(false);
 
         // Код таблиці → канонічний префікс потоку; чужі таблиці шаблону складу не дають.
         var streamByTable = new Dictionary<int, string>();
+        var yearLayoutTables = new HashSet<int>();
         foreach (var table in allTables)
         {
             var stream = Hse400CompositionMapping.Streams.FirstOrDefault(
@@ -115,6 +119,10 @@ public sealed class Hse400CompositionSnapshotLoader(
             if (stream is not null)
             {
                 streamByTable[table.Id] = stream;
+                if (table.YearLayout)
+                {
+                    yearLayoutTables.Add(table.Id);
+                }
             }
         }
 
@@ -133,7 +141,7 @@ public sealed class Hse400CompositionSnapshotLoader(
                 join doc in db.Documents.AsNoTracking() on i.DocumentId equals doc.Id
                 join project in db.Projects.AsNoTracking() on doc.ProjectId equals project.Id
                 where project.Code != Hse400CompositionMapping.GoldProjectCode
-                select new { i.Id, i.DocumentId, i.TableDefId, i.PeriodKeyValue })
+                select new { i.Id, i.DocumentId, i.TableDefId, i.PeriodKeyValue, Monthly = project.PeriodKind == PeriodKind.Monthly })
             .ToListAsync(ct).ConfigureAwait(false);
         if (instances.Count == 0)
         {
@@ -260,7 +268,7 @@ public sealed class Hse400CompositionSnapshotLoader(
             .ToListAsync(ct).ConfigureAwait(false);
 
         var instanceById = chosen.ToDictionary(i => i.Id);
-        var found = new List<(int Year, int TableDefId, int Ordinal, Hse400DocumentCell Cell)>();
+        var found = new List<(int Year, int TableDefId, int Ordinal, Hse400DocumentCell Cell, long InstanceId)>();
 
         bool Passes(long documentId, int tableDefId, int year, int month)
             => approved is null || approved.Contains((documentId, tableDefId, year, month));
@@ -291,7 +299,8 @@ public sealed class Hse400CompositionSnapshotLoader(
             var inputMonth = (year, instance.TableDefId, monthByColumn[cell.ColumnDefId]);
             inputMonths[inputMonth] = (!inputMonths.TryGetValue(inputMonth, out var allZero) || allZero) && cell.Value == 0m;
             found.Add((year, instance.TableDefId, OrdinalOf(instance.TableDefId, row.RowKeyValue), new Hse400DocumentCell(
-                year, monthByColumn[cell.ColumnDefId], streamByTable[instance.TableDefId], row.RowKeyValue, cell.Value)));
+                year, monthByColumn[cell.ColumnDefId], streamByTable[instance.TableDefId], row.RowKeyValue, cell.Value),
+                instance.Id));
         }
 
         // Розрахункові рядки F_<X>: числа актуального прогону, колонка місяця — у коді виходу.
@@ -318,7 +327,7 @@ public sealed class Hse400CompositionSnapshotLoader(
                 }
 
                 found.Add((year, instance.TableDefId, OrdinalOf(instance.TableDefId, rowKey), new Hse400DocumentCell(
-                    year, month, streamByTable[instance.TableDefId], rowKey, result.Value)));
+                    year, month, streamByTable[instance.TableDefId], rowKey, result.Value), instance.Id));
             }
         }
 
@@ -346,10 +355,18 @@ public sealed class Hse400CompositionSnapshotLoader(
                 if (!calculatedFound.Contains((year, tableDefId, month, rowKey.ToUpperInvariant())))
                 {
                     found.Add((year, tableDefId, OrdinalOf(tableDefId, rowKey),
-                        new Hse400DocumentCell(year, month, streamByTable[tableDefId], rowKey, 0m)));
+                        new Hse400DocumentCell(year, month, streamByTable[tableDefId], rowKey, 0m), 0L));
                 }
             }
         }
+
+        // ✎ b14 document-move P1 (H1/H3): у місячному проєкті версії «рік + місячні колонки» місяць m має ВЛАСНИКА —
+        // екземпляр періоду рік·100+m (Q-17). Значення власника перемагає копію в іншому екземплярі (січнева копія
+        // перенесеного річного документа, F_ старого «всі місяці» прогону) — незалежно від порядку рядків SQL. Інший
+        // екземпляр — лише коли власник не має значення; різні значення одного рівня — значення немає (як
+        // MonthRowResultOverlay), а не «перше». Власник береться з уже обраних екземплярів — жодного зайвого запиту.
+        found = OwnerFirst(found, chosen.Where(i => i.Monthly && yearLayoutTables.Contains(i.TableDefId))
+            .ToDictionary(i => (i.TableDefId, i.PeriodKeyValue), i => i.Id));
 
         var rows = new List<Hse400CompositionRow>();
         foreach (var year in documentByYear.Keys.Order())
@@ -378,6 +395,63 @@ public sealed class Hse400CompositionSnapshotLoader(
 
         return (rows, years);
     }
+
+    /// <summary>
+    /// ✎ b14 P1: на кожен (рік, таблиця, рядок, місяць) лишає значення ВЛАСНИКА місяця, інакше — інших екземплярів;
+    /// різні значення одного рівня — без значення (попередження в журнал). Порядок решти записів не змінюється.
+    /// </summary>
+    /// <param name="found">Знайдені значення з екземпляром-джерелом (0 — синтетичний нуль паритету).</param>
+    /// <param name="owners">
+    /// (таблиця, період) → екземпляр для таблиць, де правило діє (місячний проєкт, версія <c>YearWithMonthColumns</c>);
+    /// таблиці поза ним — як до P1 (перше значення).
+    /// </param>
+    internal List<(int Year, int TableDefId, int Ordinal, Hse400DocumentCell Cell, long InstanceId)> OwnerFirst(
+        List<(int Year, int TableDefId, int Ordinal, Hse400DocumentCell Cell, long InstanceId)> found,
+        IReadOnlyDictionary<(int TableDefId, int PeriodKeyValue), long> owners)
+    {
+        if (owners.Count == 0)
+        {
+            return found;
+        }
+
+        var routedTables = owners.Keys.Select(k => k.TableDefId).ToHashSet();
+        var keep = new HashSet<int>();
+        var groups = found
+            .Select((f, index) => (f, index))
+            .Where(x => routedTables.Contains(x.f.TableDefId))
+            .GroupBy(x => (x.f.Year, x.f.TableDefId, Key: x.f.Cell.RowKey.ToUpperInvariant(), x.f.Cell.Month));
+        foreach (var group in groups)
+        {
+            var ownerId = owners.TryGetValue((group.Key.TableDefId, (group.Key.Year * 100) + group.Key.Month), out var id)
+                ? id
+                : -1;
+            var tier = group.Where(x => x.f.InstanceId == ownerId).ToList();
+            if (tier.Count == 0)
+            {
+                tier = [.. group];
+            }
+
+            if (tier.Exists(x => x.f.Cell.Value != tier[0].f.Cell.Value))
+            {
+                if (logger is not null)
+                {
+                    LogOwnerConflict(logger, group.Key.TableDefId, tier[0].f.Cell.RowKey, group.Key.Year, group.Key.Month, null);
+                }
+
+                continue;
+            }
+
+            keep.Add(tier[0].index);
+        }
+
+        return [.. found.Where((f, index) => !routedTables.Contains(f.TableDefId) || keep.Contains(index))];
+    }
+
+    private static readonly Action<ILogger, int, string, int, int, Exception?> LogOwnerConflict =
+        LoggerMessage.Define<int, string, int, int>(
+            LogLevel.Warning,
+            new EventId(4001, "Hse400OwnerConflict"),
+            "Склад HSE400: різні значення одного рівня власника для таблиці {TableDefId}, рядок {RowKey}, {Year}-{Month}; значення не взято.");
 
     /// <summary>Штамп рядків (<c>COUNT</c>, <c>MAX</c> і сума версій) для відбитка кешу.</summary>
     private sealed record RowStamp(long Cnt, byte[]? MaxVersion, decimal? SumVersion);

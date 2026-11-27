@@ -254,7 +254,20 @@ public sealed record ColumnDto(
     int? WidthPx = null,
     string? Expression = null,
     int? HeaderGroupId = null,
-    string? LookupFilter = null);
+    string? LookupFilter = null,
+    IReadOnlyList<ColumnMethodologyDto>? CalculatedBy = null,
+    IReadOnlyList<ColumnMethodologyDto>? ReadBy = null);
+
+/// <summary>
+/// ✎ D-577 (інспектор комірки): методологія, що пише колонку (<c>calculatedBy</c>, з кодом виходу-кроку) або читає її як
+/// обов'язковий вхід (<c>readBy</c>, <c>required = true</c>). Рівень КОЛОНКИ (не комірки): з прив'язок таблиці й чинних версій
+/// методологій на період — без трасування прогону (D-565). <c>null</c> у колонки — немає.
+/// </summary>
+/// <param name="MethodologyCode">Код методології.</param>
+/// <param name="MethodologyName">Назва мовою читача (або код).</param>
+/// <param name="Step">Код виходу (кроку) методології, що пише колонку; <c>null</c> для <c>readBy</c>.</param>
+/// <param name="Required">Для <c>readBy</c>: обов'язковий вхід (<c>ECR-CALC-0437</c>); для <c>calculatedBy</c> — <c>false</c>.</param>
+public sealed record ColumnMethodologyDto(string MethodologyCode, string MethodologyName, string? Step, bool Required);
 
 /// <summary>
 /// Підмножина <c>StyleDef</c>, потрібна ЖИВІЙ сітці (директива registry-

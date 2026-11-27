@@ -190,7 +190,8 @@ test.describe('Live refresh: two users on the stand', () => {
       // The reviewer changes row 0: the administrator gets the polite banner within one marker interval.
       const second = `${String(5000 + Math.floor(Math.random() * 999))}`;
       await reviewerWrites(reviewer.page.request, target.row0, target.column, Number(second));
-      const banner = page.getByTestId('sheet-live-banner');
+      // ✎ DOCUX L7: «Updated by … at …» — у рядку повідомлень над сіткою (роль status), «Refresh» — його дія.
+      const banner = page.getByTestId('notice-live-change');
       await expect(banner).toBeVisible({ timeout: SlowPoll });
       await expect(banner).toContainText(`Updated by ${Reviewer.shown} at`);
       await expect(page.getByTestId('sheet-live-host')).toHaveAttribute('aria-live', 'polite');
@@ -199,7 +200,7 @@ test.describe('Live refresh: two users on the stand', () => {
       expect(await axeViolations(page, 'color-contrast'), 'light: axe color-contrast with the banner').toEqual([]);
 
       // Refresh while my PATCH is still held: the reload waits for it — my value stays on screen.
-      await page.getByTestId('sheet-live-refresh').click();
+      await page.getByTestId('notice-live-refresh').click();
       await page.waitForTimeout(1_500);
       await expect(mine).toHaveText(own);
       release();
@@ -242,7 +243,7 @@ test.describe('Live refresh: two users on the stand', () => {
 
         const target = await writableColumn(reviewer.page.request);
         await reviewerWrites(reviewer.page.request, target.row0, target.column, 8000 + Math.floor(Math.random() * 999));
-        await expect(page.getByTestId('sheet-live-banner')).toBeVisible({ timeout: SlowPoll });
+        await expect(page.getByTestId('notice-live-change')).toBeVisible({ timeout: SlowPoll });
 
         await shot(page, `banner-${scheme}-1440`);
         for (const rule of ['color-contrast', 'button-name', 'aria-allowed-attr', 'aria-valid-attr-value']) {
@@ -253,14 +254,14 @@ test.describe('Live refresh: two users on the stand', () => {
         await page.locator('[data-chat-panel]').getByRole('button', { name: 'Close discussion' }).click();
         await expect(page.locator('[data-chat-panel]')).toHaveCount(0);
         await page.setViewportSize({ width: 500, height: 800 });
-        await expect(page.getByTestId('sheet-live-banner')).toBeVisible();
-        const box = await page.getByTestId('sheet-live-banner').boundingBox();
+        await expect(page.getByTestId('notice-live-change')).toBeVisible();
+        const box = await page.getByTestId('notice-live-change').boundingBox();
         expect((box?.x ?? 0) + (box?.width ?? 0), '500 px: the banner must fit the viewport').toBeLessThanOrEqual(500);
         await shot(page, `banner-${scheme}-500`);
         expect(await axeViolations(page, 'color-contrast'), `${scheme} 500px: axe color-contrast`).toEqual([]);
 
-        await page.getByTestId('sheet-live-refresh').click();
-        await expect(page.getByTestId('sheet-live-banner')).toHaveCount(0, { timeout: 30_000 });
+        await page.getByTestId('notice-live-refresh').click();
+        await expect(page.getByTestId('notice-live-change')).toHaveCount(0, { timeout: 30_000 });
       } finally {
         await admin.context.close();
         await reviewer.context.close();
@@ -302,7 +303,7 @@ test.describe('Live refresh: two users on the stand', () => {
         expect(polls.length).toBeGreaterThan(0);
         expect(polls.every((status) => status === 200 || status === 304), `marker answers: ${polls.join(',')}`).toBe(true);
         expect(polls[0], `first poll has no ETag yet: ${polls.join(',')}`).toBe(200);
-        await expect(page.getByTestId('sheet-live-banner')).toHaveCount(0);
+        await expect(page.getByTestId('notice-live-change')).toHaveCount(0);
 
         // A sheet the user cannot see (no such sheet in the document): 404, the poll would stop — also with the
         // `ETag` of a visible sheet in `If-None-Match` (visibility is checked before the conditional answer).

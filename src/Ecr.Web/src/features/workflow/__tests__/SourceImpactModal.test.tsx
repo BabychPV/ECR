@@ -27,9 +27,10 @@ function impact(overrides: Partial<SourceImpact> = {}): SourceImpact {
     dependentCount: 2,
     approvedCount: 1,
     canRecalculateApproved: false,
+    wholeYearReason: null,
     consumers: [
-      { bindingCode: 'HSE400_LAND', templateCode: 'LAND', documentId: 5, projectCode: 'LAND-2026', documentKey: 'DOC-LAND', periodKey: 202603, approved: true, willRecalculate: false, skipReason: 'approved', sheets: [] },
-      { bindingCode: 'HSE400_LAND', templateCode: 'LAND', documentId: 6, projectCode: 'LAND-2026', documentKey: 'DOC-LAND-2', periodKey: 202603, approved: false, willRecalculate: true, skipReason: null, sheets: [] },
+      { bindingCode: 'HSE400_LAND', templateCode: 'LAND', documentId: 5, projectCode: 'LAND-2026', documentKey: 'DOC-LAND', periodKey: 202603, approved: true, willRecalculate: false, skipReason: 'approved', sheets: [], reason: 'sourceMonth', readsPeriodKey: null },
+      { bindingCode: 'HSE400_LAND', templateCode: 'LAND', documentId: 6, projectCode: 'LAND-2026', documentKey: 'DOC-LAND-2', periodKey: 202603, approved: false, willRecalculate: true, skipReason: null, sheets: [], reason: 'sourceMonth', readsPeriodKey: null },
     ],
     ...overrides,
   };
@@ -46,6 +47,58 @@ function show(value: SourceImpact | null, onConfirm = vi.fn(), onClose = vi.fn()
 }
 
 describe('SourceImpactModal', () => {
+  it('✎ огляд L2: закритий період — «закрито»; незатверджений аркуш періоду, що НЕ перераховується, — причина періоду, а не «затверджено»', async () => {
+    const base = impact().consumers[1]!;
+    show(
+      impact({
+        consumers: [
+          { ...base, periodKey: 202601, approved: true, willRecalculate: false, skipReason: 'closed' },
+          {
+            ...base,
+            periodKey: 202602,
+            willRecalculate: false,
+            skipReason: 'dependentsOff',
+            sheets: [
+              { sheetDefId: 1, sheetCode: 'SH_APPROVED', approved: true, willRecalculate: false },
+              { sheetDefId: 2, sheetCode: 'SH_DRAFT', approved: false, willRecalculate: false },
+            ],
+          },
+        ],
+      }),
+    );
+
+    await screen.findByRole('dialog');
+    expect(screen.getAllByText('⟦sourceImpact.status.closed⟧')).toHaveLength(1);
+    const sheets = screen.getByTestId('source-impact-sheets').textContent ?? '';
+    expect(sheets).toContain('SH_APPROVED · ⟦sourceImpact.status.approved⟧');
+    expect(sheets).toContain('SH_DRAFT · ⟦sourceImpact.status.dependentsOff⟧');
+  });
+
+  it('✎ кожен період каже, ЧОМУ він у переліку: власник зміненого місяця, міжмісячна формула (який місяць читає), увесь рік — з причиною', async () => {
+    const base = impact().consumers[1]!;
+    show(
+      impact({
+        wholeYearReason: 'sourceSpreadsMonths',
+        consumers: [
+          { ...base, periodKey: 202601 },
+          { ...base, periodKey: 202602, reason: 'crossMonth', readsPeriodKey: 202601 },
+          { ...base, periodKey: 202603, reason: 'sourceYear', willRecalculate: false, skipReason: 'dependentsOff' },
+        ],
+      }),
+      vi.fn(),
+      vi.fn(),
+      'edit',
+    );
+
+    await screen.findByRole('dialog');
+    const why = screen.getAllByTestId('source-impact-why').map((e) => e.textContent);
+    expect(why[0]).toBe('⟦sourceImpact.why.sourceMonth⟧');
+    expect(why[1]).toContain('sourceImpact.why.crossMonth (period=');
+    expect(why[2]).toBe('⟦sourceImpact.why.sourceYear⟧');
+    expect(screen.getByTestId('source-impact-whole-year').textContent).toBe('⟦sourceImpact.wholeYear.sourceSpreadsMonths⟧');
+    expect(screen.getAllByText('⟦sourceImpact.status.dependentsOff⟧')).toHaveLength(1);
+  });
+
   it('Warn: перелік залежних зі статусом, підтвердження одним кліком несе відбиток без причини', async () => {
     const { onConfirm } = show(impact());
 

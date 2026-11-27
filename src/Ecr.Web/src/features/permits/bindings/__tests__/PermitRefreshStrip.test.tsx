@@ -1,6 +1,6 @@
 import type { JSX, ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
@@ -83,7 +83,7 @@ describe('PermitRefreshStrip — показ', () => {
     expect(screen.queryByTestId('permit-refresh-strip')).toBeNull();
   });
 
-  it('кожна прив’язана таблиця аркуша має свою кнопку', () => {
+  it('кожна прив’язана таблиця аркуша має свою кнопку (DOCUX L8: кілька — у спливаючому переліку чипа)', async () => {
     mount({
       tables: [
         tableDto(),
@@ -96,7 +96,8 @@ describe('PermitRefreshStrip — показ', () => {
       ],
     });
 
-    expect(screen.getAllByRole('button', { name: k('doc.refresh') })).toHaveLength(2);
+    fireEvent.click(screen.getByTestId('from-permit-menu'));
+    expect(await screen.findAllByRole('button', { name: k('doc.refresh') })).toHaveLength(2);
   });
 });
 

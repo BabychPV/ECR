@@ -90,6 +90,8 @@ public sealed partial class SheetCopyQuerySitesTests
             "B179 L2: «документ-споживач × період є» — екземпляри оригіналу (SheetCopyId == null); перерахунок методологій — лише оригінал",
         ["src/Ecr.Infrastructure/Persistence/GasCompositionStore.cs"] =
             "D-NEW: замкнений період складу газу — затверджений аркуш ОРИГІНАЛУ (ApprovalState.SheetCopyId == null), як і результати методологій",
+        ["src/Ecr.Infrastructure/Jobs/EditAutoRecalculation.cs"] =
+            "D-577 (Q2): «чи є в документі методологія» — будь-який екземпляр (оригінал чи копія) у періодах правки з прив'язаною таблицею: копії мають ту саму таблицю шаблону, а перерахунок документа рахує обидві",
         ["src/Ecr.Infrastructure/Jobs/SourceDocumentChangeHook.cs"] =
             "B179 L2: «чи документ — джерело зв'язки» — за екземплярами оригіналу (SheetCopyId == null), як у завантажувачі складу",
         ["src/Ecr.Infrastructure/Jobs/SourceApprovalChangeTrigger.cs"] =
@@ -120,6 +122,8 @@ public sealed partial class SheetCopyQuerySitesTests
         // в роботу будь-якої копії — вхід документа; версії шаблону й документи-джерела — за екземплярами всіх видів.
         ["src/Ecr.Infrastructure/Jobs/RecalculationJob.Nightly.cs"] =
             "версії шаблону документа й документи шаблону-джерела — за екземплярами будь-якого виду (копія тієї ж версії)",
+        ["src/Ecr.Infrastructure/Jobs/RecalculationJob.Forecast.cs"] =
+            "D-581: пізніші читачі для політики впливу джерела — періоди й версії за екземплярами ОРИГІНАЛУ (SheetCopyId == null), як план каскаду",
         ["src/Ecr.Infrastructure/Jobs/RecalculationJob.Selective.cs"] =
             "✎ PERF-06b (D-572): покривні періоди документа-джерела — за екземплярами ОРИГІНАЛУ (SheetCopyId IS NULL), як завантажувач складу",
         ["src/Ecr.Infrastructure/Jobs/NightlyInputChangeQuery.cs"] =

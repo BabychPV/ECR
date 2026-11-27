@@ -75,6 +75,57 @@ public sealed class CalculationTrigger(
 
     /// <inheritdoc />
     /// <remarks>
+    /// ⛔ Без шторму (D-577): відкладення <see cref="EditDebounce"/> від ПЕРШОЇ правки (злиття лишає раніший момент
+    /// доступності — вікно не подовжується), ціль <see cref="AutoTargetOf"/> спільна зі збором PI і власним перерахунком
+    /// документа-джерела (B179 L2b): масова вставка чи імпорт — одна задача на документ і період; правки під час прогону —
+    /// ще ОДНА задача позаду нього. Задача системна (без автора) — під стелею важких перерахунків як «стеля − 1» і в черзі
+    /// людей не обганяє ручне «Перерахувати» (D-564c). Закритий, не відкритий, архівований, затверджений — не ставиться
+    /// (<see cref="WritableAsync"/>), подані перераховуються з позначкою (B83). Quartz (live) — те саме вікно в пам'яті (<c>QuartzJobScheduler.EnqueueCoalescedDelayedAsync</c>) і злиття на ціль.
+    /// </remarks>
+    public Task<string?> RequestAfterEditAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+        => RequestAfterEditAsync(documentId, periodKey, approverSheetDefIds: null, ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ Огляд H2 (b): payload несе <c>SkipIfFresh</c> — задача нічого не рахує, якщо актуальний прогін уже новіший за останню
+    /// зміну входів (людина встигла натиснути «Перерахувати», або злитий прогін це покрив). ✎ M5 (рішення людини, D-442):
+    /// аркуші, які правив погоджувач поточного кроку (<paramref name="approverSheetDefIds"/>), — без позначки «перераховано після
+    /// подання» (<c>ApproverSheets</c>).
+    /// </remarks>
+    public async Task<string?> RequestAfterEditAsync(
+        long documentId, PeriodKey periodKey, IReadOnlyCollection<int>? approverSheetDefIds, CancellationToken ct)
+    {
+        if (!await WritableAsync(documentId, periodKey, ct).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        int[]? approver = approverSheetDefIds is { Count: > 0 } ? [.. approverSheetDefIds.Distinct().Order()] : null;
+        var payload = new
+        {
+            DocumentId = documentId,
+            PeriodKey = periodKey.Value,
+            TriggeredByUserId = (int?)null,
+            SheetDefId = (int?)null,
+            RecalculateSubmitted = true,
+            SkipIfFresh = true,
+            ApproverSheets = approver,
+        };
+
+        return await jobs
+            .EnqueueCoalescedDelayedAsync<IRecalculationJob>(
+                AutoTargetOf(documentId, periodKey), payload, EditDebounce, ct, createdByUserId: null)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ D-577 (Q2): вікно злиття правок людини перед автоперерахунком методологій (рекомендація плану — ~20 с тиші; черга
+    /// рахує від першої правки сплеску, тож старт — щонайбільше через це вікно після першої правки).
+    /// </summary>
+    public static readonly TimeSpan EditDebounce = TimeSpan.FromSeconds(20);
+
+    /// <inheritdoc />
+    /// <remarks>
     /// ✎ PERF-06b (<c>D-572</c>): місяці — у payload (<c>SourceMonths</c>) лише коли черга зливає постановки об'єднанням
     /// (<c>DbJobQueue.MergePressFieldsSql</c>: обидві з місяцями — об'єднання, хоч одна без — без місяців, тобто увесь рік). Quartz
     /// лишає payload першої постановки — місяці другої правки загубилися б, тож там без них (увесь рік, як доти).

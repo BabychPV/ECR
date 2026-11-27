@@ -94,8 +94,18 @@ public sealed class SubmitSheetHandler(
 
     // ✎ F5: місяць споживача, що ще чекає каскаду від зміни джерела (HSE400, D-566), не подається. `null` (тестові
     // фабрики) — перевірки немає.
-    ISourceCascadePendingGate? cascadeGate = null)
+    ISourceCascadePendingGate? cascadeGate = null,
+
+    // ✎ D-577 (Q6, рішення людини 26.11): порожній обов'язковий вхід методології рівня Block блокує подання. `null`
+    // (тестові фабрики) — перевірки немає, як доти.
+    Documents.RequiredInputs.RequiredInputsScanner? requiredInputs = null)
 {
+    /// <summary>
+    /// ✎ Огляд H4: стеля повідомлень у тілі відмови подання (як перелік при відкритті, <c>GetRequiredInputsHandler.MaxCells</c>):
+    /// не будувати мегабайтних переліків під винятковим замком аркуша.
+    /// </summary>
+    public const int MaxRequiredInputMessages = 5000;
+
     /// <summary>✎ C-5: дефолти колонок версії для незаповнених комірок (02b §6.3), як у «Перевірити».</summary>
     private readonly Recalculation.ColumnDefaultValues columnDefaults = new(metadata, registries);
 
@@ -671,6 +681,49 @@ public sealed class SubmitSheetHandler(
                 formulaErrorCells, snapshot.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id), currentUser.Language));
         }
 
+        // ✎ D-577 (Q6; BUG-9 UX-огляду): обов'язкові входи методологій — по ВСІХ рядках аркуша, з введеним значенням чи
+        // наперед заданих (Q4), а не лише по рядках, які правили (ворота PATCH). Блокує рівень Block — заведений методологом
+        // і ВИВЕДЕНИЙ з полів, які читає скрипт (D-578; виняток методолога Optional/Warn знімає);
+        // попередження входів — у «Перевірити» й переліку при відкритті, не діалог підтвердження подання. Без прив'язаних
+        // методологій (той самий пакетний пошук прив'язок, що для свіжості вище) — жодного нового звернення.
+        // ✎ Огляд M1/H4: план — ОДИН на аркуш (прив'язки одним зверненням, читання методологій спільні), зрізи таблиць поза
+        // перевіркою вище — одним пакетом; повідомлень у тілі 422 — не більше MaxRequiredInputMessages (решта — лічильником).
+        var requiredInputsTotal = 0;
+        var requiredInputsListed = 0;
+        if (requiredInputs is not null && boundMethodologyIds.Count > 0)
+        {
+            var sheetInstances = instances.Where(i => tables.ContainsKey(i.TableDefId)).ToList();
+            var plans = await requiredInputs
+                .PlanManyAsync(documentId, key.Value, templateVersionId, [.. sheetInstances.Select(i => tables[i.TableDefId]).Distinct()], ct)
+                .ConfigureAwait(false);
+            var planned = sheetInstances.Where(i => plans.ContainsKey(i.TableDefId)).ToList();
+            var unread = planned.Select(i => i.TableInstanceId).Where(id => !cellsByInstance.ContainsKey(id)).ToList();
+            IReadOnlyDictionary<long, IReadOnlyList<CellRecord>> extraCells = unread.Count == 0
+                ? new Dictionary<long, IReadOnlyList<CellRecord>>()
+                : await cellStore.ReadSlicesAsync(unread, key, ct).ConfigureAwait(false);
+            IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>> extraRows = unread.Count == 0
+                ? new Dictionary<long, IReadOnlyDictionary<string, long>>()
+                : await rowStore.GetRowIdsBatchAsync(unread, key, ct).ConfigureAwait(false);
+
+            foreach (var instance in planned)
+            {
+                var table = tables[instance.TableDefId];
+                var id = instance.TableInstanceId;
+                var rowIds = rowIdsByInstance.TryGetValue(id, out var known)
+                    ? known
+                    : extraRows.GetValueOrDefault(id) ?? new Dictionary<string, long>(StringComparer.Ordinal);
+                var cells = cellsByInstance.TryGetValue(id, out var read) ? read : extraCells.GetValueOrDefault(id) ?? [];
+                rowIdsByTable.TryAdd(table.Id, rowIds);
+                var listed = Documents.RequiredInputs.RequiredInputsScanner.Scan(
+                    plans[table.Id], table, snapshot.ColumnsById, cells, rowIds, currentUser.Language,
+                    Math.Max(0, MaxRequiredInputMessages - requiredInputsListed),
+                    m => m.Severity == ValidationSeverity.Error, out var total);
+                blocking.AddRange(listed);
+                requiredInputsListed += listed.Count;
+                requiredInputsTotal += total;
+            }
+        }
+
         if (blocking.Count > 0)
         {
             // ⛔ Порядок у тілі 422 — ЯВНИЙ, як на екрані: таблиця аркуша →
@@ -698,11 +751,18 @@ public sealed class SubmitSheetHandler(
                 ["messageKey"] = onlyHidden
                     ? Validation.HiddenValidationIssues.MessageKey
                     : "err.ECR-SUB-4221.validationBlocked",
-                ["messages"] = MessageDetails(shown),
+                ["messages"] = MessageDetails(shown.Take(MaxRequiredInputMessages)),
             };
             if (!onlyHidden)
             {
-                details["messageCount"] = shown.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                // ✎ Огляд H4: лічильник — усіх (і тих, що не потрапили в перелік через стелю); `truncated` — перелік обрізано.
+                var hiddenByCap = requiredInputsTotal - requiredInputsListed;
+                var count = shown.Count + hiddenByCap;
+                details["messageCount"] = count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (count > Math.Min(shown.Count, MaxRequiredInputMessages))
+                {
+                    details["truncated"] = "true";
+                }
             }
 
             throw new BusinessRuleException(

@@ -334,6 +334,9 @@ export type RequiredInputSeverity = Schemas['RequiredInputSeverity'];
 /** Обов'язкова вхідна колонка методології (директива «обов'язкові вхідні колонки методології»). */
 export type MethodologyRequiredInputDto = Schemas['MethodologyRequiredInputDto'];
 
+/** ✎ D-578: виведені обов'язкові входи версії — поля, які читає скрипт (лише читання), з винятком методолога. */
+export type DerivedRequiredInputsDto = Schemas['DerivedRequiredInputsDto'];
+
 /** Запис обов'язкової вхідної колонки. */
 export type SaveMethodologyRequiredInputRequest = Schemas['SaveMethodologyRequiredInputRequest'];
 

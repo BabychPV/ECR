@@ -66,14 +66,15 @@ test.describe('docNoticesCompact: смуга проблем розрахунку
     await shot(page, 'docNoticesCompact-collapsed-1440');
     expect(await axe(page), 'axe light').toEqual([]);
 
-    // Details — матриця; стан пам'ятається після перезавантаження (AC-3).
+    // Details — матриця. ✎ DOCUX L1 (принцип 8 плану): розгорнутість НЕ переживає перезавантаження й не переходить на
+    // інші документи (доти кожен документ відкривався з розгорнутою матрицею — пів екрана).
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-expanded', 'true');
     await expect(page.getByTestId('document-calc-strip-matrix')).toBeVisible();
     await expect(page.locator('[data-testid="document-calc-strip-matrix"] tr[data-kind="missingInputs"] td').first()).toHaveAttribute('data-count', '2');
     await shot(page, 'docNoticesCompact-expanded-1440');
     await page.reload();
-    await expect(page.getByTestId('document-calc-strip-toggle')).toHaveAttribute('aria-expanded', 'true', { timeout: 60_000 });
+    await expect(page.getByTestId('document-calc-strip-toggle')).toHaveAttribute('aria-expanded', 'false', { timeout: 60_000 });
 
     // Темна тема (AC-4) — і повернути світлу: оператор спільний для всіх специфікацій.
     try {
@@ -84,7 +85,6 @@ test.describe('docNoticesCompact: смуга проблем розрахунку
       expect(await axe(page), 'axe dark').toEqual([]);
     } finally {
       await preference(page, 'light');
-      await page.getByTestId('document-calc-strip-toggle').click();
     }
   });
 });

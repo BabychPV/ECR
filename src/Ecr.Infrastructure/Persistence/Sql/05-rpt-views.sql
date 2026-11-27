@@ -1239,7 +1239,12 @@ N' AND a.PeriodKey = ti.PeriodKey
                                AND (a.SheetCopyId = ti.SheetCopyId OR (a.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL))
 LEFT JOIN rpt.fn_RecalculatedAfterSubmission() AS ras ON ras.ApprovalStateId = a.Id
 LEFT JOIN doc.DocumentSheet AS dsh ON dsh.Id = ti.SheetCopyId', @joins, N'
-WHERE ti.TableDefId = ', CAST(@id AS nvarchar(10)), N';');
+WHERE ti.TableDefId = ', CAST(@id AS nvarchar(10)),
+-- b14 (D-579, review L-7): a PerPeriodInstance table of a YearWithMonthColumns version is year-scoped (all values live in
+-- the year anchor); the empty rows mirrored into a lazily created month instance (GET periodKey=202611) are not data.
+             CASE WHEN @layout = 3 AND @rc = 1 THEN N'
+  AND (ti.PeriodKey = (SELECT MIN(yp.PeriodKey) FROM doc.Period AS yp WHERE yp.ProjectId = d.ProjectId AND yp.PeriodKey / 100 = ti.PeriodKey / 100)
+       OR EXISTS (SELECT 1 FROM doc.CellValue AS yc WHERE yc.PeriodKey = r.PeriodKey AND yc.TableRowId = r.Id AND yc.IsEmpty = 0))' ELSE N'' END, N';');
 
         -- ⚠ Порівнюється текст від позначки, а не весь: заголовок
         -- `CREATE OR ALTER VIEW` сервер не зобов'язаний зберігати дослівно.
@@ -1896,6 +1901,10 @@ BEGIN
 
         SET @tids = STUFF((SELECT N',' + CAST(TableDefId AS nvarchar(10)) FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) ORDER BY TableDefId
                            FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'');
+        -- b14 (D-579, review L-7): year-scoped tables of the group - PerPeriodInstance (3) in a YearWithMonthColumns version (Rc).
+        DECLARE @ysTids nvarchar(max) = STUFF((SELECT N',' + CAST(TableDefId AS nvarchar(10)) FROM @gt
+                           WHERE TableDefId IN (SELECT TableDefId FROM @gx) AND LayoutKind = 3 AND Rc = 1 ORDER BY TableDefId
+                           FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'');
         SET @sheetCase = N'CASE ti.TableDefId' + (SELECT N' WHEN ' + CAST(TableDefId AS nvarchar(10)) + N' THEN ' + CAST(SheetDefId AS nvarchar(10))
                            FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) ORDER BY TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END';
         SET @verCase = N'CAST(CASE ti.TableDefId' + (SELECT N' WHEN ' + CAST(TableDefId AS nvarchar(10)) + N' THEN N' + QUOTENAME(VersionText, '''')
@@ -2476,6 +2485,11 @@ N' AND a.PeriodKey = ti.PeriodKey
 LEFT JOIN rpt.fn_RecalculatedAfterSubmission() AS ras ON ras.ApprovalStateId = a.Id
 LEFT JOIN doc.DocumentSheet AS dsh ON dsh.Id = ti.SheetCopyId', @joins, N'
 WHERE ti.TableDefId IN (', @tids, N')',
+             -- b14 (D-579, review L-7): empty mirror rows of year-scoped PerPeriodInstance tables (as in the versioned view)
+             CASE WHEN @ysTids IS NULL THEN N'' ELSE CONCAT(N'
+  AND (ti.TableDefId NOT IN (', @ysTids, N')
+       OR (ti.PeriodKey = (SELECT MIN(yp.PeriodKey) FROM doc.Period AS yp WHERE yp.ProjectId = d.ProjectId AND yp.PeriodKey / 100 = ti.PeriodKey / 100)
+       OR EXISTS (SELECT 1 FROM doc.CellValue AS yc WHERE yc.PeriodKey = r.PeriodKey AND yc.TableRowId = r.Id AND yc.IsEmpty = 0)))') END,
              CASE WHEN COALESCE(@rowScope, N'') = N'' THEN N'' ELSE CONCAT(N' AND (ti.TableDefId IN (', @baseTids, N')', @rowScope, N')') END);
         -- R-1 (D-498): the replacement touches the tail only (FROM/JOIN/APPLY/WHERE). It holds no literals with names (view names
         -- in @vnLit are sanitised to [A-Za-z0-9_]), so REPLACE changes table names only. doc.Document, doc.Project, doc.Period,

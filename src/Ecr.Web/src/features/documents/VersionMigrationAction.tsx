@@ -3,9 +3,7 @@ import { Menu } from '@mantine/core';
 import type { DocumentSummary } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
 import { t } from '@/shared/i18n';
-import { isActiveJob } from '@/features/jobs/myTasks';
 import { hasProjectGrant } from './projectGrant';
-import { useMigrationJobCompletion } from './useMigrationJobCompletion';
 import { MigrateDocumentVersionPermission } from './versionMigrationApi';
 
 /**
@@ -16,10 +14,8 @@ import { MigrateDocumentVersionPermission } from './versionMigrationApi';
  * `SegmentedControl`, `Table` і сам діалог потрібні лише тому, хто відкрив
  * перенос. Стиль — `loadX`/`lazy(async () => ...)`, як у `DocumentPage.tsx`.
  */
-const loadVersionMigrationDialog = () => import('./VersionMigrationDialog');
-const VersionMigrationDialog = lazy(async () => ({
-  default: (await loadVersionMigrationDialog()).VersionMigrationDialog,
-}));
+const loadVersionMigrationHost = () => import('./VersionMigrationHost');
+const VersionMigrationHost = lazy(loadVersionMigrationHost);
 
 interface VersionMigrationActionArgs {
   readonly documentId: number;
@@ -48,23 +44,13 @@ export function useVersionMigrationAction({ documentId, document }: VersionMigra
   const session = useSession();
   const [opened, setOpened] = useState(false);
 
-  // D-2: задача переносу і її завершення живуть ТУТ, на рівні сторінки, і переживають закриття діалогу.
-  const [jobId, setJobId] = useState<string | null>(null);
-  const job = useMigrationJobCompletion(jobId, opened, () => {
-    setJobId(null);
-    setOpened(false);
-  });
-  const jobActive = jobId !== null && (job.data === undefined ? job.error === null : isActiveJob(job.data.state));
-
+  // ✎ b18 D-132: задача переносу, її завершення й сам діалог живуть у `VersionMigrationHost` (окремий чанк, D-2): хост
+  // лишається змонтованим після першого відкриття, тож завершення переживає закриття діалогу.
+  const [everOpened, setEverOpened] = useState(false);
+  if (opened && !everOpened) setEverOpened(true);
   // P3 (AU-13 pass B): діалог розмонтовується одразу, а пункт меню зникає разом із меню - Esc лишав фокус на BODY.
   // Тригер - кнопка меню, з якого відкрито діалог (`aria-labelledby` випадного списку Mantine); йому й повертаємо фокус.
   const trigger = useRef<HTMLElement | null>(null);
-  const close = () => {
-    setOpened(false);
-    window.setTimeout(() => trigger.current?.focus(), 0);
-    // Завершена (відмовлена) задача не тягнеться в наступне відкриття; та, що йде, - лишається.
-    if (!jobActive) setJobId(null);
-  };
 
   // ⛔ L1-08 (HU-11 Q3=A): дзеркало сервера — `Template.Edit` І грант Manage на проєкт документа.
   const allowed =
@@ -79,18 +65,24 @@ export function useVersionMigrationAction({ documentId, document }: VersionMigra
         trigger.current = menu == null ? null : window.document.getElementById(menu);
         setOpened(true);
       }}
+      onPointerEnter={() => void loadVersionMigrationHost()}
       data-migrate-version=""
     >
       {t('documents.migrateVersion')}
     </Menu.Item>
   ) : null;
 
-  const dialog =
-    allowed && opened ? (
-      <Suspense fallback={null}>
-        <VersionMigrationDialog documentId={documentId} onClose={close} jobId={jobId} onJobChange={setJobId} />
-      </Suspense>
-    ) : null;
+  const dialog = everOpened ? (
+    <Suspense fallback={null}>
+      <VersionMigrationHost
+        documentId={documentId}
+        opened={opened}
+        allowed={allowed}
+        trigger={trigger}
+        onOpenedChange={setOpened}
+      />
+    </Suspense>
+  ) : null;
 
   return { menuItem, dialog };
 }

@@ -39,13 +39,17 @@ export type RecalculateApprovedResult = components['schemas']['RecalculateApprov
  */
 export function recalculateApprovedDependents(
   documentId: number,
-  at: { readonly sheetDefId: number; readonly periodKey: number },
+  at: { readonly sheetDefId: number; readonly periodKey: number; readonly months?: readonly number[] | undefined },
   hash: string,
   reason: string,
 ): Promise<RecalculateApprovedResult> {
   return apiFetch<RecalculateApprovedResult>(
     `/api/v1/documents/${String(documentId)}/source-impact/recalculate-approved`,
-    { method: 'POST', body: JSON.stringify({ sheetDefId: at.sheetDefId, periodKey: at.periodKey, hash, reason }) },
+    {
+      method: 'POST',
+      // ✎ Місяці правки — ті самі, з якими людина бачила вплив (інакше відбиток не збігся б).
+      body: JSON.stringify({ sheetDefId: at.sheetDefId, periodKey: at.periodKey, hash, reason, ...(at.months === undefined ? {} : { months: at.months }) }),
+    },
   );
 }
 
@@ -57,14 +61,21 @@ export function recalculateApprovedDependents(
  */
 export async function fetchSourceImpact(
   documentId: number,
-  at: { readonly sheetDefId: number; readonly periodKey: number; readonly sheetCopyId: number | null },
+  at: {
+    readonly sheetDefId: number;
+    readonly periodKey: number;
+    readonly sheetCopyId: number | null;
+    /** ✎ Місяці (1–12) місячних колонок правки — лише для `edit`; немає — сервер вважає увесь рік. */
+    readonly months?: readonly number[] | undefined;
+  },
   action: SourceImpactAction,
 ): Promise<SourceImpact | null> {
   if (at.sheetCopyId !== null) return null;
 
+  const months = action === 'edit' && at.months !== undefined ? at.months.map((m) => `&months=${String(m)}`).join('') : '';
   try {
     const impact = await apiFetch<SourceImpact | undefined>(
-      `/api/v1/documents/${String(documentId)}/source-impact?sheetDefId=${String(at.sheetDefId)}&periodKey=${String(at.periodKey)}&action=${action}`,
+      `/api/v1/documents/${String(documentId)}/source-impact?sheetDefId=${String(at.sheetDefId)}&periodKey=${String(at.periodKey)}&action=${action}${months}`,
     );
 
     return impact !== undefined && typeof impact === 'object' && 'required' in impact ? impact : null;
@@ -94,6 +105,30 @@ export function editedPeriods(
   }
 
   return [...periods];
+}
+
+/**
+ * ✎ Місяці (1–12) незбережених правок за МІСЯЧНИМИ колонками аркуша (`submission-target.monthColumnCodes` — факт шаблону, є й у
+ * річному проєкті HSE400, де `monthColumns` порожні). Хоч одна правка не в місячній колонці (річне значення, код, рядок) —
+ * `undefined`: місяці правки невідомі, сервер покаже увесь рік — так само, як його порахує каскад (D-572).
+ */
+export function editedMonths(
+  slices: readonly { readonly edits: readonly { readonly columnCode: string }[] }[],
+  monthColumnCodes: readonly { readonly columnCode: string; readonly monthNumber: number }[] | null | undefined,
+): number[] | undefined {
+  const monthOf = new Map<string, number>();
+  for (const column of monthColumnCodes ?? []) monthOf.set(column.columnCode, column.monthNumber);
+
+  const months = new Set<number>();
+  for (const slice of slices) {
+    for (const edit of slice.edits) {
+      const month = monthOf.get(edit.columnCode);
+      if (month === undefined) return undefined;
+      months.add(month);
+    }
+  }
+
+  return months.size > 0 ? [...months].sort((a, b) => a - b) : undefined;
 }
 
 /** Відмова сервера через вплив на залежні (`ECR-SRC-0409` / `ECR-SRC-0422`)? Тоді діалог впливу відкривається за відмовою. */

@@ -667,15 +667,18 @@ public sealed class CalculationOrchestrator(
 
                     // AN-164: рядок закрито правилом, але жодного значення — бо формулам бракує аргументів. Без цього
                     // сліду він був тихим нулем: 0 результатів, 0 невдалих кроків (`#NULL` — «немає значення»), 0 проблем.
-                    if (output.Values.Count == 0 && output.MissingArguments is { Count: > 0 } missingArguments)
+                    // ✎ D-578 (Q2): і рядок з частиною виходів — модуль називає аргументи лише коли хоч одного виходу немає.
+                    if (output.MissingArguments is { Count: > 0 } missingArguments)
                     {
                         missingInputs.Add((RowOf(input), missingArguments));
                     }
 
                     // B66: крок методики впав (#VALUE, #ARG…) — проблема рядка, а не лише трейс (doc 96: 64 #VALUE,
-                    // 0 проблем). Рядок, що вже має MissingInputs, другої проблеми не отримує: його #ARG — наслідок
-                    // відсутніх входів, і дія та сама («заповніть комірки»).
-                    else if (output.StepError is { } stepError)
+                    // 0 проблем). Рядок БЕЗ жодного значення, що вже має MissingInputs, другої проблеми не отримує: його #ARG —
+                    // наслідок відсутніх входів, і дія та сама («заповніть комірки»). ✎ Огляд M3 (D-578): рядок з ЧАСТИНОЮ
+                    // виходів має обидві — його StepError (наявна проблема, її тотожність) не зникає через нову MissingInputs.
+                    if (output.StepError is { } stepError
+                        && (output.MissingArguments is not { Count: > 0 } || output.Values.Count > 0))
                     {
                         stepErrors.Add(new StepErrorRow(
                             RowOf(input), stepError.StepCode, stepError.ErrorCode, stepError.FailedSteps));

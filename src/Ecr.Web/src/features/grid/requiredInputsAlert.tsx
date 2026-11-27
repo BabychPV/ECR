@@ -1,5 +1,5 @@
 import { type JSX } from 'react';
-import { Alert, Button, List, Popover } from '@mantine/core';
+import { Alert, List } from '@mantine/core';
 import type { RequiredInputCell } from '@/api/client';
 import { t } from '@/shared/i18n';
 
@@ -173,24 +173,4 @@ export function RequiredInputsBlockedAlert({ cells, columns, rows }: RequiredInp
   );
 }
 
-/**
- * Warn: запис пройшов — одна кнопка в рядку інструментів, перелік у спливаючому вікні (сітка не рухається).
- * ⚠ Popover Mantine сам ставить кнопці `aria-expanded`/`aria-controls` і закривається Esc / кліком поза ним.
- */
-export function RequiredInputsSummary({ cells, columns, rows }: RequiredInputsProps): JSX.Element | null {
-  const groups = groupRequiredInputs(dedupeRequiredInputs(cells), columns, rows);
-  if (groups.length === 0) return null;
-
-  return (
-    <Popover position="bottom-start" withArrow shadow="md" width={480} trapFocus={false}>
-      <Popover.Target>
-        <Button variant="light" color="statusWarning" data-required-inputs="warning">
-          {t('grid.requiredInput.summary', { count: groups.length })}
-        </Button>
-      </Popover.Target>
-      <Popover.Dropdown aria-label={t('grid.requiredInput.listLabel')}>
-        <GroupList groups={groups} />
-      </Popover.Dropdown>
-    </Popover>
-  );
-}
+// ✎ DOCUX L2: Warn-кнопку «N required column(s) not filled yet» замінив лічильник комірок `NeedsInputCounter` (‹ ›, F8).

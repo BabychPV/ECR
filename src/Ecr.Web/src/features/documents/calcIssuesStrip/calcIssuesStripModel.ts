@@ -72,25 +72,28 @@ export function monthCount(reason: StripReason, periodKey: number): number {
   return (reason.byMonth.get(periodKey) ?? []).reduce((sum, cause) => sum + cause.count, 0);
 }
 
-/** Ключ пам'яті «Details розгорнуто» — на користувача (а не на документ: людина вирішує, як їй зручніше). */
-export function detailsStorageKey(userId: number | undefined): string {
-  return `ecr.docNotices.calcDetails.v1:${userId === undefined ? 'anon' : String(userId)}`;
+/**
+ * ✎ DOCUX L1 (принцип 8 плану): «Details розгорнуто» пам'ятається лише в межах ВІДКРИТОГО документа (пам'ять вкладки),
+ * а не на людину між документами. Доти стан ішов у localStorage і кожен наступний документ відкривався з розгорнутою
+ * матрицею й технічними панелями — пів екрана. Ключ — документ (без нього — `anon`, як сторінка без `documentId`).
+ */
+const detailsOpenByDocument = new Map<string, boolean>();
+
+function detailsKey(documentId: number | undefined): string {
+  return documentId === undefined ? 'anon' : String(documentId);
 }
 
-/** Прочитати збережений стан; немає сховища (приватне вікно, заборона) чи запису — згорнуто, без помилки. */
-export function readDetailsOpen(userId: number | undefined): boolean {
-  try {
-    return window.localStorage.getItem(detailsStorageKey(userId)) === '1';
-  } catch {
-    return false;
-  }
+/** Чи розгорнуто Details на цьому документі за цю сесію вкладки; за замовчуванням — згорнуто. */
+export function readDetailsOpen(documentId: number | undefined): boolean {
+  return detailsOpenByDocument.get(detailsKey(documentId)) === true;
 }
 
-/** Запам'ятати стан; сховище недоступне — мовчки (стан живе до закриття сторінки). */
-export function writeDetailsOpen(userId: number | undefined, open: boolean): void {
-  try {
-    window.localStorage.setItem(detailsStorageKey(userId), open ? '1' : '0');
-  } catch {
-    // Сховища немає — нічого.
-  }
+/** Запам'ятати стан для цього документа (до перезавантаження вкладки). */
+export function writeDetailsOpen(documentId: number | undefined, open: boolean): void {
+  detailsOpenByDocument.set(detailsKey(documentId), open);
+}
+
+/** Для тестів: забути стан усіх документів. */
+export function resetDetailsOpen(): void {
+  detailsOpenByDocument.clear();
 }

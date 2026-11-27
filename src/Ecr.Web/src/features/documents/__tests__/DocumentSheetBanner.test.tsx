@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DocumentSheetBanner } from '@/features/documents/DocumentSheetBanner';
@@ -41,6 +41,7 @@ function show(
   canDecide = false,
   sheetCopyId: number | null = null,
   recalculatedAfterSubmission = false,
+  part: 'all' | 'chips' | 'alerts' = 'all',
 ): void {
   render(
     <MantineProvider theme={testTheme}>
@@ -54,6 +55,7 @@ function show(
           lock={lock}
           canDecide={canDecide}
           recalculatedAfterSubmission={recalculatedAfterSubmission}
+          part={part}
         />
       </QueryClientProvider>
     </MantineProvider>,
@@ -134,7 +136,8 @@ describe('DocumentSheetBanner', () => {
     stubHistory('fail');
     show('Submitted', 'sheetSubmitted', true);
 
-    expect(await screen.findByText('⟦document.banner.submitted⟧')).toBeDefined();
+    // ✎ DOCUX L8: заголовок — підпис чипа («… ⓘ»), пояснення — прихованим текстом у ньому ж.
+    expect(await screen.findByText(/^⟦document\.banner\.submitted⟧ ⓘ/)).toBeDefined();
     expect(screen.queryByText(/submittedBy/)).toBeNull();
   });
 
@@ -160,4 +163,43 @@ describe('DocumentSheetBanner', () => {
 
     expect(screen.queryByRole('status')).toBeNull();
   });
+
+  it('DOCUX L8 (Q7): поданий аркуш — ЧИП «Submitted … by …» (не Alert), пояснення й крок — у ⓘ і для читалки', async () => {
+    stubHistory(History);
+    show('Submitted', 'sheetSubmitted', false, null, false, 'chips');
+
+    const chip = await screen.findByText(/document\.banner\.submittedBy/);
+    expect(chip.closest('button')).not.toBeNull();
+    const banner = screen.getByTestId('document-sheet-banner');
+    expect(banner.getAttribute('data-sheet-state-chip')).toBe('Submitted');
+    expect(banner.querySelector('.mantine-Alert-root')).toBeNull();
+    expect(document.querySelector('.mantine-Alert-root')).toBeNull();
+    expect(banner.textContent).toContain('⟦document.banner.submittedWait⟧');
+  });
+
+  it('DOCUX L8: частини — чип лише в `chips`, «Rejected» з причиною — лише в `alerts`', async () => {
+    stubHistory(History);
+    show('Submitted', 'sheetSubmitted', false, null, false, 'alerts');
+    expect(screen.queryByTestId('document-sheet-banner')).toBeNull();
+    cleanup();
+
+    show('Rejected', null, false, null, false, 'chips');
+    expect(screen.queryByTestId('document-sheet-banner')).toBeNull();
+    cleanup();
+
+    show('Rejected', null, false, null, false, 'alerts');
+    expect((await screen.findByTestId('document-sheet-banner')).closest('.mantine-Alert-root')).not.toBeNull();
+  });
+
+  it('RC b18 (keyboardPath): назва кнопки-чипа — лише заголовок; пояснення й крок — її опис (aria-describedby), не назва', async () => {
+    stubHistory(History);
+    show('Submitted', 'sheetSubmitted', true, null, false, 'chips');
+
+    const chip = (await screen.findByText(/document\.banner\.submittedBy/)).closest('button') as HTMLElement;
+    expect(chip.textContent).not.toContain('submittedDecide');
+    const described = document.getElementById(chip.getAttribute('aria-describedby') ?? '');
+    expect(described?.textContent).toContain('⟦document.banner.submittedDecide⟧');
+    expect(screen.queryByRole('button', { name: /submittedDecide/ })).toBeNull();
+  });
 });
+

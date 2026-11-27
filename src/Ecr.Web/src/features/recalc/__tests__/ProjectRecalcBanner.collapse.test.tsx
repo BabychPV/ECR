@@ -78,4 +78,21 @@ describe('ProjectRecalcBanner: згортання пам\'ятається дл�
     expect(screen.queryByRole('progressbar')).toBeNull();
     expect(screen.getByRole('button', { name: '⟦recalcProgress.expand⟧' })).toBeTruthy();
   });
+
+  it('L1-3 (DOCUX BUG-5): згорнутий рядок — Dismiss видно й він працює (і під час виконання); після перезавантаження рядка немає', async () => {
+    serve();
+    show();
+
+    await screen.findByRole('progressbar');
+    await userEvent.setup().click(screen.getByRole('button', { name: '⟦recalcProgress.collapse⟧' }));
+
+    const dismiss = screen.getByRole('button', { name: '⟦recalcProgress.dismiss⟧' });
+    await userEvent.setup().click(dismiss);
+    expect(document.querySelector('[data-recalc-banner]')).toBeNull();
+
+    cleanup();
+    show();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(document.querySelector('[data-recalc-banner]')).toBeNull();
+  });
 });

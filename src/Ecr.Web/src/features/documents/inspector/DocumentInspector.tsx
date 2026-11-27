@@ -53,6 +53,9 @@ import { rowKeyText } from '@/features/grid/rowKeyText';
 import { LockedRows } from './LockedRows';
 import { SheetLog, type InspectorSheet, type SheetLogTarget } from './SheetLog';
 import './inspector.css';
+import { provenanceFrom, provenanceLines } from './cellProvenance';
+import { NoticeList, useNoticeCount } from '../notices/NoticeLine';
+import { useStatusRequests } from '../notices/useOpenStatus';
 
 export type { InspectorSheet, SheetLogTarget } from './SheetLog';
 
@@ -94,9 +97,10 @@ const CellSourceSection = lazy(async () => ({
  * хрестик) повертає тому, хто відкривав (кнопка «K issues», «History»,
  * «Validate»); якщо того вже немає в DOM — на кнопку зауважень.
  */
-export type InspectorTab = 'issues' | 'history' | 'info';
+// ✎ DOCUX L7: `status` — усі повідомлення екрана документа (рядок над сіткою показує лише найважливіше).
+export type InspectorTab = 'issues' | 'history' | 'info' | 'status';
 
-const Tabs3: readonly InspectorTab[] = ['issues', 'history', 'info'];
+const Tabs3: readonly InspectorTab[] = ['issues', 'history', 'info', 'status'];
 
 /** Макет: на ≤ 1180px інспектор — шар поверх сітки й закривається після переходу. */
 const NarrowQuery = '(max-width: 1180px)';
@@ -157,6 +161,7 @@ export function DocumentInspector({
   checkedAt = null,
 }: DocumentInspectorProps): JSX.Element {
   const [panel, setPanel] = useUrlState(PanelParam);
+  const noticeCount = useNoticeCount();
   const [historyMode, setHistoryMode] = useState<HistoryMode>('sheet');
   const tab = asTab(panel);
   const opened = tab !== null;
@@ -198,6 +203,11 @@ export function DocumentInspector({
     focusTabOnOpen.current = takeFocus;
     setPanel(next);
   };
+
+  // ✎ DOCUX L7: «Details / Review» повідомлення (рядок над сіткою) відкриває вкладку Status.
+  const openStatusRef = useRef(() => open('status'));
+  openStatusRef.current = () => open('status');
+  useStatusRequests(useCallback(() => openStatusRef.current(), []));
 
   const close = (refocus: boolean): void => {
     setPanel(null);
@@ -399,6 +409,16 @@ export function DocumentInspector({
               </Tabs.Tab>
               <Tabs.Tab value="history">{t('inspector.tabHistory')}</Tabs.Tab>
               <Tabs.Tab value="info">{t('inspector.tabInfo')}</Tabs.Tab>
+              <Tabs.Tab value="status">
+                <Group gap="xs" wrap="nowrap">
+                  {t('inspector.tabStatus')}
+                  {noticeCount > 0 && (
+                    <Badge size="xs" variant="light" color="statusWarning" data-inspector-status-count="">
+                      {noticeCount}
+                    </Badge>
+                  )}
+                </Group>
+              </Tabs.Tab>
             </Tabs.List>
 
             <Tabs.Panel value="issues" className="ecr-insp-body">
@@ -431,6 +451,9 @@ export function DocumentInspector({
                 onModeChange={setHistoryMode}
                 onOpenCell={onOpenCell}
               />
+            </Tabs.Panel>
+            <Tabs.Panel value="status" className="ecr-insp-body" p="sm">
+              <NoticeList />
             </Tabs.Panel>
             <Tabs.Panel value="info" className="ecr-insp-body">
               <InfoTab
@@ -999,6 +1022,8 @@ function InfoTab({
 }): JSX.Element {
   // ⚠ Той самий ключ запиту, що в `SheetFillSummary`: зайвого запиту немає.
   const status = useTableStatus(documentId, periodKey);
+  // ✎ DOCUX: «Calculated by» / «Read by» — походження колонки зі зрізу (контракт doc-ux-server, D-577).
+  const provenance = provenanceFrom(cell?.provenance);
 
   if (cell === null || table === undefined) {
     return <Empty title={t('inspector.noCellTitle')} hint={t('inspector.noCellHint')} />;
@@ -1028,6 +1053,7 @@ function InfoTab({
           ? t('inspector.info.inputReadOnly')
           : t('inspector.info.inputManual'),
     },
+    ...provenanceLines(provenance).map((line) => ({ label: line.label, value: line.value })),
     { label: t('inspector.info.value'), value: cell.value.length === 0 ? null : cell.value, mono: true },
     // ✎ LAND-YEAR L7a: рік — ЧИЯ комірка: місячна колонка належить своєму місяцю, решта — році (якорю, річний агрегат).
     ...(year === undefined

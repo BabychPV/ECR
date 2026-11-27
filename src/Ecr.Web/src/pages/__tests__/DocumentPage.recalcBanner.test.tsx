@@ -8,9 +8,9 @@ import { DocumentPage } from '@/pages/DocumentPage';
 import { testTheme } from '@/test/render';
 
 /**
- * Бюджет D-132: місце банера перерахунку проєкту на сторінці документа винесено за `import()` (DocumentPage був
- * 250.5 КБ gzip після зведення з #782). Лінивий чанк має так само доїхати й показати банер, коли перерахунок
- * проєкту документа щойно завершився. Мутаційний доказ: прибрати `<ProjectRecalcBannerSlot>` у `DocumentPage.tsx` —
+ * ✎ DOCUX Q5 (рішення людини 26.11): смуги «перерахунок проєкту» на екрані документа НЕМАЄ — вона лишається на дошці
+ * документів (`DocumentsPage`); стан цього документа каже чип розрахунку. Доти смуга «Finished: 92 recalculated…» стояла на
+ * кожному документі проєкту 24 години. Мутаційний доказ: повернути `<ProjectRecalcBannerSlot>` у `DocumentPage.tsx` —
  * тест червоний.
  */
 
@@ -130,9 +130,9 @@ afterEach(() => {
   globalThis.localStorage?.clear();
 });
 
-describe('DocumentPage: банер перерахунку проєкту — лінивим чанком (D-132)', () => {
+describe('DocumentPage: смуги перерахунку проєкту немає (DOCUX Q5)', () => {
   it(
-    'щойно завершений перерахунок проєкту документа — банер на місці',
+    'щойно завершений перерахунок проєкту документа — на сторінці документа смуги немає, перерахунки проєкту не читаються',
     async () => {
       serve();
       render(
@@ -147,12 +147,13 @@ describe('DocumentPage: банер перерахунку проєкту — л�
         </MantineProvider>,
       );
 
-      // Сторінка відомо знає свій проєкт (документ прочитано) — і банер читає перерахунки саме його.
-      await waitFor(() => expect(requested.some((url) => url.includes('/api/v1/jobs?') && url.includes('projectId=1'))).toBe(true), {
-        timeout: Wait,
-      });
-      await waitFor(() => expect(document.querySelector('[data-recalc-banner="RC-1"]')).not.toBeNull(), { timeout: Wait });
-      expect(document.querySelector('[data-recalc-banner="RC-1"]')?.getAttribute('data-recalc-phase')).toBe('finished');
+      // Сторінка прочитала документ (заголовок із бізнес-ключем) і таблиці.
+      await waitFor(() => expect(document.body.textContent ?? '').toContain('DOC-0001'), { timeout: Wait });
+      await waitFor(() => expect(requested.some((url) => url.includes('/tables'))).toBe(true), { timeout: Wait });
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      expect(document.querySelector('[data-recalc-banner]')).toBeNull();
+      expect(requested.some((url) => url.includes('/api/v1/jobs?') && url.includes('projectId=1'))).toBe(false);
     },
     Slow,
   );

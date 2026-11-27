@@ -1,3 +1,4 @@
+import { NoticeSlot } from '@/features/documents/notices/NoticeSlot';
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
@@ -113,7 +114,21 @@ export function useSheetLiveRefresh({ documentId, periodKey, tables }: SheetLive
   const change = changes.change;
   const banner = (
     <div className="ecr-live-host" role="status" aria-live="polite" aria-atomic="true" data-testid="sheet-live-host">
+      {/* ✎ DOCUX L7: чужий перехід стану й чужа зміна — у рядку повідомлень сторінки, не банерами. Пріоритет 5 (вище за
+          проблеми розрахунку): дані на екрані застаріли — людина має побачити це до наступної правки (RC b18).
+          ✎ e2e-stand RC b18 (liveStatus): чужий ПЕРЕХІД СТАНУ — пріоритет 4, вище за «Updated by …» (5). Правка A, помічена
+          попереднім опитуванням, публікувалась раніше з тим самим пріоритетом 5, і «Status changed by A: Submitted» ховалося за
+          «+1 more» — B не бачив, що аркуш тепер лише для читання й чекає його рішення. */}
       {status.notice !== null && (
+        <NoticeSlot
+          id={`live-status:${String(sheetDefId)}`}
+          priority={4}
+          tone="info"
+          text={statusBannerText(status.notice)}
+          onDismiss={status.dismiss}
+          testId="notice-live-status"
+          data={{ 'data-live-status': status.notice.state }}
+        >
         <div className="ecr-live-banner" data-testid="sheet-status-banner" data-live-status={status.notice.state}>
           <span className="ecr-live-banner-text">{statusBannerText(status.notice)}</span>
           <button
@@ -125,8 +140,18 @@ export function useSheetLiveRefresh({ documentId, periodKey, tables }: SheetLive
             {t('common.close')}
           </button>
         </div>
+        </NoticeSlot>
       )}
       {change !== null && (
+        <NoticeSlot
+          id={`live-change:${String(sheetDefId)}`}
+          priority={5}
+          data={{ 'data-live-tables': [...change.tables.keys()].join(',') }}
+          tone="info"
+          text={bannerText(change)}
+          actions={[{ label, run: () => void run(change.tables.keys()), keys: 'Shift+F5', testId: 'notice-live-refresh' }]}
+          testId="notice-live-change"
+        >
         <div className="ecr-live-banner" data-testid="sheet-live-banner" data-live-tables={[...change.tables.keys()].join(',')}>
           <span className="ecr-live-banner-text">{bannerText(change)}</span>
           <button
@@ -139,6 +164,7 @@ export function useSheetLiveRefresh({ documentId, periodKey, tables }: SheetLive
             {label}
           </button>
         </div>
+        </NoticeSlot>
       )}
     </div>
   );

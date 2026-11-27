@@ -10,6 +10,7 @@ import {
   renameTemplate,
   restoreTemplate,
   setTemplateDocumentPolicy,
+  setTemplateYearEditWindow,
 } from '@/features/templates/templateApi';
 import { templateCardKey, useTemplateCard } from '@/features/templates/templateCardQuery';
 import { toTemplateListRow } from '@/features/templates/templateListModel';
@@ -153,6 +154,17 @@ export function TemplateCardPage(): JSX.Element {
     onError: showApiError,
   });
 
+  /* ✎ b14 (D-579): «вікно редагування = рік проєкту + зміщення» — той самий ендпоінт, прапорець B151 передається поточним. */
+  const yearEditWindow = useMutation({
+    mutationFn: ({ current, enabled }: { current: TemplateCard; enabled: boolean }) =>
+      setTemplateYearEditWindow(current, enabled),
+    onSuccess: async (updated) => {
+      await applyCard(updated);
+      showDone(t('templates.yearEditWindowSaved'));
+    },
+    onError: showApiError,
+  });
+
   const rename = useMutation({
     mutationFn: (nameL10n: LocalizedValue) => renameTemplate(templateId, nameL10n),
     onSuccess: async (updated) => {
@@ -246,6 +258,14 @@ export function TemplateCardPage(): JSX.Element {
                 documentPolicy.mutate(true);
               },
             },
+        {
+          label: data?.yearEditWindow === true ? t('templates.yearEditWindowOff') : t('templates.yearEditWindowOn'),
+          onClick: () => {
+            if (data !== undefined) {
+              yearEditWindow.mutate({ current: data, enabled: !data.yearEditWindow });
+            }
+          },
+        },
         isActive
           ? {
               label: t('templates.archive'),
@@ -331,6 +351,14 @@ export function TemplateCardPage(): JSX.Element {
                     ? t('templates.documentsPerProjectOne')
                     : t('templates.documentsPerProjectMany'),
                   hint: t('templates.documentsPerProjectHint'),
+                },
+                {
+                  // ✎ b14 (D-579): до коли правляться річні дані документів шаблону в місячному проєкті.
+                  label: t('templates.yearEditWindow'),
+                  value: loaded.yearEditWindow
+                    ? t('templates.yearEditWindowProjectYear')
+                    : t('templates.yearEditWindowPeriodState'),
+                  hint: t('templates.yearEditWindowHint'),
                 },
               ]}
             />

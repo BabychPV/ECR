@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
-import { Menu, Tabs } from '@mantine/core';
+import { Badge, Menu, Tabs } from '@mantine/core';
 import { t } from '@/shared/i18n';
-import { StatusBadge } from '@/shared/ui/StatusBadge';
+import { badgeLook, StatusBadge } from '@/shared/ui/StatusBadge';
+import { useNeedsInputSummary } from '@/features/grid/needsInputState';
 import './documentSheetStrip.css';
 
 export interface SheetStripItem {
@@ -43,6 +44,7 @@ const Chevron = ({ path }: { readonly path: string }): JSX.Element => (
  * ⚠ У режимі «на весь екран» смуга `inert` разом з усією сторінкою: перехід між аркушами — після виходу.
  */
 export function SheetStrip({ sheets, activeCode, onSelect, children }: SheetStripProps): JSX.Element {
+  const needs = useNeedsInputSummary();
   const list = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ left: false, right: false });
 
@@ -159,11 +161,34 @@ export function SheetStrip({ sheets, activeCode, onSelect, children }: SheetStri
         {sheets.map((s) => (
           <Tabs.Tab key={s.code} value={s.code} className="doc-sheet-tab">
             {s.name} <StatusBadge kind="sheet" state={s.state} />
+            {/* ✎ DOCUX L2 (§4.4): порожні обов'язкові комірки відкритого аркуша (змонтовані таблиці) — числом на вкладці. */}
+            {s.code === activeCode && needs.count > 0 && <NeedsInputTabBadge count={needs.count} blocking={needs.blocking > 0} />}
           </Tabs.Tab>
         ))}
       </Tabs.List>
 
       {children !== undefined && children !== null && <div className="doc-sheet-scroll">{children}</div>}
     </div>
+  );
+}
+
+/** ✎ DOCUX L2: «N» порожніх обов'язкових комірок на вкладці аркуша — тоном `badgeLook`, із поясненням для читалки. */
+function NeedsInputTabBadge({ count, blocking }: { readonly count: number; readonly blocking: boolean }): JSX.Element {
+  const look = badgeLook(blocking ? 'danger' : 'warning');
+
+  return (
+    <Badge
+      size="xs"
+      variant="transparent"
+      radius="xs"
+      ml="xs"
+      c={look.text}
+      bg={look.bg}
+      title={t('grid.needsInput.counter', { count })}
+      aria-label={t('grid.needsInput.counter', { count })}
+      data-sheet-needs-input={count}
+    >
+      {count}
+    </Badge>
   );
 }

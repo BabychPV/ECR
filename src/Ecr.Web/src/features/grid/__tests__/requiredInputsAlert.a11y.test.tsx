@@ -6,7 +6,9 @@ import type { RequiredInputCell } from '@/api/client';
 import { mantineProviderProps } from '@/shared/theme/provider';
 import { Catalog, Themes } from '@/test/__tests__/a11yFixtures';
 import { describe as describeViolations, findViolations } from '@/test/a11y';
-import { RequiredInputsBlockedAlert, RequiredInputsSummary } from '../requiredInputsAlert';
+import { RequiredInputsBlockedAlert } from '../requiredInputsAlert';
+import { NeedsInputCounter } from '../NeedsInputCounter';
+import type { NeedsInputCell } from '../needsInput';
 
 /**
  * ✎ 25.11: блок «обов'язкові колонки методології» — axe без блокуючих порушень у обох темах: згорнута кнопка (Warn)
@@ -30,29 +32,43 @@ const Columns = [
   { code: 'A', header: 'Power' },
 ];
 const Rows = [{ rowKey: 'r1', label: null }];
+const Needs: NeedsInputCell[] = [
+  { rowKey: 'r1', columnCode: 'KIND', level: 'block', source: 'template', methodologies: [], rowIndex: 0, columnIndex: 0 },
+  { rowKey: 'r1', columnCode: 'A', level: 'warn', source: 'methodology', methodologies: ['M1'], rowIndex: 0, columnIndex: 1 },
+];
 const Cells: RequiredInputCell[] = [
   { rowKey: 'r1', columnCode: 'KIND', ruleCode: 'ECR-CALC-0437', message: 'm', methodologies: ['M1', 'M2'] },
   { rowKey: 'r1', columnCode: 'A', ruleCode: 'ECR-CALC-0437', message: 'm', methodologies: ['M1'] },
 ];
 
 describe('RequiredInputs: a11y', () => {
-  it.each(Themes)('%s: згорнута кнопка і розгорнутий перелік — без порушень', async (scheme) => {
+  it.each(Themes)('%s: DOCUX L2 — лічильник комірок ‹ › і розгорнутий перелік-посилання — без порушень', async (scheme) => {
     const { container } = render(
       <MantineProvider {...mantineProviderProps} forceColorScheme={scheme}>
         <main>
-          <RequiredInputsSummary cells={Cells} columns={Columns} rows={Rows} />
+          <NeedsInputCounter
+            cells={Needs}
+            tableDefId={1}
+            tableInstanceId={1}
+            periodKey={202609}
+            columnHeader={(code) => Columns.find((column) => column.code === code)?.header ?? code}
+            rowLabel={() => 'Row 1'}
+          />
         </main>
       </MantineProvider>,
     );
 
     expect(document.body.textContent).not.toContain('⟦');
-    const toggle = screen.getByRole('button', { name: /2 required column\(s\) not filled yet/ });
+    const toggle = screen.getByRole('button', { name: /2 required cell\(s\) empty/ });
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByRole('button', { name: /Next required cell \(F8\)/ }).getAttribute('aria-keyshortcuts')).toBe('F8');
+    expect(screen.getByRole('button', { name: /Previous required cell/ }).getAttribute('aria-keyshortcuts')).toBe('Shift+F8');
     let violations = await findViolations(container);
     expect(violations, describeViolations(violations)).toHaveLength(0);
 
     await userEvent.setup().click(toggle);
     await screen.findByRole('list');
+    expect(screen.getAllByRole('button', { name: /Type of fuel · Row 1|Power · Row 1/ })).toHaveLength(2);
     expect(document.body.textContent).not.toContain('⟦');
     violations = await findViolations(document.body);
     expect(violations, describeViolations(violations)).toHaveLength(0);

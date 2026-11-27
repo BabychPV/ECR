@@ -2938,6 +2938,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<bool>("YearEditWindow")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false, "DF_Template_YearEditWindow");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Code")
@@ -5978,6 +5983,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasFilter("[State] IN ('Queued', 'Running') AND [DocumentId] IS NOT NULL");
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "DocumentId", "State" }, "IX_JobProgress_Document_Active"), new[] { "Lane" });
+
+                    b.HasIndex(new[] { "DocumentId", "State", "UpdatedAt" }, "IX_JobProgress_Document_State_UpdatedAt")
+                        .HasFilter("[DocumentId] IS NOT NULL");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "DocumentId", "State", "UpdatedAt" }, "IX_JobProgress_Document_State_UpdatedAt"), new[] { "JobCode" });
 
                     b.HasIndex(new[] { "FanOutParentJobId" }, "IX_JobProgress_FanOutParent");
 

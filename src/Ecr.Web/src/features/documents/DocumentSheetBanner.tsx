@@ -1,5 +1,6 @@
-import type { JSX } from 'react';
-import { Alert, Text } from '@mantine/core';
+import { useId, type JSX } from 'react';
+import { Alert, Badge, Group, Popover, Stack, Text, VisuallyHidden } from '@mantine/core';
+import { badgeLook } from '@/shared/ui/StatusBadge';
 import { periodLabel } from '@/features/workflow/SheetActions';
 import { isEventOfSheet, useWorkflowHistory, type WorkflowEvent } from '@/features/workflow/api';
 import { formatDate } from '@/shared/format/datetime';
@@ -37,6 +38,11 @@ interface DocumentSheetBannerProps {
     | { readonly periodKey: number; readonly state: 'Submitted' | 'Approved'; readonly canDecide: boolean }
     | null
     | undefined;
+  /**
+   * ✎ DOCUX L8 (рішення людини Q7): постійні стани «Submitted / Approved … by …» — ЧИП у рядку стану (`chips`), а не банер;
+   * банери, що потребують дії (ширші блокування, «Rejected» з причиною), — під рядком дій (`alerts`). `all` — обидва.
+   */
+  readonly part?: 'all' | 'chips' | 'alerts';
 }
 
 /**
@@ -66,7 +72,10 @@ export function DocumentSheetBanner({
   periodAction = null,
   yearLayout = false,
   monthTarget,
+  part = 'all',
 }: DocumentSheetBannerProps): JSX.Element | null {
+  const chips = part !== 'alerts';
+  const alerts = part !== 'chips';
   // ✎ D-6: річна розкладка — стан свій у кожного місяця: банер каже про МІСЯЦЬ, а не «аркуш поданий, правка закрита».
   if (monthTarget !== undefined && !widerLock(lock)) {
     const rejected = state === 'Rejected';
@@ -75,7 +84,7 @@ export function DocumentSheetBanner({
     return (
       <>
         {/* Відхилений якір лишається видимим разом із причиною — навіть коли інший місяць поданий. */}
-        {rejected && (
+        {rejected && alerts && (
           <SheetStateBanner
             documentId={documentId}
             periodKey={periodKey}
@@ -86,7 +95,7 @@ export function DocumentSheetBanner({
             month
           />
         )}
-        {monthTarget !== null && (
+        {monthTarget !== null && chips && (
           <SheetStateBanner
             documentId={documentId}
             periodKey={monthTarget.periodKey}
@@ -107,8 +116,12 @@ export function DocumentSheetBanner({
     !widerLock(lock) && (lock === 'sheetSubmitted' || lock === 'sheetApproved' || state === 'Rejected');
 
   if (!contextual) {
+    if (!alerts) return null;
     return <DocumentLockBanner lock={lock} periodKey={periodKey} periodAction={periodAction} yearLayout={yearLayout} />;
   }
+
+  const contextualState = lock === 'sheetSubmitted' ? 'Submitted' : lock === 'sheetApproved' ? 'Approved' : 'Rejected';
+  if (contextualState === 'Rejected' ? !alerts : !chips) return null;
 
   return (
     <SheetStateBanner
@@ -156,43 +169,30 @@ function SheetStateBanner({
   const who = event === null ? null : { name: event.byDisplayName, date: formatDate(event.at) };
   const lock = state === 'Submitted' ? 'sheetSubmitted' : state === 'Approved' ? 'sheetApproved' : undefined;
 
-  if (state === 'Submitted') {
-    return (
-      <Alert
-        color="statusWarning"
-        variant="light"
-        role="status"
-        data-document-lock={lock}
-        data-testid="document-sheet-banner"
-        data-banner-period={month ? periodKey : undefined}
-        title={(who === null ? t('document.banner.submitted') : t('document.banner.submittedBy', who)) + monthSuffix}
-      >
-        {/* ⚠ Речення посібника — окремим текстом, крок — окремим елементом:
-            людина (і тест) знаходить те саме речення, що в розділі 5.3. */}
-        {month ? t('document.banner.monthSubmitted', { period }) : t('grid.submittedReadOnlyHint')}{' '}
-        <span>{canDecide ? t('document.banner.submittedDecide') : t('document.banner.submittedWait')}</span>
-        {recalculatedAfterSubmission && (
-          <Text component="strong" display="block" fw={700} mt="xs" size="sm" data-recalculated-after-submission="">
-            {t('sheet.recalculatedAfterSubmission')}: {t('sheet.recalculatedAfterSubmissionHint')}
-          </Text>
-        )}
-      </Alert>
-    );
-  }
+  // ✎ DOCUX L8 (Q7): поданий / затверджений — ЧИП «Submitted 24 Nov by Ivan P.» з поясненням у спливаючому вікні (і для
+  // читалки — прихованим текстом), а не банер на 2–3 рядки: це постійний стан, дії тут немає (вона — у кнопках).
+  if (state === 'Submitted' || state === 'Approved') {
+    const title =
+      state === 'Submitted'
+        ? (who === null ? t('document.banner.submitted') : t('document.banner.submittedBy', who)) + monthSuffix
+        : (who === null ? t('document.banner.approved') : t('document.banner.approvedBy', who)) + monthSuffix;
+    const detail =
+      state === 'Submitted'
+        ? [
+            month ? t('document.banner.monthSubmitted', { period }) : t('grid.submittedReadOnlyHint'),
+            canDecide ? t('document.banner.submittedDecide') : t('document.banner.submittedWait'),
+          ]
+        : [month ? t('document.banner.monthApproved', { period }) : t('document.lock.sheetApproved')];
 
-  if (state === 'Approved') {
     return (
-      <Alert
-        color="statusWarning"
-        variant="light"
-        role="status"
-        data-document-lock={lock}
-        data-testid="document-sheet-banner"
-        data-banner-period={month ? periodKey : undefined}
-        title={(who === null ? t('document.banner.approved') : t('document.banner.approvedBy', who)) + monthSuffix}
-      >
-        {month ? t('document.banner.monthApproved', { period }) : t('document.lock.sheetApproved')}
-      </Alert>
+      <SheetStateChip
+        state={state}
+        title={title}
+        detail={detail}
+        lock={lock}
+        bannerPeriod={month ? periodKey : undefined}
+        recalculatedAfterSubmission={state === 'Submitted' && recalculatedAfterSubmission}
+      />
     );
   }
 
@@ -210,6 +210,88 @@ function SheetStateBanner({
     >
       {reason.length === 0 ? t('document.banner.rejectedNext') : `«${reason}» ${t('document.banner.rejectedNext')}`}
     </Alert>
+  );
+}
+
+/**
+ * ✎ DOCUX L8: чип стану аркуша в рядку стану — заголовок «хто й коли», ⓘ відкриває пояснення й наступний крок; позначка
+ * «перераховано після подання» — окремим чипом поруч (для погоджувача). Тон — `badgeLook` (`StatusBadge`), колір лише
+ * разом зі словом.
+ */
+function SheetStateChip({
+  state,
+  title,
+  detail,
+  lock,
+  bannerPeriod,
+  recalculatedAfterSubmission,
+}: {
+  readonly state: 'Submitted' | 'Approved';
+  readonly title: string;
+  /** Речення посібника й наступний крок — окремими реченнями (людина й тест знаходять кожне ціле). */
+  readonly detail: readonly string[];
+  readonly lock: string | undefined;
+  readonly bannerPeriod: number | undefined;
+  readonly recalculatedAfterSubmission: boolean;
+}): JSX.Element {
+  const look = badgeLook(state === 'Submitted' ? 'warning' : 'info');
+  const warn = badgeLook('warning');
+  // ✎ DOCUX (RC b18, keyboardPath): пояснення — ОПИС кнопки (`aria-describedby`), а не частина її назви: інакше назва чипа
+  // («… approve or reject») збігалася з дією «Approve», і клавіатурний шлях потрапляв у чип замість кнопки.
+  const detailId = useId();
+
+  return (
+    <Group gap="xs" wrap="nowrap" data-testid="document-sheet-banner" data-document-lock={lock} data-banner-period={bannerPeriod} data-sheet-state-chip={state}>
+      <Popover position="bottom-start" withArrow shadow="md" width={360}>
+        <Popover.Target>
+          <Badge
+            component="button"
+            type="button"
+            size="sm"
+            variant="transparent"
+            radius="xs"
+            c={look.text}
+            bg={look.bg}
+            styles={{ root: { textTransform: 'none', letterSpacing: 'normal', fontWeight: 500, cursor: 'pointer' } }}
+            aria-describedby={detailId}
+          >
+            {`${title} ⓘ`}
+          </Badge>
+        </Popover.Target>
+        <Popover.Dropdown>
+          <Stack gap="xs">
+            <Text size="sm" fw={600}>
+              {title}
+            </Text>
+            {detail.map((part) => (
+              <Text key={part} size="sm">
+                {part}
+              </Text>
+            ))}
+          </Stack>
+        </Popover.Dropdown>
+      </Popover>
+      <VisuallyHidden id={detailId}>
+        {detail.map((part) => (
+          <span key={part}> {part}</span>
+        ))}
+      </VisuallyHidden>
+      {recalculatedAfterSubmission && (
+        <Badge
+          size="sm"
+          variant="transparent"
+          radius="xs"
+          c={warn.text}
+          bg={warn.bg}
+          styles={{ root: { textTransform: 'none', letterSpacing: 'normal', fontWeight: 700 } }}
+          title={t('sheet.recalculatedAfterSubmissionHint')}
+          data-recalculated-after-submission=""
+        >
+          {t('sheet.recalculatedAfterSubmission')}
+          <VisuallyHidden>{`: ${t('sheet.recalculatedAfterSubmissionHint')}`}</VisuallyHidden>
+        </Badge>
+      )}
+    </Group>
   );
 }
 

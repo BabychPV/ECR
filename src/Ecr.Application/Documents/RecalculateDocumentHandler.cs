@@ -28,7 +28,9 @@ public sealed class RecalculateDocumentHandler(
     // ✎ LAND-YEAR B24: розкладки версій (в пам'яті) і версія періоду — закритий якір річної розкладки у відкритому році не
     // відмовляє. Без них (тести, що конструюють обробник вручну) — відмова, як доти.
     ITemplateLayoutRegistry? layouts = null,
-    IProjectVersionTimeline? timeline = null)
+    IProjectVersionTimeline? timeline = null,
+    // ✎ b14 (D-579, огляд H-2): «вікно року» шаблону — те саме рішення, що правка й RecalculationJob.
+    IYearEditWindowFacts? yearWindow = null)
 {
     /// <summary>Право на перерахунок СВОГО документа: лише читання (`02-contracts.md` §9).</summary>
     /// <remarks>
@@ -398,6 +400,23 @@ public sealed class RecalculateDocumentHandler(
                 .EnqueueCoalescedAsync<IRecalculationJob>(target, payload, ct, currentUser.UserId)
                 .ConfigureAwait(false);
 
+        // ✎ Огляд H2 (a, D-577): натискання на ВЕСЬ документ покриває тихий автоперерахунок після правки (`-auto`), що ще
+        // чекає вікна відкладення: без цього за прогоном натискання йшов би другий такий самий. Знімається лише задача, що
+        // ЧЕКАЄ (виконувану не чіпаємо), і лише після постановки натискання — у жодну мить цілі без задачі немає.
+        if (sheetDefId is null && jobId is { Length: > 0 })
+        {
+            int[] covered = year is { } coveredYear
+                ? [.. Enumerable.Range(1, 12).Select(m => (coveredYear * 100) + m)]
+                : [periodKey.Value];
+            foreach (var key in covered)
+            {
+                await jobs
+                    .CancelQueuedAsync<IRecalculationJob>(
+                        Calculations.CalculationTrigger.AutoTargetOf(documentId, new PeriodKey(key)), jobId, ct)
+                    .ConfigureAwait(false);
+            }
+        }
+
         return new Calculations.RecalculationRequestOutcome(jobId, skipped, truncated);
     }
 
@@ -424,9 +443,19 @@ public sealed class RecalculateDocumentHandler(
             .Where(p => p.PeriodKey / 100 == periodKey.Year)
             .ToList();
 
-        return year.Count > 0
-               && year.Min(p => p.PeriodKey) == periodKey.Value
-               && Security.AnnualPeriodRule.AnchorWritesAnnualTargets(
+        if (year.Count == 0 || year.Min(p => p.PeriodKey) != periodKey.Value)
+        {
+            return false;
+        }
+
+        if (yearWindow is not null
+            && await yearWindow.StateAsync(documentId, periodKey.Year, ct).ConfigureAwait(false) is { } windowState)
+        {
+            // ✎ b14 (огляд H-2): шаблон із вікном року — якір пишеться, доки вікно Open/Grace, як і правка.
+            return windowState is Domain.Enums.PeriodState.Open or Domain.Enums.PeriodState.Grace;
+        }
+
+        return Security.AnnualPeriodRule.AnchorWritesAnnualTargets(
                    Domain.Enums.PeriodState.Closed, year.Select(p => p.State));
     }
 

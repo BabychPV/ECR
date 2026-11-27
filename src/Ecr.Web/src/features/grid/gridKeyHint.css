@@ -90,3 +90,40 @@
   color: var(--ecr-text);
   white-space: nowrap;
 }
+
+/*
+ * ✎ DOCUX: легенда позначок комірок. Зразок — та сама розмітка класів, що справжня комірка (`cell-states.css`): тут лише
+ * розмір і рамка сітки, щоб маркери (кути, смуги, слово «Required») мали де стати. Лише токени.
+ */
+.ecr-legend-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.ecr-legend-row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  align-items: center;
+  gap: 10px;
+}
+
+.ecr-legend-row dd {
+  margin: 0;
+  font-size: 12px;
+}
+
+.ecr-legend-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  box-sizing: border-box;
+  width: 96px;
+  height: 28px;
+  padding-left: 6px;
+  border: 1px solid var(--ecr-border);
+  background: var(--ecr-grid-surface);
+  color: var(--ecr-grid-text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}

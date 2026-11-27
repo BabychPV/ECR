@@ -1,5 +1,6 @@
-import { lazy, Suspense, useEffect, useState, type JSX } from 'react';
-import { Alert, Button, Group, Text } from '@mantine/core';
+import { badgeLook } from '@/shared/ui/StatusBadge';
+import { lazy, Suspense, useEffect, useId, useState, type JSX } from 'react';
+import { Badge, Button, Group, Popover, Text, VisuallyHidden } from '@mantine/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
 import type { components } from '@/api/schema';
@@ -127,21 +128,38 @@ export function useDocumentPeriodReopen({ documentId, periodKey, periodState, ti
     }
   }
 
+  // ✎ DOCUX L8 (№9): «відкрито для документа до …» — ЧИП у рядку стану (хто, чому — у ⓘ і для читалки), а не банер.
+  // Пояснення чипа — опис (`aria-describedby`), не частина назви кнопки.
+  const reopenDetailId = useId();
   const banner =
     active === null ? null : (
-      <Alert
-        color="brand"
-        variant="light"
-        role="status"
-        title={t('document.reopen.activeTitle', { until: untilText(active.openUntil, timeZoneId) })}
-        data-testid="document-period-reopened"
-      >
-        {t('document.reopen.activeBody', {
-          period,
-          reason: active.reason,
-          by: active.openedByName ?? String(active.openedByUserId),
-        })}
-      </Alert>
+      <span data-testid="document-period-reopened">
+      <Popover position="bottom-start" withArrow shadow="md" width={360}>
+        <Popover.Target>
+          <Badge
+            component="button"
+            type="button"
+            size="sm"
+            variant="transparent"
+            radius="xs"
+            c={badgeLook('info').text}
+            bg={badgeLook('info').bg}
+            styles={{ root: { textTransform: 'none', letterSpacing: 'normal', fontWeight: 500, cursor: 'pointer' } }}
+            aria-describedby={reopenDetailId}
+          >
+            {`${t('document.reopen.activeTitle', { until: untilText(active.openUntil, timeZoneId) })} ⓘ`}
+          </Badge>
+        </Popover.Target>
+        <Popover.Dropdown>
+          <Text size="sm">
+            {t('document.reopen.activeBody', { period, reason: active.reason, by: active.openedByName ?? String(active.openedByUserId) })}
+          </Text>
+        </Popover.Dropdown>
+      </Popover>
+      <VisuallyHidden id={reopenDetailId}>
+        {` ${t('document.reopen.activeBody', { period, reason: active.reason, by: active.openedByName ?? String(active.openedByUserId) })}`}
+      </VisuallyHidden>
+      </span>
     );
 
   const dialog =

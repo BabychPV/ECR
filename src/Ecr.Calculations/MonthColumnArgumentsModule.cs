@@ -277,7 +277,8 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
         IReadOnlyList<TableInstanceRef> group,
         CancellationToken ct)
     {
-        var tables = await LoadTablesAsync(group, input.PeriodKey, ct).ConfigureAwait(false);
+        var isScriptAsOf = binding.Methodology.Engine == MethodologyEngine.Script && binding.Script?.RegistryAsOf is not null;
+        var tables = await LoadTablesAsync(group, input.PeriodKey, isScriptAsOf, ct).ConfigureAwait(false);
         var catalog = await _unitCatalog.GetAsync(ct).ConfigureAwait(false);
         var dimensionless = catalog.Units.TryGetValue(DimensionlessUnitCode, out var one) ? one.Id : (int?)null;
         var isScript = binding.Methodology.Engine == MethodologyEngine.Script && binding.Script is not null;
@@ -311,19 +312,26 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
                     continue;
                 }
 
-                filled.Add(table.Instance.TableInstanceId);
                 var column = table.MonthColumns[month];
                 foreach (var (rowKey, value) in cells)
                 {
+                    // ✎ SGF AC-5: місяць лише з датою (без жодного вводу) лишається порожнім — як до лінії.
+                    if (value.ValueNumeric is not null || !string.IsNullOrWhiteSpace(value.ValueString))
+                    {
+                        filled.Add(table.Instance.TableInstanceId);
+                    }
+
                     foreach (var ns in namespaces(table))
                     {
                         foreach (var name in (string[])[$"GCV.{ns}_{table.Code}_{rowKey}", $"GCV_{ns}_{table.Code}_{rowKey}"])
                         {
                             if (names.Add(name))
                             {
+                                // ✎ SGF AC-5 (огляд b13, F1-3): дата Date-комірки місяця — і в аргументі GCV (для
+                                // `registry as of row.GCV_…` скрипта); рушій формул її не читає.
                                 arguments.Add(new CalculationArgument(
                                     name, value.ValueNumeric, value.ValueNumeric is null ? value.ValueString : null,
-                                    value.ValueUnitId ?? column.UnitId));
+                                    value.ValueUnitId ?? column.UnitId, ValueDate: value.ValueDate));
                             }
                         }
                     }
@@ -516,7 +524,7 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
     }
 
     private async Task<List<MonthTable>> LoadTablesAsync(
-        IReadOnlyList<TableInstanceRef> group, PeriodKey periodKey, CancellationToken ct)
+        IReadOnlyList<TableInstanceRef> group, PeriodKey periodKey, bool withDates, CancellationToken ct)
     {
         var tables = new List<MonthTable>();
 
@@ -588,7 +596,9 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
             {
                 if (!monthByColumn.TryGetValue(cell.Address.ColumnDefId, out var month)
                     || !inputRows.TryGetValue(cell.Address.TableRowId, out var rowKey)
-                    || (cell.Value.ValueNumeric is null && string.IsNullOrWhiteSpace(cell.Value.ValueString)))
+                    || (cell.Value.ValueNumeric is null && string.IsNullOrWhiteSpace(cell.Value.ValueString)
+                        // ✎ SGF AC-5: Date-комірка — вхід лише скрипта з `registry as of` (інакше як до лінії, F1-2).
+                        && (!withDates || cell.Value.ValueDate is null)))
                 {
                     continue;
                 }

@@ -77,9 +77,20 @@ public sealed class MonthColumnRouter : IMonthColumnRouter
     public bool AppliesToTable(TableDef table)
     {
         ArgumentNullException.ThrowIfNull(table);
-        return !table.IsDeleted
-               && table.LayoutKind == TableLayoutKind.MonthsInColumns
-               && (_allVersions || _registry?.IsYearSheet(table.SheetDefId) == true);
+        if (table.IsDeleted)
+        {
+            return false;
+        }
+
+        // ✎ b14 document-move P2 (H4): «екземпляр на період» у версії «рік + місячні колонки» — теж ОДНА копія на рік
+        // (D-474): усі її комірки належать якорю року, як немісячний ввід MonthsInColumns. Лише за реєстром розкладок —
+        // спадковий прапор «усі версії» таблиць PerPeriodInstance не чіпає (Land 1.0.16.0 і подібні — як до b14).
+        return table.LayoutKind switch
+        {
+            TableLayoutKind.MonthsInColumns => _allVersions || _registry?.IsYearSheet(table.SheetDefId) == true,
+            TableLayoutKind.PerPeriodInstance => _registry?.IsYearSheet(table.SheetDefId) == true,
+            _ => false,
+        };
     }
 
     private bool RoutesVersion(int templateVersionId)

@@ -93,6 +93,15 @@ public interface ISheetChangeStore
         long documentId, IReadOnlyCollection<long> rowIds, IReadOnlyCollection<int> hiddenColumnIds, DateTime fromUtc,
         int viewerUserId, CancellationToken ct);
 
+    /// <summary>
+    /// Те саме з періодами рядків <paramref name="periodKeys"/>: ✎ D-577 (огляд L5) журнал рядків <c>aud.RowChange</c>
+    /// шукається лише в їхніх партиціях (<c>IX_RowChange_Document (DocumentId, PeriodKey, ChangedAt)</c>), а не в усіх.
+    /// </summary>
+    public Task<SheetChangeAttribution> AttributeAsync(
+        long documentId, IReadOnlyCollection<long> rowIds, IReadOnlyCollection<int> hiddenColumnIds, DateTime fromUtc,
+        int viewerUserId, IReadOnlyCollection<int> periodKeys, CancellationToken ct)
+        => AttributeAsync(documentId, rowIds, hiddenColumnIds, fromUtc, viewerUserId, ct);
+
     /// <summary>Стан погодження аркуша <paramref name="sheetDefId"/> документа за період і ревізія цього стану.</summary>
     public Task<SheetStatusSnapshot> SheetStatusAsync(
         long documentId, int sheetDefId, int periodKey, CancellationToken ct, long? sheetCopyId = null);

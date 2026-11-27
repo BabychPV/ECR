@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { registerCellNavigator } from './cellNavigationPort';
 import { viewportOfColumn } from './selection';
 
 /**
@@ -312,3 +313,6 @@ export function scrollIntoUpperThird(element: Element, win: Window = window): vo
 
 /** Скільки тримається підсвітка цільової комірки. */
 export const NavigationHighlightMs = 4000;
+
+// ✎ b18 D-132: needsInputStore переходить сюди через порт без статичного імпорту цього модуля.
+registerCellNavigator(requestCellNavigation);

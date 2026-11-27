@@ -123,7 +123,19 @@ public sealed class SetTemplateDocumentPolicyHandler(
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="NotFoundException"><c>ECR-TMPL-0404</c> — шаблону немає.</exception>
     /// <exception cref="DomainException"><c>ECR-TMPL-0409</c> — у проєктах уже є кілька документів шаблону.</exception>
-    public async Task<TemplateCard> HandleAsync(int templateId, bool single, CancellationToken ct)
+    public Task<TemplateCard> HandleAsync(int templateId, bool single, CancellationToken ct)
+        => HandleAsync(templateId, single, yearEditWindow: null, ct);
+
+    /// <summary>Задає правило «один документ на проєкт» і (b14) вікно року й повертає оновлену картку.</summary>
+    /// <param name="templateId">Шаблон.</param>
+    /// <param name="single"><c>true</c> — один документ на проєкт; <c>false</c> — скільки завгодно.</param>
+    /// <param name="yearEditWindow">
+    /// ✎ b14 (D-579): «вікно редагування = рік проєкту + зміщення»; <c>null</c> — без змін.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException"><c>ECR-TMPL-0404</c> — шаблону немає.</exception>
+    /// <exception cref="DomainException"><c>ECR-TMPL-0409</c> — у проєктах уже є кілька документів шаблону.</exception>
+    public async Task<TemplateCard> HandleAsync(int templateId, bool single, bool? yearEditWindow, CancellationToken ct)
     {
         var profile = await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
@@ -133,6 +145,7 @@ public sealed class SetTemplateDocumentPolicyHandler(
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var before = false;
+        var windowBefore = false;
         await uow.ExecuteInTransactionAsync(
             async innerCt =>
             {
@@ -140,7 +153,12 @@ public sealed class SetTemplateDocumentPolicyHandler(
                                ?? throw GetTemplateCardHandler.NotFound(templateId);
 
                 before = template.SingleDocumentPerProject;
+                windowBefore = template.YearEditWindow;
                 template.SetSingleDocumentPerProject(single);
+                if (yearEditWindow is { } window)
+                {
+                    template.SetYearEditWindow(window);
+                }
                 await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
 
                 if (single && !before)
@@ -157,7 +175,7 @@ public sealed class SetTemplateDocumentPolicyHandler(
         var card = await templates.FindCardAsync(templateId, ct).ConfigureAwait(false)
                    ?? throw GetTemplateCardHandler.NotFound(templateId);
 
-        if (before != single)
+        if (before != single || windowBefore != card.YearEditWindow)
         {
             // ⚠ Після коміту — як в архівування: журнал пише власним підключенням і не відкочується.
             await audit.WriteSecurityEventAsync(
@@ -166,7 +184,14 @@ public sealed class SetTemplateDocumentPolicyHandler(
                     EventType,
                     TargetUserId: null,
                     TargetRoleId: null,
-                    JsonSerializer.Serialize(new { templateId, code = card.Code, singleDocumentPerProject = single }),
+                    JsonSerializer.Serialize(new
+                    {
+                        templateId,
+                        code = card.Code,
+                        singleDocumentPerProject = single,
+                        yearEditWindow = card.YearEditWindow,
+                        yearEditWindowBefore = windowBefore,
+                    }),
                     userId,
                     currentUser.CorrelationId),
                 ct).ConfigureAwait(false);

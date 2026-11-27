@@ -149,6 +149,7 @@ const methodologies = {
 
   /** Обов'язкові вхідні колонки версії (директива «обов'язкові вхідні колонки методології»). */
   requiredInputs: (versionId: number) => ['methodologies', 'requiredInputs', versionId] as const,
+  derivedInputs: (versionId: number) => ['methodologies', 'derivedInputs', versionId] as const,
 
   /** Золотий набір тестів версії (`ФВ-13.7`). */
   tests: (versionId: number) => ['methodologies', 'tests', versionId] as const,

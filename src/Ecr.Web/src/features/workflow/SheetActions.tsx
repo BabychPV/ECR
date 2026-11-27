@@ -12,7 +12,9 @@ import type {
   ReopenDocumentRequest,
   SheetWorkflowRequest,
 } from '@/api/types';
-import { allSheetsLocked, locksDataActions, type DocumentLock } from '@/features/documents/documentLock';
+import { locksDataActions, type DocumentLock } from '@/features/documents/documentLock';
+import { recalcBlockOf, serverEligibility } from './recalcAvailability';
+import { calcStatusKey, getCalcStatus } from '@/features/documents/calcStatus/useDocumentCalcStatus';
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { refreshSheetWorkflow } from './refreshSheetWorkflow';
 import { useStatusStale } from './statusStale';
@@ -20,6 +22,7 @@ import { can, useSession, type MeDto } from '@/shared/session/useSession';
 import { LazyConfirmModal, LazyReasonModal, LazySourceImpactModal } from './lazyDialogs';
 import { pendingSlices, usePendingCount } from '@/features/grid/pendingStore';
 import {
+  editedMonths,
   editedPeriods,
   fetchSourceImpact,
   impactRefusal,
@@ -53,6 +56,9 @@ import { GrantOrder, meetsGrant, type GrantLevelName } from './grantLevels';
 import { t } from '@/shared/i18n';
 import { formatPeriodKey } from '@/shared/format';
 import { DisabledReason } from '@/features/common/DisabledReason';
+import { guardSubmitNeedsInput, isOwnRecalculationPending, showSubmitWaitsRecalc, SubmitWaitsRecalcNoticeId } from './submitGuide';
+import { withdrawNotice } from '@/features/documents/notices/noticeStore';
+import { isRequiredInputsRefusal, refreshAllRequiredInputs } from '@/features/grid/requiredInputsServer';
 
 /**
  * Причина невдалого перерахунку в тості — окремим чанком (`D-132`): з'являється лише на відмові
@@ -149,6 +155,8 @@ interface SheetActionsProps {
    * «аркуш «Викиди» не можна…», а не «аркуш 2». Не задано — текст сервера.
    */
   sheetName?: string | null | undefined;
+  /** ✎ DOCUX Q3: код аркуша — стани оригіналу й копій у картці (`sheetStates[КОД]`, `sheetStates[КОД#копія]`). */
+  sheetCode?: string | null | undefined;
 
   /**
    * Чому документ за цей період не змінити (`F-18`): архівний проєкт, закритий
@@ -567,6 +575,10 @@ export interface SheetActionsModel {
         readonly runFull: (() => void) | null;
         /** «Queued: position N …» — лише коли сервер віддав позицію в черзі; інакше `null`. */
         readonly queueText: string | null;
+        /** ✎ DOCUX L4: власна задача цього екрана в черзі (ще не почалась). */
+        readonly queued: boolean;
+        /** ✎ DOCUX L4: власна задача цього екрана впала — чип «Recalculation failed · Retry» до наступного запуску. */
+        readonly failed: { readonly errorCode: string | null; readonly correlationId: string | null } | null;
       })
     | null;
   /**
@@ -683,6 +695,7 @@ export function useSheetActions({
   periodKey,
   state,
   sheetName = null,
+  sheetCode = null,
   lock = null,
   yearLayout = false,
   decideMonth = null,
@@ -767,6 +780,7 @@ export function useSheetActions({
     onSuccess: async (_result, at) => {
       setWarnings(null);
       closeSubmitConfirm();
+      withdrawNotice(SubmitWaitsRecalcNoticeId);
       await refresh(at);
       // ✎ D-441: попередження «наступний — …» стоїть поруч із кнопкою ДО подання (`SubmitPeriodPicker`); після
       // нього кнопка сама переходить на наступний період.
@@ -778,6 +792,23 @@ export function useSheetActions({
     // питання, а не відмова, тож замість тосту — діалог із переліком.
     onError: (error, at) => {
       closeSubmitConfirm();
+      // ✎ DOCUX L9 (Q6): сервер відмовив через порожні обов'язкові входи — не тост, а перехід до першої комірки з поясненням
+      // (переліки таблиць перечитуються: сервер знає й рядки, яких людина не правила, і таблиці, яких ще не відкрито).
+      // ✎ DOCUX (RC b18): правки щойно збережено, тихий перерахунок ще йде — не тупик і не тост помилки: рядок повідомлень
+      // каже, що подання чекає перерахунку (чип показує стан), і дає «Submit again».
+      if (isOwnRecalculationPending(error)) {
+        void queryClient.invalidateQueries({ queryKey: calcStatusKey(documentId, at.periodKey) });
+        showSubmitWaitsRecalc(() => void settled.run(() => submit.mutateAsync({ ...at, acknowledgeWarnings: false })));
+        return;
+      }
+      if (isRequiredInputsRefusal(error)) {
+        void refreshAllRequiredInputs(queryClient, documentId).then(() =>
+          window.setTimeout(() => {
+            if (!guardSubmitNeedsInput(yearLayout ? at.periodKey : null)) showSheetError(error, at.sheetName);
+          }, 0),
+        );
+        return;
+      }
       const pending = warningsToConfirm(error);
       if (pending === null) {
         setWarnings(null);
@@ -1092,11 +1123,11 @@ export function useSheetActions({
   // сторінки: річний шаблон показує місяці колонками, і сторінка завжди стоїть на січні (зріз правок теж якірний). Місяць питається раз за життя екрана.
   const checkedEditPeriods = useRef(new Set<number>());
   const editCheckRunning = useRef(false);
-  const [editNoticeState, setEditNotice] = useState<{ impact: SourceImpact; periodKey: number } | null>(null);
+  const [editNoticeState, setEditNotice] = useState<{ impact: SourceImpact; periodKey: number; months: number[] | undefined } | null>(null);
   const editNotice = editNoticeState?.impact ?? null;
-  const approvedRecalcRequest = useRef<{ hash: string; reason: string; sheetDefId: number; periodKey: number } | null>(null);
+  const approvedRecalcRequest = useRef<{ hash: string; reason: string; sheetDefId: number; periodKey: number; months: number[] | undefined } | null>(null);
 
-  const runApprovedRecalc = (request: { hash: string; reason: string; sheetDefId: number; periodKey: number }): void => {
+  const runApprovedRecalc = (request: { hash: string; reason: string; sheetDefId: number; periodKey: number; months: number[] | undefined }): void => {
     approvedRecalcRequest.current = null;
     recalculateApprovedDependents(documentId, request, request.hash, request.reason).then(
       (result) => showDone(t('sourceImpact.approved.queued', { queued: result.queued })),
@@ -1117,6 +1148,11 @@ export function useSheetActions({
         // Без зрізів (не має бути при pendingCount > 0) — період сторінки, як було до D-5.
         return (edited.length > 0 ? edited : [periodKey]).find((p) => !checkedEditPeriods.current.has(p));
       };
+      // ✎ Місяці правки (річний HSE400: місяць — колонка): сервер покаже ті місяці споживачів, які порахує каскад (D-572).
+      const monthsOfEdits = (): number[] | undefined => {
+        const target = queryClient.getQueryData<SubmissionTarget>(submissionTargetKey(documentId, sheetDefId, periodKey, sheetCopyId));
+        return editedMonths(pendingSlices(), target?.monthColumnCodes);
+      };
       if (nextPeriod() !== undefined) {
         editCheckRunning.current = true;
         void (async () => {
@@ -1124,9 +1160,10 @@ export function useSheetActions({
             for (let p = nextPeriod(); p !== undefined; p = nextPeriod()) {
               checkedEditPeriods.current.add(p);
               if (isEditNoticeSuppressed(documentId, sheetDefId)) break;
-              const impact = await fetchSourceImpact(documentId, { sheetDefId, periodKey: p, sheetCopyId }, 'edit');
+              const months = monthsOfEdits();
+              const impact = await fetchSourceImpact(documentId, { sheetDefId, periodKey: p, sheetCopyId, months }, 'edit');
               if (impact !== null && impact.dependentCount > 0) {
-                setEditNotice({ impact, periodKey: p });
+                setEditNotice({ impact, periodKey: p, months });
                 break;
               }
             }
@@ -1210,7 +1247,13 @@ export function useSheetActions({
       // заводиться — каталог живе в сіді БД, поза цим пакетом, — тому період
       // дописується до наявного рядка тим самим `·`, яким уже підписано
       // діалоги (`UserAccessEditor.tsx`).
-      showDone(`${t('workflow.recalcDone')} · ${String(recalc.periodKey)}`);
+      // ✎ DOCUX L4 (ST-7): «figures are up to date» — лише коли картка після перечитування справді не застаріла
+      // (правка під час прогону лишає результати застарілими — тоді про це каже чип, а не тост «актуально»).
+      const doneText = `${t('workflow.recalcDone')} · ${String(recalc.periodKey)}`;
+      const cardKey = ['document', recalc.documentId, recalc.periodKey] as const;
+      void queryClient.invalidateQueries({ queryKey: cardKey }).then(() => {
+        if (queryClient.getQueryData<{ resultsStale?: boolean | null }>(cardKey)?.resultsStale !== true) showDone(doneText);
+      });
 
       // ⚠ Сітка перечитується САМЕ тут: оновити її на постановці в чергу
       // означало б показати старі числа під написом «перераховано».
@@ -1227,10 +1270,6 @@ export function useSheetActions({
         documentId: recalc.documentId,
         periodKey: recalc.periodKey,
         sheetDefId: recalc.sheetDefId,
-      });
-
-      void queryClient.invalidateQueries({
-        queryKey: ['document', recalc.documentId, recalc.periodKey],
       });
 
       // Чіп «Needs recalculation (N)» у переліку документів читає зведення періоду.
@@ -1432,24 +1471,40 @@ export function useSheetActions({
   // застосувала для лан 1-7.
   // ✎ 2026-10-02: перерахунок СВОГО документа — за читанням (сервер: `RecalculateDocumentHandler`),
   // а не за `Calculation.Recalculate` (те — проєктний/масовий перерахунок).
-  // ✎ AN-39/L8-12: сервер (`RecalculateDocumentHandler`) відмовляє, коли ХОЧ ОДИН аркуш
-  // періоду поданий чи затверджений, - кнопки, яка гарантовано дасть відмову, немає.
   // ✎ `UI-42`: на вузькому екрані документ лише для читання — перерахунок, що переписує
   // обчислені комірки, теж ні (макет: `Recalculate` вимкнений, коли `readOnlyReason()`).
   // ✎ RC14-B: поданий/затверджений СУСІДНІЙ аркуш не ховає кнопку чернеткового, а вимикає її з
   // причиною (`DisabledReason`) - раніше «Перерахувати» (і F9) мовчки зникала.
   const canRecalculate = !dataLocked && !narrow && can(me, 'Document.View');
-  // ✎ RC15-C: сервер пропускає подані/затверджені аркуші й перераховує решту; відмова (4221) - лише коли
-  // подані ВСІ, тож тільки тоді кнопка вимкнена.
-  // ✎ AN-77 / L8-12: клієнт завжди шле `sheetDefId`, а для цієї області сервер відмовляє, щойно поданий
-  // САМ цей аркуш (`RecalculateDocumentHandler`, ФВ-9.17), хай сусідні й у чернетці, - кнопка (і F9, і
-  // кнопка банера) вимкнена з причиною. «Усі подані» лишається для випадку, коли стан цього аркуша невідомий.
-  const ownLocked = state === 'Submitted' || state === 'Approved';
-  const recalcBlockedReason = ownLocked
-    ? t('workflow.recalculateSheetSubmitted', { sheet: sheetName ?? String(sheetDefId) })
-    : allSheetsLocked(summary?.sheetStates)
-      ? t('workflow.recalculateAllSubmitted', { period: formatPeriodKey(periodKey) || String(periodKey) })
-      : null;
+  // ✎ DOCUX L1 / ST-3 (підтверджено сервером 26.11): поданий аркуш перераховується (202 + задача); «нічого рахувати» —
+  // лише коли ЗАТВЕРДЖЕНО все в області (оригінал і кожна копія аркуша); річний документ не відмовляє через затверджений
+  // місяць. Вимкнена кнопка — лише тоді; рішення — `recalcBlockOf` (правда сервера з `calc-status`, коли вона є).
+  // ✎ Q3 координатора: рішення — одна функція (`recalcAvailability.ts`); поле сервера «можна перерахувати» (контракт L3)
+  // береться, щойно картка його віддає.
+  // ✎ Контракт doc-ux-server: «можна перерахувати» — із `calc-status` (`staleMonths[].recalculable / lockedReason`).
+  // Підписка без власного запиту: стан розрахунку читає чип (`CalcStatusChip`), тут — той самий кеш.
+  const calcStatus = useQuery({
+    queryKey: calcStatusKey(documentId, periodKey),
+    queryFn: () => getCalcStatus(documentId, periodKey),
+    enabled: false,
+  });
+  const eligibility = serverEligibility(Array.isArray(calcStatus.data?.staleMonths) ? calcStatus.data.staleMonths : undefined);
+  const recalcBlock = recalcBlockOf({
+    yearLayout,
+    state,
+    sheetCode,
+    sheetStates: summary?.sheetStates,
+    serverCanRecalculate: eligibility.canRecalculate,
+    serverLockedReason: eligibility.lockedReason,
+  });
+  const recalcBlockedReason =
+    recalcBlock === 'sheetApproved'
+      ? t('workflow.recalculateSheetApproved', { sheet: sheetName ?? String(sheetDefId) })
+      : recalcBlock === 'allApproved'
+        ? t('workflow.recalculateAllApproved', { period: formatPeriodKey(periodKey) || String(periodKey) })
+        : recalcBlock === 'locked'
+          ? t('workflow.recalculateLocked')
+          : null;
   const recalcBusy = recalculate.isPending || recalcRunning || settled.settling;
 
   /*
@@ -1665,7 +1720,13 @@ export function useSheetActions({
         onConfirm={(confirmed, extras) => {
           if (extras.suppress) suppressEditNotice(documentId, sheetDefId);
           if (confirmed.recalculateApproved === true && confirmed.hash !== null) {
-            const request = { hash: confirmed.hash, reason: confirmed.reason ?? '', sheetDefId, periodKey: editNoticeState?.periodKey ?? periodKey };
+            const request = {
+              hash: confirmed.hash,
+              reason: confirmed.reason ?? '',
+              sheetDefId,
+              periodKey: editNoticeState?.periodKey ?? periodKey,
+              months: editNoticeState?.months,
+            };
             // Правки вже збережено — виконуємо одразу; ні — після збереження (див. ефект вище).
             if (pendingCount === 0) runApprovedRecalc(request);
             else approvedRecalcRequest.current = request;
@@ -1699,6 +1760,11 @@ export function useSheetActions({
               ? () => void settled.run(() => recalculate.mutateAsync({ ...here, full: true }))
               : null,
           queueText: recalcIsHere && outcome === 'running' && recalcJob.data?.state === 'Queued' ? queueText(recalcJob.data) : null,
+          queued: recalcIsHere && outcome === 'running' && recalcJob.data?.state === 'Queued',
+          failed:
+            recalcIsHere && (outcome === 'failed' || outcome === 'partial')
+              ? { errorCode: recalcJob.data?.errorCode ?? null, correlationId: recalcJob.data?.correlationId ?? null }
+              : null,
           // AN-28/L8-01: спершу зберегти набране; відмова збереження - дії немає.
           run: () =>
             recalcBlockedReason !== null ? showWarning(recalcBlockedReason) : settled.run(() => recalculate.mutateAsync(here)),
@@ -1720,6 +1786,8 @@ export function useSheetActions({
           blockedReason: submitBlockedReason,
           run: () => {
             if (confirmedPeriod === null || submitBlockedReason !== null) return;
+            // ✎ DOCUX L9 (Q6): порожні обов'язкові комірки — запиту немає, фокус на першу, пояснення в рядку повідомлень.
+            if (guardSubmitNeedsInput(yearLayout ? confirmedPeriod : null)) return;
             askedAt.current = { ...here, periodKey: confirmedPeriod };
             setAskedPeriod(confirmedPeriod);
             setAsking('submit');

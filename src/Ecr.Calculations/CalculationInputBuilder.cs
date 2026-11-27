@@ -185,7 +185,12 @@ public sealed class CalculationInputBuilder(
                 cell.Value.ValueString,
                 cell.Value.ValueUnitId
                     ?? (snapshot.ColumnsById.TryGetValue(alias.ColumnDefId, out var column) ? column.UnitId : null),
-                cell.Value.ValueRegistryEntryId));
+                cell.Value.ValueRegistryEntryId,
+
+                // ✎ SGF AC-5 (огляд b13, F1-3): дата Date-колонки місяця доходить і через псевдонім — інакше
+                // `registry as of row.<Псевдонім>` відхиляв би КОЖЕН рядок як «дата порожня». Скрипт без речення її не бачить
+                // (F1-2), рушій формул не читає.
+                cell.Value.ValueDate));
         }
 
         return arguments;

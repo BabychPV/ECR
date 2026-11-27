@@ -496,6 +496,10 @@ public sealed record TemplateDuplicateDocument(int ProjectId, long DocumentId);
 /// <param name="SingleDocumentPerProject">
 /// ✎ B151: <c>true</c> — у проєкті щонайбільше один документ цього шаблону.
 /// </param>
+/// <param name="YearEditWindow">
+/// ✎ b14 (D-579): <c>true</c> — річні дані документів шаблону в місячному проєкті правляться у вікні «рік проєкту +
+/// зміщення», а не за станом місяця-якоря.
+/// </param>
 public sealed record TemplateCard(
     int Id,
     string Code,
@@ -503,7 +507,8 @@ public sealed record TemplateCard(
     bool IsActive,
     DateTime CreatedAt,
     TemplateDependents Dependents,
-    bool SingleDocumentPerProject = false);
+    bool SingleDocumentPerProject = false,
+    bool YearEditWindow = false);
 
 /// <summary>Скільки всього посилається на шаблон — ціна архівування.</summary>
 /// <param name="Versions">Версій шаблону всього.</param>

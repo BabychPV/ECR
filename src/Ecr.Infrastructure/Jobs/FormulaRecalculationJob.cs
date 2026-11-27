@@ -38,7 +38,9 @@ public sealed partial class FormulaRecalculationJob(
     IAuditWriter? audit = null,
     Ecr.Domain.Abstractions.IClock? clock = null,
     // B179 L2: зміна документа-джерела (правка комірки дає лише цю задачу) — перерахунок залежних.
-    IRecalculationCompletionHook? completionHook = null) : IFormulaRecalculationJob
+    IRecalculationCompletionHook? completionHook = null,
+    // ✎ D-577 (Q2): автоперерахунок методологій після правки; без нього (ручна збірка в тестах) — як доти.
+    EditAutoRecalculation? editRecalculation = null) : IFormulaRecalculationJob
 {
     /// <summary>Ключ каталогу відмови спільного блокування аркуша (<c>SheetEditGate.Busy</c>).</summary>
     private const string SheetBeingSubmittedKey = "err.ECR-DOC-4091.sheetBeingSubmitted";
@@ -96,6 +98,9 @@ public sealed partial class FormulaRecalculationJob(
 
         // B179 L2: періоди правки (насіння) — вони змінились, навіть коли похідних формул немає (written = 0).
         var seedPeriods = work.Where(p => !p.Value.Dirty.IsEmpty).Select(p => p.Key).ToList();
+        // ✎ M5 (D-442): аркуші правки погоджувача за періодом — знімок до проходу (цикл проходу вибирає `work`).
+        var approverSheetsByPeriod = work.Where(p => p.Value.ApproverSheets.Count > 0)
+            .ToDictionary(p => p.Key, p => (IReadOnlySet<int>)p.Value.ApproverSheets.ToHashSet());
         if (work.Count == 0)
         {
             await progress.ReportKeyAsync(100, FormulaRecalcOutcome.NoneKey, ct).ConfigureAwait(false);
@@ -381,6 +386,27 @@ public sealed partial class FormulaRecalculationJob(
                         : completionHook.OnSucceededAsync(changed, sourceHop: 0, ct))
                     .ConfigureAwait(false);
             }
+        }
+
+        // ✎ D-577 (Q2): прохід із НАСІННЯМ (правка людини) — тихий автоперерахунок методологій документа за періоди правки
+        // (відкладення й злиття — у тригері). Прохід лише з міжперіодних джерел його не ставить (петлі немає).
+        if (editRecalculation is not null && seedPeriods.Count > 0)
+        {
+            // ✎ Огляд H1: періоди, де хук документа-джерела вже поставив власний перерахунок (з місяцями правки), — не дублюємо.
+            // ✎ M5 (D-442, рішення людини): аркуші правки погоджувача — автоперерахунок пише їх без позначки.
+            int[] editedPeriods = [.. writtenPeriods.Union(seedPeriods).Order()];
+            await editRecalculation
+                .OnEditedAsync(
+                    documentId,
+                    new EditedPeriods(editedPeriods)
+                    {
+                        TemplateVersionIds = shared.TemplateVersionsOf(documentId, editedPeriods),
+                        ChangedColumns = changedColumnsByPeriod.ToDictionary(p => p.Key, p => (IReadOnlySet<int>)p.Value),
+                        ApproverSheets = approverSheetsByPeriod,
+                        Claimed = (completionHook as IOwnRecalculationClaims)?.OwnRecalculationQueued(documentId),
+                    },
+                    ct)
+                .ConfigureAwait(false);
         }
     }
 

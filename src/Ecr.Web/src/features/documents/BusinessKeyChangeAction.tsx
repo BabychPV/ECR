@@ -1,28 +1,18 @@
-import { lazy, Suspense, useEffect, useId, useState, type JSX } from 'react';
+import { lazy, Suspense, useId, useState, type JSX } from 'react';
 import { Menu, Stack, Text } from '@mantine/core';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { EcrApiError } from '@/api/client';
 import type { DocumentSummary } from '@/api/types';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
-import { problemText } from '@/shared/ui/problemText';
 import { hasProjectGrant } from './projectGrant';
-import { showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
-import {
-  BusinessKeyMaxLength,
-  ChangeDocumentKeyPermission,
-  changeDocumentBusinessKey,
-} from './api';
+import { ChangeDocumentKeyPermission } from './api';
 
 /**
- * Діалог — окремим чанком (`D-132`); вантажиться з першим відкриттям, на наведенні на пункт —
- * заздалегідь. Стиль — `loadX`/`lazy(async () => ...)`, як у `DocumentPage.tsx`.
+ * Мутація, поля форми й діалог — окремим чанком (`D-132`, `BusinessKeyChangeHost`); вантажиться з першим відкриттям,
+ * на наведенні на пункт — заздалегідь. Стиль — `loadX`/`lazy(async () => ...)`, як у `DocumentPage.tsx`.
  */
-const loadBusinessKeyChangeDialog = () => import('./BusinessKeyChangeDialog');
-const BusinessKeyChangeDialog = lazy(async () => ({
-  default: (await loadBusinessKeyChangeDialog()).BusinessKeyChangeDialog,
-}));
+const loadBusinessKeyChangeHost = () => import('./BusinessKeyChangeHost');
+const BusinessKeyChangeHost = lazy(loadBusinessKeyChangeHost);
 
 /**
  * Чи має користувач ефективний грант **Write** (чи вищий) на проєкт.
@@ -62,39 +52,6 @@ export { hasProjectGrant } from './projectGrant';
  */
 export function hasLockedSheet(sheetStates: Readonly<Record<string, string>>): boolean {
   return Object.values(sheetStates).some((state) => state === 'Submitted' || state === 'Approved');
-}
-
-/** `422 rekeyKeyInvalid` — під полем ключа, а не банером: людина може одразу виправити. */
-function isRekeyKeyInvalid(error: unknown): boolean {
-  return (
-    error instanceof EcrApiError
-    && error.problem.errorCode === 'ECR-DOC-0422'
-    && error.problem.extensions2?.['messageKey'] === 'err.ECR-DOC-0422.rekeyKeyInvalid'
-  );
-}
-
-/** `422 rekeyReasonRequired` — під полем причини. */
-function isRekeyReasonRequired(error: unknown): boolean {
-  return (
-    error instanceof EcrApiError
-    && error.problem.errorCode === 'ECR-DOC-0422'
-    && error.problem.extensions2?.['messageKey'] === 'err.ECR-DOC-0422.rekeyReasonRequired'
-  );
-}
-
-/**
- * `409 rekeyStale`: чинний ключ на сервері вже не той, що бачила людина —
- * хтось змінив його першим.
- *
- * ⚠ Єдина відмова, після якої форму НЕ можна просто повторити: значення
- * `expectedBusinessKey`, з яким пішов запит, застаріле, а не невалідне.
- */
-function isRekeyStale(error: unknown): boolean {
-  return (
-    error instanceof EcrApiError
-    && error.problem.errorCode === 'ECR-DOC-0409'
-    && error.problem.extensions2?.['messageKey'] === 'err.ECR-DOC-0409.rekeyStale'
-  );
 }
 
 interface BusinessKeyChangeActionArgs {
@@ -153,7 +110,6 @@ export function useBusinessKeyChangeAction({
   periodKey,
 }: BusinessKeyChangeActionArgs): BusinessKeyChangeAction {
   const session = useSession();
-  const queryClient = useQueryClient();
   const me = session.data;
 
   const [opened, setOpened] = useState(false);
@@ -161,8 +117,8 @@ export function useBusinessKeyChangeAction({
   // йшло тим самим переходом `Modal`, що й доти.
   const [everOpened, setEverOpened] = useState(false);
   if (opened && !everOpened) setEverOpened(true);
-  const [newKey, setNewKey] = useState('');
-  const [reason, setReason] = useState('');
+  // `rekeyStale` від хоста: банер рисуємо тут, поза діалогом.
+  const [staleError, setStaleError] = useState<unknown>(null);
 
   const lockedReasonId = useId();
 
@@ -172,86 +128,6 @@ export function useBusinessKeyChangeAction({
     && hasProjectWriteGrant(me, document.projectId);
 
   const locked = document !== undefined && hasLockedSheet(document.sheetStates);
-
-  const change = useMutation({
-    mutationFn: () => {
-      // ⛔ Кнопка, що відкриває діалог, показується лише коли `document` уже
-      // є (`allowed` вище), тож на момент підтвердження документ завжди
-      // визначений. Явна відмова тут — страховка компілятора, не робочий шлях.
-      if (document === undefined) {
-        return Promise.reject(new Error('Документ ще не завантажено.'));
-      }
-
-      return changeDocumentBusinessKey({
-        documentId,
-        businessKey: newKey.trim(),
-        expectedBusinessKey: document.businessKey,
-        reason: reason.trim(),
-      });
-    },
-    onSuccess: async () => {
-      setOpened(false);
-
-      // ⚠ Перелік документів теж показує бізнес-ключ (`DocumentsPage`) —
-      // спільний префікс `['documents']` оновлює і його, і зведення над ним
-      // (той самий прийом, що `useDocumentListSummary`).
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['document', documentId, periodKey] }),
-        queryClient.invalidateQueries({ queryKey: ['documents'] }),
-      ]);
-
-      showDone(t('documents.keyChanged'));
-    },
-    onError: async (error) => {
-      // ⚠ ЛИШЕ `rekeyStale` закриває діалог і перечитує документ: чинний
-      // ключ на сервері вже не той, з яким пішов запит, — надсилати ту саму
-      // форму ще раз нема чим, доки людина не побачить новий ключ.
-      if (isRekeyStale(error)) {
-        setOpened(false);
-        await queryClient.invalidateQueries({ queryKey: ['document', documentId, periodKey] });
-      }
-    },
-  });
-
-  const { reset: resetChange } = change;
-
-  // ⚠ Поля очищаються при КОЖНОМУ відкритті — той самий прийом, що
-  // `ReasonModal`/`TestDataSourceModal`: причина чи ключ, що лишилися з
-  // попередньої спроби, тут особливо небезпечні, бо йдуть в аудит зміни
-  // бізнес-ключа.
-  useEffect(() => {
-    if (opened) {
-      setNewKey('');
-      setReason('');
-      resetChange();
-    }
-  }, [opened, resetChange]);
-
-  const currentKey = document?.businessKey ?? '';
-  const trimmedKey = newKey.trim();
-  const trimmedReason = reason.trim();
-
-  const keyValid =
-    trimmedKey.length > 0 && trimmedKey.length <= BusinessKeyMaxLength && trimmedKey !== currentKey;
-  const reasonValid = trimmedReason.length > 0;
-  const canSubmit = keyValid && reasonValid && document !== undefined && !change.isPending;
-
-  const shownProblem = change.error !== null ? problemText(change.error) : null;
-
-  const keyServerError = isRekeyKeyInvalid(change.error)
-    ? (shownProblem?.detail ?? shownProblem?.title ?? null)
-    : null;
-
-  const reasonServerError = isRekeyReasonRequired(change.error)
-    ? (shownProblem?.detail ?? shownProblem?.title ?? null)
-    : null;
-
-  // Решта відмов (duplicate/locked, або щось геть інше — 403/404/500):
-  // банер під полями, форма лишається на екрані.
-  const dialogBannerError =
-    change.error !== null && !isRekeyStale(change.error) && keyServerError === null && reasonServerError === null
-      ? change.error
-      : null;
 
   /*
    * ⚠ Заблокований пункт лишається ВИДИМИМ і пояснює причину під підписом —
@@ -267,7 +143,7 @@ export function useBusinessKeyChangeAction({
       aria-label={t('documents.changeKey')}
       aria-describedby={locked ? lockedReasonId : undefined}
       onClick={() => setOpened(true)}
-      onPointerEnter={() => void loadBusinessKeyChangeDialog()}
+      onPointerEnter={() => void loadBusinessKeyChangeHost()}
       data-change-business-key=""
     >
       {/* ⚠ Лише `span`-и: пункт меню — це `<button>`, і блоковий `div`/`p`
@@ -291,32 +167,26 @@ export function useBusinessKeyChangeAction({
   ) : null;
 
   const dialog =
-    allowed && everOpened ? (
+    allowed && everOpened && document !== undefined ? (
       <Suspense fallback={null}>
-        <BusinessKeyChangeDialog
+        <BusinessKeyChangeHost
+          documentId={documentId}
+          document={document}
+          periodKey={periodKey}
           opened={opened}
           onClose={() => setOpened(false)}
-          newKey={newKey}
-          onNewKeyChange={setNewKey}
-          reason={reason}
-          onReasonChange={setReason}
-          keyError={keyServerError}
-          reasonError={reasonServerError}
-          bannerError={dialogBannerError}
-          canSubmit={canSubmit}
-          isPending={change.isPending}
-          onConfirm={() => change.mutate()}
+          onRefusal={setStaleError}
         />
       </Suspense>
     ) : null;
 
   const refusal =
-    change.error !== null && isRekeyStale(change.error) ? (
+    staleError !== null ? (
       <Stack gap="xs" data-change-key-stale="">
         <Text size="sm" c="statusError">
           {t('documents.changeKeyStaleHint')}
         </Text>
-        <ErrorAlert error={change.error} />
+        <ErrorAlert error={staleError} />
       </Stack>
     ) : null;
 

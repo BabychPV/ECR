@@ -72,8 +72,9 @@ async function axeLiveHost(page: Page): Promise<string[]> {
     const axe = (window as unknown as {
       axe: { run: (c: Element, o: object) => Promise<{ violations: { id: string; nodes: { target: unknown[] }[] }[] }> };
     }).axe;
-    const host = document.querySelector('[data-testid="sheet-live-host"]');
-    if (host === null) return ['sheet-live-host: немає'];
+    // ✎ DOCUX L7: повідомлення — у рядку над сіткою (живий регіон самого рядка), тож axe — на ньому.
+    const host = document.querySelector('[data-testid="document-notice-line"]');
+    if (host === null) return ['document-notice-line: немає'];
     const result = await axe.run(host, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] } });
 
     return result.violations.flatMap((v) => v.nodes.map((n) => `${v.id}: ${String(n.target.join(' '))}`));
@@ -258,7 +259,8 @@ test.describe('Live status: sheet state reaches the other open page without relo
       expect(submit.status(), `submit A: ${await submit.text()}`).toBe(204);
 
       // ── 2. B: polite banner, the sheet banner and the approver's buttons — without reload ──
-      const bBanner = b.page.locator('[data-testid="sheet-status-banner"][data-live-status="Submitted"]');
+      // ✎ DOCUX L7: чужий перехід стану — у рядку повідомлень над сіткою (роль status — живий регіон), не банером сітки.
+      const bBanner = b.page.locator('[data-testid="notice-live-status"][data-live-status="Submitted"]');
       await expect(bBanner, 'B не побачив подання без перезавантаження').toBeVisible({ timeout: LiveWait });
       await expect(bBanner).toContainText(UserA.display);
       await expect(b.page.locator('[data-testid="sheet-live-host"]')).toHaveAttribute('aria-live', 'polite');
@@ -291,7 +293,7 @@ test.describe('Live status: sheet state reaches the other open page without relo
       await expect(dialog).toBeHidden({ timeout: 30_000 });
 
       // ── 5. A: "Rejected" without reload ──
-      const aBanner = a.page.locator('[data-testid="sheet-status-banner"][data-live-status="Rejected"]');
+      const aBanner = a.page.locator('[data-testid="notice-live-status"][data-live-status="Rejected"]');
       await expect(aBanner, 'A не побачив відхилення без перезавантаження').toBeVisible({ timeout: LiveWait });
       await expect(aBanner).toContainText(UserB.display);
       await expect(a.page.getByTestId('document-sheet-banner')).toContainText('e2e: Live status');

@@ -132,6 +132,7 @@ public sealed class ProjectPermissionCheckTests
                 "Ecr.Api.Controllers.MethodologiesController::Categories",
                 "Ecr.Api.Controllers.MethodologiesController::CategoryRule",
                 "Ecr.Api.Controllers.MethodologiesController::Constants",
+                "Ecr.Api.Controllers.MethodologiesController::DerivedInputs",
                 "Ecr.Api.Controllers.MethodologiesController::Formulas",
                 "Ecr.Api.Controllers.MethodologiesController::Outputs",
                 "Ecr.Api.Controllers.MethodologiesController::RequiredInputs",

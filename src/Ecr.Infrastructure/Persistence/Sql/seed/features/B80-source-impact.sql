@@ -74,7 +74,36 @@ SELECT v.[Key], v.Lang, v.Val
     (N'sourceImpact.approved.queued', N'ru', N'Пересчёт утверждённых зависимых документов поставлен в очередь: {queued}'),
     (N'sourceImpact.approved.queued', N'kz', N'Бекітілген тәуелді құжаттарды қайта есептеу кезекке қойылды: {queued}'),
     (N'sourceImpact.loadFailed', N'ru', N'Не удалось проверить влияние на зависимые документы; сервер проверит его при выполнении действия.'),
-    (N'sourceImpact.loadFailed', N'kz', N'Тәуелді құжаттарға әсерді тексеру мүмкін болмады; әрекет орындалғанда сервер оны тексереді.')
+    (N'sourceImpact.loadFailed', N'kz', N'Тәуелді құжаттарға әсерді тексеру мүмкін болмады; әрекет орындалғанда сервер оны тексереді.'),
+    -- ✎ Причина кожного періоду й «увесь рік» (людина: «змінила січень, а вікно показало ще 2 місяці»).
+    (N'sourceImpact.why.sourceMonth', N'ru', N'содержит изменённый месяц источника'),
+    (N'sourceImpact.why.sourceMonth', N'kz', N'дерек көзінің өзгертілген айын қамтиды'),
+    (N'sourceImpact.why.sourceYear', N'ru', N'пересчитывается весь год (см. пояснение выше)'),
+    (N'sourceImpact.why.sourceYear', N'kz', N'бүкіл жыл қайта есептеледі (жоғарыдағы түсіндірмені қараңыз)'),
+    (N'sourceImpact.why.readsYear', N'ru', N'этот шаблон читает источник за весь год, а не только за свой месяц'),
+    (N'sourceImpact.why.readsYear', N'kz', N'бұл үлгі дерек көзін тек өз айы үшін емес, бүкіл жыл үшін оқиды'),
+    (N'sourceImpact.why.crossMonth', N'ru', N'читает рассчитанные числа за {period} через межмесячную формулу'),
+    (N'sourceImpact.why.crossMonth', N'kz', N'айаралық формула арқылы {period} есептелген сандарын оқиды'),
+    (N'sourceImpact.why.annualAnchor', N'ru', N'закрытый первый месяц года: пересчитываются только годовые значения'),
+    (N'sourceImpact.why.annualAnchor', N'kz', N'жылдың жабық бірінші айы: тек жылдық мәндер қайта есептеледі'),
+    (N'sourceImpact.why.readerPass', N'ru', N'методология этого месяца читает результаты пересчитанного месяца'),
+    (N'sourceImpact.why.readerPass', N'kz', N'осы айдың әдістемесі қайта есептелген айдың нәтижелерін оқиды'),
+    (N'sourceImpact.status.dependentsOff', N'ru', N'НЕ будет пересчитан — связь не пересчитывает зависимые документы'),
+    (N'sourceImpact.status.dependentsOff', N'kz', N'қайта есептелмейді — байланыс тәуелді құжаттарды қайта есептемейді'),
+    (N'sourceImpact.status.notWritable', N'ru', N'НЕ будет пересчитан — в период нельзя записывать'),
+    (N'sourceImpact.status.notWritable', N'kz', N'қайта есептелмейді — кезеңге жазуға болмайды'),
+    (N'sourceImpact.status.closed', N'ru', N'НЕ будет пересчитан — период закрыт; утверждённые данные в нём устареют'),
+    (N'sourceImpact.status.closed', N'kz', N'қайта есептелмейді — кезең жабық; ондағы бекітілген деректер ескіреді'),
+    (N'sourceImpact.wholeYear.periodApproval', N'ru', N'Источник — годовой (квартальный) документ: утверждение или возврат меняет все его месяцы, поэтому зависимые документы пересчитываются за весь год.'),
+    (N'sourceImpact.wholeYear.periodApproval', N'kz', N'Дерек көзі — жылдық (тоқсандық) құжат: оны бекіту немесе қайтару оның барлық айын өзгертеді, сондықтан тәуелді құжаттар бүкіл жыл үшін қайта есептеледі.'),
+    (N'sourceImpact.wholeYear.editedMonthsUnknown', N'ru', N'Правка не ограничена месячными колонками (годовое значение, код или строка), поэтому зависимые документы пересчитываются за весь год.'),
+    (N'sourceImpact.wholeYear.editedMonthsUnknown', N'kz', N'Түзету айлық бағандармен шектелмейді (жылдық мән, код немесе жол), сондықтан тәуелді құжаттар бүкіл жыл үшін қайта есептеледі.'),
+    (N'sourceImpact.wholeYear.queueWithoutMonths', N'ru', N'Очередь задач этого сервера не передаёт изменённые месяцы, поэтому зависимые документы пересчитываются за весь год.'),
+    (N'sourceImpact.wholeYear.queueWithoutMonths', N'kz', N'Осы сервердің тапсырмалар кезегі өзгертілген айларды бермейді, сондықтан тәуелді құжаттар бүкіл жыл үшін қайта есептеледі.'),
+    (N'sourceImpact.wholeYear.annualColumn', N'ru', N'Формула источника превращает изменённый месяц в годовое (немесячное) значение, поэтому зависимые документы пересчитываются за весь год.'),
+    (N'sourceImpact.wholeYear.annualColumn', N'kz', N'Дерек көзінің формуласы өзгертілген айды жылдық (айлық емес) мәнге айналдырады, сондықтан тәуелді құжаттар бүкіл жыл үшін қайта есептеледі.'),
+    (N'sourceImpact.wholeYear.sourceSpreadsMonths', N'ru', N'Методология или формула источника переносит изменённый месяц в другие месяцы, поэтому зависимые документы пересчитываются за весь год.'),
+    (N'sourceImpact.wholeYear.sourceSpreadsMonths', N'kz', N'Дерек көзінің әдістемесі немесе формуласы өзгертілген айды басқа айларға тасымалдайды, сондықтан тәуелді құжаттар бүкіл жыл үшін қайта есептеледі.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -119,7 +148,22 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'sourceImpact.confirm.edit', N'en', N'Continue editing', 1),
     (N'sourceImpact.suppress.label', N'en', N'Do not ask again for this sheet until the end of the session', 1),
     (N'sourceImpact.approved.queued', N'en', N'Recalculation of approved dependent documents queued: {queued}', 1),
-    (N'sourceImpact.loadFailed', N'en', N'Could not check the impact on dependent documents; the server will check it when the action runs.', 1)
+    (N'sourceImpact.loadFailed', N'en', N'Could not check the impact on dependent documents; the server will check it when the action runs.', 1),
+    -- ✎ Причина кожного періоду й «увесь рік».
+    (N'sourceImpact.why.sourceMonth', N'en', N'contains the edited month of the source', 1),
+    (N'sourceImpact.why.sourceYear', N'en', N'the whole year is recalculated (see the note above)', 1),
+    (N'sourceImpact.why.readsYear', N'en', N'this template reads the source for the whole year, not only its own month', 1),
+    (N'sourceImpact.why.crossMonth', N'en', N'reads calculated numbers of {period} through a cross-month formula', 1),
+    (N'sourceImpact.why.annualAnchor', N'en', N'closed first month of the year: only annual values are recalculated', 1),
+    (N'sourceImpact.why.readerPass', N'en', N'a methodology of this month reads results of a recalculated month', 1),
+    (N'sourceImpact.status.dependentsOff', N'en', N'will NOT be recalculated — the binding does not recalculate dependent documents', 1),
+    (N'sourceImpact.status.notWritable', N'en', N'will NOT be recalculated — the period cannot be written', 1),
+    (N'sourceImpact.status.closed', N'en', N'will NOT be recalculated — the period is closed; approved data in it becomes stale', 1),
+    (N'sourceImpact.wholeYear.periodApproval', N'en', N'The source is a yearly (quarterly) document: approving or returning it changes every month it holds, so dependent documents are recalculated for the whole year.', 1),
+    (N'sourceImpact.wholeYear.editedMonthsUnknown', N'en', N'The edit is not limited to month columns (an annual value, a code or a row), so dependent documents are recalculated for the whole year.', 1),
+    (N'sourceImpact.wholeYear.queueWithoutMonths', N'en', N'The job queue of this server does not pass the edited months on, so dependent documents are recalculated for the whole year.', 1),
+    (N'sourceImpact.wholeYear.annualColumn', N'en', N'A formula of the source turns the edited month into an annual (non-month) value, so dependent documents are recalculated for the whole year.', 1),
+    (N'sourceImpact.wholeYear.sourceSpreadsMonths', N'en', N'A methodology or formula of the source carries the edited month into other months, so dependent documents are recalculated for the whole year.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

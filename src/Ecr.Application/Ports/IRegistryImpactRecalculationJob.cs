@@ -45,6 +45,11 @@ public interface IRegistryImpactRecalculationJob : IBackgroundJob;
 /// </param>
 /// <param name="OverrideUserId">Хто ввімкнув перекриття.</param>
 /// <param name="OverrideReason">Причина перекриття (обов'язкова, в журнал записів аркушів).</param>
+/// <param name="AlsoRegistryDefIds">
+/// ✎ SGF-flaring AC-3: ще довідники тієї ж правки (кейс + склад газу) — постановка «довідник × рік» (<see cref="IsSourceChange"/>)
+/// бере ОБ'ЄДНАННЯ залежних документів усіх довідників, і кожен документ × період ставиться РАЗ (раніше — дві задачі на рік, і
+/// документ, що читає обидва довідники, перераховувався двічі). <c>null</c>/порожньо — лише <paramref name="RegistryDefId"/>.
+/// </param>
 public sealed record RegistryImpactRecalculationRequest(
     int RegistryDefId,
     IReadOnlyList<long> DocumentIds,
@@ -55,8 +60,14 @@ public sealed record RegistryImpactRecalculationRequest(
     int Hop = 0,
     bool IncludeApproved = false,
     int? OverrideUserId = null,
-    string? OverrideReason = null)
+    string? OverrideReason = null,
+    IReadOnlyList<int>? AlsoRegistryDefIds = null)
 {
+    /// <summary>✎ SGF-flaring AC-3: усі довідники постановки — <see cref="RegistryDefId"/> і <see cref="AlsoRegistryDefIds"/>, без дублів.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlyList<int> AllRegistryDefIds
+        => [.. new[] { RegistryDefId }.Concat(AlsoRegistryDefIds ?? []).Where(id => id > 0).Distinct()];
+
     /// <summary>B179 L2: стеля ланцюжка «джерело → споживач-джерело → …» (як <c>CrossPeriodFanOut.MaxHops</c>).</summary>
     public const int MaxHops = 8;
 
@@ -129,6 +140,23 @@ public static class RegistryImpactRecalculationTarget
     /// </remarks>
     public static string ForYear(int registryDefId, int year)
         => string.Create(CultureInfo.InvariantCulture, $"registry-impact-r{registryDefId}-y{year}");
+
+    /// <summary>
+    /// ✎ SGF-flaring AC-3: ціль «кілька довідників однієї правки × рік» (кейс + склад газу). Один довідник — та сама ціль, що
+    /// <see cref="ForYear(int, int)"/>; кілька — власний ключ із відсортованим набором, щоб злиття (payload ОСТАННЬОЇ постановки) не
+    /// загубило довідник: постановка «лише кейс» лишається окремою ціллю.
+    /// </summary>
+    /// <param name="registryDefIds">Довідники правки.</param>
+    /// <param name="year">Рік періодів.</param>
+    /// <returns>Ключ цілі.</returns>
+    public static string ForYear(IEnumerable<int> registryDefIds, int year)
+    {
+        ArgumentNullException.ThrowIfNull(registryDefIds);
+        var ids = registryDefIds.Distinct().Order().ToList();
+        return ids.Count == 1
+            ? ForYear(ids[0], year)
+            : string.Create(CultureInfo.InvariantCulture, $"registry-impact-r{string.Join('+', ids)}-y{year}");
+    }
 
     /// <summary>B179 L2: ціль «зв'язка × рік × місяць» для зміни документа-джерела.</summary>
     /// <param name="bindingId">Зв'язка.</param>

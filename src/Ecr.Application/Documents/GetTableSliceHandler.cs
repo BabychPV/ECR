@@ -324,8 +324,13 @@ public sealed class GetTableSliceHandler(
         // сигналу на сітці ДО того не було. Тут той самий факт (яка версія
         // методології зараз чинна для цієї таблиці й що вона вимагає)
         // рахується для позначки в заголовку, а не для gate.
-        var requiredByMethodology = await RequiredByMethodologyColumnIdsAsync(
-            table.Id, documentId, instance.PeriodKey, instance.TemplateVersionId, ct).ConfigureAwait(false);
+        var methodologyColumns = await RequiredByMethodologyColumnIdsAsync(
+            table, documentId, instance.PeriodKey, instance.TemplateVersionId, ct).ConfigureAwait(false);
+        var requiredByMethodology = methodologyColumns.Required;
+
+        // ✎ D-577 (інспектор комірки): хто пише колонку і хто читає її як обов'язковий вхід — по КОЛОНЦІ. Лише коли до
+        // таблиці прив'язано методологію: два пакетні звернення (прив'язки з виходами, підписи версій), не по колонці.
+        var (calculatedBy, readBy) = await ColumnMethodologiesAsync(table.Id, methodologyColumns, language, ct).ConfigureAwait(false);
 
         // ⛔ Директива registry-lookup / cell-style, PR B2: жива сітка досі не
         // показувала оформлення, задане автором шаблону (`ColumnDef.StyleId`)
@@ -361,7 +366,9 @@ public sealed class GetTableSliceHandler(
                 ColumnExpressionVisibility.Visible(
                     columnFormulas.GetValueOrDefault(c.Id), table, c.Id, snapshot, readable, formulaEngine),
                 c.HeaderGroupId,
-                c.LookupFilter))
+                c.LookupFilter,
+                calculatedBy.GetValueOrDefault(c.Id),
+                readBy.GetValueOrDefault(c.Id)))
             .ToList();
 
         // Групи заголовків: лише ті, у піддереві яких є видима колонка; колонка без групи/з невідомою — без групи.
@@ -891,9 +898,10 @@ public sealed class GetTableSliceHandler(
     /// звернень <b>не залежить від <c>N</c></b>: лишається рівно одне —
     /// склад прив'язок, який кешувати не можна (він і є ключем кешу).
     /// </remarks>
-    private async Task<HashSet<int>> RequiredByMethodologyColumnIdsAsync(
-        int tableDefId, long documentId, int periodKey, int templateVersionId, CancellationToken ct)
+    private async Task<MethodologyColumns> RequiredByMethodologyColumnIdsAsync(
+        Domain.Entities.Configuration.TableDef table, long documentId, int periodKey, int templateVersionId, CancellationToken ct)
     {
+        var tableDefId = table.Id;
         // ⚠ Цей запит лишається на кожен зріз навмисно: увімкнення чи зняття
         // прив'язки (`cfg.CalculationBinding`) мусить бути видно негайно, і
         // саме склад прив'язок входить у ключ кешу нижче.
@@ -902,13 +910,13 @@ public sealed class GetTableSliceHandler(
 
         if (methodologyIds.Count == 0)
         {
-            return [];
+            return MethodologyColumns.None;
         }
 
         var bounds = await periods.FindPeriodBoundsAsync(documentId, periodKey, ct).ConfigureAwait(false);
         if (bounds is null)
         {
-            return [];
+            return MethodologyColumns.None with { Bound = true };
         }
 
         var versionIds = await _required.CurrentVersionIdsAsync(
@@ -917,19 +925,93 @@ public sealed class GetTableSliceHandler(
             .ConfigureAwait(false);
 
         var result = new HashSet<int>();
+        var byVersion = new List<(int VersionId, IReadOnlySet<int> Columns)>();
 
         foreach (var versionId in versionIds)
         {
             // ⛔ C1: вміст версії методології — Id колонок версії-джерела; кеш ключується ще й версією шаблону
             // документа, інакше документ на клоні отримав би закешований набір Id іншої версії.
             var columns = await _required.RequiredColumnIdsAsync(
-                versionId, templateVersionId, token => RequiredColumnIdsOfVersionAsync(versionId, templateVersionId, token), ct)
+                versionId, templateVersionId, tableDefId,
+                token => RequiredColumnIdsOfVersionAsync(versionId, templateVersionId, table, token), ct)
                 .ConfigureAwait(false);
 
             result.UnionWith(columns);
+            byVersion.Add((versionId, columns));
         }
 
-        return result;
+        return new MethodologyColumns(result, byVersion, Bound: true);
+    }
+
+    /// <summary>✎ D-577: обов'язкові входи методологій таблиці — разом і по версіях; <see cref="Bound"/> — є прив'язка.</summary>
+    private sealed record MethodologyColumns(
+        HashSet<int> Required, IReadOnlyList<(int VersionId, IReadOnlySet<int> Columns)> ByVersion, bool Bound)
+    {
+        public static readonly MethodologyColumns None = new([], [], Bound: false);
+    }
+
+    /// <summary>
+    /// ✎ D-577 (інспектор комірки, рішення людини): «Calculated by» — прив'язки таблиці з колонкою-виходом і кодом виходу
+    /// (кроку); «Read by» — чинні версії методологій, що вимагають колонку як обов'язковий вхід. Таблиця без прив'язок —
+    /// жодного звернення; інакше — рівно два пакетні (прив'язки, підписи версій), незалежно від колонок.
+    /// </summary>
+    private async Task<(Dictionary<int, IReadOnlyList<ColumnMethodologyDto>> CalculatedBy, Dictionary<int, IReadOnlyList<ColumnMethodologyDto>> ReadBy)>
+        ColumnMethodologiesAsync(int tableDefId, MethodologyColumns columns, string language, CancellationToken ct)
+    {
+        var calculatedBy = new Dictionary<int, IReadOnlyList<ColumnMethodologyDto>>();
+        var readBy = new Dictionary<int, IReadOnlyList<ColumnMethodologyDto>>();
+        if (!columns.Bound)
+        {
+            return (calculatedBy, readBy);
+        }
+
+        // ⛔ RD-04 (TableSliceMethodologyQueryCountTests): теплий зріз — лише склад прив'язок; походження колонок — з пам'яті на
+        // (таблиця, версії-читачі з колонками, мова) з тим самим строком, що й вибір версій (MethodologyRequiredColumnsCache).
+        var key = string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"col-provenance:{tableDefId}:{language}:{string.Join(';', columns.ByVersion.Select(v => v.VersionId + "=" + string.Join(',', v.Columns.Order())))}");
+        if (memory is not null
+            && memory.TryGetValue(key, out (Dictionary<int, IReadOnlyList<ColumnMethodologyDto>>, Dictionary<int, IReadOnlyList<ColumnMethodologyDto>>) known))
+        {
+            return known;
+        }
+
+        foreach (var group in (await methodologies.GetColumnBindingsOfTableAsync(tableDefId, ct).ConfigureAwait(false))
+                     .GroupBy(b => b.ColumnDefId))
+        {
+            calculatedBy[group.Key] =
+            [
+                .. group.Select(b => new ColumnMethodologyDto(
+                    b.MethodologyCode, b.MethodologyNameL10n?.Get(language) ?? b.MethodologyCode, b.OutputCode, Required: false)),
+            ];
+        }
+
+        var readers = columns.ByVersion.Where(v => v.Columns.Count > 0).ToList();
+        if (readers.Count > 0)
+        {
+            var labels = await methodologies
+                .GetVersionLabelsAsync([.. readers.Select(v => v.VersionId)], ct).ConfigureAwait(false);
+            foreach (var group in readers
+                         .SelectMany(v => v.Columns.Select(c => (Column: c, Label: labels.GetValueOrDefault(v.VersionId))))
+                         .Where(x => x.Label is not null)
+                         .GroupBy(x => x.Column))
+            {
+                readBy[group.Key] =
+                [
+                    .. group.Select(x => new ColumnMethodologyDto(
+                            x.Label!.MethodologyCode, x.Label.MethodologyNameL10n?.Get(language) ?? x.Label.MethodologyCode,
+                            Step: null, Required: true))
+                        .DistinctBy(m => m.MethodologyCode),
+                ];
+            }
+        }
+
+        memory?.Set(key, (calculatedBy, readBy), new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = MethodologyRequiredColumnsCache.ResolutionLifetime,
+            Size = 1,
+        });
+        return (calculatedBy, readBy);
     }
 
     /// <summary>
@@ -986,7 +1068,7 @@ public sealed class GetTableSliceHandler(
     /// версії, а не тимчасова відсутність відповіді.
     /// </remarks>
     private async Task<IReadOnlySet<int>> RequiredColumnIdsOfVersionAsync(
-        int methodologyVersionId, int templateVersionId, CancellationToken ct)
+        int methodologyVersionId, int templateVersionId, Domain.Entities.Configuration.TableDef table, CancellationToken ct)
     {
         var rules = await methodologies.GetRulesAsync(methodologyVersionId, ct).ConfigureAwait(false);
         if (rules.Count == 0 && !await IsScriptVersionAsync(methodologyVersionId, ct).ConfigureAwait(false))
@@ -998,8 +1080,18 @@ public sealed class GetTableSliceHandler(
             .GetRequiredInputsAsync(methodologyVersionId, ct).ConfigureAwait(false);
 
         // Колонки без відповідника у версії документа відкидаються: зірочки на неіснуючій колонці немає.
-        return await MethodologyKeyLocalizer.LocalizeColumnIdsAsync(
+        // ✎ D-578 (Q3): виняток методолога Optional — не обов'язкове; решту заведених і ВИВЕДЕНІ з полів скрипта — так.
+        var declared = await MethodologyKeyLocalizer.LocalizeColumnIdsAsync(
             columnMapper, templateVersionId, [.. requiredInputs.Select(i => i.ColumnDefId)], ct).ConfigureAwait(false);
+        var optional = await MethodologyKeyLocalizer.LocalizeColumnIdsAsync(
+            columnMapper, templateVersionId,
+            [.. requiredInputs.Where(i => i.Severity == Domain.Enums.RequiredInputSeverity.Optional).Select(i => i.ColumnDefId)], ct).ConfigureAwait(false);
+        var derived = await new RequiredInputs.MethodologyRequiredInputs(methodologies, columnMapper, null)
+            .DerivedColumnsAsync([methodologyVersionId], table, ct).ConfigureAwait(false);
+
+        var result = declared.Concat(derived.GetValueOrDefault(methodologyVersionId) ?? []).ToHashSet();
+        result.ExceptWith(optional);
+        return result;
     }
 
     /// <summary>

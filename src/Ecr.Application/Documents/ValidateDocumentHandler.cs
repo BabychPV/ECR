@@ -36,8 +36,15 @@ public sealed class ValidateDocumentHandler(
     IPermitHistoryStore? permitHistory = null,
 
     // ✎ C-1 (D-475): збережений стан помилок формул — «Перевірити» показує те, що заблокує подання. `null` (тести) — вимкнено.
-    IFormulaErrorStore? formulaErrors = null)
+    IFormulaErrorStore? formulaErrors = null,
+
+    // ✎ D-577 (L6, Q6): порожні обов'язкові входи методологій — у знахідках «Перевірити» (Block — помилка, як блокує подання).
+    // `null` (тести) — вимкнено.
+    RequiredInputs.RequiredInputsScanner? requiredInputs = null)
 {
+    /// <summary>✎ Огляд H4: стеля знахідок порожніх входів методологій у результаті «Перевірити» (як перелік при відкритті).</summary>
+    public const int MaxRequiredInputMessages = 5000;
+
     /// <summary>✎ C-5: дефолти колонок версії для незаповнених комірок (02b §6.3).</summary>
     private readonly Recalculation.ColumnDefaultValues columnDefaults = new(metadata, registries);
 
@@ -146,6 +153,70 @@ public sealed class ValidateDocumentHandler(
 
             messages.AddRange(TableValidation.MissingRequiredColumnMessages(
                 table, [.. table.Columns.Where(c => !c.IsDeleted && c.IsRequired)], cells, rowIds, currentUser.Language));
+        }
+
+        // ✎ D-577 (L6, Q6; BUG-9): обов'язкові входи методологій по всіх рядках (з введеним значенням чи наперед заданих) —
+        // те саме, що заблокує подання (Block) і що сітка показує при відкритті. Зрізи таблиць поза `toValidate` — одним
+        // пакетним запитом; таблиці без методологій з вимогами — без читання.
+        if (requiredInputs is not null)
+        {
+            // ✎ Огляд M1: план — пакетом на версію шаблону (прив'язки одним зверненням, читання методологій спільні).
+            var planned = new List<(TableInstanceRef Instance, TableDef Table, TemplateVersionSnapshot Snapshot, RequiredInputs.RequiredInputPlan Plan)>();
+            foreach (var byVersion in instances.GroupBy(i => i.TemplateVersionId))
+            {
+                var snapshot = await metadata.GetAsync(byVersion.Key, ct).ConfigureAwait(false);
+                var tablesById = snapshot.Sheets.SelectMany(s => s.Tables).GroupBy(t => t.Id).ToDictionary(g => g.Key, g => g.First());
+                var versionTables = byVersion.Select(i => tablesById.GetValueOrDefault(i.TableDefId)).OfType<TableDef>().Distinct().ToList();
+                var plans = await requiredInputs
+                    .PlanManyAsync(documentId, periodKey.Value, byVersion.Key, versionTables, ct)
+                    .ConfigureAwait(false);
+                foreach (var instance in byVersion)
+                {
+                    if (plans.TryGetValue(instance.TableDefId, out var plan))
+                    {
+                        planned.Add((instance, tablesById[instance.TableDefId], snapshot, plan));
+                    }
+                }
+            }
+
+            var unread = planned.Select(p => p.Instance.TableInstanceId).Where(id => !cellsByInstance.ContainsKey(id)).ToList();
+            IReadOnlyDictionary<long, IReadOnlyList<CellRecord>> extraCells = unread.Count == 0
+                ? new Dictionary<long, IReadOnlyList<CellRecord>>()
+                : await cellStore.ReadSlicesAsync(unread, periodKey, ct).ConfigureAwait(false);
+            IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>> extraRows = unread.Count == 0
+                ? new Dictionary<long, IReadOnlyDictionary<string, long>>()
+                : await rowStore.GetRowIdsBatchAsync(unread, periodKey, ct).ConfigureAwait(false);
+
+            // ✎ Огляд H4: не більше MaxRequiredInputMessages знахідок входів у результаті; решта — одним зауваженням з числом.
+            var listed = 0;
+            var total = 0;
+            foreach (var (instance, table, snapshot, plan) in planned)
+            {
+                var id = instance.TableInstanceId;
+                var cells = cellsByInstance.TryGetValue(id, out var c) ? c : extraCells.GetValueOrDefault(id) ?? [];
+                var rowIds = rowIdsByInstance.TryGetValue(id, out var r)
+                    ? r
+                    : extraRows.GetValueOrDefault(id) ?? new Dictionary<string, long>(StringComparer.Ordinal);
+                var found = RequiredInputs.RequiredInputsScanner.Scan(
+                    plan, table, snapshot.ColumnsById, cells, rowIds, currentUser.Language,
+                    Math.Max(0, MaxRequiredInputMessages - listed), _ => true, out var tableTotal);
+                messages.AddRange(found);
+                listed += found.Count;
+                total += tableTotal;
+            }
+
+            if (total > listed)
+            {
+                var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["count"] = (total - listed).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                };
+                messages.Add(new ValidationMessage(
+                    Domain.Enums.ValidationSeverity.Warning, "ECR-CALC-0437",
+                    ValidationMessageTemplates.Render(ValidationMessageTemplates.RequiredInputMore, currentUser.Language, parameters),
+                    planned[0].Table.Id, RowKey: null, ColumnCode: null, BlocksSave: false,
+                    MessageKey: ValidationMessageTemplates.RequiredInputMore, Params: parameters));
+            }
         }
 
         // ⛔ D-PS / R-B3: «Перевірити» рахує те саме, що подання, — порожнє обов'язкове поле шапки.

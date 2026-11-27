@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act } from '@testing-library/react';
+import { publishNeedsInput, resetNeedsInput } from '@/features/grid/needsInputStore';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MantineProvider, Tabs } from '@mantine/core';
 import { testTheme } from '@/test/render';
@@ -83,3 +85,31 @@ describe('SheetStrip', () => {
     expect(slot.closest('.doc-sheet-scroll')).not.toBeNull();
   });
 });
+
+describe('SheetStrip: порожні обов’язкові комірки на вкладці (DOCUX L2)', () => {
+  afterEach(() => resetNeedsInput());
+
+  it('активна вкладка — число порожніх обов’язкових комірок (червоне, коли блокують подання); інші вкладки — без числа', () => {
+    show('S1');
+    expect(document.querySelector('[data-sheet-needs-input]')).toBeNull();
+    act(() =>
+      publishNeedsInput({
+        tableInstanceId: 1,
+        tableDefId: 1,
+        periodKey: 202601,
+        order: 1,
+        labelOffset: 0,
+        cells: [
+          { rowKey: 'a', columnCode: 'C', level: 'block', source: 'template', methodologies: [], rowIndex: 0, columnIndex: 0 },
+          { rowKey: 'b', columnCode: 'C', level: 'warn', source: 'calcIssue', methodologies: [], rowIndex: 1, columnIndex: 0 },
+        ],
+      }),
+    );
+    const badges = document.querySelectorAll('[data-sheet-needs-input]');
+    expect(badges).toHaveLength(1);
+    expect(badges[0]?.textContent).toBe('2');
+    expect(badges[0]?.closest('[role="tab"]')?.textContent).toContain('First');
+    expect(badges[0]?.getAttribute('aria-label')).toContain('grid.needsInput.counter (count=2)');
+  });
+});
+

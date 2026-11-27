@@ -1,3 +1,4 @@
+import type { ProvenanceSource } from './cellProvenance';
 import { useSyncExternalStore } from 'react';
 
 /**
@@ -36,6 +37,8 @@ export interface InspectedCell {
   readonly isReadOnly: boolean;
   /** Значення в канонічному записі; порожній рядок — не заповнено. */
   readonly value: string;
+  /** ✎ DOCUX: походження колонки зі зрізу (D-577) — «Calculated by» / «Read by» в Info. */
+  readonly provenance?: ProvenanceSource | null;
 }
 
 let current: InspectedCell | null = null;

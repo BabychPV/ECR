@@ -310,6 +310,44 @@ public interface IMethodologyStore
     public Task<IReadOnlyList<int>> GetMethodologyIdsBoundToTableAsync(
         int tableDefId, CancellationToken ct);
 
+    /// <summary>✎ Огляд M1: методології, активно прив'язані до КОЖНОЇ з таблиць, — одним зверненням (подання аркуша).</summary>
+    /// <param name="tableDefIds">Таблиці.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>Типова реалізація (тестові заглушки) — по таблиці, через <see cref="GetMethodologyIdsBoundToTableAsync"/>.</remarks>
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> GetMethodologyIdsBoundPerTableAsync(
+        IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tableDefIds);
+        var result = new Dictionary<int, IReadOnlyList<int>>();
+        foreach (var tableDefId in tableDefIds.Distinct())
+        {
+            result[tableDefId] = await GetMethodologyIdsBoundToTableAsync(tableDefId, ct).ConfigureAwait(false);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// ✎ D-578: поля власної таблиці, які читає скрипт версій (<c>calc.MethodologyReadField</c>, D-568), — одним зверненням.
+    /// Службові рядки (<c>""</c> — «перелік записано», <c>*</c> — «читає будь-що») — як є.
+    /// </summary>
+    /// <param name="methodologyVersionIds">Версії.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>Типова реалізація (тестові заглушки) — порожньо (запису немає — виведених вимог немає).</remarks>
+    public Task<IReadOnlyList<MethodologyReadFieldInfo>> GetReadFieldsOfVersionsAsync(
+        IReadOnlyCollection<int> methodologyVersionIds, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<MethodologyReadFieldInfo>>([]);
+
+    /// <summary>
+    /// ✎ D-577 (інспектор комірки «Calculated by»): активні прив'язки таблиці з колонкою-виходом і методологією (код,
+    /// назва) — одним зверненням.
+    /// </summary>
+    /// <param name="tableDefId">Таблиця.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>Типова реалізація (тестові заглушки) — порожньо.</remarks>
+    public Task<IReadOnlyList<ColumnBindingInfo>> GetColumnBindingsOfTableAsync(int tableDefId, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<ColumnBindingInfo>>([]);
+
     /// <summary>
     /// Методології, активно прив'язані бодай однією колонкою до БУДЬ-ЯКОЇ з
     /// названих таблиць (<c>cfg.CalculationBinding</c>) — одним зверненням.
@@ -642,3 +680,18 @@ public sealed record LiveTable(
 /// <param name="RegistryCode">Код довідника.</param>
 /// <param name="UsedByMethodology">Довідник уже вживає ця методологія (речовини будь-якої її версії).</param>
 public sealed record SubstanceCandidate(string Code, long EntryId, string EntryCode, string RegistryCode, bool UsedByMethodology);
+
+/// <summary>✎ D-577: прив'язка колонки-виходу до методології (<c>cfg.CalculationBinding</c>).</summary>
+/// <param name="MethodologyId">Методологія.</param>
+/// <param name="MethodologyCode">Код методології.</param>
+/// <param name="MethodologyNameL10n">Назва мовами каталогу.</param>
+/// <param name="ColumnDefId">Колонка, у яку пише результат.</param>
+/// <param name="OutputCode">Код виходу (кроку) методології.</param>
+public sealed record ColumnBindingInfo(
+    int MethodologyId, string MethodologyCode, Ecr.Domain.ValueObjects.LocalizedText? MethodologyNameL10n, int ColumnDefId, string OutputCode);
+
+/// <summary>✎ D-578: поле, яке читає скрипт версії (<c>calc.MethodologyReadField</c>).</summary>
+/// <param name="MethodologyVersionId">Версія.</param>
+/// <param name="FieldCode">Код поля (колонки) або службовий код.</param>
+/// <param name="OtherMonths">Читається за інший місяць (поза межами виведених вимог — етап 2).</param>
+public sealed record MethodologyReadFieldInfo(int MethodologyVersionId, string FieldCode, bool OtherMonths);

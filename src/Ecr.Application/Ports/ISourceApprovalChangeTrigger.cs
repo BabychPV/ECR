@@ -77,6 +77,22 @@ public interface ISourceApprovalChangeTrigger
         long documentId, int sheetDefId, int periodKey, ApprovedRecalculationOverride approvedOverride, CancellationToken ct)
         => Task.FromResult(0);
 
+    /// <summary>
+    /// ✎ Те саме з місяцями каскаду, які показала оцінка впливу (<see cref="SourceImpact.CascadeMonths"/>): річне/квартальне
+    /// джерело ставить задачу на кожен місяць, а не на рік; <c>null</c> — як без місяців (місячне — свій місяць, інакше рік).
+    /// </summary>
+    /// <param name="documentId">Документ-джерело.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період аркуша.</param>
+    /// <param name="cascadeMonths">Місяці 1–12; <c>null</c> — увесь рік.</param>
+    /// <param name="approvedOverride">Хто й чому.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Скільки задач поставлено.</returns>
+    public Task<int> RequestApprovedDependentsRecalculationAsync(
+        long documentId, int sheetDefId, int periodKey, IReadOnlyList<int>? cascadeMonths,
+        ApprovedRecalculationOverride approvedOverride, CancellationToken ct)
+        => RequestApprovedDependentsRecalculationAsync(documentId, sheetDefId, periodKey, approvedOverride, ct);
+
     /// <summary>ДО видалення: чи документ — джерело зв'язки <c>ApprovedOnly</c>, і які його роки; інакше <c>null</c>.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="ct">Токен скасування.</param>

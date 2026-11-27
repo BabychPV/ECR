@@ -185,6 +185,7 @@ public static class DependencyInjection
         services.AddScoped<IEditAssignmentManagementStore, EditAssignmentManagementStore>();
         services.AddScoped<ITableDiscussionStore, TableDiscussionStore>();
         services.AddScoped<ISheetChangeStore, SheetChangeStore>();
+        services.AddScoped<IDocumentCalcStatusStore, DocumentCalcStatusStore>(); // D-577 (L3)
         services.AddScoped<IApprovalQueueStore, ApprovalQueueStore>();
         services.AddScoped<IStepApproverStore, StepApproverStore>();
         services.AddScoped<IColumnDefSearchStore, ColumnDefSearchStore>();
@@ -511,7 +512,11 @@ public static class DependencyInjection
         services.AddScoped<ISourceCascadePendingGate>(sp => new Jobs.SourceCascadePendingGate(
             sp.GetRequiredService<EcrDbContext>(), sp.GetRequiredService<Jobs.SourceBindingGateCache>(),
             sp.GetRequiredService<IDependencyGraphProvider>())); // F5: Submit/Approve споживача — не поки місяць чекає каскаду джерела (і ланок до нього)
+        // ✎ Прогноз каскаду — окремий екземпляр задачі (кеш читачів не ділиться з прогоном у тій самій області).
+        services.AddScoped<Jobs.ISourceCascadePlanner>(sp => ActivatorUtilities.CreateInstance<Jobs.RecalculationJob>(sp));
         services.AddScoped<ISourceImpactAssessor, SourceImpactAssessor>(); // B80 N5 (D-554): вплив Approve/Reopen джерела на залежні + підтвердження
+        services.AddSingleton<Jobs.BoundTablesCache>();   // D-577 (Q2): прив'язані таблиці в пам'яті (TTL 60 с)
+        services.AddScoped<Jobs.EditAutoRecalculation>(); // D-577 (Q2): автоперерахунок методологій після правки
         services.AddScoped<IFormulaRecalculationJob, Jobs.FormulaRecalculationJob>();
         // WW-03: постановка перерахунку в періоди-читачі (міжперіодні посилання).
         services.AddScoped<Jobs.CrossPeriodFanOut>();
@@ -539,6 +544,7 @@ public static class DependencyInjection
 
         // D-476 / D-NEW: разовий імпорт складу газу FLERT → STREAM/STREAM_CASE/GAS_COMPOSITION (власник — ECR).
         services.AddScoped<Jobs.FlertRegistryProvisioner>();
+        services.AddScoped<Jobs.FlaringRegistryProvisioner>(); // SGF-flaring §5.7: FLARE_LOCATION, LP_SOUR_SPLIT, TOX_GAS_STREAM
         services.AddScoped<Jobs.FlertCompositionSyncJob>();
         services.AddScoped<IGasCompositionProvisioning, Jobs.GasCompositionProvisioning>();
         services.AddScoped<IGasCompositionStore, GasCompositionStore>();
@@ -696,6 +702,7 @@ public static class DependencyInjection
         // RT-22; HSE400: склад газу LAND_HSE400_COMPOSITION за прапором читається з документа, а не з довідника.
         services.AddScoped<RegistrySnapshotLoader>();
         services.AddSingleton<Hse400CompositionCache>(); // PERF-11
+        services.AddScoped<IYearEditWindowFacts, YearEditWindowFacts>(); // b14 D-579: вікно року — правка й перерахунок
         services.AddScoped<IRegistrySnapshotLoader>(sp => new Hse400CompositionSnapshotLoader(
             sp.GetRequiredService<RegistrySnapshotLoader>(),
             sp.GetRequiredService<EcrDbContext>(),
@@ -703,7 +710,8 @@ public static class DependencyInjection
             // P-0118-31/33: лише біт зв'язки cfg.DocumentSourceBinding.ReadFromDocument (ключ виведено, не читається).
             enabled: null,
             // PERF-11: склад із документів HSE400 не перечитується кожним прогоном (відбиток входів, пам'ять процесу).
-            cache: sp.GetRequiredService<Hse400CompositionCache>()));
+            cache: sp.GetRequiredService<Hse400CompositionCache>(),
+            logger: sp.GetService<Microsoft.Extensions.Logging.ILogger<Hse400CompositionSnapshotLoader>>()));
 
         // PERMITS: types — типи дозволів над реєстрами (PM-03)
         services.AddScoped<IPermitTypeStore, PermitTypeStore>();

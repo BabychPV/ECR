@@ -9,6 +9,7 @@ import type {
   MethodologyDraftVersionDto,
   MethodologyPublicationDiff,
   MethodologyRequiredInputDto,
+  DerivedRequiredInputsDto,
   MethodologySummaryDto,
   MethodologyTestCaseDto,
   MethodologyTraceStepsDto,
@@ -128,6 +129,19 @@ export function methodologyRequiredInputs(
 ): Promise<MethodologyRequiredInputDto[]> {
   return apiFetch<MethodologyRequiredInputDto[]>(
     `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/required-inputs`,
+  );
+}
+
+/**
+ * ✎ D-578: виведені обов'язкові входи версії — поля, які читає скрипт (лише читання), з винятком методолога
+ * (Block/Warn/Optional) з переліку `required-inputs`. `status` ≠ `available` — автоматичного переліку немає.
+ */
+export function methodologyDerivedInputs(
+  methodologyId: number,
+  versionId: number,
+): Promise<DerivedRequiredInputsDto> {
+  return apiFetch<DerivedRequiredInputsDto>(
+    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/derived-inputs`,
   );
 }
 

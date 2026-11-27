@@ -589,6 +589,37 @@ public sealed class RecalculateDocumentSheetScopeTests
         => payload.GetType().GetProperty(name)?.GetValue(payload);
 
     /// <summary>
+    /// ✎ D-577 (огляд H2 (a)): «Перерахувати» на ВЕСЬ документ знімає тихий автоперерахунок після правки (<c>-auto</c>), що чекає,
+    /// з посиланням на задачу натискання; річна розкладка — усі місяці року; область аркуша — не знімає (не покриває документ).
+    /// </summary>
+    /// <remarks>Мутація (локально): прибрати блок <c>CancelQueuedAsync</c> у <c>RecalculateDocumentHandler</c> — червоний.</remarks>
+    [Theory]
+    [InlineData(false, null, 1)]
+    [InlineData(true, null, 12)]
+    [InlineData(false, 3, 0)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "D-577")]
+    public async Task H2_натискання_на_документ_знімає_автоперерахунок_що_чекає(bool yearLayout, int? sheetDefId, int cancelled)
+    {
+        var fixture = yearLayout
+            ? ArrangeYear(yearLayout: true, PeriodState.Open, PeriodState.Open, PeriodState.Open)
+            : Arrange(submittedSheet: null, hiddenSheet: null);
+
+        await fixture.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId, CancellationToken.None);
+
+        var calls = fixture.Jobs.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.CancelQueuedAsync))
+            .Select(c => ((string)c.GetArguments()[0]!, (string?)c.GetArguments()[1]))
+            .ToList();
+        Assert.Equal(cancelled, calls.Count);
+        Assert.All(calls, c => Assert.Equal("job-1", c.Item2));
+        if (cancelled > 0)
+        {
+            Assert.Contains(calls, c => c.Item1 == Ecr.Application.Calculations.CalculationTrigger.AutoTargetOf(Document, new PeriodKey(Period)));
+        }
+    }
+
+    /// <summary>
     /// Календар року проєкту: <see cref="Period"/> (202610) і два наступні місяці зі станами; <paramref name="earlier"/> —
     /// ще й відкритий 202609 (тоді якір — він).
     /// </summary>

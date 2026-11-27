@@ -517,9 +517,64 @@ public sealed class FormulaRecalculationDocumentPassSqlTests(SqlServerFixture sq
         Assert.Equal(0, hop);
     }
 
+    /// <summary>
+    /// ✎ D-577 (Q2), огляд «тестові прогалини»: прохід ПРАВКИ документа з методологією ставить автоперерахунок за періоди
+    /// правки й записаних читачів; ✎ H1 — крім періодів, де хук джерела вже поставив власний перерахунок (з місяцями правки);
+    /// ✎ M5 — період правки погоджувача несе його аркуш (без позначки «після подання»).
+    /// </summary>
+    /// <remarks>
+    /// Мутації (локально): (1) прибрати виклик <c>editRecalculation.OnEditedAsync</c> у <c>FormulaRecalculationJob</c> — червоний
+    /// (жодної постановки); (2) не передавати <c>Claimed</c> — червоний (202604 поставлено); (3) не передавати
+    /// <c>ApproverSheets</c> — червоний (202605 без аркуша).
+    /// </remarks>
+    [Fact]
+    [Trait("Requirement", "D-577")]
+    public async Task D577_прохід_правки_ставить_автоперерахунок_без_періодів_хука_і_з_аркушем_погоджувача()
+    {
+        var world = await ArrangeAsync(Chain);
+        await SetInputAsync(world, 4, 47m);
+        await SetInputAsync(world, 5, 57m);
+        await using (var db = world.Builder.CreateContext())
+        {
+            var methodology = new Ecr.Domain.Entities.Calculations.Methodology(
+                EcrCode.Create($"FA_{Guid.NewGuid():N}"[..20]), new LocalizedText(new Dictionary<string, string> { ["en"] = "m" }));
+            db.Methodologies.Add(methodology);
+            await db.SaveChangesAsync();
+            db.CalculationBindings.Add(new Ecr.Domain.Entities.Configuration.CalculationBinding(
+                world.Doc.TableDefId, world.Doc.ColumnDefIds[^1], methodology.Id, "E_CO2", "{}"));
+            await db.SaveChangesAsync();
+        }
+
+        var hook = Substitute.For<IRecalculationCompletionHook, IOwnRecalculationClaims>();
+        hook.OnCellsEditedAsync(Arg.Any<IReadOnlyDictionary<long, int[]>>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        ((IOwnRecalculationClaims)hook).OwnRecalculationQueued(world.Doc.DocumentId).Returns(new HashSet<int> { Period(4) });
+        var trigger = Substitute.For<ICalculationTrigger>();
+        trigger.RequestAfterEditAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>()).Returns("auto");
+        trigger.RequestAfterEditAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
+            .Returns("auto");
+
+        var approverSeed = Seed(world, 5) with { ApproverSheetDefId = world.Doc.SheetDefId };
+        await RunJobAsync(
+            world,
+            new FormulaRecalculationRequest(
+                world.Instance(4).InstanceId, Period(4), [Seed(world, 4), approverSeed], world.Doc.DocumentId),
+            new RecordingAuditWriter(),
+            hook,
+            db => new EditAutoRecalculation(db, trigger));
+
+        await trigger.DidNotReceive().RequestAfterEditAsync(world.Doc.DocumentId, new PeriodKey(Period(4)), Arg.Any<CancellationToken>());
+        await trigger.DidNotReceive().RequestAfterEditAsync(
+            world.Doc.DocumentId, new PeriodKey(Period(4)), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
+        await trigger.Received(1).RequestAfterEditAsync(
+            world.Doc.DocumentId, new PeriodKey(Period(5)),
+            Arg.Is<IReadOnlyCollection<int>?>(s => s != null && s.Single() == world.Doc.SheetDefId), Arg.Any<CancellationToken>());
+        await trigger.Received(1).RequestAfterEditAsync(world.Doc.DocumentId, new PeriodKey(Period(6)), Arg.Any<CancellationToken>());
+        await trigger.Received(1).RequestAfterEditAsync(world.Doc.DocumentId, new PeriodKey(Period(7)), Arg.Any<CancellationToken>());
+    }
+
     private async Task<CapturingJobProgress> RunJobAsync(
         World world, FormulaRecalculationRequest request, RecordingAuditWriter audit,
-        IRecalculationCompletionHook? hook = null)
+        IRecalculationCompletionHook? hook = null, Func<EcrDbContext, EditAutoRecalculation>? edit = null)
     {
         await using var db = world.Builder.CreateContext();
 
@@ -529,7 +584,8 @@ public sealed class FormulaRecalculationDocumentPassSqlTests(SqlServerFixture sq
         var fanOut = new CrossPeriodFanOut(
             new RowStore(db, bulk, new TestClock(Now)), Versions(world), periods, jobs, db);
 
-        var job = new FormulaRecalculationJob(Formulas(db, world, audit), db, fanOut, periods, completionHook: hook);
+        var job = new FormulaRecalculationJob(
+            Formulas(db, world, audit), db, fanOut, periods, completionHook: hook, editRecalculation: edit?.Invoke(db));
         var progress = new CapturingJobProgress();
         await job.ExecuteAsync(request, progress, CancellationToken.None);
 

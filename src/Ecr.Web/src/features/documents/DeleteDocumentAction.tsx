@@ -1,14 +1,16 @@
-import { useState, type JSX } from 'react';
+import { lazy, Suspense, useState, type JSX } from 'react';
 import { Menu } from '@mantine/core';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
 import type { DocumentSummary } from '@/api/types';
-import { deleteDocument } from './api';
 import { localized } from '@/shared/i18n/localized';
-import { LazyConfirmModal } from '@/features/workflow/lazyDialogs';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
-import { showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
+
+/**
+ * ✎ b18 D-132: мутація й діалог підтвердження — окремий чанк (`DeleteDocumentHost`); у маршруті лишається пункт меню.
+ * Вантажиться з першим відкриттям, на наведенні на пункт — заздалегідь.
+ */
+const loadDeleteDocumentHost = () => import('./DeleteDocumentHost');
+const DeleteDocumentHost = lazy(loadDeleteDocumentHost);
 
 /** Право, під яким сервер приймає `DELETE /api/v1/documents/{id}`. */
 export const DeleteDocumentPermission = 'Document.Delete';
@@ -95,9 +97,10 @@ export function useDeleteDocumentAction({
   sheetCodes,
   allowed,
 }: DeleteDocumentActionArgs): DeleteDocumentAction {
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const [opened, setOpened] = useState(false);
+  const [everOpened, setEverOpened] = useState(false);
+  if (opened && !everOpened) setEverOpened(true);
+  const [error, setError] = useState<unknown>(null);
 
   const name =
     document === undefined
@@ -106,34 +109,6 @@ export function useDeleteDocumentAction({
         ? `${localized(document.nameL10n)} · ${document.businessKey}`
         : document.businessKey;
 
-  const remove = useMutation({
-    mutationFn: () => deleteDocument(documentId),
-    onSuccess: async () => {
-      setOpened(false);
-
-      // ⚠ Спершу перелік, потім перехід: людина має прийти на перелік, де
-      // видаленого документа вже немає, а не побачити його там ще раз.
-      // Ключ `['documents']` — префікс і переліку, і зведення над ним.
-      await queryClient.invalidateQueries({ queryKey: ['documents'] });
-
-      showDone(t('documents.deleted', { name }));
-      await navigate('/');
-
-      // ⚠ Після переходу: доки сторінка змонтована, прибраний кеш вона
-      // перезапитала б — і отримала б `404` на документ, якого вже немає.
-      queryClient.removeQueries({ queryKey: ['document', documentId] });
-      queryClient.removeQueries({ queryKey: ['document-tables', documentId] });
-    },
-    onError: async () => {
-      setOpened(false);
-
-      // ⚠ Відмова могла статися тому, що стан документа змінився за спиною
-      // (аркуш подали з іншої вкладки). Перечитаний стан сховає кнопку, якщо
-      // документ уже не чернетка, — банер із причиною лишається.
-      await queryClient.invalidateQueries({ queryKey: ['document', documentId] });
-    },
-  });
-
   const shown =
     allowed && document !== undefined && isKnownDraft(document.sheetStates, sheetCodes);
 
@@ -141,38 +116,29 @@ export function useDeleteDocumentAction({
     <Menu.Item
       color="statusError"
       data-delete-document=""
-      onClick={() => {
-        remove.reset();
-        setOpened(true);
-      }}
+      onClick={() => setOpened(true)}
+      onPointerEnter={() => void loadDeleteDocumentHost()}
     >
       {t('documents.delete')}
     </Menu.Item>
   ) : null;
 
-  const dialog = shown ? (
-    <LazyConfirmModal
-      opened={opened}
-      title={t('documents.deleteTitle', { name })}
-      text={t('documents.deleteText')}
-      consequences={[
-        { text: t('documents.deleteNote'), note: true },
-        // ⛔ P1 «прихований аркуш»: клієнт бачить лише видимі аркуші, тож
-        // «чернетка» тут — здогад, а не факт. Перевіряє сервер (усі аркуші,
-        // зокрема приховані від цієї ролі); його відмову показує `refusal`.
-        { text: t('documents.deleteServerChecks'), note: true },
-      ]}
-      verb={t('documents.delete')}
-      danger
-      isPending={remove.isPending}
-      onConfirm={() => remove.mutate()}
-      onClose={() => setOpened(false)}
-    />
-  ) : null;
+  const dialog =
+    shown && everOpened ? (
+      <Suspense fallback={null}>
+        <DeleteDocumentHost
+          documentId={documentId}
+          name={name}
+          opened={opened}
+          onClose={() => setOpened(false)}
+          onError={setError}
+        />
+      </Suspense>
+    ) : null;
 
   // ⚠ Без `onRetry`: «повторити» тут означало б повторне видалення БЕЗ
-  // підтвердження. Банер знімає наступне відкриття діалогу (`remove.reset()`).
-  const refusal = remove.error === null ? null : <ErrorAlert error={remove.error} />;
+  // підтвердження. Банер знімає наступне відкриття діалогу (скидання мутації в хості).
+  const refusal = error === null ? null : <ErrorAlert error={error} />;
 
   return { menuItem, dialog, refusal };
 }

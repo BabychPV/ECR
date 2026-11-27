@@ -3152,6 +3152,15 @@ CREATE INDEX IX_JobProgress_CreatedBy_UpdatedAt
     ON itg.JobProgress (CreatedByUserId, UpdatedAt DESC)
     INCLUDE (State, JobCode);
 GO
+
+-- ✎ D-577 (огляд M7): чип «Стан розрахунку» — останній провал перерахунку документа після актуального прогону
+-- (DocumentCalcStatusStore.LastFailureAsync: DocumentId + State = 'Failed' + UpdatedAt > …, найновіший).
+-- Міграція D577CalcStatusFailureIndex (ONLINE, де він є).
+CREATE INDEX IX_JobProgress_Document_State_UpdatedAt
+    ON itg.JobProgress (DocumentId, State, UpdatedAt)
+    INCLUDE (JobCode)
+    WHERE DocumentId IS NOT NULL;
+GO
 ```
 
 ---

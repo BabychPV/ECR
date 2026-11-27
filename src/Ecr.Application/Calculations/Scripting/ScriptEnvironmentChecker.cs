@@ -63,6 +63,7 @@ public sealed class ScriptEnvironmentChecker(
         CheckAliasColumns(script, resolved, diagnostics, used);
 
         await CheckEntriesAsync(script, diagnostics, ct).ConfigureAwait(false);
+        await CheckRegistryRowFieldsAsync(script, text, diagnostics, ct).ConfigureAwait(false);
 
         var sources = await CheckResultReadsAsync(methodologyId, used, diagnostics, ct).ConfigureAwait(false);
 
@@ -330,6 +331,122 @@ public sealed class ScriptEnvironmentChecker(
                     ("entry", entry.EntryCode)));
             }
         }
+    }
+
+    /// <summary>
+    /// ✎ D-580 / огляд M5: <c>ROW.&lt;поле&gt;{.&lt;поле&gt;}</c> в умові/виразі REG* — поле є в довіднику з літерального коду, проміжні
+    /// сегменти — <c>Lookup</c> (як перевірки 15–20 формул, FEATURE-REGISTRY-TABLES §5.5); помилка — при збереженні й публікації,
+    /// а не <c>#REF</c> у кожному рядку прогону. Невідомий довідник тут не перевіряється (його називає рантайм / граф).
+    /// </summary>
+    private async Task CheckRegistryRowFieldsAsync(CompiledScript script, string text, List<ScriptDiagnostic> diagnostics, CancellationToken ct)
+    {
+        var definitions = new Dictionary<string, Domain.Entities.Configuration.RegistryDef?>(StringComparer.OrdinalIgnoreCase);
+        var reported = new HashSet<(string, string)>();
+        foreach (var root in ScriptRegistryScopes.Roots(script))
+        {
+            var pending = new Stack<(global::Ecr.Expressions.Ast.AstNode Node, string? Row)>();
+            pending.Push((root, null));
+            while (pending.Count > 0)
+            {
+                var (node, row) = pending.Pop();
+                switch (node)
+                {
+                    case global::Ecr.Expressions.Ast.RowFieldNode field when row is not null:
+                        var path = string.Join('.', field.Path);
+                        if (reported.Contains((row, path)))
+                        {
+                            break;
+                        }
+
+                        if (!definitions.TryGetValue(row, out var definition))
+                        {
+                            definition = await registries.FindDefinitionAsync(row, ct).ConfigureAwait(false);
+                            definitions[row] = definition;
+                        }
+
+                        if (definition is not null && await RowFieldProblemAsync(definition, field.Path, ct).ConfigureAwait(false) is { } problem)
+                        {
+                            reported.Add((row, path));
+                            diagnostics.Add(ScriptDiagnostic.At(
+                                ScriptDiagnosticCodes.RegistryFieldUnknown, SpanAt(text, field.Position, "ROW.".Length + path.Length),
+                                $"ROW.{path}: {problem} in registry '{row}'.", ("registry", row), ("field", path)));
+                        }
+
+                        break;
+                    case global::Ecr.Expressions.Ast.FunctionNode call:
+                        var opens = global::Ecr.Expressions.Evaluation.RegistryForms.RowScopeNames.Contains(call.Name);
+                        var code = opens && call.Arguments.Count > 0
+                            && call.Arguments[0] is global::Ecr.Expressions.Ast.LiteralNode { Value: string literal } ? literal : null;
+                        for (var i = call.Arguments.Count - 1; i >= 0; i--)
+                        {
+                            pending.Push((call.Arguments[i], opens && i > 0 ? code : row));
+                        }
+
+                        break;
+                    case global::Ecr.Expressions.Ast.UnaryNode unary:
+                        pending.Push((unary.Operand, row));
+                        break;
+                    case global::Ecr.Expressions.Ast.BinaryNode binary:
+                        pending.Push((binary.Right, row));
+                        pending.Push((binary.Left, row));
+                        break;
+                    case global::Ecr.Expressions.Ast.ConditionalNode conditional:
+                        pending.Push((conditional.WhenFalse, row));
+                        pending.Push((conditional.WhenTrue, row));
+                        pending.Push((conditional.Condition, row));
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+    }
+
+    /// <summary>Чому шлях поля не читається: поля немає, або проміжний сегмент не <c>Lookup</c>; <c>null</c> — усе гаразд.</summary>
+    private async Task<string?> RowFieldProblemAsync(
+        Domain.Entities.Configuration.RegistryDef definition, IReadOnlyList<string> path, CancellationToken ct)
+    {
+        var current = definition;
+        for (var i = 0; i < path.Count; i++)
+        {
+            var field = current.Fields.FirstOrDefault(f => string.Equals(f.Code, path[i], StringComparison.OrdinalIgnoreCase));
+            if (field is null)
+            {
+                return $"field '{path[i]}' does not exist";
+            }
+
+            if (i == path.Count - 1)
+            {
+                return null;
+            }
+
+            if (field.DataType != CellDataType.Lookup || field.RefRegistryDefId is not { } target
+                || await registries.FindDefinitionByIdAsync(target, ct).ConfigureAwait(false) is not { } next)
+            {
+                return $"field '{path[i]}' is not a Lookup";
+            }
+
+            current = next;
+        }
+
+        return null;
+    }
+
+    private static ScriptSpan SpanAt(string text, int position, int length)
+    {
+        var start = Math.Clamp(position, 0, text.Length);
+        var line = 1;
+        var lineStart = 0;
+        for (var i = 0; i < start; i++)
+        {
+            if (text[i] == '\n')
+            {
+                line++;
+                lineStart = i + 1;
+            }
+        }
+
+        return new ScriptSpan(start, Math.Max(1, Math.Min(length, text.Length - start)), line, start - lineStart + 1);
     }
 
     private async Task<IReadOnlyList<int>> CheckResultReadsAsync(
