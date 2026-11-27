@@ -3882,11 +3882,33 @@
               "string"
             ]
           },
+          "newValueLabelL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Те саме для нового значення."
+              }
+            ]
+          },
           "oldValue": {
             "description": "Старе значення.",
             "type": [
               "null",
               "string"
+            ]
+          },
+          "oldValueLabelL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "✎ DOCUX (огляд UI 27.11): довідникова колонка — назва запису старого значення (як у комірці); `null` — не\nдовідник, порожньо або запису вже немає. Сирий id — у значенні (CSV-експорт — лише він)."
+              }
             ]
           },
           "origin": {
@@ -29718,11 +29740,33 @@
               "string"
             ]
           },
+          "newValueLabelL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Те саме для нового значення."
+              }
+            ]
+          },
           "oldValue": {
             "description": "Лише правка: значення до.",
             "type": [
               "null",
               "string"
+            ]
+          },
+          "oldValueLabelL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "✎ DOCUX (огляд UI 27.11): довідникова колонка — назва запису старого значення (як у комірці); `null` — не\nдовідник, порожньо або запису вже немає. Сирий id — у значенні (CSV-експорт — лише він)."
+              }
             ]
           },
           "origin": {
@@ -29760,6 +29804,14 @@
                 "$ref": "#/components/schemas/LocalizedText",
                 "description": "Лише правка: підпис фіксованого рядка; `null` — динамічний."
               }
+            ]
+          },
+          "rowOrdinal": {
+            "description": "Лише правка: номер рядка на екрані (як int? CellChangeView.RowOrdinal).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
             ]
           },
           "tableCode": {
