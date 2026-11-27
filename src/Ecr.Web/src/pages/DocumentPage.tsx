@@ -72,6 +72,11 @@ import {
   stateOfGroup,
 } from '@/features/documents/sheetCopies/sheetGroups';
 import { parseChatKey } from '@/features/tableChat/chatKey';
+import {
+  clearScrollBeforePeriodSwitch,
+  peekScrollBeforePeriodSwitch,
+  rememberScrollBeforePeriodSwitch,
+} from '@/features/documents/periodSwitchScroll';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { registerHeldEditRevealer, useSettledAction } from '@/features/grid/settleEdits';
@@ -327,7 +332,14 @@ export function DocumentPage(): JSX.Element {
   const [focusMonth, setFocusMonth] = useUrlNumber('focusMonth');
   const setUrlParams = useUrlParamsSetter();
   const periodKey = urlPeriod ?? currentPeriodKey();
-  const setPeriodKey = setUrlPeriod;
+  // ✎ PERIODNAV: позицію прокрутки беремо ДО зміни адреси (див. `periodSwitchScroll`), а не з рендера нового періоду.
+  const setPeriodKey = useCallback(
+    (value: number | null) => {
+      rememberScrollBeforePeriodSwitch(documentId);
+      setUrlPeriod(value);
+    },
+    [documentId, setUrlPeriod],
+  );
 
   const summary = useQuery({
     queryKey: ['document', documentId, periodKey],
@@ -737,13 +749,21 @@ export function DocumentPage(): JSX.Element {
   const seenPeriod = useRef(periodKey);
   if (seenPeriod.current !== periodKey) {
     seenPeriod.current = periodKey;
-    scrollAtSwitch.current = { periodKey, y: window.scrollY };
+    scrollAtSwitch.current = { periodKey, y: peekScrollBeforePeriodSwitch(documentId) ?? window.scrollY };
   }
   const periodSettled = summary.data !== undefined && tables.data !== undefined;
+  // ✎ PERIODNAV: поки новий період вантажиться, `AsyncBoundary` заміняє ВЕСЬ документ скелетом, нижчим за вікно, - і
+  // `scrollHeight` падає, а браузер притискає прокрутку до 0. Скелет тримає висоту останнього намальованого документа.
+  const documentBox = useRef<HTMLDivElement>(null);
+  const settledHeight = useRef(0);
+  useLayoutEffect(() => {
+    if (periodSettled && documentBox.current !== null) settledHeight.current = documentBox.current.offsetHeight;
+  });
   useLayoutEffect(() => {
     const saved = scrollAtSwitch.current;
     if (saved === null || saved.periodKey !== periodKey || !periodSettled) return;
     scrollAtSwitch.current = null;
+    clearScrollBeforePeriodSwitch();
 
     // Висота документа добирається ще якийсь час (слоти таблиць, зрізи сітки, смуга аркушів): утримуємо позицію, доки
     // людина сама не прокрутила (колесо, дотик, клавіша, клік) - її рух важливіший за збережену позицію.
@@ -1056,6 +1076,7 @@ export function DocumentPage(): JSX.Element {
      * період міг ще не відкритися. Порожні вкладки без пояснення виглядали б
      * як несправність (`A7-30` показав, що так і буває насправді).
      */
+    <div ref={documentBox} style={periodSettled ? undefined : { minHeight: settledHeight.current }} data-document-box="">
     <AsyncBoundary<DocumentSummary>
       isPending={summary.isPending || tables.isPending}
       // AN-39/L8-11: збій ФОНОВОГО перезапиту (є `data`) не підміняє сторінку на помилку -
@@ -1573,6 +1594,7 @@ export function DocumentPage(): JSX.Element {
     </Stack>
       )}
     </AsyncBoundary>
+    </div>
     )}
     </>
   );
