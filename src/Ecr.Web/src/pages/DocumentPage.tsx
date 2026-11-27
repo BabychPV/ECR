@@ -41,6 +41,7 @@ import { editsDeferToServer, isEditable } from '@/features/workflow/sheetEditabi
 import { fetchSubmissionTarget, submissionTargetKey, useApproverEditAvailability } from '@/features/workflow/api';
 import {
   hasCalculationIssues,
+  hasCalculationProblems,
   useUnmatchedRows,
   useYearUnmatchedRows,
   type MonthUnmatchedRows,
@@ -1178,6 +1179,8 @@ export function DocumentPage(): JSX.Element {
             documentItems={[...documentLog.menuItems, businessKeyChange.menuItem, versionMigration.menuItem, editAssignments.menuItem, deletion.menuItem]}
             resultsStale={document.resultsStale ?? null}
             resultsStaleSince={document.resultsStaleSince ?? null}
+            // ✎ DOCUX: проблеми розрахунку в рядку повідомлень — чип розрахунку каже те саме («with issues»).
+            calcIssues={issuePanels.some((month) => hasCalculationProblems(month.rows))}
             staleReminderHost={staleReminderHost}
             periodAction={periodReopen.lockAction}
             yearLayout={yearLayout}

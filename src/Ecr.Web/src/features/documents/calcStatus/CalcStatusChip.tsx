@@ -18,6 +18,12 @@ interface CalcStatusChipProps {
   readonly local: LocalRecalc;
   /** «Recalculate» / «Retry» — та сама дія, що в «More» і F9; `null` — ролі її не дано. */
   readonly recalculate: { readonly run: () => void; readonly loading: boolean; readonly blockedReason: string | null } | null;
+  /**
+   * ✎ DOCUX (живий прохід 27.11): у рядку повідомлень є проблеми розрахунку (рядки не пораховано, помилки формул). Прогін
+   * ЗАВЕРШИВСЯ, але не чисто: чип «Calculated with issues» (тон попередження) замість «✓ Calculated» — і рядок, і чип кажуть
+   * одне.
+   */
+  readonly issues?: boolean;
 }
 
 const short = (periodKey: number): string => formatMonthName(periodKey % 100).slice(0, 3);
@@ -62,7 +68,7 @@ function originText(origin: JobOrigin | null): string {
  *
  * Стан — із сервера (`calc-status`): переживає перезавантаження, показує свої й чужі задачі, тихий автоперерахунок (Q2).
  */
-export function CalcStatusChip({ documentId, periodKey, card, local, recalculate }: CalcStatusChipProps): JSX.Element | null {
+export function CalcStatusChip({ documentId, periodKey, card, local, recalculate, issues = false }: CalcStatusChipProps): JSX.Element | null {
   const server = useDocumentCalcStatus(documentId, periodKey, local.queued || local.running);
   // Пояснення — опис чипа (`aria-describedby`), не частина назви: «Recalculate» лишається назвою лише кнопки дії.
   const detailId = useId();
@@ -72,13 +78,23 @@ export function CalcStatusChip({ documentId, periodKey, card, local, recalculate
   const notes = notesOf(view);
   if (status.kind === 'unknown' && notes.length === 0) return null;
 
+  // ✎ DOCUX: актуально, але з проблемами розрахунку — попередження, а не нейтральне «✓».
+  const withIssues = status.kind === 'upToDate' && issues;
   const tone =
-    status.kind === 'failed' ? 'danger' : status.kind === 'stale' ? 'warning' : status.kind === 'upToDate' ? 'neutral' : 'info';
+    status.kind === 'failed'
+      ? 'danger'
+      : status.kind === 'stale' || withIssues
+        ? 'warning'
+        : status.kind === 'upToDate'
+          ? 'neutral'
+          : 'info';
   const look = badgeLook(tone);
   const label = (() => {
     switch (status.kind) {
-      case 'upToDate':
-        return `✓ ${t('calcStatus.upToDate', { time: status.at === null ? '' : formatTime(status.at) })}`;
+      case 'upToDate': {
+        const time = status.at === null ? '' : formatTime(status.at);
+        return withIssues ? `⚠ ${t('calcStatus.upToDateIssues', { time })}` : `✓ ${t('calcStatus.upToDate', { time })}`;
+      }
       case 'stale':
         return `● ${t('calcStatus.stale')}`;
       case 'queued':
@@ -101,6 +117,8 @@ export function CalcStatusChip({ documentId, periodKey, card, local, recalculate
   })();
   const detail = (() => {
     switch (status.kind) {
+      case 'upToDate':
+        return withIssues ? t('calcStatus.issuesHint') : null;
       case 'stale':
         return status.since === null ? t('document.staleResults.hint') : t('document.staleResults.hintSince', { date: formatDateTime(status.since) });
       case 'failed':
@@ -114,7 +132,14 @@ export function CalcStatusChip({ documentId, periodKey, card, local, recalculate
   const action = status.kind === 'stale' ? t('workflow.recalculate') : status.kind === 'failed' ? t('calcStatus.retry') : null;
 
   return (
-    <Group gap="xs" wrap="nowrap" data-testid="calc-status" data-calc-status={status.kind} aria-live="polite">
+    <Group
+      gap="xs"
+      wrap="nowrap"
+      data-testid="calc-status"
+      data-calc-status={status.kind}
+      data-calc-issues={withIssues || undefined}
+      aria-live="polite"
+    >
       {label !== null && (
         <Popover position="bottom-start" withArrow shadow="md" width={360} disabled={detail === null}>
           <Popover.Target>

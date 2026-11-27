@@ -139,6 +139,19 @@ export function hasCalculationIssues(rows: UnmatchedRows): boolean {
 }
 
 /**
+ * ✎ DOCUX (живий прохід 27.11): чи прогін місяця завершився З ПРОБЛЕМАМИ — для чипа розрахунку («Calculated with issues»).
+ * Рядки, відсіяні фільтром активності (`RowInactive`, `unmatchedRowsModel.RowInactiveKind` — літералом, щоб не тягнути модель
+ * панелі в чанк сторінки), — довідка, не проблема.
+ */
+export function hasCalculationProblems(rows: UnmatchedRows): boolean {
+  return (
+    rows.formulaErrors.length > 0 ||
+    (rows.sourceIssues?.length ?? 0) > 0 ||
+    rows.issues.some((issue) => issue.kind !== 'RowInactive')
+  );
+}
+
+/**
  * ✎ W15z M4: розкласти відповідь `year=true` (кожен рядок — з `monthNumber` місяця прогону) по місяцях року якоря; лише
  * місяці з проблемами, за зростанням. Рядок без `monthNumber` (не мав би бути в «рік») — до якоря. Час прогону відомий
  * лише якорю (`calculation-run` якоря) — інші місяці без нього, щоб не показувати чужий час.
