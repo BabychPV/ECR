@@ -163,6 +163,10 @@ public sealed class SubmitBlockedMessageOrderTests(SqlServerFixture sql)
 
         var store = Substitute.For<IMethodologyStore>();
         store.GetMethodologyIdsBoundToTableAsync(tableDefId, Arg.Any<CancellationToken>()).Returns(new List<int> { MethodologyId });
+        // ✎ Огляд M1: подання планує вимоги на аркуш — прив'язки всіх таблиць одним зверненням.
+        store.GetMethodologyIdsBoundPerTableAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+             .Returns(call => (IReadOnlyDictionary<int, IReadOnlyList<int>>)call.Arg<IReadOnlyCollection<int>>()
+                 .ToDictionary(id => id, id => (IReadOnlyList<int>)(id == tableDefId ? [MethodologyId] : [])));
         store.GetMethodologyIdsBoundToTablesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
              .Returns(new List<int> { MethodologyId });
         store.GetPublishedVersionsOfAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())

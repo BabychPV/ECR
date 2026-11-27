@@ -60,20 +60,39 @@ public sealed partial class PatchCellsTests
     /// <remarks>
     /// Мутації (локально): (1) у <c>RequiredInputCollector.Add</c> <c>saveBlocks = error</c> — червоний (виведена блокує
     /// збереження); (2) прибрати пропуск <c>Optional</c> у <c>EvaluateRow</c> — червоний другий крок; (3) прибрати пропуск
-    /// <c>AllFields</c> у <c>DerivedColumnsAsync</c> — червоний третій крок.
+    /// <c>AllFields</c> у <c>DerivedColumnsAsync</c> — червоний третій крок; (4) прибрати фільтр <c>!c.IsComputed</c> —
+    /// червоний «calculated»; (5) завжди Block для виведених — червоний «norules».
     /// </remarks>
     [Theory] [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "D-578")]
     [InlineData("derived")]
     [InlineData("optional")]
     [InlineData("anything")]
+    [InlineData("norules")]
+    [InlineData("calculated")]
+    [InlineData("formula")]
+    [InlineData("readonly")]
     public async Task D578_поле_яке_читає_скрипт_обовязкове_для_подання_але_не_для_збереження(string kind)
     {
+        // ✎ Огляд H3: версія з правилом відбору (застосовність рядка) — Block; без правил — лише попередження; обчислена
+        // колонка (Calculated) — не вхід, вимоги немає.
         var category = WithMethodology(
             kind == "optional" ? RequiredInputSeverity.Optional : RequiredInputSeverity.Block,
-            engine: MethodologyEngine.Script, withRule: false,
+            categoryType: kind switch
+            {
+                "calculated" => CellDataType.Calculated,
+                "formula" => CellDataType.Formula,
+                _ => CellDataType.String,
+            },
+            engine: MethodologyEngine.Script, withRule: kind != "norules",
             requiredColumnId: kind == "optional" ? 12 : VolumeColumnId);
         var versionId = _lastMethodology.Version.Id;
+        if (kind == "readonly")
+        {
+            // ✎ Огляд H3: колонка «лише для читання» — людина її не заповнює, тож і не вимагається.
+            _lastMethodology.Category.SetReadOnly(true);
+        }
+
         _methodologies.GetReadFieldsOfVersionsAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
                       .Returns(Task.FromResult<IReadOnlyList<MethodologyReadFieldInfo>>(
                       [
@@ -96,6 +115,10 @@ public sealed partial class PatchCellsTests
             var only = Assert.Single(messages);
             Assert.Equal(Domain.Enums.ValidationSeverity.Error, only.Severity);
             Assert.False(only.BlocksSave);
+        }
+        else if (kind == "norules")
+        {
+            Assert.Equal(Domain.Enums.ValidationSeverity.Warning, Assert.Single(messages).Severity);
         }
         else
         {

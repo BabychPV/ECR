@@ -57,6 +57,62 @@ public sealed class RequiredInputsScanner(
         return applicable.Count == 0 ? null : new RequiredInputPlan(applicable, MethodologyRequiredInputs.ColumnIds(applicable));
     }
 
+    /// <summary>
+    /// ✎ Огляд M1: плани для КІЛЬКОХ таблиць (аркуш на поданні, документ на «Перевірити») — прив'язки одним зверненням, межі
+    /// періоду один раз, читання методологій спільні для таблиць з тими самими методологіями (пам'ять на це звернення).
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="templateVersionId">Версія шаблону екземплярів.</param>
+    /// <param name="tables">Таблиці.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>План за <c>TableDefId</c> лише для таблиць, де є що перевіряти.</returns>
+    public async Task<IReadOnlyDictionary<int, RequiredInputPlan>> PlanManyAsync(
+        long documentId, int periodKey, int templateVersionId, IReadOnlyCollection<TableDef> tables, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tables);
+        var result = new Dictionary<int, RequiredInputPlan>();
+        if (tables.Count == 0)
+        {
+            return result;
+        }
+
+        var bound = await methodologies
+            .GetMethodologyIdsBoundPerTableAsync([.. tables.Select(t => t.Id)], ct).ConfigureAwait(false);
+        if (!bound.Values.Any(ids => ids.Count > 0))
+        {
+            return result;
+        }
+
+        var bounds = await periods.FindPeriodBoundsAsync(documentId, periodKey, ct).ConfigureAwait(false);
+        if (bounds is null)
+        {
+            return result;
+        }
+
+        var resolver = new MethodologyRequiredInputs(methodologies, columnMapper, rowActivity) { Memo = [] };
+        await resolver
+            .PrefetchAsync([.. bound.Values.SelectMany(ids => ids).Distinct()], bounds.PeriodEnd, ct)
+            .ConfigureAwait(false);
+        foreach (var table in tables)
+        {
+            if (bound.GetValueOrDefault(table.Id) is not { Count: > 0 } methodologyIds)
+            {
+                continue;
+            }
+
+            var applicable = await resolver
+                .ResolveAsync(methodologyIds, bounds.PeriodEnd, templateVersionId, table.Id, ct, derivedFor: table)
+                .ConfigureAwait(false);
+            if (applicable.Count > 0)
+            {
+                result[table.Id] = new RequiredInputPlan(applicable, MethodologyRequiredInputs.ColumnIds(applicable));
+            }
+        }
+
+        return result;
+    }
+
     /// <summary>Незаповнені входи всіх рядків зрізу (порядок — рядки за <c>Id</c>, колонки — перша поява).</summary>
     /// <param name="plan">План (<see cref="PlanAsync"/>).</param>
     /// <param name="table">Таблиця.</param>
@@ -72,7 +128,26 @@ public sealed class RequiredInputsScanner(
         IReadOnlyList<CellRecord> cells,
         IReadOnlyDictionary<string, long> rowIds,
         string? language)
+        => Scan(plan, table, columnsById, cells, rowIds, language, int.MaxValue, _ => true, out _);
+
+    /// <summary>
+    /// ✎ Огляд H4: те саме зі стелею — у список потрапляє щонайбільше <paramref name="limit"/> повідомлень, що проходять
+    /// <paramref name="include"/>, а <paramref name="total"/> рахує всі такі (подання й «Перевірити» не будують мегабайтних
+    /// переліків під винятковим замком).
+    /// </summary>
+    public static List<Validation.ValidationMessage> Scan(
+        RequiredInputPlan plan,
+        TableDef table,
+        IReadOnlyDictionary<int, ColumnDef> columnsById,
+        IReadOnlyList<CellRecord> cells,
+        IReadOnlyDictionary<string, long> rowIds,
+        string? language,
+        int limit,
+        Func<Validation.ValidationMessage, bool> include,
+        out int total)
     {
+        ArgumentNullException.ThrowIfNull(include);
+        total = 0;
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(cells);
@@ -118,7 +193,19 @@ public sealed class RequiredInputsScanner(
                        && Recalculation.ColumnDefaultValues.HasEffectiveDefault(table, rowKey, columnId));
 
             var missing = MethodologyRequiredInputs.EvaluateRow(plan.Applicable, plan.ColumnIds, ValueOf, IsFilled, humanBatch: true);
-            messages.AddRange(missing.Messages(table.Id, columnsById, rowKey, language, rendered).Where(m => m.ColumnCode is not null));
+            foreach (var message in missing.Messages(table.Id, columnsById, rowKey, language, rendered))
+            {
+                if (message.ColumnCode is null || !include(message))
+                {
+                    continue;
+                }
+
+                total++;
+                if (messages.Count < limit)
+                {
+                    messages.Add(message);
+                }
+            }
         }
 
         return messages;

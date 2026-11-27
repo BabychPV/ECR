@@ -86,29 +86,40 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
 
     private const int MaxCommandsBound = 18;
 
+    /// <summary>
+    /// ✎ Огляд M1 (D-577, L6): кожна таблиця аркуша — своя методологія з опублікованою версією й обов'язковим входом.
+    /// Перевірка входів подання планує ОДИН раз на аркуш: прив'язки таблиць, межі періоду, версії, правила, вимоги, поля
+    /// читання, підписи — по одному зверненню на вид даних для всіх методологій (<c>MethodologyRequiredInputs.PrefetchAsync</c>),
+    /// зрізи екземплярів уже прочитано валідацією. Замір 27.11: 25 = 18 + 7 під замком аркуша, однаково на 3 і на 12 таблицях.
+    /// Без наперед прочитаного — 35 і 80 (по 5 звернень на таблицю): мутація червонить рівність.
+    /// </summary>
+    private const int MaxCommandsRequiredInputs = MaxCommandsBound + 7;
+
     private static readonly AsyncLocal<StrongBox<bool>?> Measuring = new();
 
     private static int _counter;
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "P3")]
-    public async Task Подання_аркуша_робить_стільки_ж_звернень_до_БД_на_3_і_на_12_таблицях(bool bindLastTable)
+    public async Task Подання_аркуша_робить_стільки_ж_звернень_до_БД_на_3_і_на_12_таблицях(bool bindLastTable, bool requiredInputs)
     {
         // Розігрів: перше подання в процесі платить за модель EF і кеш планів.
-        var warm = await ArrangeAsync(tableCount: 1, bindLastTable);
-        await SubmitMeasuredAsync(warm);
+        var warm = await ArrangeAsync(tableCount: 1, bindLastTable, requiredInputs);
+        await SubmitMeasuredAsync(warm, requiredInputs);
 
         // ⚠ Прив'язана саме ОСТАННЯ таблиця аркуша: поштучний цикл, що
         // виходить на першій прив'язаній, пройшов би тоді всі N таблиць.
-        var small = await ArrangeAsync(tableCount: 3, bindLastTable);
-        var large = await ArrangeAsync(tableCount: 12, bindLastTable);
+        // ✎ Огляд M1: з обов'язковими входами — прив'язана КОЖНА таблиця (план на аркуш, а не на таблицю).
+        var small = await ArrangeAsync(tableCount: 3, bindLastTable, requiredInputs);
+        var large = await ArrangeAsync(tableCount: 12, bindLastTable, requiredInputs);
 
-        var (smallCount, smallDetail) = await SubmitMeasuredAsync(small);
-        var (largeCount, largeDetail) = await SubmitMeasuredAsync(large);
+        var (smallCount, smallDetail) = await SubmitMeasuredAsync(small, requiredInputs);
+        var (largeCount, largeDetail) = await SubmitMeasuredAsync(large, requiredInputs);
 
         // ⛔ Подання справді зняло всі клітинки — інакше «мало звернень»
         // доводило б лише, що зріз порожній.
@@ -124,7 +135,7 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
         Assert.Equal(1, CountOf(largeDetail, "ecr:f5-cascade-gate"));
         Assert.Contains("ecr:f5-cascade-gate */ DECLARE @t", largeDetail, StringComparison.Ordinal); // розширений шлях
 
-        var ceiling = bindLastTable ? MaxCommandsBound : MaxCommandsUnbound;
+        var ceiling = requiredInputs ? MaxCommandsRequiredInputs : bindLastTable ? MaxCommandsBound : MaxCommandsUnbound;
         Assert.True(
             largeCount <= ceiling,
             $"Подання: {largeCount} звернень до БД, стеля {ceiling}.\n{largeDetail}");
@@ -194,10 +205,10 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
     }
 
     /// <summary>Одне подання під лічильником; повертає число звернень і їх розклад.</summary>
-    private async Task<(int Total, string Detail)> SubmitMeasuredAsync(Scenario doc)
+    private async Task<(int Total, string Detail)> SubmitMeasuredAsync(Scenario doc, bool requiredInputs = false)
     {
         await using var db = CreateContext();
-        var handler = BuildSubmit(db, doc);
+        var handler = BuildSubmit(db, doc, requiredInputs);
 
         var texts = new List<string>();
         using var counter = new SqlClientCommandCounter(new CommandTally(), command =>
@@ -264,7 +275,7 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
     /// перша колонка обов'язкова (щоб валідація читала кожну таблицю), усі
     /// клітинки заповнені (щоб подання пройшло).
     /// </summary>
-    private async Task<Scenario> ArrangeAsync(int tableCount, bool bindLastTable = false)
+    private async Task<Scenario> ArrangeAsync(int tableCount, bool bindLastTable = false, bool requiredInputs = false)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(columnCount: ColumnsPerTable, rowCount: RowsPerTable);
@@ -313,7 +324,30 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
                 tables.Add((table.Id, [.. columns.Select(c => c.Id)], rowIds));
             }
 
-            if (bindLastTable)
+            if (requiredInputs)
+            {
+                // ✎ Огляд M1: кожна таблиця — своя методологія з опублікованою версією (правило «усі рядки») і обов'язковим
+                // входом у другій (числовій) колонці, як на live (методологія на таблицю). Клітинки заповнені — подання проходить.
+                foreach (var (tableId, columnIds, _) in tables)
+                {
+                    var methodology = new Ecr.Domain.Entities.Calculations.Methodology(
+                        EcrCode.Create($"SQ_{Guid.NewGuid():N}"[..20]), Name("m"));
+                    db.Methodologies.Add(methodology);
+                    await db.SaveChangesAsync();
+                    var version = new Ecr.Domain.Entities.Calculations.MethodologyVersion(
+                        methodology.Id, "1.0", CalculationLevel.Configuration, 1, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+                    version.Publish(2, "m1", new DateOnly(2026, 1, 1), testsPassed: true, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+                    db.MethodologyVersions.Add(version);
+                    await db.SaveChangesAsync();
+                    db.MethodologyRules.Add(new Ecr.Domain.Entities.Calculations.MethodologyRule(version.Id, EcrCode.Create("ALL"), "{}", 100));
+                    db.CalculationBindings.Add(new CalculationBinding(tableId, columnIds[^1], methodology.Id, "tons", "{}"));
+                    db.MethodologyRequiredInputs.Add(new Ecr.Domain.Entities.Calculations.MethodologyRequiredInput(
+                        version.Id, columnIds[1], RequiredInputSeverity.Block, hint: null));
+                }
+
+                await db.SaveChangesAsync();
+            }
+            else if (bindLastTable)
             {
                 // `MethodologyId` навмисно без FK (Q-222) — самої методології не треба.
                 var (lastTableId, lastColumns, _) = tables[^1];
@@ -352,7 +386,7 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
         return new Scenario(doc, tables);
     }
 
-    private static SubmitSheetHandler BuildSubmit(EcrDbContext db, Scenario doc)
+    private static SubmitSheetHandler BuildSubmit(EcrDbContext db, Scenario doc, bool requiredInputs = false)
     {
         var bulk = new BulkCellLoader(db.Database.GetConnectionString()!, 1000);
         var clock = new FixedClock(new DateTime(2026, 2, 1, 9, 0, 0, DateTimeKind.Utc));
@@ -383,6 +417,9 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
         var methodologies = new MethodologyStore(db);
 
         var metadata = Metadata(doc);
+        var snapshot = metadata.GetAsync(doc.TemplateVersionId, CancellationToken.None).GetAwaiter().GetResult();
+        access.ReadScopeAsync(Arg.Any<AccessProfile>(), doc.DocumentId, Arg.Any<CancellationToken>())
+              .Returns(call => DocumentReadScope.For(call.Arg<AccessProfile>(), doc.ProjectId, snapshot));
 
         return new SubmitSheetHandler(
             new NormalizedCellStore(db), new RowStore(db, bulk, clock), new WorkflowStore(db), documents,
@@ -395,7 +432,8 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
             new TemplateVersionStore(db),
             new RegistryStore(db),
             new AuditWriter(db),
-            cascadeGate: NonConsumerCascadeGate(db));
+            cascadeGate: NonConsumerCascadeGate(db),
+            requiredInputs: requiredInputs ? new Ecr.Application.Documents.RequiredInputs.RequiredInputsScanner(methodologies, new PeriodStore(db)) : null);
     }
 
     /// <summary>
