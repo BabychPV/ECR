@@ -965,6 +965,17 @@ public sealed class GetTableSliceHandler(
             return (calculatedBy, readBy);
         }
 
+        // ⛔ RD-04 (TableSliceMethodologyQueryCountTests): теплий зріз — лише склад прив'язок; походження колонок — з пам'яті на
+        // (таблиця, версії-читачі з колонками, мова) з тим самим строком, що й вибір версій (MethodologyRequiredColumnsCache).
+        var key = string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"col-provenance:{tableDefId}:{language}:{string.Join(';', columns.ByVersion.Select(v => v.VersionId + "=" + string.Join(',', v.Columns.Order())))}");
+        if (memory is not null
+            && memory.TryGetValue(key, out (Dictionary<int, IReadOnlyList<ColumnMethodologyDto>>, Dictionary<int, IReadOnlyList<ColumnMethodologyDto>>) known))
+        {
+            return known;
+        }
+
         foreach (var group in (await methodologies.GetColumnBindingsOfTableAsync(tableDefId, ct).ConfigureAwait(false))
                      .GroupBy(b => b.ColumnDefId))
         {
@@ -995,6 +1006,11 @@ public sealed class GetTableSliceHandler(
             }
         }
 
+        memory?.Set(key, (calculatedBy, readBy), new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = MethodologyRequiredColumnsCache.ResolutionLifetime,
+            Size = 1,
+        });
         return (calculatedBy, readBy);
     }
 
