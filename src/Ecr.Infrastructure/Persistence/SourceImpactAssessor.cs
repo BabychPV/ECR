@@ -259,7 +259,6 @@ internal sealed partial class SourceImpactAssessor(
                 {
                     d.ColumnDefId,
                     d.TableDefId,
-                    TargetTableId = f.TableDefId,
                     TargetId = tc == null ? (int?)null : tc.Id,
                     TargetMonth = tc != null && tc.IsMonthColumn ? (int?)tc.MonthNumber : null,
                 })
@@ -281,23 +280,16 @@ internal sealed partial class SourceImpactAssessor(
             .ToList();
         var changed = seeds.Select(c => c.Id).ToHashSet();
         var tables = seeds.Select(c => c.TableDefId).ToHashSet();
-        for (var grew = true; grew;)
-        {
-            grew = false;
-            foreach (var edge in edges.Where(e => (e.ColumnDefId is { } c && changed.Contains(c))
-                                                  || (e.ColumnDefId is null && e.TableDefId is { } t && tables.Contains(t))))
-            {
-                if (edge.TargetId is not { } target || edge.TargetMonth is not { } month || !wanted.Contains(month))
-                {
-                    return true;
-                }
 
-                // ✎ Огляд M3: змінена похідна колонка змінює й свою таблицю — ребра «уся таблиця» на неї теж ідуть далі.
-                grew |= changed.Add(target) | tables.Add(edge.TargetTableId);
-            }
-        }
-
-        return false;
+        // ✎ Борги 27.11 (п. 7): ОДИН прохід, без транзитивного росту набору (колишній «огляд M3»: ціль ребра додавалась у
+        // `changed`, а її таблиця — у `tables`). Ріст неможливий за побудовою: ребро, що НЕ завершує перевірку, веде в місячну
+        // колонку ЗАПИТАНОГО місяця версії документа, а насіння — це ВСІ такі колонки всіх таблиць цих версій, тож ціль і її
+        // таблиця вже в наборі. Похідна іншого місяця чи не-місячна (зокрема в таблиці поза насінням) одразу дає «так».
+        // Мутант без `tables.Add` був еквівалентним (тест не червонів) — мертву гілку прибрано, поведінку стереже
+        // `SourceImpactCascadeParityTests.Ребро_вся_таблиця_через_похідну_колонку_дає_річну_колонку`.
+        return edges.Any(e => ((e.ColumnDefId is { } c && changed.Contains(c))
+                               || (e.ColumnDefId is null && e.TableDefId is { } t && tables.Contains(t)))
+                              && (e.TargetId is null || e.TargetMonth is not { } month || !wanted.Contains(month)));
     }
 
     private async Task<List<SourceImpactConsumer>> ConsumersAsync(
