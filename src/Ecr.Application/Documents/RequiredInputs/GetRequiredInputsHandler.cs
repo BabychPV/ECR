@@ -2,6 +2,7 @@
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace Ecr.Application.Documents.RequiredInputs;
 
@@ -20,8 +21,16 @@ public sealed class GetRequiredInputsHandler(
     IRowStore rowStore,
     ICellStore cellStore,
     IMetadataCache metadata,
-    RequiredInputsScanner scanner)
+    RequiredInputsScanner scanner,
+    // ✎ Огляд M2: пам'ять переліку на (екземпляр, версії рядків, мова); без неї (тести) — щоразу зріз.
+    Microsoft.Extensions.Caching.Memory.IMemoryCache? memory = null)
 {
+    /// <summary>
+    /// ✎ Огляд M2: скільки живе перелік у пам'яті. Ключ — найновіша версія рядків екземпляра (будь-яка правка рядка її піднімає),
+    /// тож правка в самому екземплярі перелік оновлює одразу; запис у колонку місяця-власника (Q-17) — щонайпізніше за цей час.
+    /// </summary>
+    public static readonly TimeSpan CacheLifetime = TimeSpan.FromSeconds(30);
+
     /// <summary>Стеля комірок у відповіді (решта — у <see cref="RequiredInputsDto.Total"/>).</summary>
     public const int MaxCells = 5000;
 
@@ -55,15 +64,13 @@ public sealed class GetRequiredInputsHandler(
             return new RequiredInputsDto(tableInstanceId, [], 0, Truncated: false);
         }
 
-        var rowIds = await rowStore.GetRowIdsAsync(tableInstanceId, period, ct).ConfigureAwait(false);
-        var cells = await cellStore.ReadSliceAsync(tableInstanceId, period, ct).ConfigureAwait(false);
+        var all = await ScanAsync(tableInstanceId, period, plan, table, snapshot, ct).ConfigureAwait(false);
 
         var columnIds = table.Columns.Where(c => !c.IsDeleted)
             .GroupBy(c => c.Code, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.Ordinal);
-        var visible = RequiredInputsScanner
-            .Scan(plan, table, snapshot.ColumnsById, cells, rowIds, currentUser.Language)
-            .Where(m => m.ColumnCode is not null && columnIds.TryGetValue(m.ColumnCode, out var columnId) && readable.CanReadColumn(columnId))
+        var visible = all
+            .Where(m => m.ColumnCode is not null && columnIds.ContainsKey(m.ColumnCode) && readable.CanReadAt(instance.TableDefId, m.ColumnCode))
             .ToList();
 
         return new RequiredInputsDto(
@@ -76,6 +83,44 @@ public sealed class GetRequiredInputsHandler(
             ],
             visible.Count,
             Truncated: visible.Count > MaxCells);
+    }
+
+    /// <summary>
+    /// ✎ Огляд M2: перелік без фільтра видимості — з пам'яті, якщо версії рядків екземпляра не змінились (одне легке читання
+    /// версій замість повного зрізу), інакше зріз і сканування; фільтр читача — завжди після пам'яті.
+    /// </summary>
+    private async Task<List<Validation.ValidationMessage>> ScanAsync(
+        long tableInstanceId, Domain.ValueObjects.PeriodKey period, RequiredInputPlan plan,
+        Domain.Entities.Configuration.TableDef table, Domain.Entities.Configuration.TemplateVersionSnapshot snapshot,
+        CancellationToken ct)
+    {
+        string? key = null;
+        if (memory is not null)
+        {
+            var versions = await rowStore.GetRowVersionsAsync(tableInstanceId, period, ct).ConfigureAwait(false);
+            var newest = versions.Values.DefaultIfEmpty(string.Empty).Max(StringComparer.Ordinal);
+            key = string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"reqin:{tableInstanceId}:{versions.Count}:{newest}:{currentUser.Language}");
+            if (memory.TryGetValue(key, out List<Validation.ValidationMessage>? cached) && cached is not null)
+            {
+                return cached;
+            }
+        }
+
+        var rowIds = await rowStore.GetRowIdsAsync(tableInstanceId, period, ct).ConfigureAwait(false);
+        var cells = await cellStore.ReadSliceAsync(tableInstanceId, period, ct).ConfigureAwait(false);
+        var scanned = RequiredInputsScanner.Scan(plan, table, snapshot.ColumnsById, cells, rowIds, currentUser.Language);
+        if (key is not null)
+        {
+            memory!.Set(key, scanned, new Microsoft.Extensions.Caching.Memory.MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = CacheLifetime,
+                Size = 1 + (scanned.Count / 100),
+            });
+        }
+
+        return scanned;
     }
 }
 

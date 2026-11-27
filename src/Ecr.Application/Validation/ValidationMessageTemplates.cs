@@ -93,6 +93,9 @@ public static class ValidationMessageTemplates
     /// <summary>✎ 25.11: та сама колонка потрібна кільком методологіям — одне повідомлення з переліком.</summary>
     public const string RequiredInputMany = "validation.methodology.requiredInputMany";
 
+    /// <summary>✎ D-577 (огляд H4): знахідок порожніх входів методологій більше за стелю результату — решта одним числом.</summary>
+    public const string RequiredInputMore = "validation.methodology.requiredInputMore";
+
     /// <summary>✎ 25.11: колонку вимоги методології не знайдено у версії шаблону (C1) — перевірку пропущено.</summary>
     public const string RequiredInputUnmapped = "validation.methodology.requiredInputUnmapped";
 
@@ -140,6 +143,10 @@ public static class ValidationMessageTemplates
             "Access rule: {expression}.",
             "Правило доступа: {expression}.",
             "Қол жеткізу ережесі: {expression}."),
+        [RequiredInputMore] = (
+            "{count} more empty required input(s) of methodologies are not listed.",
+            "Ещё незаполненных обязательных входов методологий: {count} (не показаны).",
+            "Әдістемелердің тағы {count} толтырылмаған міндетті кірісі көрсетілмеген."),
         [RequiredInputOne] = (
             "Column \"{column}\" is required for methodology {methodologies}.",
             "Колонка «{column}» обязательна для методологии {methodologies}.",

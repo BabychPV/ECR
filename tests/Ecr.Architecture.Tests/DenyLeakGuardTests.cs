@@ -62,7 +62,7 @@ public sealed partial class DenyLeakGuardTests
         ["src/Ecr.Application/Documents/RequiredInputs/MethodologyRequiredInputs.cs"] =
             "виробник: обов'язкові входи методологій (D-577, винесено з PatchCellsHandler); назовні — через PATCH (фільтр там), перелік/подання/«Перевірити» нижче",
         ["src/Ecr.Application/Documents/RequiredInputs/RequiredInputsScanner.cs"] =
-            "виробник: вимоги по всіх рядках зрізу; GetRequiredInputsHandler відсіює сховані колонки (CanReadColumn), подання — HiddenValidationIssues.ForViewer, «Перевірити» — фільтр читання результату",
+            "виробник: вимоги по всіх рядках зрізу; GetRequiredInputsHandler відсіює сховані колонки (CanReadAt), подання — HiddenValidationIssues.ForViewer, «Перевірити» — фільтр читання результату",
         ["src/Ecr.Application/Validation/RequiredHeaderCheck.cs"] = "виробник: порожні обов'язкові поля шапки (D-PS); лише коди, без значень",
         ["src/Ecr.Application/Validation/RelationCheckRunner.cs"] = "виробник: зв'язки Check (джерело — правило 1)",
         ["src/Ecr.Application/Validation/PermitCoverageIssues.cs"] =

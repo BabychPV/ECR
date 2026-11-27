@@ -84,7 +84,45 @@ public sealed class MissingInputsRowIssueTests
         var row = Assert.Single(profile.MissingInputRows);
         Assert.Equal(new RejectedRow(TableInstance, 2, "R001", DocumentId, Methodology), row);
         Assert.Equal(["Qty"], profile.MissingArgumentsOf(row));
-        Assert.Empty(profile.StepErrorRows);
+    }
+
+    /// <summary>
+    /// ✎ Огляд M3 (D-578): рядок з частиною виходів називає лише аргументи ВІДСУТНІХ виходів — поле, яке читає лише вихід, що
+    /// вже є (тут Density у гілці Total, яку не взято), рядок не винить.
+    /// </summary>
+    /// <remarks>Мутація (локально): у <c>MissingArgumentsOf</c> ігнорувати <c>reachable</c> (усі формули) — червоний (Density).</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "D-578")]
+    public async Task M3_частковий_рядок_називає_лише_аргументи_відсутніх_виходів()
+    {
+        var profile = await RunAsync("if(@Qty > 0, 1, @Density)", [5m], second: "@Extra * 1");
+
+        var row = Assert.Single(profile.MissingInputRows);
+        Assert.Equal(["Extra"], profile.MissingArgumentsOf(row));
+    }
+
+    /// <summary>
+    /// ✎ Огляд M3 (D-578): рядок з частиною виходів, де відсутній вихід ще й упав кроком, має ОБИДВІ проблеми — StepError (наявна,
+    /// її тотожність не змінюється) і MissingInputs; рядок без жодного значення — лише MissingInputs, як доти (B66).
+    /// </summary>
+    /// <remarks>Мутація (локально): повернути <c>else</c> перед гілкою StepError в оркестраторі — червоний (StepError порожній).</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "D-578")]
+    public async Task M3_частковий_рядок_зберігає_StepError_поруч_із_MissingInputs()
+    {
+        var profile = await RunAsync("@Qty * 2", [5m, null], second: "1");
+
+        var missing = Assert.Single(profile.MissingInputRows);
+        var error = Assert.Single(profile.StepErrorRows);
+        Assert.Equal(missing, error.Row);
+        Assert.Equal("Total", error.StepCode);
+
+        // Рядок без жодного значення — лише MissingInputs (B66, як доти).
+        var none = await RunAsync("@Qty * 2", [null, 3m]);
+        Assert.Single(none.MissingInputRows);
+        Assert.Empty(none.StepErrorRows);
     }
 
     [Fact]

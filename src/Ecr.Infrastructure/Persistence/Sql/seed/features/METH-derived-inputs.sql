@@ -3,6 +3,7 @@ INSERT INTO #UiEn ([Key], Lang, Val, Scope)
 SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
     (N'methodologies.severityOptional', N'en', N'Optional (may be empty)', 1),
+    (N'validation.methodology.requiredInputMore', N'en', N'{count} more empty required input(s) of methodologies are not listed.', 1),
     (N'methodologies.derivedInputs', N'en', N'Read by the script (required automatically)', 1),
     (N'methodologies.derivedInputsHint', N'en', N'Every field the script reads is required to submit the sheet in the rows this methodology applies to. Saving a cell is not blocked. To relax a field, add it to the list above as Warn or Optional.', 1),
     (N'methodologies.derivedUnavailable', N'en', N'The automatic list is not available for this version (the script was not compiled or its fields were not recorded). Only the list above applies.', 1),
@@ -19,6 +20,8 @@ INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
     (N'methodologies.severityOptional', N'ru', N'Необязательное (может быть пустым)'),
+    (N'validation.methodology.requiredInputMore', N'ru', N'Ещё незаполненных обязательных входов методологий: {count} (не показаны).'),
+    (N'validation.methodology.requiredInputMore', N'kz', N'Әдістемелердің тағы {count} толтырылмаған міндетті кірісі көрсетілмеген.'),
     (N'methodologies.severityOptional', N'kz', N'Міндетті емес (бос болуы мүмкін)'),
     (N'methodologies.derivedInputs', N'ru', N'Читает скрипт (обязательные автоматически)'),
     (N'methodologies.derivedInputs', N'kz', N'Скрипт оқиды (автоматты түрде міндетті)'),

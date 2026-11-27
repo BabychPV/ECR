@@ -9,6 +9,7 @@
 --     вимагає поле лише від рядків, до яких методологія застосовна (дизельний рядок не вимагає полів газу);
 --   * дефолти колонок (C-5) і колонки власників річної розкладки (Q-17) не враховано — порожня тут може бути заповненою
 --     дефолтом чи місяцем-власником на екрані;
+--   * версії-скрипти без правил відбору — лише попередження (огляд H3), тут не рахуються;
 --   * рядок рахується лише «розпочатий» (є хоч одне введене непорожнє значення), як Q4 (порожні запасні — ні).
 -- Винятки методолога (calc.MethodologyRequiredInput зі Severity 1 = Warn чи 2 = Optional) знімають вимогу; Severity 0 =
 -- Block уже блокує збереження сьогодні — такі колонки НЕ рахуються як «нові».
@@ -22,8 +23,7 @@ WITH months AS (
     SELECT DISTINCT i.PeriodKey, i.DocumentId, i.Id AS TableInstanceId, i.TableDefId
       FROM doc.TableInstance AS i
      WHERE i.PeriodKey > @Year * 100 AND i.PeriodKey < (@Year + 1) * 100
-       AND (@DocumentId IS NULL OR i.DocumentId = @DocumentId)
-       AND i.SheetCopyId IS NULL),
+       AND (@DocumentId IS NULL OR i.DocumentId = @DocumentId)),  -- оригінали й копії аркушів (RS)
 current_versions AS (
     SELECT m.TableInstanceId, m.PeriodKey, m.DocumentId, m.TableDefId, v.Id AS VersionId, v.MethodologyId
       FROM months AS m
@@ -35,12 +35,17 @@ current_versions AS (
                      AND mv.EffectiveFrom <= EOMONTH(DATEFROMPARTS(m.PeriodKey / 100, m.PeriodKey % 100, 1))
                    ORDER BY mv.EffectiveFrom DESC, mv.Id DESC) AS v
      WHERE v.Engine = 1
+       -- огляд H3: версія-скрипт БЕЗ правил відбору дає лише попередження (не блок подання) — тут не рахується
+       AND EXISTS (SELECT 1 FROM calc.MethodologyRule AS mr WHERE mr.MethodologyVersionId = v.Id AND mr.IsActive = 1)
        AND NOT EXISTS (SELECT 1 FROM calc.MethodologyReadField AS f WHERE f.MethodologyVersionId = v.Id AND f.FieldCode = N'*')),
 derived AS (
     SELECT DISTINCT cv.TableInstanceId, cv.PeriodKey, cv.DocumentId, c.Id AS ColumnDefId
       FROM current_versions AS cv
       JOIN calc.MethodologyReadField AS f ON f.MethodologyVersionId = cv.VersionId AND f.FieldCode <> N'' AND f.OtherMonths = 0
       JOIN cfg.ColumnDef AS c ON c.TableDefId = cv.TableDefId AND c.Code = f.FieldCode AND c.IsDeleted = 0
+                             -- огляд H3: лише поля вводу — не Formula (6) / Calculated (8), не «лише читання», без формули шаблону
+                             AND c.DataType NOT IN (6, 8) AND c.IsReadOnly = 0
+                             AND NOT EXISTS (SELECT 1 FROM cfg.FormulaDef AS fd WHERE fd.ColumnDefId = c.Id AND fd.IsDeleted = 0)
      WHERE NOT EXISTS (SELECT 1 FROM calc.MethodologyRequiredInput AS r
                         WHERE r.MethodologyVersionId = cv.VersionId AND r.ColumnDefId = c.Id)),
 started AS (

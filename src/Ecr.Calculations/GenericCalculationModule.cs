@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
@@ -666,8 +667,12 @@ public sealed class GenericCalculationModule(
         {
             // AN-164: рядок без жодного значення — назвати аргументи, яких бракує (інакше тихий нуль).
             // ✎ D-578 (Q2): і рядок з частиною виходів — коли хоч одного виходу немає (розбір формул лише тоді, не на кожен рядок).
+            // ✎ Огляд M3: лише аргументи ВІДСУТНІХ виходів (їхні формули й проміжні, транзитивно) — поле, яке читає лише
+            // вихід, що вже є, рядок не винить.
             MissingArguments = outputs.Count > 0 && ScriptCalculationModule.AnyOutputAbsent(outputs.Select(o => o.Code), values)
-                ? MissingArgumentsOf(ordered, binding.Libraries, arguments, optionalArguments, input.Arguments)
+                ? MissingArgumentsOf(
+                    ordered, binding.Libraries, arguments, optionalArguments, input.Arguments,
+                    AbsentOutputs(outputs.Select(o => o.Code), values))
                 : null,
 
             // B66: вихід без результату через помилку — проблема рядка StepError (раніше лише трейс, а на Off — ніде).
@@ -681,15 +686,16 @@ public sealed class GenericCalculationModule(
     /// AN-164: аргументи <c>@Code</c> формул версії й бібліотек, яких рядок не має (немає комірки, порожня або <c>#ARG</c>).
     /// </summary>
     /// <remarks>
-    /// ⚠ Кличеться лише для рядка без жодного значення (рідкісний випадок): розбір усіх формул на кожен рядок коштував би
-    /// парсером мільйони разів за відповідь, яка потрібна тільки тут. Порядок — порядок формул, без повторів.
+    /// ⚠ Кличеться лише для рядка, якому бракує хоч одного виходу; розбір формули — раз на вираз (✎ огляд M3, кеш модуля),
+    /// а не на кожен рядок. Лише формули відсутніх виходів (транзитивно). Порядок — порядок формул, без повторів.
     /// </remarks>
     private List<string>? MissingArgumentsOf(
         IReadOnlyList<MethodologyFormula> formulas,
         CalculationLibraries? libraries,
         Dictionary<string, ExpressionValue> arguments,
         IReadOnlySet<string> optionalArguments,
-        IReadOnlyList<CalculationArgument> raw)
+        IReadOnlyList<CalculationArgument> raw,
+        IReadOnlyCollection<string> absentOutputs)
     {
         // ✎ D-571: заповнена Lookup-комірка (лише id запису) у Legacy для формули — null (D-161), але вона НЕ відсутня: за нею
         // правило й відібрало рядок, і скрипт її відсутньою не називає (розбіжність паритету C07_07_01 на копії live).
@@ -697,15 +703,11 @@ public sealed class GenericCalculationModule(
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var missing = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var formula in formulas.Concat(libraries?.Versions.SelectMany(v => v.Formulas) ?? []))
+        List<MethodologyFormula> all = [.. formulas.Concat(libraries?.Versions.SelectMany(v => v.Formulas) ?? [])];
+        var reachable = ReachableFrom(all, absentOutputs);
+        foreach (var formula in all.Where(f => reachable is null || reachable.Contains(f.Code)))
         {
-            var parsed = formulaEngine.Parse(formula.Expression, ExpressionDialect.Methodology);
-            if (!parsed.IsSuccess || parsed.Expression is null)
-            {
-                continue;
-            }
-
-            foreach (var reference in ReferenceCollector.Collect(parsed.Expression.Root))
+            foreach (var reference in ReferencesOf(formula.Expression))
             {
                 // ✎ D-556: необов'язковий аргумент (`Name?` в ArgumentsCsv) за визначенням може бути порожнім і НЕ є «відсутнім
                 // входом»: інакше рядок, якому просто не підійшла гілка, називав виною поле, яке методологія дозволила
@@ -725,6 +727,64 @@ public sealed class GenericCalculationModule(
         }
 
         return missing.Count == 0 ? null : missing;
+    }
+
+    /// <summary>✎ Огляд M3: розібрані посилання формули — раз на вираз (модуль живе прогін), а не на кожен рядок.</summary>
+    private readonly ConcurrentDictionary<string, (TraceInputKind Kind, string Code)[]> _references = new(StringComparer.Ordinal);
+
+    private (TraceInputKind Kind, string Code)[] ReferencesOf(string expression)
+        => _references.GetOrAdd(expression, e =>
+        {
+            var parsed = formulaEngine.Parse(e, ExpressionDialect.Methodology);
+            return parsed.IsSuccess && parsed.Expression is not null
+                ? [.. ReferenceCollector.Collect(parsed.Expression.Root).Select(r => (r.Kind, r.Code))]
+                : [];
+        });
+
+    /// <summary>Коди оголошених виходів, яких рядок не дав.</summary>
+    private static List<string> AbsentOutputs(IEnumerable<string> outputCodes, IReadOnlyCollection<CalculationOutputValue> values)
+    {
+        var produced = values.Select(v => v.OutputCode).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return [.. outputCodes.Where(code => !produced.Contains(code))];
+    }
+
+    /// <summary>
+    /// ✎ Огляд M3: формули, від яких залежать відсутні виходи (транзитивно через <c>!Formula</c>); <c>null</c> — невідомо (вихід
+    /// без формули чи посилання на формулу поза переліком), тоді — усі формули, як доти.
+    /// </summary>
+    private HashSet<string>? ReachableFrom(IReadOnlyList<MethodologyFormula> formulas, IReadOnlyCollection<string> absentOutputs)
+    {
+        var byCode = new Dictionary<string, MethodologyFormula>(StringComparer.OrdinalIgnoreCase);
+        foreach (var formula in formulas)
+        {
+            byCode.TryAdd(formula.Code, formula);
+        }
+
+        var reachable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pending = new Stack<string>(absentOutputs);
+        while (pending.Count > 0)
+        {
+            var code = pending.Pop();
+            if (!byCode.TryGetValue(code, out var formula))
+            {
+                return null;
+            }
+
+            if (!reachable.Add(formula.Code))
+            {
+                continue;
+            }
+
+            foreach (var (kind, referenced) in ReferencesOf(formula.Expression))
+            {
+                if (kind == TraceInputKind.Formula)
+                {
+                    pending.Push(referenced);
+                }
+            }
+        }
+
+        return reachable;
     }
 
     /// <summary>

@@ -291,6 +291,8 @@ public sealed class ScriptCalculationModule(
             // Рядок без жодного значення — назвати обов'язкові поля, яких бракує (інакше тихий нуль).
             // ✎ D-578 (Q2, рішення людини 26.11: «бракує даних — не 0»): і рядок, що дав ЧАСТИНУ виходів, — коли хоч одного
             // виходу немає, а поле, яке читає скрипт, порожнє, — рядок теж отримує названу проблему MissingInputs.
+            // ⚠ Огляд M3: у скрипті вихід не зв'язаний статично з полями (поля — на весь скрипт, `RowFields`), тож названо всі
+            // порожні обов'язкові поля скрипта, а не лише полів відсутнього виходу (у формул — лише їх, GenericCalculationModule).
             MissingArguments = script.Outputs.Count > 0 && AnyOutputAbsent(script.Outputs.Select(o => o.Code), values)
                 ? MissingArgumentsOf(runtime.Program, arguments)
                 : null,
