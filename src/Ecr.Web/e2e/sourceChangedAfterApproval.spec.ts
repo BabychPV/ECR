@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type APIResponse, type Locator, type Page } from '@playwright/test';
 
 /**
  * ✎ F5-R (D-570, рішення людини P-1122-4: «так познач щоб користувач бачив це»): на справжньому стенді й у справжньому
@@ -63,14 +63,15 @@ test.describe('Джерело змінено після затвердження
     });
 
     await page.goto(`/documents/${String(firstId)}?periodKey=${PeriodKey}`);
-    await revealCalcPanels(page);
-    const cause = page.getByTestId('document-calc-issue').filter({ has: page.getByTestId('document-calc-issue-source-hint') });
+    const issues = await revealCalcPanels(page, (list) =>
+      list.getByTestId('document-calc-issue').filter({ has: page.getByTestId('document-calc-issue-source-hint') }));
+    const cause = issues.getByTestId('document-calc-issue').filter({ has: page.getByTestId('document-calc-issue-source-hint') });
     await expect(cause, 'причини «джерело змінено» в панелі немає').toBeVisible({ timeout: 30_000 });
     await expect(cause).toHaveAttribute('data-kind', 'sourceChanged');
     await expect(cause.getByTestId('document-calc-issue-title')).toContainText(/HSE400/);
     await expect(cause.getByTestId('document-calc-issue-source-dates').locator('time')).toHaveCount(2);
     await expect(cause.getByTestId('document-calc-issue-source-hint')).not.toContainText('document.calcIssues');
-    await expect(page.getByTestId('document-calc-issues')).toHaveAttribute('data-blocking', 'false');
+    await expect(issues.getByTestId('document-calc-issues')).toHaveAttribute('data-blocking', 'false');
   });
 
   /**
@@ -129,8 +130,9 @@ test.describe('Джерело змінено після затвердження
     await page.goto(`/documents/${String(arranged.documentId)}?periodKey=${String(arranged.october)}`);
     await expect(page).toHaveURL(new RegExp(`periodKey=${String(arranged.anchor)}`), { timeout: 90_000 });
 
-    await revealCalcPanels(page);
-    const panel = page.locator(`[data-testid="document-calc-issues"][data-period="${String(arranged.october)}"]`);
+    const octoberPanel = `[data-testid="document-calc-issues"][data-period="${String(arranged.october)}"]`;
+    const issues = await revealCalcPanels(page, (list) => list.locator(octoberPanel));
+    const panel = issues.locator(octoberPanel);
     await expect(panel, 'панелі проблем жовтня на якорі року немає').toBeVisible({ timeout: 60_000 });
     expect(yearRead, 'сторінка «рік» не читала проблеми року (year=true)').toBe(true);
     await expect(panel.getByTestId('document-calc-issues-title')).toContainText(/October|Жовт|Октябр|Қазан/i);
@@ -268,12 +270,31 @@ async function signIn(page: Page, user: string, password: string): Promise<void>
 /**
  * ✎ b14 doc-notices-compact: проблеми розрахунку над сіткою — ОДНА смуга, згорнута; панелі місяців — у її «Details →
  * Technical details». Розгорнути обидва рівні (Details пам'ятається між відкриттями, Technical details — ні).
+ *
+ * ✎ Борги 27.11 (п. 8, флейк :68 / :134): смуга живе в РЯДКУ ПОВІДОМЛЕНЬ (DOCUX L7, RC b18), а рядок показує лише
+ * НАЙВАЖЛИВІШЕ повідомлення. Будь-яке вище за пріоритетом, що з'явилось ПІСЛЯ розгортання (5 — «Updated by …» від
+ * автоперерахунку D-577 через ~20 с після правок фікстури чи правки іншої специфікації стенда; 4 — чужий перехід стану),
+ * забирає смугу з рядка за «+N more» — панель зникає, а повернувшись, смуга монтується заново з ЗГОРНУТИМИ «Technical
+ * details». Тож смуга читається з вкладки Status інспектора (`NoticeList`: усі повідомлення за ключем, перестановка не
+ * перемонтовує), а розгортання повторюється, доки шукане не видно (`toPass`).
  */
-async function revealCalcPanels(page: Page): Promise<void> {
-  const toggle = page.getByTestId('document-calc-strip-toggle');
-  await expect(toggle, 'смуги проблем розрахунку немає').toBeVisible({ timeout: 60_000 });
-  if ((await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click();
-  const technical = page.getByTestId('document-calc-strip-technical-toggle');
-  await expect(technical).toBeVisible();
-  if ((await technical.getAttribute('aria-expanded')) === 'false') await technical.click();
+async function revealCalcPanels(page: Page, wanted: (list: Locator) => Locator): Promise<Locator> {
+  const list = page.getByTestId('document-notice-list');
+  const statusTab = list.or(page.getByTestId('document-notice-list-empty'));
+  await expect(async () => {
+    if (!(await statusTab.first().isVisible())) {
+      const url = new URL(page.url());
+      url.searchParams.set('panel', 'status');
+      await page.goto(url.toString());
+    }
+    const toggle = list.getByTestId('document-calc-strip-toggle');
+    await expect(toggle, 'смуги проблем розрахунку у вкладці Status немає').toBeVisible({ timeout: 15_000 });
+    if ((await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click();
+    const technical = list.getByTestId('document-calc-strip-technical-toggle');
+    await expect(technical).toBeVisible();
+    if ((await technical.getAttribute('aria-expanded')) === 'false') await technical.click();
+    await expect(wanted(list).first()).toBeVisible({ timeout: 10_000 });
+  }).toPass({ timeout: 120_000 });
+
+  return list;
 }
