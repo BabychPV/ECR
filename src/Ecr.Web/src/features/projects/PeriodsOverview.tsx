@@ -212,7 +212,7 @@ export function PeriodYearTiles({
             </UnstyledButton>
             {canReopen && (
               <Button
-                size="compact-xs"
+                size="xs"
                 variant="subtle"
                 pos="absolute"
                 bottom={4}
