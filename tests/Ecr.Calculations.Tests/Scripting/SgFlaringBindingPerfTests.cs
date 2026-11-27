@@ -97,7 +97,8 @@ public sealed class SgFlaringBindingPerfTests(ITestOutputHelper output)
             $"TOX year: {inputs.Count} rows, {values} output values in {elapsed.TotalSeconds:F1} s ({elapsed.TotalMilliseconds / inputs.Count:F2} ms/row)"));
         Assert.Equal(5840, inputs.Count);
         Assert.True(values > 0);
-        Assert.True(elapsed < TimeSpan.FromSeconds(20), $"TOX year took {elapsed} (measured 6.2 s locally after the pair index; was 52-80 s)");
+        // Стеля 45 с: локально 6,2 с, на CI під навантаженням Evidence — 24 с; без індексу пари — 52-80 с локально (на CI ~4×).
+        Assert.True(elapsed < TimeSpan.FromSeconds(45), $"TOX year took {elapsed} (measured 6.2 s locally / 24 s on CI after the pair index; was 52-80 s)");
     }
 
     private static async Task<(TimeSpan Elapsed, int Values)> RunAsync(ScriptStand stand, List<CalculationInput> inputs)
