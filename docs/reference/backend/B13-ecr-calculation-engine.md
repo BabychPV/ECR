@@ -371,8 +371,7 @@ Retention: `CalculationStep`/`CalculationInput` — не менший, ніж у
 ```
 1. Прочитати дзеркала: AF_Methodology, AF_Formulas, AF_Constants,
    AF_EmissionCalculationWork_Rules  (вони вже в SQL — у PI AF ходити не треба)
-2. Згрупувати за MInfo_Name → MethodologyDef + MethodologyVersion (за MInfo_Version + датами;
-   ✎ FInfo_Version — версія ФОРМУЛИ, не методології)
+2. Згрупувати за MInfo_Name → MethodologyDef + MethodologyVersion (за FInfo_Version + датами)
 3. FInfo_Text → FormulaDef.Expression;  FInfo_Arguments → ArgumentsCsv (1:1, без нормалізації)
 4. CInfo_* → ConstantDef + ConstantValue (CategoryKey = CInfo_Category)
 5. RuleArg_* → RuleDef.MatchJson  (розбір ';'-списків параметрів і значень)

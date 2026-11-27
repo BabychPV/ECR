@@ -98,7 +98,7 @@ ext.SourceEntity
 | Дані RDS | `EventFrame` | `HSE_Land_*` (63), `HSE_401*`, `HSE_400_*`, `HSE_Thermaloxidizer*` | `doc.*` (на перехід) |
 | Налаштування | `Element` | `Settings_General_V` (`Calculation_StartDateTime/EndDateTime/Offset`) | `Project.ExternalSettingsJson` |
 | Керування | `Element` | `Recalculate_Land_V`, `Settings_RecalculateManual_V` | зникає ([B15](B15-ecr-recalc-orchestration.md) §2.3) |
-| Події факела | `EventFrame` | AF-база FLERT `FLERT_NV_0114`: `FlareEventFull_*`, `FlareDailyReport` | рядки динамічних таблиць через `SourceEventSyncJob`, повна звірка за період (`D-259`); не `ext.RawDataPoint` (`D-252`) |
+| Потоки | `Stream` | FLERT: `FlareEventFull_*`, `FlareDailyReport_*` | `ext.RawDataPoint` — **лишається назавжди** |
 
 Перелік узятий із фактичного експорту `PI AF/ECR_01_Air_PISqlClientExportedObjects.sql`
 (26 в'юх) і `FLERT_NV_0114_PISqlClientExportedObjects.sql` (6 в'юх).
