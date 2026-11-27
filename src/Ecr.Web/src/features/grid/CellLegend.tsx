@@ -1,7 +1,8 @@
-import { useState, type JSX } from 'react';
+import { useCallback, useRef, useState, type JSX } from 'react';
 import { Popover, UnstyledButton } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import './gridKeyHint.css';
+import { usePopoverEscape } from './usePopoverEscape';
 
 /** Рядок легенди: класи справжньої комірки (`cell-states.css`), зразок значення і пояснення словами. */
 export interface LegendEntry {
@@ -38,12 +39,16 @@ export function legendEntries(): LegendEntry[] {
  */
 export function CellLegend(): JSX.Element {
   const [opened, setOpened] = useState(false);
+  // ✎ DOCUX: Esc закриває довідку й повертає фокус на кнопку (`usePopoverEscape`).
+  const button = useRef<HTMLButtonElement>(null);
+  usePopoverEscape(opened, useCallback(() => setOpened(false), []), button);
   const entries = legendEntries();
 
   return (
     <Popover opened={opened} onChange={setOpened} position="top-end" withArrow shadow="md" width={420}>
       <Popover.Target>
         <UnstyledButton
+          ref={button}
           className="ecr-keyhint-btn"
           aria-expanded={opened}
           aria-haspopup="dialog"
