@@ -268,7 +268,8 @@ public sealed class FlertCaseLinkTests(SqlServerFixture sql)
     {
         public ExternalTransport Transport => ExternalTransport.Sql;
 
-        public Task<ExternalTable> ReadTableAsync(int dataSourceId, string queryKey, int maxRows, CancellationToken ct)
+        public Task<ExternalTable> ReadTableAsync(
+            int dataSourceId, string queryKey, string? fallbackQuery, int maxRows, CancellationToken ct)
             => Task.FromResult(table);
     }
 

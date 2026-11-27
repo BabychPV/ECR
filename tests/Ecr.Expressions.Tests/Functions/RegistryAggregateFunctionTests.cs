@@ -506,7 +506,6 @@ public sealed class RegistryAggregateFunctionTests
         Assert.True(RegistryForms.Handles(name, ExpressionDialect.Methodology));
         Assert.True(RegistryForms.Handles(name.ToLowerInvariant(), ExpressionDialect.Template));
         Assert.False(RegistryForms.Handles(name.ToLowerInvariant(), ExpressionDialect.Methodology));
-        Assert.False(RegistryForms.Handles(name, ExpressionDialect.Report));
     }
 
     [Theory]

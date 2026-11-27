@@ -20,6 +20,11 @@ const Connection = {
   collectionSchedules: 0,
   endpoint: 'https://pi.example.invalid/piwebapi',
   hasSecret: false,
+  authMode: 'Windows',
+  hasPassword: false,
+  credentialsState: 'Ok',
+  credentialsRejectedAt: null,
+  userName: null,
   id: 7,
   isActive: true,
   maxParallel: 4,
@@ -246,6 +251,11 @@ describe("З'єднання: створення", () => {
       isActive: true,
       secretConfirmation: null,
       confirmEndpointChange: false,
+      // P-1126-SRCCRED: новий PiSqlClient — Windows, без логіна й пароля.
+      authMode: 'Windows',
+      userName: null,
+      password: null,
+      clearPassword: false,
     });
 
     await waitFor(() => expect(listReads()).toBeGreaterThan(before));
@@ -464,6 +474,11 @@ describe("З'єднання: правка", () => {
       isActive: false,
       secretConfirmation: null,
       confirmEndpointChange: false,
+      // PiWebApi входу за логіном не має: режим не змінюється (`null`), облікових даних немає.
+      authMode: null,
+      userName: null,
+      password: null,
+      clearPassword: false,
     });
 
     // ⛔ `If-Match` — версія ПОКАЗАНОГО рядка: без неї сервер дає `422`, а

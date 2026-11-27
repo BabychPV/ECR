@@ -610,8 +610,8 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyDictionary<string, long>> FindSubstanceEntryIdsAsync(
-        IReadOnlyCollection<string> codes, CancellationToken ct)
+    public async Task<IReadOnlyList<SubstanceCandidate>> FindSubstanceCandidatesAsync(
+        IReadOnlyCollection<string> codes, int methodologyId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(codes);
 
@@ -620,10 +620,10 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
             .Select(c => c.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-        var result = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<(string Code, long EntryId)>();
         if (wanted.Count == 0)
         {
-            return result;
+            return [];
         }
 
         // Довідники речовин — ті, що мають поле SUBSTANCE_CODE (так само, як у GetSubstanceCodesAsync).
@@ -635,7 +635,7 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
             .ConfigureAwait(false);
         if (fields.Count == 0)
         {
-            return result;
+            return [];
         }
 
         var registryIds = fields.Select(f => f.RegistryDefId).Distinct().ToList();
@@ -656,13 +656,15 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
             var text = !string.IsNullOrWhiteSpace(row.ValueString)
                 ? row.ValueString.Trim()
                 : row.ValueNumeric?.ToString("0.#########", System.Globalization.CultureInfo.InvariantCulture);
-            if (text is not null && wanted.Contains(text, StringComparer.OrdinalIgnoreCase) && !result.ContainsKey(text))
+            var key = text is null ? null : wanted.FirstOrDefault(w => string.Equals(w, text, StringComparison.OrdinalIgnoreCase));
+            if (key is not null && !result.Contains((key, row.Id)))
             {
-                result[text] = row.Id;
+                result.Add((key, row.Id));
             }
         }
 
-        var missing = wanted.Where(w => !result.ContainsKey(w)).ToList();
+        // Код запису — лише для кодів, яких за полем немає (як і раніше: «333» за полем не змішується з записом «333»).
+        var missing = wanted.Where(w => !result.Any(r => string.Equals(r.Code, w, StringComparison.OrdinalIgnoreCase))).ToList();
         if (missing.Count > 0)
         {
             var byCode = await db.RegistryEntries
@@ -674,15 +676,49 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
 
             foreach (var row in byCode.OrderBy(r => r.Id))
             {
-                var key = missing.First(m => string.Equals(m, row.Code, StringComparison.OrdinalIgnoreCase));
-                if (!result.ContainsKey(key))
-                {
-                    result[key] = row.Id;
-                }
+                result.Add((missing.First(m => string.Equals(m, row.Code, StringComparison.OrdinalIgnoreCase)), row.Id));
             }
         }
 
-        return result;
+        if (result.Count == 0)
+        {
+            return [];
+        }
+
+        var entryIds = result.Select(r => r.EntryId).Distinct().ToList();
+        var entries = await (
+                from e in db.RegistryEntries.AsNoTracking()
+                join d in db.RegistryDefs.AsNoTracking() on e.RegistryDefId equals d.Id
+                where entryIds.Contains(e.Id)
+                select new { e.Id, e.Code, e.RegistryDefId, Registry = d.Code })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // ✎ c11-10: довідники, які методологія вже вживає (речовини будь-якої її версії), — бажаний вибір між кандидатами.
+        var used = await (
+                from s in db.MethodologySubstances.AsNoTracking()
+                join v in db.MethodologyVersions.AsNoTracking() on s.MethodologyVersionId equals v.Id
+                join e in db.RegistryEntries.AsNoTracking() on s.SubstanceEntryId equals e.Id
+                where v.MethodologyId == methodologyId
+                select e.RegistryDefId)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var byId = entries.ToDictionary(e => e.Id);
+        return
+        [
+            .. result
+                .Where(r => byId.ContainsKey(r.EntryId))
+                .Select(r => new SubstanceCandidate(
+                    r.Code,
+                    r.EntryId,
+                    byId[r.EntryId].Code,
+                    byId[r.EntryId].Registry,
+                    used.Contains(byId[r.EntryId].RegistryDefId)))
+                .OrderBy(c => c.Code, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(c => c.EntryId),
+        ];
     }
 
     /// <inheritdoc />

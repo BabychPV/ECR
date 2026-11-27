@@ -85,4 +85,38 @@ test.describe("Діалог «Нове з'єднання»: підказки й 
     await page.keyboard.press('Escape');
     await expect(dialog.locator('[data-data-source-form]')).toHaveCount(0);
   });
+  // P-1126-SRCCRED (AC-1): перемикач «Authentication» є в PI SQL Client і Sql, у PI Web API його немає;
+  // пароль — лише для запису (`type=password`, порожній, без автозаповнення).
+  test('перемикач автентифікації: є в PI SQL Client і Sql, немає в PI Web API; пароль порожній і write-only', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await signIn(page);
+    await page.goto('/admin/sources');
+
+    await page.locator('[data-new-connection]').click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.locator('[data-data-source-form]')).toBeVisible({ timeout: 30_000 });
+
+    const mode = dialog.locator('input[data-field="authMode"]');
+    await expect(mode).toBeVisible();
+
+    await mode.click();
+    await page.getByRole('option').nth(1).click();
+    const password = dialog.locator('input[data-field="password"]');
+    await expect(password).toHaveAttribute('type', 'password');
+    await expect(password).toHaveAttribute('autocomplete', 'new-password');
+    await expect(password).toHaveValue('');
+    await expect(dialog.locator('input[data-field="userName"]')).toBeVisible();
+
+    await pickTransport(dialog, 'Sql');
+    await expect(mode).toBeVisible();
+
+    await pickTransport(dialog, 'PiWebApi');
+    await expect(mode).toHaveCount(0);
+    await expect(password).toHaveCount(0);
+
+    await page.keyboard.press('Escape');
+    await expect(dialog.locator('[data-data-source-form]')).toHaveCount(0);
+  });
 });

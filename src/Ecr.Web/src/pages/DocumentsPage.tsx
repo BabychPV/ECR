@@ -253,6 +253,14 @@ export function DocumentsPage(): JSX.Element {
   const calendars = useCalendarsOf((projects.data?.items ?? []).map((project) => project.id));
   const calendarOf = (projectId: number): PeriodCalendarDto | undefined =>
     calendars[(projects.data?.items ?? []).findIndex((project) => project.id === projectId)];
+  // ✎ b14 documents-board-yearly: розпочаті періоди проєкту (не `Scheduled`) — стан документа за рік рахується лише по них,
+  // як у сервера для лічильників (`documentYearState`); календар ще в дорозі — `undefined`.
+  const startedOf = (projectId: number): ReadonlySet<number> | undefined => {
+    const calendar = calendarOf(projectId);
+    return calendar === undefined
+      ? undefined
+      : new Set((calendar.periods ?? []).filter((period) => period.state !== 'Scheduled').map((period) => period.periodKey));
+  };
   const yearOptions = yearsWithProjects(
     calendars,
     year,
@@ -558,6 +566,7 @@ export function DocumentsPage(): JSX.Element {
                   documents={rows}
                   documentHref={documentHref}
                   projectCode={(projectId) => projects.data?.items.find((project) => project.id === projectId)?.code}
+                  startedOf={startedOf}
                   onQuickLook={(documentId, opener) => {
                     quickLookOpener.current = opener;
                     setPanel(String(documentId));
@@ -762,6 +771,7 @@ export function DocumentsPage(): JSX.Element {
             }}
             document={list?.items.find((item) => String(item.id) === quickLookId)}
             listReady={list !== undefined}
+            startedOf={startedOf}
             onClose={() => {
               // Після зняття шторки — фокус назад на «око» (KIT §5; «Аудит»: e2e -Grep "модальний").
               const opener = quickLookOpener.current;

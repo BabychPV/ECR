@@ -131,9 +131,12 @@ function New-Hse400MethodologyBody {
 }
 
 function New-Hse400MethodologyVersionBody {
-    <# POST /api/v1/methodologies/{id}/versions (CreateMethodologyVersionRequest): порожня чернетка рівня Module. #>
+    <# POST /api/v1/methodologies/{id}/versions (CreateMethodologyVersionRequest): порожня чернетка рівня Module.
+       P-1124-1: рушій ЯВНО Formulas - модуль складається з формул/констант/правил. Без прапора
+       Calculations:FormulaEngineAuthoring:Enabled=true на стенді сервер відповідає 422 formulaEngineRetired
+       (а пропущений рушій тепер дав би версію-скрипт, у яку формули не пишуться). #>
     param([Parameter(Mandatory)]$Model)
-    return @{ versionNumber = [string]$Model.methodology.version; copyFromVersionId = $null; level = 'Module' }
+    return @{ versionNumber = [string]$Model.methodology.version; copyFromVersionId = $null; level = 'Module'; engine = 'Formulas' }
 }
 
 function New-Hse400CatchAllRuleBody {

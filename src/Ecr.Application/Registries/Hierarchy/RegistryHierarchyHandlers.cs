@@ -406,7 +406,8 @@ public sealed class MoveRegistryEntryHandler(
     ICurrentUser currentUser,
     IClock clock,
     Nae.NaeTreeNodePolicy? nae = null,
-    RegistryEntryWriter? writer = null)
+    RegistryEntryWriter? writer = null,
+    FlaringRegistryLock? flaring = null)
 {
     // ⚠ `nae` і `writer` (типи вузлів НАЕ, 03.11) — контейнер підставляє обидва; без них (ручні тести) дерево НАЕ
     // переміщується як звичайний довідник.
@@ -444,6 +445,14 @@ public sealed class MoveRegistryEntryHandler(
         {
             throw RegistryAccess.EntryNotFound(entryId, registryCode);
         }
+
+        // ✎ DESIGN-sg-flaring §5.7 (C4): перенесення запису довідника факелів — зміна на всьому його вікні.
+        await ExternalRegistryGuard.EnsureFlaringEditAllowedAsync(
+                definition,
+                () => Task.FromResult<IReadOnlyCollection<FlaringRegistryEdit>>([FlaringRegistryEdit.Change(entry.Window)]),
+                flaring,
+                ct)
+            .ConfigureAwait(false);
 
         if (request.ParentEntryId is { } parentId)
         {
@@ -579,7 +588,8 @@ public sealed class RetireRegistryEntryHandler(
     IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock,
-    Keys.RegistryKeyService? keys = null)
+    Keys.RegistryKeyService? keys = null,
+    FlaringRegistryLock? flaring = null)
 {
     /// <summary>Permission to change registry data.</summary>
     public const string Permission = "Registry.EditData";
@@ -608,6 +618,17 @@ public sealed class RetireRegistryEntryHandler(
         }
 
         var on = request.On ?? DateOnly.FromDateTime(clock.UtcNow);
+
+        // ✎ DESIGN-sg-flaring §5.7 (C4): виведення закриває вікно днем `on` — і старе, і нове вікно перевіряються.
+        // ⚠ Лише вузол запиту: довідники факелів не ієрархічні, тож піддерева в них немає.
+        await ExternalRegistryGuard.EnsureFlaringEditAllowedAsync(
+                definition,
+                () => Task.FromResult<IReadOnlyCollection<FlaringRegistryEdit>>(
+                    [new FlaringRegistryEdit(entry.Window, new ValidityWindow(entry.ValidFrom, on))]),
+                flaring,
+                ct)
+            .ConfigureAwait(false);
+
         var retired = new List<long>();
         var affected = 0;
 

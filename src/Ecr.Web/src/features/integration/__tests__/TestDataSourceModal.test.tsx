@@ -120,6 +120,42 @@ describe('TestDataSourceModal', () => {
     expect(banner.textContent).toContain('count=1,250');
   });
 
+  it('B14F-UI-01 AC-2: ok: true з ключем — «з’єднано, каталогу немає», а не «0 сутностей»', async () => {
+    // ⛔ FLERT для складу газу каталогу сутностей не має: «у каталозі 0 сутностей» читалося б як порожній каталог.
+    respond(() =>
+      json({ ok: true, entities: 0, error: null, messageKey: 'integration.test.connectedNoCatalog' }),
+    );
+    show();
+
+    runWith('перевірка');
+
+    const banner = await outcome();
+    expect(banner.getAttribute('data-test-outcome')).toBe('ok');
+    expect(banner.textContent).toContain('integration.test.connectedNoCatalog');
+    expect(banner.textContent).not.toContain('sources.testEntities');
+  });
+
+  it.each(['notConfigured', 'query', 'auth', 'unreachable', 'timeout'])(
+    'B14F-UI-02 AC-3: категорія %s — власний текст із каталогу',
+    async (category) => {
+      respond(() =>
+        json({
+          ok: false,
+          entities: 0,
+          error: category,
+          messageKey: `integration.test.failed.${category}`,
+        }),
+      );
+      show();
+
+      runWith('перевірка');
+
+      const banner = await outcome();
+      expect(banner.getAttribute('data-test-outcome')).toBe('failed');
+      expect(banner.textContent).toContain(`integration.test.failed.${category}`);
+    },
+  );
+
   it('ok: false — відмова джерела, а не збій запиту; причина з каталогу за messageKey', async () => {
     respond(() =>
       json({

@@ -91,14 +91,15 @@ test.describe('Period clarity', () => {
     }
     await expect(page.locator('[data-note="periods-lock-only"]')).toBeVisible();
     // Налаштування — сусідня вкладка проєкту, а не окрема сторінка.
-    await expect(page.locator('[data-project-tab="settings"]')).toHaveAttribute('href', `/projects/${String(card.projectId)}/settings`);
+    // ✎ 24.11: колишня Settings — вкладки Templates і General.
+    await expect(page.locator('[data-project-tab="general"]')).toHaveAttribute('href', `/projects/${String(card.projectId)}/general`);
   });
 
   test('project settings pins the current month and goes back to automatic', async ({ page }) => {
     await signIn(page);
     const { card } = await partlySubmittedDocument(page);
 
-    await page.goto(`/projects/${String(card.projectId)}/settings`);
+    await page.goto(`/projects/${String(card.projectId)}/general`);
     const section = page.locator('[data-project-section="current-period"]');
     await expect(section.locator('[data-current-period-mode="Auto"]')).toBeVisible({ timeout: 60_000 });
     await expect(section.locator('[data-current-period-badge]')).toHaveText(/Automatic by date/);
@@ -200,7 +201,12 @@ test.describe('Pass2 (людський прохід 07.11)', () => {
     return dialog;
   }
 
-  test('Pass2: new document wizard warns that the project already has a document and opens it instead', async ({ page }) => {
+  /*
+   * ✎ B74 (людина 24.11, live: «чому я бачу це і для чого?»): проєкт тримає документи кількох шаблонів, тож на кроці
+   * Project попередження немає; воно — на кроці Template, коли документ є в ОБРАНОГО шаблону, і не запрошує «Next —
+   * створити ще один» (шаблон «один документ на проєкт» сервер відхилить `409 ECR-DOC-4092`).
+   */
+  test('Pass2: new document wizard warns that the chosen template already has a document and opens it instead', async ({ page }) => {
     await signIn(page);
     const { id, project, card } = await partlySubmittedDocument(page);
     let posts = 0;
@@ -210,17 +216,57 @@ test.describe('Pass2 (людський прохід 07.11)', () => {
 
     const dialog = await wizardOnProject(page, project);
     const banner = dialog.getByTestId('create-existing-documents');
-    await expect(banner).toBeVisible({ timeout: 60_000 });
-    await expect(banner).toContainText('This project already has a document');
-    await expect(banner).toContainText(card.businessKey);
+    // Крок Project: документи проєкту ще ні до чого — шаблон не обрано.
+    await expect(dialog.getByRole('button', { name: /^Next$/ })).toBeEnabled({ timeout: 60_000 });
+    await expect(banner).toHaveCount(0);
 
-    // «Створити ще один» лишається: Next доступний.
-    await expect(dialog.getByRole('button', { name: /^Next$/ })).toBeEnabled();
+    // Крок Template: у проєкту один шаблон (обраний сам), і документ цього шаблону вже є.
+    await dialog.getByRole('button', { name: /^Next$/ }).click();
+    await expect(dialog.getByRole('textbox', { name: /^Template/ })).not.toHaveValue('', { timeout: 60_000 });
+    await expect(banner).toBeVisible({ timeout: 60_000 });
+    await expect(banner).toContainText('This template already has a document in this project');
+    await expect(banner).toContainText(card.businessKey);
+    await expect(banner).not.toContainText(/press Next|create another/);
+    // Шаблон без прапорця «один документ на проєкт» — другий документ сервер дозволяє, Next доступний.
+    await expect(dialog.getByRole('button', { name: /^Next$/ })).toBeEnabled({ timeout: 60_000 });
 
     await banner.getByRole('button', { name: `Open ${card.businessKey}` }).click();
     await expect(page).toHaveURL(new RegExp(`/documents/${String(id)}(\\?|$)`), { timeout: 60_000 });
     await expect(page.getByRole('dialog')).toHaveCount(0);
     expect(posts, 'документ не мав створюватися').toBe(0);
+  });
+
+  /*
+   * ✎ B74 (24.11): шаблон «один документ на проєкт» (B151) з документом у проєкті — Next вимкнено, причина в банері,
+   * дія — «Open <ключ>» (створення однаково дало б `409 ECR-DOC-4092`). Прапорець — власного шаблону тесту.
+   */
+  test('Pass2: single-document template with a document blocks Next and offers to open it', async ({ page }) => {
+    await signIn(page);
+    const { id, project, card } = await partlySubmittedDocument(page);
+    const templates = await ok<{ templateId: number }[]>(
+      await page.request.get(`/api/v1/projects/${String(project.id)}/templates`),
+      'GET project templates',
+    );
+    expect(templates, 'у власного проєкту тесту один шаблон').toHaveLength(1);
+    await ok(
+      await page.request.put(`/api/v1/templates/${String(templates[0]?.templateId)}/document-policy`, {
+        data: { singleDocumentPerProject: true },
+      }),
+      'PUT document-policy',
+    );
+
+    const dialog = await wizardOnProject(page, project);
+    await expect(dialog.getByRole('button', { name: /^Next$/ })).toBeEnabled({ timeout: 60_000 });
+    await dialog.getByRole('button', { name: /^Next$/ }).click();
+
+    const banner = dialog.getByTestId('create-existing-documents');
+    await expect(banner).toBeVisible({ timeout: 60_000 });
+    await expect(banner).toContainText('allows only one document per project');
+    await expect(banner).toContainText(card.businessKey);
+    await expect(dialog.getByRole('button', { name: /^Next$/ })).toBeDisabled();
+
+    await banner.getByRole('button', { name: `Open ${card.businessKey}` }).click();
+    await expect(page).toHaveURL(new RegExp(`/documents/${String(id)}(\\?|$)`), { timeout: 60_000 });
   });
 
   test('Pass2: Esc in the new document wizard asks to discard what was entered', async ({ page }) => {

@@ -56,6 +56,7 @@ function count(path: string, param: string): string[] {
 
       if (url.pathname === path) seen.push(url.searchParams.get(param) ?? '');
       if (url.pathname === '/api/v1/me') return json(me);
+      if (url.pathname === '/api/v1/audit/structure/entity-types') return json(['cfg.Template']);
 
       return json({ items: [], nextCursor: null, totalCount: 0 });
     }),
@@ -114,9 +115,10 @@ describe('/admin/audit — журнал змін комірок', () => {
   // (`Select`): один вибір — один запит, відкладати нічого.
 
   it(
-    '«Document» (число): набір 12345 — один запит',
+    // ✎ audit-filters-live D2: «Document» — пошук документа за назвою/кодом; набір 12345 — один пошуковий запит.
+    '«Document» (пошук): набір 12345 — один запит пошуку',
     async () => {
-      const seen = count('/api/v1/audit/cells', 'documentId');
+      const seen = count('/api/v1/documents', 'q');
       show(<AuditPage />, '/admin/audit');
 
       await typeAndCount('⟦audit.document⟧', '12345', seen);
@@ -125,25 +127,42 @@ describe('/admin/audit — журнал змін комірок', () => {
   );
 
   it(
-    '«Column» (число): набір 12345 — один запит',
+    // ✎ audit-filters-live D3: «Column» — вибір за підписом; набраний текст не йде в журнал числом.
+    '«Column» (вибір): набір 12345 — жодного запиту з columnDefId',
     async () => {
       const seen = count('/api/v1/audit/cells', 'columnDefId');
       show(<AuditPage />, '/admin/audit?documentId=7');
 
-      await typeAndCount('⟦audit.columnDefId⟧', '12345', seen);
+      const user = userEvent.setup();
+      const input = await screen.findByRole('textbox', { name: '⟦audit.columnDefId⟧' }, { timeout: SlowEnvTimeout });
+      await waitFor(() => expect(seen).toEqual(['']));
+      await user.type(input, '12345');
+      await settle();
+      expect(seen).toEqual(['']);
     },
     SlowEnvTimeout,
   );
 });
 
 describe('/admin/audit?view=structure — журнал структурних змін', () => {
+  // ✎ P-1124-4: «Entity type» — вибір із типів вікна (`/structure/entity-types`), а не набір коду: один вибір —
+  // один запит із КОДОМ типу (сервер шукає точний збіг).
   it(
-    '«Entity type»: набір Template — один запит',
+    '«Entity type»: вибір Template — один запит із кодом',
     async () => {
       const seen = count('/api/v1/audit/structure', 'entityType');
       show(<AuditPage />, '/admin/audit?view=structure');
 
-      await typeAndCount('⟦audit.entityType⟧', 'Template', seen);
+      const user = userEvent.setup();
+      const input = await screen.findByRole('textbox', { name: '⟦audit.entityType⟧' }, { timeout: SlowEnvTimeout });
+      await waitFor(() => expect(seen).toEqual(['']));
+
+      await user.click(input);
+      await user.click(await screen.findByRole('option', { name: 'Template' }, { timeout: SlowEnvTimeout }));
+
+      await waitFor(() => expect(seen).toEqual(['', 'cfg.Template']));
+      await settle();
+      expect(seen).toEqual(['', 'cfg.Template']);
     },
     SlowEnvTimeout,
   );
@@ -151,12 +170,23 @@ describe('/admin/audit?view=structure — журнал структурних з
 
 describe('/admin/consistency — перелік розбіжностей', () => {
   it(
-    '«Rule»: набір CNS-01 — один запит',
+    '«Rule»: вибір правила — один запит',
     async () => {
       const seen = count('/api/v1/consistency/issues', 'ruleCode');
       show(<ConsistencyIssuesPage />, '/admin/consistency');
 
-      await typeAndCount('⟦consistency.rule⟧', 'CNS-01', seen);
+      // ✎ 24.11: «Rule» — перелік відомих правил (select), набору посимвольно немає; стережена поведінка та сама — одна
+      // зміна фільтра дає рівно один запит із ним, а не по запиту на проміжний стан.
+      const user = userEvent.setup();
+      const field = await screen.findByLabelText('⟦consistency.rule⟧', undefined, { timeout: SlowEnvTimeout });
+      await waitFor(() => expect(seen).toEqual(['']));
+
+      await user.click(field);
+      await user.click(await screen.findByRole('option', { name: '⟦consistency.rule.BROKEN_FK⟧' }));
+
+      await waitFor(() => expect(seen).toEqual(['', 'BROKEN_FK']));
+      await settle();
+      expect(seen).toEqual(['', 'BROKEN_FK']);
     },
     SlowEnvTimeout,
   );

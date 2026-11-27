@@ -406,31 +406,6 @@ export type PeriodCalendarDto = Schemas['PeriodCalendarDto'];
 /** Сутність збору зі станом останнього прогону і прогалиною. */
 export type SourceEntityStatus = Schemas['SourceEntityStatus'];
 
-/** Зріз звітності. */
-export type ReportSnapshotSummary = Schemas['ReportSnapshotSummary'];
-
-/**
- * Опис звіту разом із версіями (`ФВ-10.4`).
- *
- * ⛔ Це не звіт і не його вигляд: рендеринг лишається в SSRS (`D-52`), а
- * веб-конструктор звітів ТЗ виносить за обсяг (`ФВ-10.6`). Тип потрібен, щоб
- * побудову зрізу можна було замовити ВИБОРОМ зі списку, а не набором коду
- * руками — до `W7` єдиним способом вказати звіт було вгадати його код.
- */
-export type ReportDefinition = Schemas['ReportDefinitionDto'];
-
-/** Колонка зрізу в описі версії: код і тип значення. */
-export type ReportColumnCommand = Schemas['ReportColumnCommand'];
-
-/** Запит на створення опису звіту разом із першою версією. */
-export type CreateReportDefRequest = Schemas['CreateReportDefRequest'];
-
-/** Запит на створення версії-чернетки опису звіту. */
-export type CreateReportVersionRequest = Schemas['CreateReportVersionRequest'];
-
-/** Запит на публікацію версії опису звіту: причина обов'язкова (ФВ-14.7). */
-export type PublishReportVersionRequest = Schemas['PublishReportVersionRequest'];
-
 /** Стан фонової задачі. */
 export type JobStatus = Schemas['JobStatus'];
 
@@ -515,9 +490,6 @@ export type ProjectRecalculationRequest = Schemas['ProjectRecalculationRequest']
 
 /** Запуск збору з джерела. */
 export type CollectRequest = Schemas['CollectRequest'];
-
-/** Побудова зрізу звітності. */
-export type BuildSnapshotRequest = Schemas['BuildSnapshotRequest'];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Дії, яких в інтерфейсі не було зовсім.
@@ -814,3 +786,8 @@ export type EffectiveAccessView = Schemas['EffectiveAccessView'];
 export type EffectiveAccessContribution = Schemas['EffectiveAccessContribution'];
 
 export type TemplateHeaderGroupDto = Schemas['TemplateHeaderGroupDto'];
+
+/** ✎ 25.11: попередній перегляд видалення проєкту з даними (`GET /api/v1/projects/{id}/deletion-preview`). */
+export type ProjectPurgePreviewDto = Schemas['ProjectPurgePreviewDto'];
+/** ✎ 25.11: тіло `POST /api/v1/projects/{id}/purge` — набраний код і причина. */
+export type PurgeProjectRequest = Schemas['PurgeProjectRequest'];

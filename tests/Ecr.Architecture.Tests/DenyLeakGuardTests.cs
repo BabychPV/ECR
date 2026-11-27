@@ -165,11 +165,11 @@ public sealed partial class DenyLeakGuardTests
         ["src/Ecr.Application/Documents/PatchCellsHandler.cs | деталь columnCode | code"] =
             (1, "те саме, що текст"),
         ["src/Ecr.Application/Documents/PatchCellsHandler.cs | текст | columnCode"] =
-            (2, "ехо вводу (колонки немає у версії); ECR-CALC-0437 — ValidationMessage, фільтр visible"),
+            (1, "ехо вводу (колонки немає у версії)"),
         ["src/Ecr.Application/Documents/PatchCellsHandler.cs | деталь columnCode | columnCode"] =
             (1, "колонки з запиту немає у версії (ехо вводу)"),
-        ["src/Ecr.Application/Documents/PatchCellsHandler.cs | текст | applied.MethodologyCode"] =
-            (1, "код методології, не колонки; текст — ValidationMessage, фільтр visible"),
+        ["src/Ecr.Application/Documents/PatchCellsHandler.cs | деталь column | column?.HeaderL10n?.Get(language ?? \"en\") ?? columnCode"] =
+            (1, "✎ 25.11: назва колонки в підстановці ECR-CALC-0437 — ValidationMessage з ColumnCode, фільтр visible (і cells відмови .Where(visible))"),
         ["src/Ecr.Application/Documents/PatchCellsHandler.cs | текст | codeById[a.ColumnDefId]"] =
             (1, "ключі «рядок:колонка» лише комірок, які батч щойно записав з дозволом"),
         ["src/Ecr.Application/Documents/PatchCellsHandler.cs | текст | cell.ColumnCode"] =

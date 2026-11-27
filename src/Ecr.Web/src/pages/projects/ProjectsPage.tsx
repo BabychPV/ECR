@@ -217,7 +217,7 @@ export function ProjectsPage(): JSX.Element {
             onCreated={async (created) => {
               await queryClient.invalidateQueries({ queryKey: projectsQuery.queryKey });
               showDone(t('periods.created'));
-              void navigate(projectTabPath(created, 'settings'));
+              void navigate(projectTabPath(created, 'templates'));
             }}
           />
         </Suspense>

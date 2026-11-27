@@ -3,19 +3,22 @@ import { Button, SegmentedControl, Text, TextInput, Title } from '@mantine/core'
 import { Link } from 'react-router-dom';
 import { language, t } from '@/shared/i18n';
 import { formatDateTime } from '@/shared/format/datetime';
-import { formatNumber } from '@/shared/format/number';
+import { formatNumber, type DecimalGrouping } from '@/shared/format/number';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Banner } from '@/shared/ui/Banner';
 import { permitImportPath } from '../shell/permitPaths';
 import {
   addedColumnsOf,
+  addedRaw,
   addedText,
   cell,
   columnTitle,
   filterSources,
+  groupingOf,
   initialValues,
   isNumericColumn,
   num,
+  numTitle,
   scopeLabel,
   scopeNamesOf,
   type ScopeNames,
@@ -56,12 +59,20 @@ function AddedHeaders({ columns, lang }: { readonly columns: readonly AirAddedCo
   );
 }
 
-function AddedCells({ columns, values }: { readonly columns: readonly AirAddedColumn[]; readonly values: AirSource['added'] }): JSX.Element {
+function AddedCells({
+  columns,
+  values,
+  grouping,
+}: {
+  readonly columns: readonly AirAddedColumn[];
+  readonly values: AirSource['added'];
+  readonly grouping: (code: string) => DecimalGrouping;
+}): JSX.Element {
   return (
     <>
       {columns.map((column) => (
         <td key={column.code} className={isNumericColumn(column) ? 'pa-num' : undefined}>
-          {addedText(values, column)}
+          {addedText(values, column, grouping(column.code))}
         </td>
       ))}
     </>
@@ -78,6 +89,14 @@ function EditButton({ label, onClick }: { readonly label: string; readonly onCli
 
 function SubstancesTable({ source, id, context }: { readonly source: AirSource; readonly id: string; readonly context: CardContext }): JSX.Element {
   const { substanceColumns, lang, onEditSubstance } = context;
+  // Групування тисяч — одне на стовпець (картка number-format-consistent).
+  const rows = source.substances;
+  const g = {
+    gs: groupingOf(rows, (row) => row.gramsPerSecond),
+    mg: groupingOf(rows, (row) => row.mgPerNm3),
+    ty: groupingOf(rows, (row) => row.tonsPerYear),
+  };
+  const added = (code: string): DecimalGrouping => groupingOf(rows, (row) => addedRaw(row.added, code));
 
   return (
     <table className="pa-sub" id={id} aria-label={t('permits.air.substances.aria', { nae: source.naeCode })}>
@@ -107,10 +126,10 @@ function SubstancesTable({ source, id, context }: { readonly source: AirSource; 
           <tr key={substance.id} data-testid="air-substance-row">
             <td className="pa-code">{substance.substanceCode}</td>
             <td>{cell(substance.substanceName)}</td>
-            <td className="pa-num">{num(substance.gramsPerSecond)}</td>
-            <td className="pa-num">{num(substance.mgPerNm3)}</td>
-            <td className="pa-num">{num(substance.tonsPerYear)}</td>
-            <AddedCells columns={substanceColumns} values={substance.added} />
+            <td className="pa-num" title={numTitle(substance.gramsPerSecond, g.gs)}>{num(substance.gramsPerSecond, g.gs)}</td>
+            <td className="pa-num" title={numTitle(substance.mgPerNm3, g.mg)}>{num(substance.mgPerNm3, g.mg)}</td>
+            <td className="pa-num" title={numTitle(substance.tonsPerYear, g.ty)}>{num(substance.tonsPerYear, g.ty)}</td>
+            <AddedCells columns={substanceColumns} values={substance.added} grouping={added} />
             {onEditSubstance !== null && (
               <td className="pa-actions">
                 <EditButton
@@ -131,6 +150,20 @@ function SourcesTable({ sources, context }: { readonly sources: readonly AirSour
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   // Перший стовпчик (розкриття) лишається порожнім у рядку речовин; решта — під таблицю речовин.
   const spanned = 13 + sourceColumns.length + (onEditSource === null ? 0 : 1);
+  // Групування тисяч — одне на стовпець (картка number-format-consistent).
+  const g = useMemo(
+    () => ({
+      quantity: groupingOf(sources, (row) => row.quantity),
+      hours: groupingOf(sources, (row) => row.hoursPerYear),
+      height: groupingOf(sources, (row) => row.height),
+      diameter: groupingOf(sources, (row) => row.diameter),
+      velocity: groupingOf(sources, (row) => row.velocity),
+      volume: groupingOf(sources, (row) => row.volume),
+      temperature: groupingOf(sources, (row) => row.temperature),
+    }),
+    [sources],
+  );
+  const added = (code: string): DecimalGrouping => groupingOf(sources, (row) => addedRaw(row.added, code));
 
   const toggle = (key: string): void =>
     setOpen((current) => {
@@ -216,15 +249,15 @@ function SourcesTable({ sources, context }: { readonly sources: readonly AirSour
                   <td>{cell(source.sourceName)}</td>
                   <td>{cell(source.emissionPointName)}</td>
                   <td title={sourceTypeLabel(source.sourceType)}>{sourceTypeShort(source.sourceType)}</td>
-                  <td className="pa-num">{num(source.quantity)}</td>
-                  <td className="pa-num">{num(source.hoursPerYear)}</td>
-                  <td className="pa-num">{num(source.height)}</td>
-                  <td className="pa-num">{num(source.diameter)}</td>
-                  <td className="pa-num">{num(source.velocity)}</td>
-                  <td className="pa-num">{num(source.volume)}</td>
-                  <td className="pa-num">{num(source.temperature)}</td>
+                  <td className="pa-num" title={numTitle(source.quantity, g.quantity)}>{num(source.quantity, g.quantity)}</td>
+                  <td className="pa-num" title={numTitle(source.hoursPerYear, g.hours)}>{num(source.hoursPerYear, g.hours)}</td>
+                  <td className="pa-num" title={numTitle(source.height, g.height)}>{num(source.height, g.height)}</td>
+                  <td className="pa-num" title={numTitle(source.diameter, g.diameter)}>{num(source.diameter, g.diameter)}</td>
+                  <td className="pa-num" title={numTitle(source.velocity, g.velocity)}>{num(source.velocity, g.velocity)}</td>
+                  <td className="pa-num" title={numTitle(source.volume, g.volume)}>{num(source.volume, g.volume)}</td>
+                  <td className="pa-num" title={numTitle(source.temperature, g.temperature)}>{num(source.temperature, g.temperature)}</td>
                   <td className="pa-num">{formatNumber(source.substances.length)}</td>
-                  <AddedCells columns={sourceColumns} values={source.added} />
+                  <AddedCells columns={sourceColumns} values={source.added} grouping={added} />
                   {onEditSource !== null && (
                     <td className="pa-actions">
                       <EditButton label={t('permits.air.edit.source', { nae: source.naeCode })} onClick={() => onEditSource(source)} />
@@ -249,6 +282,8 @@ function SourcesTable({ sources, context }: { readonly sources: readonly AirSour
 }
 
 function TotalsTable({ totals }: { readonly totals: readonly AirTotal[] }): JSX.Element {
+  const gs = groupingOf(totals, (row) => row.gramsPerSecond);
+  const ty = groupingOf(totals, (row) => row.tonsPerYear);
   return (
     <div className="pa-scroll" role="region" aria-label={t('permits.air.totals.aria')} tabIndex={0}>
       <table className="pa-table">
@@ -275,8 +310,8 @@ function TotalsTable({ totals }: { readonly totals: readonly AirTotal[] }): JSX.
               </th>
               <td>{cell(total.substanceName)}</td>
               <td className="pa-num">{formatNumber(total.sources)}</td>
-              <td className="pa-num">{num(total.gramsPerSecond)}</td>
-              <td className="pa-num">{num(total.tonsPerYear)}</td>
+              <td className="pa-num" title={numTitle(total.gramsPerSecond, gs)}>{num(total.gramsPerSecond, gs)}</td>
+              <td className="pa-num" title={numTitle(total.tonsPerYear, ty)}>{num(total.tonsPerYear, ty)}</td>
             </tr>
           ))}
         </tbody>

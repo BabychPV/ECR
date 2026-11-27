@@ -144,7 +144,6 @@ public sealed class ProjectPermissionCheckTests
                 "Ecr.Api.Controllers.MethodologyScriptController::Preview",
                 "Ecr.Api.Controllers.MethodologyScriptController::Validate",
                 "Ecr.Application.Calculations.CompareMethodologyVersionsHandler::HandleAsync",
-                "Ecr.Application.Calculations.ConstantUsageHandler::HandleAsync",
                 "Ecr.Application.Calculations.GetMethodologyTraceStepsHandler::HandleAsync",
                 "Ecr.Application.Calculations.GetMethodologyCategoryRuleHandler::HandleAsync",
                 "Ecr.Application.Calculations.ListCalculationBindingsHandler::HandleAsync",
@@ -186,10 +185,6 @@ public sealed class ProjectPermissionCheckTests
             + "проєкту; менеджер проєкту бачить його, щоб скласти виняток маршруту в СВОЄМУ проєкті (той перевіряє право "
             + "в проєкті).",
             ["Ecr.Application.Workflow.ListApproverRolesHandler::HandleAsync"]),
-        (
-            "Report.ViewRegulatory",
-            "Перелік ОПИСІВ державних звітів спільний для всіх проєктів; зрізи — з проєктом.",
-            ["Ecr.Application.Reporting.ListReportDefsHandler::HandleAsync"]),
         (
             "Document.Export",
             "Лише підказка-посилання в «Моїх задачах»; завантаження перевіряє право в проєкті "

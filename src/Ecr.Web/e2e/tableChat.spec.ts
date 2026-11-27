@@ -297,11 +297,15 @@ test.describe('tableChat: table discussion on the stand', () => {
 
       try {
         const { page } = admin;
-        await page.goto(`${DocumentUrl}&panel=discussion&table=${encodeURIComponent(chatTable.tableCode)}`);
+        // ⛔ Self-sufficient under `-Grep`: run alone (e.g. `--grep "contrast"` or `"light"`), the serial chain above does
+        // not run, `chatTable` stays undefined and the chat is empty (main, e2e-stand run 45492296797: "Cannot read
+        // properties of undefined (reading 'tableCode')"). The table and one message are ensured here.
+        const table = await ensureChatContent(page);
+        await page.goto(`${DocumentUrl}&panel=discussion&table=${encodeURIComponent(table.tableCode)}`);
         const panel = page.locator('[data-chat-panel]');
         await expect(panel).toBeVisible({ timeout: 90_000 });
         await expect(panel.locator('[data-chat-message]').first()).toBeVisible({ timeout: 30_000 });
-        await expect(page.locator(`[data-chat-badge="${chatTable.tableCode}"]`)).toBeVisible();
+        await expect(page.locator(`[data-chat-badge="${table.tableCode}"]`)).toBeVisible();
 
         await shot(page, `after-${scheme}-panel-desktop`);
 
@@ -327,6 +331,34 @@ test.describe('tableChat: table discussion on the stand', () => {
     });
   }
 });
+
+/**
+ * The chat table and at least one message in it — whatever ran before. In the full serial scenario both already exist
+ * (`chatTable` from the first test, messages from the next ones) and nothing is written.
+ */
+async function ensureChatContent(page: Page): Promise<TableInfo> {
+  // Declared definitely-assigned for the serial tests; undefined at runtime when they did not run.
+  if ((chatTable as TableInfo | undefined) === undefined) {
+    const response = await page.request.get(`/api/v1/documents/${DocumentId}/tables?periodKey=${PeriodKey}`);
+    expect(response.ok(), `GET tables: ${String(response.status())}`).toBe(true);
+    const tables = (await response.json()) as TableInfo[];
+    expect(tables.length, 'the stand document has no tables').toBeGreaterThan(0);
+    chatTable = tables[0] as TableInfo;
+  }
+
+  const summary = await page.request.get(`/api/v1/documents/${DocumentId}/discussions/summary`);
+  expect(summary.status(), `summary: ${await summary.text()}`).toBe(200);
+  const body = (await summary.json()) as { items: { tableCode: string }[] };
+  if (!body.items.some((item) => item.tableCode === chatTable.tableCode)) {
+    const post = await page.request.post(
+      `/api/v1/documents/${DocumentId}/tables/${encodeURIComponent(chatTable.tableCode)}/messages`,
+      { data: { body: 'contrast check message', periodKey: Number(PeriodKey) } },
+    );
+    expect(post.ok(), `POST message: ${String(post.status())} ${await post.text()}`).toBe(true);
+  }
+
+  return chatTable;
+}
 
 async function composerSend(panel: ReturnType<Page['locator']>, text: string): Promise<void> {
   const composer = panel.getByRole('textbox', { name: /^Message/ });

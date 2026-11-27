@@ -77,3 +77,57 @@ export function documentState(document: Pick<DocumentSummary, 'sheetStates' | 'w
 
   return worst;
 }
+
+/** Відомі стани клітинки «документ × період» (`DocumentPeriodState.state`). */
+const PeriodCellStates = ['Rejected', 'Draft', 'PartlySubmitted', 'Submitted', 'Approved'] as const;
+
+/**
+ * ✎ b14 documents-board-yearly: стан ДОКУМЕНТА за РІК — те саме правило, що в сервера для смуги лічильників за рік
+ * (`DocumentListSummaryStore.SummarizeYearAsync`) і фільтра `state` за рік (`DocumentStore.WhereYearState`): клітинки —
+ * «видимий аркуш × РОЗПОЧАТИЙ період року» без періодів «без погодження». Сервер дає стан кожного періоду
+ * (`periodStates`, той самий CASE над аркушами), тож рік зводиться з них без втрат:
+ * хоч один період повернуто → `Rejected`; жоден не поданий/затверджений → `Draft`; є і поданий, і неподаний →
+ * `PartlySubmitted`; неподаних немає, хоч один поданий → `Submitted`; усі затверджені → `Approved`. Усі розпочаті
+ * періоди без погодження → `NoApproval`.
+ *
+ * ⛔ Корінь дефекту: дошка брала `sheetStates` (стан за ОДИН обраний місяць, D-93), а перелік тепер завжди за рік і
+ * місяця не має — словник порожній, і всі документи падали в «без стану», хоча лічильники над дошкою їх рахували.
+ *
+ * ⚠ `started` — розпочаті періоди проєкту (календар, стан ≠ `Scheduled`): сервер віддає `Scheduled`-місяці як `Draft`,
+ * а в річне правило вони не входять. Без календаря (ще в дорозі) — усі періоди: стан може на мить сказати
+ * «частково подано» там, де після календаря буде «подано».
+ * Без `periodStates` (рядок не за рік) — колишній стан за місяць (`documentState`).
+ */
+export function documentYearState(
+  document: Pick<DocumentSummary, 'sheetStates' | 'workflowMode' | 'periodStates'>,
+  started?: ReadonlySet<number>,
+): string | null {
+  const periods = document.periodStates;
+  if (periods === undefined || periods === null) return documentState(document);
+
+  return yearStateOfPeriods(periods, started);
+}
+
+/**
+ * Річний стан із станів періодів (правило — у `documentYearState`). Те саме зведення для аркуша документа «рік»
+ * (`submission-target.monthColumns`: стан аркуша за кожен місяць).
+ */
+export function yearStateOfPeriods(
+  periods: readonly { readonly periodKey: number; readonly state: string }[],
+  started?: ReadonlySet<number>,
+): string {
+  const inYear = started === undefined ? periods : periods.filter((period) => started.has(period.periodKey));
+  if (inYear.length > 0 && inYear.every((period) => period.state === 'NoApproval')) return 'NoApproval';
+
+  const cells = inYear.filter((period) => period.state !== 'NoApproval').map((period) => period.state);
+  const unknown = cells.find((state) => !(PeriodCellStates as readonly string[]).includes(state));
+  if (unknown !== undefined) return unknown;
+  if (cells.includes('Rejected')) return 'Rejected';
+
+  const unsent = cells.some((state) => state === 'Draft' || state === 'PartlySubmitted');
+  const sent = cells.some((state) => state === 'PartlySubmitted' || state === 'Submitted' || state === 'Approved');
+  if (!sent) return 'Draft';
+  if (unsent) return 'PartlySubmitted';
+
+  return cells.includes('Submitted') ? 'Submitted' : 'Approved';
+}

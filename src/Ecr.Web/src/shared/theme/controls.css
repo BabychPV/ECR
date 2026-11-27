@@ -118,3 +118,9 @@
   background: transparent;
   text-decoration: underline;
 }
+
+/* ✎ P-1124-1: тости зверху по центру — нижче за шапку застосунку (40 px), щоб не лягати на дії заголовка сторінки.
+   Лише цей контейнер: решта п'яти (Mantine рендерить усі позиції) лишаються типовими. */
+.mantine-Notifications-root[data-position='top-center'] {
+  top: calc(40px + var(--mantine-spacing-xs));
+}

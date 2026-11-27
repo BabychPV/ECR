@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -233,6 +233,7 @@ describe('DocumentPage: проблеми розрахунку документа
 
       const panel = await waitFor(
         () => {
+          revealPanels();
           const found = document.querySelector<HTMLElement>(`[data-testid="document-calc-issues"][data-period="${String(October)}"]`);
           if (found === null) throw new Error('панелі жовтня немає');
           return found;
@@ -264,6 +265,7 @@ describe('DocumentPage: проблеми розрахунку документа
 
       await waitFor(
         () => {
+          revealPanels();
           if (document.querySelector(`[data-testid="document-calc-issues"][data-period="${String(October)}"]`) === null) {
             throw new Error('панелі жовтня немає');
           }
@@ -298,6 +300,7 @@ describe('DocumentPage: проблеми розрахунку документа
 
       await waitFor(
         () => {
+          revealPanels();
           if (document.querySelector(`[data-testid="document-calc-issues"][data-period="${String(October)}"]`) === null) {
             throw new Error('сторінка ще не готова');
           }
@@ -361,6 +364,7 @@ describe('DocumentPage: проблеми розрахунку документа
 
       await waitFor(
         () => {
+          revealPanels();
           if (document.querySelector(`[data-testid="document-calc-issues"][data-period="${String(October)}"]`) === null) {
             throw new Error('панелі жовтня немає');
           }
@@ -381,6 +385,7 @@ describe('DocumentPage: проблеми розрахунку документа
 
       const panel = await waitFor(
         () => {
+          revealPanels();
           const found = document.querySelector<HTMLElement>(`[data-testid="document-calc-issues"][data-period="${String(October)}"]`);
           if (found === null) throw new Error('запасної панелі немає');
           return found;
@@ -400,6 +405,7 @@ describe('DocumentPage: проблеми розрахунку документа
       await waitFor(() => expect(requested.some((url) => url.includes('year=true'))).toBe(true), { timeout: 60_000 });
       const panel = await waitFor(
         () => {
+          revealPanels();
           const found = document.querySelector<HTMLElement>(`[data-testid="document-calc-issues"][data-period="${String(Anchor)}"]`);
           if (found === null) throw new Error('запасної панелі немає');
           return found;
@@ -416,7 +422,17 @@ describe('DocumentPage: проблеми розрахунку документа
     async () => {
       show(`/documents/1?periodKey=${String(October)}`, 'PerMonthCopies');
 
-      const panel = await screen.findByTestId('document-calc-issues', {}, { timeout: SlowEnvTimeout });
+      // ✎ b14 doc-notices-compact: і копія на місяць — смуга (один місяць), панель — у її «Technical details».
+      const panel = await waitFor(
+        () => {
+          revealPanels();
+          const found = document.querySelector<HTMLElement>('[data-testid="document-calc-issues"]');
+          if (found === null) throw new Error('панелі немає');
+          return found;
+        },
+        { timeout: SlowEnvTimeout },
+      );
+      expect(screen.getByTestId('document-calc-strip').getAttribute('data-months')).toBe(String(October));
       expect(within(panel).getByTestId('document-calc-issues-title').textContent).toContain(formatPeriodKey(October));
       const kinds = within(panel).getAllByTestId('document-calc-issue').map((row) => row.getAttribute('data-kind'));
       expect(kinds).toEqual(['sourceChanged', 'stepError']);
@@ -426,3 +442,14 @@ describe('DocumentPage: проблеми розрахунку документа
     SlowEnvTimeout,
   );
 });
+
+/**
+ * ✎ b14 doc-notices-compact: панелі місяців — у «Technical details» смуги над сіткою (Details → Technical details);
+ * розгорнути, якщо ще згорнуто (викликається з waitFor, тож смуга може ще не прийти).
+ */
+function revealPanels(): void {
+  const toggle = document.querySelector('[data-testid="document-calc-strip-toggle"]');
+  if (toggle !== null && toggle.getAttribute('aria-expanded') === 'false') fireEvent.click(toggle);
+  const technical = document.querySelector('[data-testid="document-calc-strip-technical-toggle"]');
+  if (technical !== null && technical.getAttribute('aria-expanded') === 'false') fireEvent.click(technical);
+}

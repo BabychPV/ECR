@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { loadCatalog } from '@/shared/i18n';
 import { permissionLabel, permissionLabelKey } from '@/features/security/permissionLabel';
-import { readSeedSql } from '@/test/seedSql';
+import { readSeedEnCatalog, readSeedSql } from '@/test/seedSql';
 
 /**
  * `U-11`: 41 колонка матриці прав була підписана сирим кодом сервера.
@@ -90,7 +90,9 @@ describe('Сід покриває ВЕСЬ каталог прав (U-11)', () =
     [...section.matchAll(/\(N'([A-Z][A-Za-z]+\.[A-Za-z]+)',\s+N'/g)].map((m) => m[1] ?? ''),
   );
 
-  const named = new Set([...seed.matchAll(/N'permission\.([A-Za-z.]+)'/g)].map((m) => m[1] ?? ''));
+  // ✎ P-1124-3: назви — лише з en-каталогу (`#UiEn`): прибрані ключі (`#UiRemoved`, `permission.Report.*` зрізів) несуть
+  // ті самі імена, але назвою права вже не є.
+  const named = new Set([...readSeedEnCatalog().matchAll(/N'permission\.([A-Za-z.]+)'/g)].map((m) => m[1] ?? ''));
 
   it('блок каталогу прав у сіді знайдено — інакше решта перевірок нічого не варта', () => {
     expect(start).toBeGreaterThan(-1);
@@ -107,8 +109,14 @@ describe('Сід покриває ВЕСЬ каталог прав (U-11)', () =
   // seed/features/B80-source-binding.sql; матриця будується з каталогу сервера, окремого клієнтського переліку немає).
   // ✎ 2026-11-19: 51-ше — `Calculation.RecalculateApprovedDependents` (B80 N5, перерахунок затверджених залежних;
   // назви ru/kz/en у сіді — перевірка «кожне право має назву» нижче).
-  it('у каталозі 51 право — рівно стільки колонок і має матриця', () => {
-    expect(codes.size).toBe(51);
+  // ✎ 2026-11-24: −4 — прибрано `Report.BuildSnapshot`, `Report.ViewSnapshot`, `Report.Export`, `Report.EditDefinition`
+  // (P-1124-3, D-NEW: зрізи звітності й конструктор звітів прибрано, звіти — у SSRS).
+  // ✎ 2026-11-25: +2 — `GasComposition.View`, `GasComposition.Edit` (D-NEW, сторінка «Склад газу»; назви ru/kz/en —
+  // seed/features/GAS-composition.sql). Разом 51 − 4 + 2 = 49 (зведення пачки b12).
+  // ✎ 2026-11-25: 50-те — `Project.DeleteWithData` (видалення проєкту з даними; назви ru/kz/en —
+  // seed/features/PURGE-project-with-data.sql).
+  it('у каталозі 50 прав — рівно стільки колонок і має матриця', () => {
+    expect(codes.size).toBe(50);
   });
 
   it('кожне право має назву в каталозі рядків', () => {

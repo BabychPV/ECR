@@ -32,9 +32,6 @@ public sealed class JobLaneTests
     /// </summary>
     private static readonly HashSet<(string File, string Literal)> NotALane = new()
     {
-        // Джерело замовчування параметра звіту (`Value(…, "default")`), не лейн.
-        ("src/Ecr.Application/Reporting/ReportParameters.cs", "default"),
-
         // ✎ B155: значення контракту `EffectiveSource` (ApprovalRouteSource.Default — типовий маршрут майданчика),
         // не лейн; JobLanes.Default тут зв'язав би контракт API з назвою лейну черги.
         ("src/Ecr.Application/Workflow/ScopedApprovalRouteHandlers.cs", "default"),

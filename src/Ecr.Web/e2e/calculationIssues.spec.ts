@@ -387,6 +387,7 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
   // 3. ✎ B78 (людина 13.11): ОДНА панель «Проблеми розрахунку» замість банера «Some rows are not included» — рядок
   //    причини з бейджем і «Show rows»; група «аркуш · таблиця — кількість» з підказкою і рядками — у «Технічних
   //    деталях» (згорнуті за замовчуванням).
+  await revealCalcPanels(page);
   const panel = page.getByTestId('document-calc-issues');
   await expect(panel).toBeVisible({ timeout: 60_000 });
   await expect(panel).toHaveAttribute('data-blocking', 'false');
@@ -427,6 +428,7 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
 
   // «Show rows» з рядка причини — той самий перехід, без розгортання вручну.
   await page.reload();
+  await revealCalcPanels(page);
   await expect(page.getByTestId('document-calc-issues-details-toggle')).toHaveAttribute('aria-expanded', 'false', { timeout: 60_000 });
   await page.getByTestId('document-calc-issue-show').click();
   await expect(page.getByTestId('document-calc-issues-details-toggle')).toHaveAttribute('aria-expanded', 'true');
@@ -435,4 +437,17 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
   // Стара жовта панель AN-69 і окремий банер з тими самими рядками більше не дублюють панель.
   await expect(page.getByTestId('calculation-issues-panel')).toHaveCount(0);
   await expect(page.getByTestId('document-unmatched-rows-toggle')).toHaveCount(0);
+}
+
+/**
+ * ✎ b14 doc-notices-compact: проблеми розрахунку над сіткою — ОДНА смуга, згорнута; панелі місяців — у її «Details →
+ * Technical details». Розгорнути обидва рівні (Details пам'ятається між відкриттями, Technical details — ні).
+ */
+async function revealCalcPanels(page: Page): Promise<void> {
+  const toggle = page.getByTestId('document-calc-strip-toggle');
+  await expect(toggle, 'смуги проблем розрахунку немає').toBeVisible({ timeout: 60_000 });
+  if ((await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click();
+  const technical = page.getByTestId('document-calc-strip-technical-toggle');
+  await expect(technical).toBeVisible();
+  if ((await technical.getAttribute('aria-expanded')) === 'false') await technical.click();
 }

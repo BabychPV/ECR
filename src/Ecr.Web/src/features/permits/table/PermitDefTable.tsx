@@ -2,7 +2,7 @@
 import { useLayoutEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { SegmentedControl, VisuallyHidden } from '@mantine/core';
 import { formatDate } from '@/shared/format/datetime';
-import { formatNumber } from '@/shared/format/number';
+import { columnGrouping, formatDecimalReadable, formatNumber, type DecimalGrouping } from '@/shared/format/number';
 import { t } from '@/shared/i18n';
 import { isEmptyCell, type PermitCellValue, type PermitColumn, type PermitRow } from '../lib/columns';
 import {
@@ -40,17 +40,58 @@ export interface PermitDefTableProps {
   readonly initialMode?: ColumnMode | undefined;
 }
 
-const FractionDigits = { small: 5, normal: 3 } as const;
+/**
+ * Число в комірці — спільним читабельним поданням (людина 25.11: «числа в пермітах не вистачає місця»): ≤ 7 значущих,
+ * без хвостових нулів, без експоненти, групування — одне на стовпець (`useColumnGrouping`); точне значення — у
+ * підказці комірки (`exactOf`). Раніше дріб різався до 3/5 знаків, і `0.0000025` г/с показувався як `0`.
+ */
+function exactOf(column: PermitColumn, value: PermitCellValue, grouping: DecimalGrouping): string | undefined {
+  if (column.type !== 'number' || isEmptyCell(value)) return undefined;
+  const readable = formatDecimalReadable(value, undefined, undefined, grouping);
+  return readable?.rounded === true ? readable.exact : undefined;
+}
 
-function formatCell(column: PermitColumn, value: PermitCellValue): ReactNode {
+/** Повний текст для підказки текстової комірки: на екрані вона обмежена двома рядками (permitDefTable.css). */
+function fullTextOf(column: PermitColumn, value: PermitCellValue): string | undefined {
+  if (column.type === 'number' || column.type === 'bool' || column.type === 'date' || isEmptyCell(value)) return undefined;
+  return String(value);
+}
+
+function readableSum(sum: number, grouping: DecimalGrouping): string {
+  return formatDecimalReadable(sum, undefined, undefined, grouping)?.text ?? formatNumber(sum);
+}
+
+/**
+ * Групування тисяч на СТОВПЕЦЬ (картка number-format-consistent, 25.11: «75,435.96» поруч із «9363.267»): якщо хоч одне
+ * значення стовпця або його підсумок має цілу частину ≥ 10 000 — розділювач у всіх значеннях від 1 000, інакше ніде.
+ * Ключ — код стовпця або `s-<група>` для згорнутої групи.
+ */
+function useColumnGrouping(
+  items: readonly VisibleItem[],
+  rows: readonly PermitRow[],
+  totals: PermitTotals | undefined,
+): ReadonlyMap<string, DecimalGrouping> {
+  return useMemo(() => {
+    const map = new Map<string, DecimalGrouping>();
+    for (const item of items) {
+      if (item.kind === 'summary') {
+        map.set(`s-${item.group}`, columnGrouping(rows.map((row) => summaryValue(row, item.columns))));
+      } else if (item.column.type === 'number') {
+        const code = item.column.code;
+        map.set(code, columnGrouping([...rows.map((row) => row[code]), totals?.sums[code]]));
+      }
+    }
+    return map;
+  }, [items, rows, totals]);
+}
+
+function formatCell(column: PermitColumn, value: PermitCellValue, grouping: DecimalGrouping): ReactNode {
   if (isEmptyCell(value)) return null;
 
   switch (column.type) {
     case 'number':
       if (typeof value !== 'number') return String(value);
-      return formatNumber(value, {
-        maximumFractionDigits: Math.abs(value) < 1 && value !== 0 ? FractionDigits.small : FractionDigits.normal,
-      });
+      return formatDecimalReadable(value, undefined, undefined, grouping)?.text ?? formatNumber(value);
     case 'date': {
       // ⚠ `formatDate` сам читає `РРРР-ММ-ДД` як місцеву північ (календарна дата без години),
       // тому день не зсувається; зону тут задавати не можна — вона якраз зсунула б.
@@ -99,6 +140,64 @@ function useFirstColumnWidth(layout: unknown): RefObject<HTMLTableElement | null
   return ref;
 }
 
+/** Чи елемент — число (стовпець `number` або підсумок суто числової групи). */
+function isNumericItem(item: VisibleItem): boolean {
+  return item.kind === 'summary' ? item.columns.every((column) => column.type === 'number') : item.column.type === 'number';
+}
+
+/**
+ * Звідки починається ХВІСТ числових стовпців (людина 25.11: «числа в пермітах не вистачає місця»): їх закріплено справа,
+ * тож при довгому тексті прокручується лише текстова частина, а числа видно завжди. `items.length` — хвоста немає.
+ */
+function trailingNumericStart(items: readonly VisibleItem[]): number {
+  let start = items.length;
+  while (start > 1 && isNumericItem(items[start - 1]!)) start -= 1;
+  return start;
+}
+
+/** Частка ширини області, яку можуть зайняти закріплені числа; більше — не закріплювати (вузький екран, 375 px). */
+const MaxPinnedShare = 0.5;
+
+/**
+ * Закріплює хвіст числових стовпців справа: для кожної комірки з `data-pin` (0 — крайній правий) рахує відступ `right` як
+ * суму ширин закріплених стовпців правіше. Якщо разом вони ширші за `MaxPinnedShare` області — не закріплює (на 375 px
+ * закріплені числа закрили б увесь текст; там таблиця просто прокручується).
+ */
+function usePinnedNumbers(
+  tableRef: RefObject<HTMLTableElement | null>,
+  regionRef: RefObject<HTMLDivElement | null>,
+  layout: unknown,
+): void {
+  useLayoutEffect(() => {
+    const table = tableRef.current;
+    const region = regionRef.current;
+    if (table === null || region === null) return undefined;
+    const apply = (): void => {
+      const heads = Array.from(table.querySelectorAll<HTMLElement>('thead tr.pm-cols > [data-pin]'));
+      const widths = new Map<string, number>();
+      for (const head of heads) widths.set(head.dataset['pin'] ?? '', head.getBoundingClientRect().width);
+      const total = [...widths.values()].reduce((sum, width) => sum + width, 0);
+      const pin = heads.length > 0 && total <= region.clientWidth * MaxPinnedShare;
+      table.dataset['pin'] = pin ? 'on' : 'off';
+      const offsets = new Map<string, string>();
+      let right = 0;
+      for (let k = 0; k < heads.length; k++) {
+        offsets.set(String(k), `${String(right)}px`);
+        right += widths.get(String(k)) ?? 0;
+      }
+      for (const cell of Array.from(table.querySelectorAll<HTMLElement>('[data-pin]'))) {
+        cell.style.right = pin ? (offsets.get(cell.dataset['pin'] ?? '') ?? '') : '';
+      }
+    };
+    apply();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(apply);
+    observer.observe(region);
+    observer.observe(table);
+    return () => observer.disconnect();
+  }, [tableRef, regionRef, layout]);
+}
+
 function summaryHeader(item: Extract<VisibleItem, { kind: 'summary' }>): string {
   return item.columns.every((column) => column.type === 'number')
     ? t('permits.table.sumOf', { count: item.columns.length })
@@ -135,6 +234,15 @@ export function PermitDefTable({
   const hasGroups = useMemo(() => groupNames(columns).length > 0, [columns]);
   const spans = useMemo(() => groupSpans(items), [items]);
   const tableRef = useFirstColumnWidth(items);
+  const regionRef = useRef<HTMLDivElement | null>(null);
+  usePinnedNumbers(tableRef, regionRef, items);
+  const groupingOf = useColumnGrouping(items, rows, totals);
+  const grouping = (key: string): DecimalGrouping => groupingOf.get(key) ?? 'never';
+  const pinStart = trailingNumericStart(items);
+  /** `data-pin` комірки стовпця `index` (0 — крайній правий закріплений) або `undefined`. */
+  const pinOf = (index: number): number | undefined => (index >= pinStart ? items.length - 1 - index : undefined);
+  /** Лівий край закріпленої смуги — з рискою. */
+  const edgeOf = (index: number): '' | undefined => (index === pinStart && pinStart < items.length ? '' : undefined);
 
   function onKeyDown(event: KeyboardEvent<HTMLTableRowElement>, row: PermitRow): void {
     if (event.target !== event.currentTarget) return;
@@ -165,7 +273,7 @@ export function PermitDefTable({
         </div>
       )}
 
-      <div className="pm-tw" role="region" aria-label={caption} tabIndex={0}>
+      <div className="pm-tw" role="region" aria-label={caption} tabIndex={0} ref={regionRef}>
         <table className="pm-t" ref={tableRef}>
           <caption className="mantine-visually-hidden">{caption}</caption>
           <thead>
@@ -200,7 +308,7 @@ export function PermitDefTable({
               {items.map((item, index) => {
                 if (item.kind === 'summary') {
                   return (
-                    <th key={`s-${item.group}`} scope="col" className="num">
+                    <th key={`s-${item.group}`} scope="col" className="num" data-pin={pinOf(index)} data-pin-edge={edgeOf(index)}>
                       <span className="pm-stick">{summaryHeader(item)}</span>
                     </th>
                   );
@@ -224,6 +332,8 @@ export function PermitDefTable({
                     scope="col"
                     className={`${column.type === 'number' ? 'num' : ''} ${index === 0 ? 'pm-first' : ''}`.trim()}
                     title={column.code}
+                    data-pin={pinOf(index)}
+                    data-pin-edge={edgeOf(index)}
                   >
                     {index === 0 ? label : <span className="pm-stick">{label}</span>}
                   </th>
@@ -244,11 +354,13 @@ export function PermitDefTable({
                   if (item.kind === 'summary') {
                     const sum = summaryValue(row, item.columns);
                     return (
-                      <td key={`s-${item.group}`} className="num">
+                      <td key={`s-${item.group}`} className="num" data-pin={pinOf(index)} data-pin-edge={edgeOf(index)}>
                         {sum === null ? (
                           <span className="pm-faint pm-stick">…</span>
                         ) : (
-                          <span className="pm-stick">{formatNumber(sum, { maximumFractionDigits: FractionDigits.normal })}</span>
+                          <span className="pm-stick" title={formatDecimalReadable(sum, undefined, undefined, grouping(`s-${item.group}`))?.exact}>
+                            {readableSum(sum, grouping(`s-${item.group}`))}
+                          </span>
                         )}
                       </td>
                     );
@@ -258,9 +370,9 @@ export function PermitDefTable({
                   const value = row[column.code];
                   const missing = column.required === true && column.derived !== true && isEmptyCell(value);
                   const warning = missing || warnCell === undefined ? null : warnCell(row, column);
-                  const shown = formatCell(column, value);
+                  const shown = formatCell(column, value, grouping(column.code));
                   const classes = [
-                    column.type === 'number' ? 'num' : '',
+                    column.type === 'number' ? 'num' : 'pm-text',
                     column.derived === true ? 'pm-derived' : '',
                     missing ? 'pm-bad' : '',
                     warning !== null ? 'pm-warn' : '',
@@ -283,7 +395,9 @@ export function PermitDefTable({
                       scope={index === 0 ? 'row' : undefined}
                       className={index === 0 ? `${classes} pm-first`.trim() : classes}
                       data-required-empty={missing ? 'true' : undefined}
-                      title={warning ?? undefined}
+                      data-pin={pinOf(index)}
+                      data-pin-edge={edgeOf(index)}
+                      title={warning ?? exactOf(column, value, grouping(column.code)) ?? fullTextOf(column, value)}
                     >
                       {index === 0 ? content : <span className="pm-stick">{content}</span>}
                       {warning !== null && <VisuallyHidden>{`. ${warning}`}</VisuallyHidden>}
@@ -297,7 +411,7 @@ export function PermitDefTable({
             <tfoot>
               <tr>
                 {items.map((item, index) => {
-                  if (item.kind === 'summary') return <td key={`s-${item.group}`} />;
+                  if (item.kind === 'summary') return <td key={`s-${item.group}`} data-pin={pinOf(index)} data-pin-edge={edgeOf(index)} />;
                   if (index === 0) {
                     return (
                       <th key={item.column.code} scope="row" className="pm-first">
@@ -307,8 +421,12 @@ export function PermitDefTable({
                   }
                   const sum = totals.sums[item.column.code];
                   return (
-                    <td key={item.column.code} className="num">
-                      {sum === undefined ? null : <span className="pm-stick">{formatNumber(sum, { maximumFractionDigits: 5 })}</span>}
+                    <td key={item.column.code} className="num" data-pin={pinOf(index)} data-pin-edge={edgeOf(index)}>
+                      {sum === undefined ? null : (
+                        <span className="pm-stick" title={formatDecimalReadable(sum, undefined, undefined, grouping(item.column.code))?.exact}>
+                          {readableSum(sum, grouping(item.column.code))}
+                        </span>
+                      )}
                     </td>
                   );
                 })}

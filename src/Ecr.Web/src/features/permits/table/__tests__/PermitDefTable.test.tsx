@@ -160,21 +160,53 @@ describe('PermitDefTable: вміст', () => {
     expect(cells.some((cell) => cell.textContent === '192.312')).toBe(true);
   });
 
-  it('числа менше за 1 — до 5 знаків, решта — до 3; булеве — Yes/No', () => {
+  // ✎ 25.11 (людина: «числа в пермітах не вистачає місця»): спільне читабельне подання — ≤ 7 значущих, крихітні науковим
+  // записом, точне — у підказці комірки (раніше 5/3 знаки дробу, і 0.0000025 показувався як 0).
+  it('числа — ≤ 7 значущих, крихітні науковим записом, точне в підказці; булеве — Yes/No', () => {
     const cols: PermitColumn[] = [
       { code: 'k', label: 'K', type: 'text' },
       { code: 'small', label: 'Small', type: 'number' },
       { code: 'big', label: 'Big', type: 'number' },
+      { code: 'tiny', label: 'Tiny', type: 'number' },
       { code: 'flag', label: 'Flag', type: 'bool' },
       { code: 'off', label: 'Off', type: 'bool' },
       { code: 'when', label: 'When', type: 'date' },
     ];
     show({
       columns: cols,
-      rows: [{ id: '1', k: 'r', small: 0.123456789, big: 1234.56789, flag: true, off: false, when: '2026-01-05' }],
+      rows: [{ id: '1', k: 'r', small: 0.123456789, big: 1234.56789, tiny: 0.0000002513, flag: true, off: false, when: '2026-01-05' }],
     });
     const cells = within(screen.getAllByRole('row')[1]!).getAllByRole('cell').map((c) => c.textContent);
-    expect(cells).toEqual(['0.12346', '1,234.568', 'text of permits.table.yes', 'text of permits.table.no', 'Jan 5, 2026']);
+    // ✎ 25.11 (картка number-format-consistent): без експоненти — крихітне звичайним дробом, показане повністю (підказки немає).
+    expect(cells).toEqual(['0.1234568', '1234.568', '0.0000002513', 'text of permits.table.yes', 'text of permits.table.no', 'Jan 5, 2026']);
+    const tiny = within(screen.getAllByRole('row')[1]!).getAllByRole('cell')[2]!;
+    expect(tiny.getAttribute('title')).toBeNull();
+  });
+
+  // AC-1 картки number-format-consistent (live b13: «75,435.96» поруч із «9363.267», «8.7E-7»). ⛔ Доказ: групування
+  // окремо на значення ('min2') → '9363.267' без розділювача, тест червоний.
+  it('групування одне на стовпець: є значення ≥ 10 000 — розділювач у всіх від 1 000; немає — ніде; без E', () => {
+    const cols: PermitColumn[] = [
+      { code: 'k', label: 'K', type: 'text' },
+      { code: 'limit', label: 'Limit', type: 'number' },
+      { code: 'year', label: 'Year', type: 'number' },
+    ];
+    show({
+      columns: cols,
+      rows: [
+        { id: '1', k: 'a', limit: 75435.9612345, year: 2031 },
+        { id: '2', k: 'b', limit: 9363.267, year: 2030 },
+        { id: '3', k: 'c', limit: 8.7e-7, year: 9363 },
+      ],
+      totals: { label: 'Σ', sums: { limit: 84799.2282345 } },
+    });
+    const column = (index: number): (string | null)[] =>
+      screen.getAllByRole('row').slice(1, 4).map((row) => within(row).getAllByRole('cell')[index]?.textContent ?? null);
+    expect(column(0)).toEqual(['75,435.96', '9,363.267', '0.00000087']);
+    expect(column(1)).toEqual(['2031', '2030', '9363']);
+    const first = within(screen.getAllByRole('row')[1]!).getAllByRole('cell')[0]!;
+    expect(first.getAttribute('title')).toBe('75,435.9612345');
+    expect(screen.getByText('84,799.23')).toBeTruthy();
   });
 
   it('порожнє необовʼязкове — тире', () => {

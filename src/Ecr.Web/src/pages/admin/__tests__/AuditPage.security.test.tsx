@@ -108,10 +108,13 @@ describe('AuditPage: вкладка подій безпеки', () => {
 
       // ⛔ Мутація: у `AuditPage` замінити `!other` на `!structure` в `useCellChangePages(applied, !other)` —
       // з'явиться другий запит (по партиціях `aud.CellChange`) заради невидимої таблиці.
-      expect(seen).toHaveLength(1);
-      expect(seen[0]).toContain('/api/v1/audit/security?');
+      // ✎ P-1124-4: варіанти фільтра типу події (`/audit/security/event-types`) — окремий легкий запит; журналів — рівно один.
+      const journals = seen.filter((url) => !url.includes('/event-types') && !url.includes('/audit/authors'));
+      expect(journals).toHaveLength(1);
+      expect(journals[0]).toContain('/api/v1/audit/security?');
+      expect(seen.some((url) => url.includes('/api/v1/audit/security/event-types?'))).toBe(true);
 
-      const query = new URLSearchParams(seen[0]!.split('?')[1]);
+      const query = new URLSearchParams(journals[0]!.split('?')[1]);
       expect(query.get('from')).toBe(new Date(2026, 0, 1).toISOString());
       expect(query.get('to')).toBe(new Date(2026, 0, 9).toISOString());
       expect(query.get('eventType')).toBe('AccessDenied');

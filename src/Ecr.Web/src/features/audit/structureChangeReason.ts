@@ -1,6 +1,7 @@
 import { formatDateTime } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
 import { siteUntilText } from '@/shared/siteMoment';
+import { zoneCityName } from './zoneCityName';
 
 /**
  * Причина структурної зміни (`StructureChange.ChangeReason`) мовою інтерфейсу.
@@ -105,12 +106,17 @@ function render(key: string, params: Record<string, string>): string | null {
       const until = params['until'];
       const zone = params['zone'];
       const { zone: _zone, ...rest } = params;
+      // ✎ P-1124-4: час запису в журналі тепер у поясі ЧИТАЧА, а строк лишається часом майданчика (це строк, D-68) —
+      // тож строк несе назву поясу («… 23:59 (Atyrau)»), щоб два часи одного рядка не читалися як один.
+      const site = until === undefined || zone === undefined || zone.length === 0 ? null : siteUntilText(until, zone);
       return t('document.reopen.audit.reopened', {
         ...rest,
         until:
           until === undefined
             ? ''
-            : (zone === undefined || zone.length === 0 ? null : siteUntilText(until, zone)) ?? formatDateTime(until),
+            : site === null || zone === undefined
+              ? formatDateTime(until)
+              : `${site} (${zoneCityName(zone)})`,
       });
     }
     case 'document.reopen.audit.closedExpired':

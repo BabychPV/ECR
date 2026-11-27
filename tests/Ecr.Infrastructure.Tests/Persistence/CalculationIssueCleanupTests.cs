@@ -29,8 +29,10 @@ public sealed class CalculationIssueCleanupTests(SqlServerFixture sql)
         var (builder, chain) = await ArrangeAsync();
         await using (var db = builder.CreateContext())
         {
-            db.CalculationIssues.Add(Issue(chain.DocumentId, chain, null));
-            db.CalculationIssues.Add(Issue(chain.DocumentId + 1_000_000, chain, null));
+            // ✎ P-1124: проблема чужого документа — на прогоні проєкту (не цього документа), що видалення документа лишає.
+            var projectRun = await AddRunAsync(db, chain, documentId: null);
+            db.CalculationIssues.Add(Issue(chain.DocumentId, chain, null, await AddRunAsync(db, chain, chain.DocumentId)));
+            db.CalculationIssues.Add(Issue(chain.DocumentId + 1_000_000, chain, null, projectRun));
             await db.SaveChangesAsync();
         }
 
@@ -59,8 +61,10 @@ public sealed class CalculationIssueCleanupTests(SqlServerFixture sql)
             await new RowStore(db, new BulkCellLoader(sql.ConnectionString, 1000), new TestClock(Now))
                 .EnsureTableInstancesAsync(chain.DocumentId, chain.PeriodKey, default);
 
+            var run = await AddRunAsync(db, chain, chain.DocumentId);
             db.CalculationIssues.AddRange(
-                Issue(chain.DocumentId, chain, copy2), Issue(chain.DocumentId, chain, copy3), Issue(chain.DocumentId, chain, null));
+                Issue(chain.DocumentId, chain, copy2, run), Issue(chain.DocumentId, chain, copy3, run),
+                Issue(chain.DocumentId, chain, null, run));
             await db.SaveChangesAsync();
         }
 
@@ -77,8 +81,17 @@ public sealed class CalculationIssueCleanupTests(SqlServerFixture sql)
         Assert.Contains(null, left);
     }
 
-    private static CalculationIssue Issue(long documentId, TestDocument chain, long? copy)
-        => new(documentId, chain.PeriodKey.Value, chain.TableDefId, copy, "R1", 1, null, 1, Now);
+    private static CalculationIssue Issue(long documentId, TestDocument chain, long? copy, long runId)
+        => new(documentId, chain.PeriodKey.Value, chain.TableDefId, copy, "R1", 1, null, runId, Now);
+
+    /// <summary>✎ P-1124: проблема посилається на справжній прогін (<c>FK_CIssue_Run</c>).</summary>
+    private static async Task<long> AddRunAsync(EcrDbContext db, TestDocument chain, long? documentId)
+    {
+        var run = new CalculationRun(chain.ProjectId, chain.PeriodKey.Value, triggeredByUserId: null, Now, documentId);
+        db.CalculationRuns.Add(run);
+        await db.SaveChangesAsync();
+        return run.Id;
+    }
 
     private async Task<(TestDocumentBuilder Builder, TestDocument Chain)> ArrangeAsync()
     {

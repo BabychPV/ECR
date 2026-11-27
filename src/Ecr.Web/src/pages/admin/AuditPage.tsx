@@ -1,9 +1,8 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, type JSX } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import {
   Badge,
   Button,
   Checkbox,
-  NumberInput,
   SegmentedControl,
   Select,
   Skeleton,
@@ -11,6 +10,7 @@ import {
 } from '@mantine/core';
 import type { CellChangePage } from '@/api/types';
 import { useAuthorOptions } from '@/features/audit/authorOptions';
+import { columnOptions, useChangedColumns, useDocumentOptions, type FilterOption } from '@/features/audit/filterOptions';
 import { CellChangesTable, originLabel } from '@/features/audit/CellChangesTable';
 import { AuditExportButton } from '@/features/audit/AuditExportButton';
 import { useAuditSort } from '@/features/audit/auditSort';
@@ -130,9 +130,9 @@ export function AuditPage(): JSX.Element {
    */
   const fromField = useFieldDraft(fromDate);
   const toField = useFieldDraft(toDate);
-  const documentField = useFieldDraft<string | number>(documentId ?? '');
   const rowKeyField = useFieldDraft(rowKey ?? '');
-  const columnField = useFieldDraft<string | number>(columnDefId ?? '');
+  const [documentSearch, setDocumentSearch] = useState('');
+  const appliedDocumentSearch = useDebouncedFilter(documentSearch);
 
   /*
    * ⛔ Поля, що набираються з клавіатури, йдуть у запит ПІСЛЯ паузи
@@ -205,7 +205,17 @@ export function AuditPage(): JSX.Element {
    */
   const single = isSingleCell(applied);
 
-  const authorOptions = useAuthorOptions(cellPage?.items, author);
+  // ✎ AC-11: підписи щойно обраних пунктів — поле не показує «#id», поки журнал перезавантажується з новим фільтром.
+  const [picked, setPicked] = useState<Record<'document' | 'column' | 'author', FilterOption | null>>({
+    document: null,
+    column: null,
+    author: null,
+  });
+  const authorOptions = useAuthorOptions(cellPage?.items, author, picked.author);
+  const documentOptions = useDocumentOptions(appliedDocumentSearch, cellPage?.items, documentId, picked.document);
+  // ✎ AC-8: колонки документа, змінені у вікні, — з сервера, а не лише з завантажених сторінок журналу.
+  const changedColumns = useChangedColumns(fromDate, toDate, documentId, !other);
+  const columnChoices = columnOptions(cellPage?.items, documentId, columnDefId, picked.column, changedColumns);
 
   return (
     <>
@@ -254,25 +264,37 @@ export function AuditPage(): JSX.Element {
                 }}
               />
             </Suspense>
-            <NumberInput
-              size="xs"
-              miw={140}
-              // ⚠ На вкладці структурних змін документа немає: мертвий фільтр
-              // читався б як «за цим документом змін не було».
-              display={other ? 'none' : undefined}
-              label={t('audit.document')}
-              // ⚠ `U-21`: пояснення лишається для читалки, а видиме — під рядом
-              // фільтрів (`FilterHints`); інакше воно зсуває ряд шапки.
-              description={t('audit.documentHint')}
-              styles={readerOnlyDescription}
-              value={documentField.value}
-              onFocus={documentField.onFocus}
-              onBlur={documentField.onBlur}
-              onChange={(value) => {
-                documentField.setValue(value);
-                setDocumentId(typeof value === 'number' ? value : null);
-              }}
-            />
+
+            {/* ✎ audit-filters-live AC-9 (рішення людини 26.11): «Clear filters» — у шапці, на КОЖНІЙ вкладці, і знімає
+                ВСЕ разом: документ, дати (назад до типового вікна), адресу комірки, походження, автора, «Late» і фільтри
+                вкладок (тип сутності, тип події, дія, автор). Вкладка й порядок лишаються.
+                ⛔ ОДИН перехід на всі параметри: два синхронні `setSearchParams` в одному тіку гублять обидві зміни
+                (`useUrlParamsSetter`). */}
+            <FilterInline>
+              <Button
+                variant="subtle"
+                data-audit-clear-filters=""
+                onClick={() => {
+                  setDocumentSearch('');
+                  setParams({
+                    from: null,
+                    to: null,
+                    documentId: null,
+                    rowKey: null,
+                    columnDefId: null,
+                    author: null,
+                    origin: null,
+                    lateOnly: null,
+                    entityType: null,
+                    eventType: null,
+                    action: null,
+                    changedBy: null,
+                  });
+                }}
+              >
+                {t('audit.reset')}
+              </Button>
+            </FilterInline>
           </FilterRow>
         }
       />
@@ -301,6 +323,30 @@ export function AuditPage(): JSX.Element {
       {/* ⚠ Фільтри ОКРЕМИМ рядком, а не в шапці: їх шість, і в шапці вони
           витіснили б заголовок за край на ноутбучній ширині. */}
       <FilterRow mb="xs" data-audit-filter-row="cells">
+        {/* ✎ audit-filters-followup AC-10 (людина 26.11, UI-прохід): «перенеси це поле сюди, це логічно» — «Document»
+            ПЕРШИМ у рядку фільтрів комірки: «Row key» і «Column» залежать від нього. Лише на вкладці комірок (на інших
+            документа немає — мертвий фільтр читався б як «за цим документом змін не було»).
+            audit-filters-live D2: документ — ВИБОРОМ за назвою/кодом (як у «Documents»), у адресі — Id. Набраний
+            текст лише шукає: «P1-V9-0001» більше не стає документом 190001. */}
+        <Select
+          size="xs"
+          miw={220}
+          searchable
+          clearable
+          label={t('audit.document')}
+          // ⚠ `U-21`: пояснення лишається для читалки, а видиме — під рядом фільтрів (`FilterHints`).
+          description={t('audit.documentHint')}
+          styles={readerOnlyDescription}
+          nothingFoundMessage={t('audit.filterNothing')}
+          data={documentOptions}
+          searchValue={documentSearch}
+          onSearchChange={setDocumentSearch}
+          value={documentId === null ? null : String(documentId)}
+          onChange={(value, option) => {
+            setPicked((previous) => ({ ...previous, document: value === null ? null : option }));
+            setDocumentId(value === null ? null : Number(value));
+          }}
+        />
         {/* ⛔ `R-18`: автор — ВИБОРОМ за іменем (`useAuthorOptions`), а не
             номером `UserId`, якого людина не знає. */}
         <Select
@@ -312,9 +358,11 @@ export function AuditPage(): JSX.Element {
           description={t('audit.authorHint')}
           styles={readerOnlyDescription}
           placeholder={t('audit.authorAny')}
+          nothingFoundMessage={t('audit.filterNothing')}
           data={authorOptions}
           value={author === null ? null : String(author)}
-          onChange={(value) => {
+          onChange={(value, option) => {
+            setPicked((previous) => ({ ...previous, author: value === null ? null : option }));
             setAuthor(value === null ? null : Number(value));
           }}
         />
@@ -345,18 +393,22 @@ export function AuditPage(): JSX.Element {
             setRowKey(event.currentTarget.value);
           }}
         />
-        <NumberInput
+        {/* audit-filters-live D3: колонка — ВИБОРОМ за підписом (аркуш / таблиця / заголовок) серед колонок обраного
+            документа в журналі; «M10» лише шукає і більше не стає колонкою 10 з хибним «No changes». */}
+        <Select
           size="xs"
-          miw={120}
+          miw={180}
+          searchable
+          clearable
           label={t('audit.columnDefId')}
           description={t('audit.cellHint')}
           styles={readerOnlyDescription}
-          value={columnField.value}
-          onFocus={columnField.onFocus}
-          onBlur={columnField.onBlur}
-          onChange={(value) => {
-            columnField.setValue(value);
-            setColumnDefId(typeof value === 'number' ? value : null);
+          nothingFoundMessage={t('audit.filterNothing')}
+          data={columnChoices}
+          value={columnDefId === null ? null : String(columnDefId)}
+          onChange={(value, option) => {
+            setPicked((previous) => ({ ...previous, column: value === null ? null : option }));
+            setColumnDefId(value === null ? null : Number(value));
           }}
         />
         <FilterInline>
@@ -392,26 +444,6 @@ export function AuditPage(): JSX.Element {
             }}
           >
             {t('audit.archiveWindow')}
-          </Button>
-        </FilterInline>
-        <FilterInline>
-          <Button
-            variant="subtle"
-            onClick={() => {
-              // ⛔ ОДИН перехід на п'ять параметрів, а не п'ять викликів
-              // `useUrlState` підряд: два синхронні `setSearchParams` в одному
-              // тіку гублять ОБИДВІ зміни, а не лише другу (див. коментар до
-              // `useUrlParamsSetter`). П'ять поспіль не скинули б нічого.
-              setParams({
-                rowKey: null,
-                columnDefId: null,
-                author: null,
-                origin: null,
-                lateOnly: null,
-              });
-            }}
-          >
-            {t('audit.reset')}
           </Button>
         </FilterInline>
       </FilterRow>

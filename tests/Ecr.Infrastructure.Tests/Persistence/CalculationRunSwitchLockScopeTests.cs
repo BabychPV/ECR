@@ -139,8 +139,7 @@ public sealed class CalculationRunSwitchLockScopeTests(SqlServerFixture sql)
                 new UnitOfWork(db),
                 Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
                 Substitute.For<ICurrentUser>(),
-                clock,
-                Substitute.For<IAuditWriter>());
+                clock);
 
             await handler.CompleteAsync(runId, new ModuleProfile(), CancellationToken.None);
             return null;

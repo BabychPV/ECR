@@ -453,7 +453,8 @@ public sealed class DeleteRegistryEntryHandler(
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock,
-    Keys.RegistryKeyService? keys = null)
+    Keys.RegistryKeyService? keys = null,
+    FlaringRegistryLock? flaring = null)
 {
     // ⚠ `keys` необов'язковий лише для тестів, що будують обробник руками (як в
     // `UpsertRegistryEntryHandler`); контейнер підставляє `RegistryKeyService` завжди. Що
@@ -518,6 +519,14 @@ public sealed class DeleteRegistryEntryHandler(
         // ⛔ D-211: запис External-довідника вручну не видаляється — master AF.
         ExternalRegistryGuard.EnsureManualEditAllowed(definition);
 
+        // ✎ DESIGN-sg-flaring §5.7 (C4): видалення запису довідника факелів — його вікно зникає з замкнених періодів.
+        await ExternalRegistryGuard.EnsureFlaringEditAllowedAsync(
+                definition,
+                () => Task.FromResult<IReadOnlyCollection<FlaringRegistryEdit>>([FlaringRegistryEdit.Remove(entry.Window)]),
+                flaring,
+                ct)
+            .ConfigureAwait(false);
+
         // ⛔ RT-12 (ФВ-8.16, D-155): частини композиції з `Cascade` видаляються разом із батьком —
         // на всю глибину (потік → кейс → рядки складу). Частина з `Restrict` у набір не входить і
         // лишається посиланням ззовні — наявна відмова 409 `entryReferenced` нижче.
@@ -538,6 +547,13 @@ public sealed class DeleteRegistryEntryHandler(
                     .ConfigureAwait(false);
 
                 ExternalRegistryGuard.EnsureManualEditAllowed(partRegistry);
+                await ExternalRegistryGuard.EnsureFlaringEditAllowedAsync(
+                        partRegistry,
+                        () => Task.FromResult<IReadOnlyCollection<FlaringRegistryEdit>>(
+                            [.. parts.Where(p => p.RegistryDefId == partRegistry.Id).Select(p => FlaringRegistryEdit.Remove(p.Window))]),
+                        flaring,
+                        ct)
+                    .ConfigureAwait(false);
                 partRegistries.Add(partRegistry);
             }
         }
@@ -717,6 +733,14 @@ public sealed class DeleteRegistryEntryHandler(
 
         ExternalRegistryGuard.EnsureManualEditAllowed(definition);
 
+        // ✎ DESIGN-sg-flaring §5.7 (C4): видалення набору записів довідника факелів.
+        await ExternalRegistryGuard.EnsureFlaringEditAllowedAsync(
+                definition,
+                () => Task.FromResult<IReadOnlyCollection<FlaringRegistryEdit>>([.. ids.Select(id => FlaringRegistryEdit.Remove(found[id].Window))]),
+                flaring,
+                ct)
+            .ConfigureAwait(false);
+
         // Каскад: рівнями на весь набір; кожна частина приписана КОРЕНЮ, від якого вона дійшла (для журналу).
         var rootOf = ids.ToDictionary(id => id, id => id);
         var parts = new List<(RegistryEntry Entry, long Root)>();
@@ -748,6 +772,13 @@ public sealed class DeleteRegistryEntryHandler(
                     .ConfigureAwait(false);
 
                 ExternalRegistryGuard.EnsureManualEditAllowed(partRegistry);
+                await ExternalRegistryGuard.EnsureFlaringEditAllowedAsync(
+                        partRegistry,
+                        () => Task.FromResult<IReadOnlyCollection<FlaringRegistryEdit>>(
+                            [.. parts.Where(p => p.Entry.RegistryDefId == partRegistry.Id).Select(p => FlaringRegistryEdit.Remove(p.Entry.Window))]),
+                        flaring,
+                        ct)
+                    .ConfigureAwait(false);
                 partRegistries.Add(partRegistry);
             }
         }

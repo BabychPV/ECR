@@ -172,6 +172,7 @@ public sealed class ReportViewLandShapeTests(SqlServerFixture sql, ITestOutputHe
         command.CommandTimeout = 600;
         command.CommandText = """
             DELETE FROM calc.CalculationResult WHERE DocumentId IN (SELECT Id FROM doc.Document WHERE ProjectId = @p);
+            DELETE FROM calc.CalculationIssue WHERE CalculationRunId IN (SELECT Id FROM calc.CalculationRun WHERE ProjectId = @p);
             DELETE FROM calc.CalculationRun WHERE ProjectId = @p;
             DELETE FROM doc.CellValue WHERE TableDefId = @t;
             DELETE FROM doc.TableRow WHERE TableInstanceId IN (SELECT Id FROM doc.TableInstance WHERE TableDefId = @t);

@@ -34,7 +34,7 @@ export const scriptKeys = {
   validation: (versionId: number, text: string) =>
     ['methodologies', 'scriptValidation', versionId, text] as const,
 
-  /** Покриття версії «виходи → колонки» — той самий ключ, що в `MethodologyCoveragePanel` (кеш спільний). */
+  /** Покриття версії «виходи → колонки» (вкладка «Входи й виходи» редактора скрипта). */
   coverage: (methodologyId: number, versionId: number) =>
     ['methodologies', 'coverage', methodologyId, versionId] as const,
 };

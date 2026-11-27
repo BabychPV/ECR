@@ -17,8 +17,8 @@ import { RegistryDataPage } from '../RegistryDataPage';
 export const SeededStrings: Record<string, string> = Catalog;
 
 export const registries = [
-  { id: 1, code: 'STREAM_CASE', nameL10n: { values: { en: 'Stream cases' } }, fields: [], isTemporal: false, isHierarchical: false, sourceKind: 'Master' },
-  { id: 2, code: 'STREAM', nameL10n: { values: { en: 'Flare streams' } }, fields: [], isTemporal: false, isHierarchical: false, sourceKind: 'Master' },
+  { id: 1, code: 'FLARE_CASE', nameL10n: { values: { en: 'Stream cases' } }, fields: [], isTemporal: false, isHierarchical: false, sourceKind: 'Master' },
+  { id: 2, code: 'FLARE', nameL10n: { values: { en: 'Flare streams' } }, fields: [], isTemporal: false, isHierarchical: false, sourceKind: 'Master' },
 ];
 
 const fieldDto = (id: number, code: string, en: string, dataType: string, isRequired: boolean, lookup: number | null = null) => ({
@@ -34,7 +34,7 @@ const fieldDto = (id: number, code: string, en: string, dataType: string, isRequ
 
 export const definition = {
   id: 1,
-  code: 'STREAM_CASE',
+  code: 'FLARE_CASE',
   codeMode: 'Auto',
   dataRevision: 3,
   definitionVersion: 2,
@@ -155,7 +155,7 @@ export function mockServer(options: ServerOptions = {}): SentBatch[] {
         return json((options.batch ?? passed)(batch));
       }
       if (url.includes('/definition')) return json(definition);
-      if (url.includes('/api/v1/registries/STREAM/rows')) {
+      if (url.includes('/api/v1/registries/FLARE/rows')) {
         if (options.lookupStatus !== undefined && options.lookupStatus >= 400) {
           return new Response(JSON.stringify({ title: 'Forbidden', status: options.lookupStatus, errorCode: 'ECR-AUTH-0403' }), {
             status: options.lookupStatus,
@@ -184,7 +184,7 @@ export function showDataPage(client = new QueryClient({ defaultOptions: { querie
   return render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={['/admin/registries/STREAM_CASE/entries']}>
+        <MemoryRouter initialEntries={['/admin/registries/FLARE_CASE/entries']}>
           <Routes>
             <Route path="/admin/registries/:code/entries" element={<RegistryDataPage />} />
           </Routes>

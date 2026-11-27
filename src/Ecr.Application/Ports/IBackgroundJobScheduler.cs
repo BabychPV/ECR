@@ -747,9 +747,6 @@ public interface IMigrateDocumentVersionJob : IBackgroundJob;
 /// </remarks>
 public interface IMaterializeCollectedDataJob : IBackgroundJob;
 
-/// <summary>Маркер задачі побудови зрізу звітності.</summary>
-public interface IReportSnapshotJob : IBackgroundJob;
-
 /// <summary>Маркер задачі збору із зовнішнього джерела.</summary>
 public interface ICollectionJob : IBackgroundJob;
 

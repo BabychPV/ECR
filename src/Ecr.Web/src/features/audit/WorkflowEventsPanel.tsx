@@ -14,7 +14,7 @@ import { authorName, useAuthorOptions } from '@/features/audit/authorOptions';
 import { SortableTh } from '@/features/audit/SortableTh';
 import { FilterHints, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
-import { Timestamp } from '@/shared/ui/Timestamp';
+import { AuditChangedAt } from './AuditChangedAt';
 import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
@@ -89,7 +89,8 @@ export function WorkflowEventsPanel({ from, to }: { from: string; to: string }):
           miw={200}
           clearable
           label={t('audit.action')}
-          placeholder={t('audit.authorAny')}
+          // ✎ P-1124-4: було «Anyone» (ключ автора) над переліком дій.
+          placeholder={t('audit.actionAny')}
           data={WorkflowActions.map((value) => ({ value, label: workflowActionLabel(value) }))}
           value={action}
           onChange={(value) => {
@@ -105,6 +106,7 @@ export function WorkflowEventsPanel({ from, to }: { from: string; to: string }):
           description={t('audit.authorHint')}
           styles={readerOnlyDescription}
           placeholder={t('audit.authorAny')}
+          nothingFoundMessage={t('audit.filterNothing')}
           data={authorOptions}
           value={changedBy === null ? null : String(changedBy)}
           onChange={(value) => {
@@ -148,11 +150,15 @@ export function WorkflowEventsPanel({ from, to }: { from: string; to: string }):
               <Table.Tbody>
                 {page.items.map((event, index) => (
                   <Table.Tr key={`${event.changedAt}:${event.documentId}:${event.sheetDefId}:${index}`}>
-                    <Table.Td>
-                      <Timestamp value={event.changedAt} />
+                    <Table.Td data-audit-time-cell="">
+                      {/* ✎ P-1124-4: місцевий час читача, 24 год, одним рядком. */}
+                      <AuditChangedAt value={event.changedAt} />
                     </Table.Td>
                     {/* Системний перехід (автора немає) — «Система»; видалений користувач — «користувач #id». */}
-                    <Table.Td title={event.changedByUserId === null ? undefined : `#${String(event.changedByUserId)}`}>
+                    <Table.Td
+                      title={event.changedByUserId === null ? undefined : `#${String(event.changedByUserId)}`}
+                      data-audit-author=""
+                    >
                       {event.changedByUserId === null
                         ? t('audit.systemActor')
                         : authorName({

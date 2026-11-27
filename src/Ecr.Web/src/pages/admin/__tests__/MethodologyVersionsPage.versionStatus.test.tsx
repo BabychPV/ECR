@@ -37,6 +37,7 @@ const versions = [
     effectiveFrom: '2026-01-01',
     effectiveTo: null,
     publishedAt: null,
+    engine: 'Script',
   },
   {
     id: 2,
@@ -49,6 +50,7 @@ const versions = [
     effectiveFrom: '2026-02-01',
     effectiveTo: null,
     publishedAt: null,
+    engine: 'Script',
   },
 ];
 
@@ -127,7 +129,7 @@ const SlowEnvTimeout = 120_000;
 
 function tone(state: string): string | null {
   return (
-    document.querySelector(`[data-status-state="${state}"]`)?.getAttribute('data-status-tone') ??
+    screen.getByTestId('script-versions').querySelector(`[data-status-state="${state}"]`)?.getAttribute('data-status-tone') ??
     null
   );
 }
@@ -150,7 +152,8 @@ describe('MethodologyVersionsPage: статус версії — з набору
        * таблицю набору, а не був надрукований рядком. Мутація «повернути
        * `<Badge>{version.status}</Badge>`» лишає цей перелік порожнім.
        */
-      const states = [...document.querySelectorAll('[data-status-state]')].map((node) =>
+      // ✎ 24.11: таблиця робочих версій (скриптів); картка поточної версії малює ту саму позначку окремо.
+      const states = [...screen.getByTestId('script-versions').querySelectorAll('[data-status-state]')].map((node) =>
         node.getAttribute('data-status-state'),
       );
 

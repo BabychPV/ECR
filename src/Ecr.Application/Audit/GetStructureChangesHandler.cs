@@ -87,4 +87,22 @@ public sealed class GetStructureChangesHandler(
 
         return await audit.ReadStructureJournalAsync(filter, page, ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// ✎ P-1124-4: різні типи сутностей у вікні — варіанти фільтра «Entity type». Поле було вільним текстом із
+    /// ТОЧНИМ збігом коду (<c>cfg.RegistryDef</c>), якого людина не знає. Ті самі право й перевірки вікна.
+    /// </summary>
+    /// <param name="from">Початок вікна в UTC, включно.</param>
+    /// <param name="to">Кінець вікна в UTC, виключно.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<IReadOnlyList<string>> EntityTypesAsync(DateTime from, DateTime to, CancellationToken ct)
+    {
+        await ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
+        AuditWindow.Require(from, to, MaxWindow, page: null);
+
+        return await audit.ReadStructureEntityTypesAsync(from, to, ct).ConfigureAwait(false);
+    }
 }

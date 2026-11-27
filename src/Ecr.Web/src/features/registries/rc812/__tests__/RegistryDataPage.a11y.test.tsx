@@ -29,7 +29,7 @@ suite.each(Themes)('Доступність даних довідника (%s)', 
     const client = createScanClient();
     const route = {
       path: routes.adminRegistryData.path,
-      entry: '/admin/registries/STREAM_CASE/entries',
+      entry: '/admin/registries/FLARE_CASE/entries',
       content: () => screen.findByRole('grid', undefined, { timeout: 10_000 }),
     };
     const { container } = render(

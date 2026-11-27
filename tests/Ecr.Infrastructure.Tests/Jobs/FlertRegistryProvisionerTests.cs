@@ -22,9 +22,8 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// правилом <c>SUM_100</c> і компонентами; другий виклик не змінює нічого; наявний довідник не редагується.
 /// </summary>
 /// <remarks>
-/// Мутаційний доказ (локально, не в коміті): прибрати <c>def.SwitchSource(sourceKind)</c> у <c>CreateAsync</c> →
-/// <c>Відсутні_довідники_заводяться_за_11_4_а_другий_виклик_нічого_не_змінює</c> червоний (дзеркало стало б Local —
-/// ручні правки копії FLERT дозволені).
+/// Мутаційний доказ (локально, не в коміті): прибрати <c>def.SwitchSource(RegistrySourceKind.Local)</c> у <c>AdoptAsync</c> →
+/// <c>Колишнє_дзеркало_External_переходить_у_власність_ECR_з_новим_полем_і_записом_журналу</c> червоний.
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class FlertRegistryProvisionerTests(SqlServerFixture sql)
@@ -50,9 +49,11 @@ public sealed class FlertRegistryProvisionerTests(SqlServerFixture sql)
         {
             var defs = await db.RegistryDefs.AsNoTracking().Include(d => d.Fields)
                 .Where(d => d.Code.EndsWith(_tag)).ToDictionaryAsync(d => d.Code);
-            Assert.Equal(RegistrySourceKind.External, defs[Codes.Stream].SourceKind);
-            Assert.Equal(RegistrySourceKind.External, defs[Codes.Case].SourceKind);
-            Assert.Equal(RegistrySourceKind.External, defs[Codes.Composition].SourceKind);
+            // D-NEW: власник складу — ECR.
+            Assert.Equal(RegistrySourceKind.Local, defs[Codes.Stream].SourceKind);
+            Assert.Equal(RegistrySourceKind.Local, defs[Codes.Case].SourceKind);
+            Assert.Equal(RegistrySourceKind.Local, defs[Codes.Composition].SourceKind);
+            Assert.Contains(defs[Codes.Case].Fields, f => f.Code == FlertCompositionSchema.CaseFlertAliases && f.DataType == CellDataType.String);
             Assert.Equal(RegistrySourceKind.Local, defs[Codes.Component].SourceKind);
             Assert.True(defs[Codes.Case].IsTemporal);
             Assert.False(defs[Codes.Composition].IsTemporal);
@@ -113,12 +114,45 @@ public sealed class FlertRegistryProvisionerTests(SqlServerFixture sql)
         Assert.Equal(45, set.ComponentsAdded.Count);
         Assert.DoesNotContain("Methane", set.ComponentsAdded);
         Assert.Contains(set.Problems, p => p.StartsWith($"{Codes.Stream}.{FlertCompositionSchema.StreamLegacyId}", StringComparison.Ordinal));
-        Assert.Contains(set.Warnings, w => w.StartsWith(Codes.Stream, StringComparison.Ordinal));
 
         await using var check = Context();
         var untouched = await check.RegistryDefs.AsNoTracking().Include(d => d.Fields).SingleAsync(d => d.Code == Codes.Stream);
         Assert.Empty(untouched.Fields);
         Assert.Equal(RegistrySourceKind.Local, untouched.SourceKind);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-476")]
+    public async Task Колишнє_дзеркало_External_переходить_у_власність_ECR_з_новим_полем_і_записом_журналу()
+    {
+        await using var provider = BuildProvider();
+        var first = await EnsureAsync(provider);
+
+        // Стан стенда до D-NEW: дзеркало External і без поля FLERT_ALIASES.
+        await using (var db = Context())
+        {
+            var ids = new[] { first.Stream!.Id, first.Case!.Id, first.Composition!.Id };
+            await db.Database.ExecuteSqlAsync($"UPDATE cfg.RegistryDef SET SourceKind = 0 WHERE Id IN ({ids[0]}, {ids[1]}, {ids[2]})");
+            await db.Database.ExecuteSqlAsync($"DELETE FROM cfg.RegistryFieldDef WHERE RegistryDefId = {ids[1]} AND Code = {FlertCompositionSchema.CaseFlertAliases}");
+        }
+
+        var adopted = await EnsureAsync(provider);
+
+        Assert.Empty(adopted.Problems);
+        Assert.Equal(3, adopted.Warnings.Count);
+        await using var check = Context();
+        var defs = await check.RegistryDefs.AsNoTracking().Include(d => d.Fields).Where(d => d.Code.EndsWith(_tag)).ToDictionaryAsync(d => d.Code);
+        Assert.All(new[] { Codes.Stream, Codes.Case, Codes.Composition }, code => Assert.Equal(RegistrySourceKind.Local, defs[code].SourceKind));
+        Assert.Contains(defs[Codes.Case].Fields, f => f.Code == FlertCompositionSchema.CaseFlertAliases);
+        var audited = await check.Database
+            .SqlQuery<int>($"SELECT COUNT(*) AS [Value] FROM aud.StructureChange WHERE EntityType = N'cfg.RegistryDef' AND Operation = {FlertRegistryProvisioner.AdoptOperation} AND EntityId IN ({first.Stream.Id}, {first.Case.Id}, {first.Composition.Id})")
+            .SingleAsync();
+        Assert.Equal(3, audited);
+
+        var third = await EnsureAsync(provider);
+        Assert.Empty(third.Warnings);
     }
 
     /// <summary>Виклик як у задачі: власна область від <c>svc-integration</c>, одна транзакція.</summary>

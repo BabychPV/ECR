@@ -222,6 +222,73 @@ public sealed class AuditController(
     }
 
     /// <summary>
+    /// Колонки документа, які змінювали у вікні, — варіанти фільтра «Column» (✎ AC-8), незалежно від завантажених
+    /// сторінок журналу. Право, вікно, грант на документ і межі читання — як у <c>cells</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Прихована читачу колонка (заборона колонки, таблиці чи аркуша) у переліку відсутня.
+    /// ✎ AC-14: версії однієї колонки (після переносу проєкту зміни до нього лежать на Id старої версії шаблону)
+    /// згорнуто за родоводом в ОДИН пункт з Id колонки поточної версії; <c>cells?columnDefId=</c> з цим Id повертає зміни
+    /// всіх її версій, а Id старої версії розв'язується в поточний за тими ж межами читання.
+    /// </remarks>
+    /// <param name="from">Початок вікна в UTC, включно.</param>
+    /// <param name="to">Кінець вікна в UTC, виключно.</param>
+    /// <param name="documentId">Документ; без нього — порожній перелік.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("cells/columns")]
+    [ProducesResponseType<IReadOnlyList<Ecr.Application.Ports.CellChangeColumnView>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> CellsColumns(
+        [FromQuery] DateTime from, [FromQuery] DateTime to, [FromQuery] long? documentId, CancellationToken ct)
+        => Ok(await cellChanges.ChangedColumnsAsync(from, to, documentId, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Типи сутностей журналу структурних змін, що є у вікні, — варіанти фільтра «Entity type» (✎ P-1124-4). Право й
+    /// вікно — як у <c>structure</c>.
+    /// </summary>
+    /// <param name="from">Початок вікна в UTC, включно.</param>
+    /// <param name="to">Кінець вікна в UTC, виключно.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("structure/entity-types")]
+    [ProducesResponseType<IReadOnlyList<string>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> StructureEntityTypes(
+        [FromQuery] DateTime from, [FromQuery] DateTime to, CancellationToken ct)
+        => Ok(await structureChanges.EntityTypesAsync(from, to, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Типи подій безпеки, що є у вікні, — варіанти фільтра «Event type» (✎ P-1124-4). Право й вікно — як у
+    /// <c>security</c>.
+    /// </summary>
+    /// <param name="from">Початок вікна в UTC, включно.</param>
+    /// <param name="to">Кінець вікна в UTC, виключно.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("security/event-types")]
+    [ProducesResponseType<IReadOnlyList<string>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> SecurityEventTypes(
+        [FromQuery] DateTime from, [FromQuery] DateTime to, CancellationToken ct)
+        => Ok(await securityEvents.EventTypesAsync(from, to, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Автори для фільтра «By user» журналів аудиту (✎ P-1124-4): номер і ім'я; логін — лише за збігу імені з іншим
+    /// автором (✎ AC-7), SID і e-mail — ніколи. Право
+    /// <c>Security.ViewAudit</c> — те саме, що відкриває журнали; <c>GET /users</c> вимагає <c>Security.ManageUsers</c>.
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("authors")]
+    [ProducesResponseType<IReadOnlyList<Ecr.Application.Ports.AuditAuthorView>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> Authors(CancellationToken ct)
+        => Ok(await securityEvents.AuthorsAsync(ct).ConfigureAwait(false));
+
+    /// <summary>
     /// Експорт журналу структурних змін у CSV (<c>BE-16</c>). Право й фільтри — як у <c>structure</c>.
     /// </summary>
     /// <remarks>

@@ -115,19 +115,6 @@ public sealed class RowReferenceParsingTests
         Assert.Contains(find.Diagnostics, d => d.MessageKey == "expr.rowReferenceOutsideScope");
     }
 
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void У_діалекті_звітів_ROW_і_THIS_заборонені_як_будь_яке_чуже_посилання()
-    {
-        foreach (var text in new[] { "ROW.X", "THIS" })
-        {
-            var result = Expr.Parse(text, ExpressionDialect.Report);
-
-            var diagnostic = Assert.Single(result.Diagnostics);
-            Assert.Equal("expr.referenceForbiddenInReport", diagnostic.MessageKey);
-        }
-    }
-
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [InlineData("CST.ROW + HDR.THIS", ExpressionDialect.Methodology)]
@@ -207,8 +194,6 @@ public sealed class RowReferenceParsingTests
 
         Assert.Throws<ArgumentException>(
             () => parser.Parse("THIS", ExpressionDialect.Methodology, host: ExpressionHost.RegistryRule));
-        Assert.Throws<ArgumentException>(
-            () => parser.Parse("THIS", ExpressionDialect.Report, host: ExpressionHost.RegistryRule));
     }
 
     [Fact]

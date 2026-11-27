@@ -21,17 +21,10 @@ public sealed partial class ReportDefinitionTests
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     [Trait("Requirement", "ФВ-10.4")]
-    public void Визначення_звіту_живе_в_таблицях_а_не_в_коді()
+    public void Жоден_клас_не_названий_на_честь_конкретного_звіту()
     {
-        // Опис звіту — сутності з полями-даними: перелік колонок і правила
-        // лежать у JSON, а не в типах. Клас на кожен звіт означав би 166
-        // класів і реліз на кожну зміну форми.
-        var definitions = File.ReadAllText(Path.Combine(
-            SolutionRoot(), "src", "Ecr.Domain", "Entities", "Reporting", "ReportDefinitions.cs"));
-
-        Assert.Contains("ColumnsJson", definitions, StringComparison.Ordinal);
-        Assert.Contains("RulesJson", definitions, StringComparison.Ordinal);
-
+        // ✎ P-1124-3 (D-NEW, людина 24.11): описів звітів у застосунку більше немає (конструктор і зрізи прибрано) —
+        // форми живуть у RDL замовника поверх сирого шару rpt.*. Лишається друга половина правила: жодного класу на звіт.
         // ⛔ І жодного типу, названого на честь конкретного звіту. Перший же
         // `WaterReportDef : ReportDef` перетворив би дані назад на код.
         var offenders = Directory
@@ -54,66 +47,46 @@ public sealed partial class ReportDefinitionTests
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     [Trait("Requirement", "ФВ-10.4")]
     [Trait("Requirement", "ФВ-5.12")]
-    public void Фільтр_за_статусом_стоїть_у_вьюсі_а_не_в_RDL()
+    [Trait("Requirement", "ФВ-10.11")]
+    public void Кожна_вʼюха_rpt_класифікована_і_жодна_не_читає_прибрані_зрізи()
     {
-        // ⛔ `ФВ-10.11`: звіти для регулятора читають лише `Approved` і
-        // `Submitted`, і фільтр стоїть у вʼюсі. 166 RDL не можуть покладатися
-        // на те, що кожен автор не забув умову — забуде один, і чернетка
-        // потрапить у державну форму.
+        // ✎ P-1124-3 (D-NEW, людина 24.11): вʼюх ЗРІЗІВ більше немає — правило «фільтр за статусом у вʼюсі» (`ФВ-10.11`)
+        // стосувалося саме їх. Сирий шар (рішення людини 2026-09-30: «для SSRS ми маємо просто підготувати сирі дані»)
+        // віддає статус КОЛОНКОЮ (StatusNumberingTests), а звіт регулятору обирає статус сам.
+        // ⛔ Тепер сторож — класифікація: кожна вʼюха файла — або сирі документи, або розшифровка Id, або поіменна вʼюха
+        // розрахунків/методологій. Нова вʼюха поза трьома класами червонить тут, і рішення про неї приймається явно.
         var views = File.ReadAllText(Path.Combine(
             SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "05-rpt-views.sql"));
+        var all = ViewRegex.Matches(views).ToList();
 
-        // ⚠ Правило — про вʼюхи ЗРІЗІВ (`rpt.ReportSnapshot`). Шар сирих даних
-        // документів (`rpt.v_DocumentCells`, рішення людини 2026-09-30: «для
-        // SSRS ми маємо просто підготувати сирі дані») віддає статус аркуша
-        // КОЛОНКОЮ: сирі дані — усі, а звіт регулятору обирає статус сам.
-        var snapshotViews = ViewRegex.Matches(views)
-            .Where(v => !IsRawDocumentView(v.Groups["body"].Value) && !IsReferenceView(v))
+        // Порожній файл пройшов би кожен цикл нижче — а означав би, що SSRS не бачить нічого.
+        Assert.NotEmpty(all);
+
+        var unclassified = all
+            .Where(v => !IsRawDocumentView(v.Groups["body"].Value) && !IsReferenceView(v) && !IsCalculationView(v))
+            .Select(v => v.Groups[1].Value)
             .ToList();
+        Assert.Empty(unclassified);
 
-        // ⛔ R-4 (аудит 2026-11): другий виняток — ІМЕНОВАНІ вʼюхи-розшифровки Id для SSRS (записи довідників, одиниці,
-        // підписи колонок). У них немає ані документів, ані зрізів — отже, і статусу подання. Виняток за іменем, а не
-        // за змістом, і кожна така вʼюха не має права читати `doc.*` чи `rpt.Report*`: інакше під назвою «довідник»
-        // повз фільтр пройшли б дані документів.
-        var references = ViewRegex.Matches(views).Where(IsReferenceView).ToList();
+        foreach (var view in all)
+        {
+            // Таблиць зрізів у базі немає (міграція P1124RemoveReportSnapshots): посилання на них — непрацююча вʼюха.
+            Assert.DoesNotContain("rpt.Report", view.Groups["body"].Value, StringComparison.Ordinal);
+        }
+
+        // ⛔ R-4 (аудит 2026-11): ІМЕНОВАНІ вʼюхи-розшифровки Id (записи довідників, одиниці, підписи колонок) не читають
+        // документів і розрахунків — інакше під назвою «довідник» до SSRS доїхали б дані документів.
+        var references = all.Where(IsReferenceView).ToList();
         Assert.Equal(ReferenceViews.Count, references.Count);
         foreach (var reference in references)
         {
             Assert.DoesNotContain("doc.", reference.Groups["body"].Value, StringComparison.Ordinal);
-            Assert.DoesNotContain("rpt.Report", reference.Groups["body"].Value, StringComparison.Ordinal);
             Assert.DoesNotContain("calc.", reference.Groups["body"].Value, StringComparison.Ordinal);
         }
 
-        // ⛔ Виняток — ЛИШЕ вʼюха, що читає сирі комірки `doc.CellValue`. Раніше
-        // сторож перевіряв тільки вʼюхи з `rpt.ReportSnapshot`, тож нова вʼюха
-        // над `rpt.ReportRow` (без зрізу) чи над чимось іншим оминала б
-        // фільтр мовчки. Тепер без фільтра статусу проходить лише шар сирих
-        // документів; усе інше в файлі — під правилом.
-        foreach (var raw in ViewRegex.Matches(views).Where(v => IsRawDocumentView(v.Groups["body"].Value)))
-        {
-            Assert.DoesNotContain("rpt.Report", raw.Groups["body"].Value, StringComparison.Ordinal);
-        }
-
-        foreach (var view in snapshotViews)
-        {
-            var body = view.Groups["body"].Value;
-
-            Assert.True(
-                body.Contains("s.Status IN", StringComparison.Ordinal),
-                $"Вʼюха {view.Groups[1].Value} не фільтрує за статусом: чернетка потрапить "
-                + "у державну форму, і помітить це регулятор.");
-
-            Assert.True(
-                body.Contains("IsCurrent", StringComparison.Ordinal),
-                $"Вʼюха {view.Groups[1].Value} не обмежує зріз поточним: SSRS отримав би "
-                + "всі побудовані зрізи разом, тобто кожен рядок стільки разів, скільки їх було.");
-        }
-
-        // Порожній файл теж пройшов би цикл — а він означав би, що регулятор
-        // не бачить нічого.
-        Assert.NotEmpty(snapshotViews);
+        // Поіменні вʼюхи розрахунків — усі на місці (видалити одну — зміна контракту D-53, RptCalculationViewsTests).
+        Assert.Equal(CalculationViews.Count, all.Count(IsCalculationView));
     }
-
     // PERMUSE: шар сирих даних для SSRS - це ще й вʼюхи даних дозволів (`rpt.v_Permit`, `rpt.v_PermitAir*`), що читають записи
     // довідників `dic.RegistryValue`: у них немає ні зрізу, ні статусу подання. Правило «жодного `rpt.Report*`» на них діє так само.
     /// <summary>R-4: вʼюхи-розшифровки Id (без даних документів і зрізів) — перелік поіменний.</summary>
@@ -123,6 +96,18 @@ public sealed partial class ReportDefinitionTests
     };
 
     private static bool IsReferenceView(Match view) => ReferenceViews.Contains(view.Groups[1].Value);
+
+    /// <summary>
+    /// ✎ P-1124-3 (людина 24.11: «дані розрахунків, методологія тощо мають бути доступні для SSRS»): сирі вʼюхи результатів і
+    /// проблем розрахунку, методологій і розшифровок проєкту/періоду/документа — поіменно.
+    /// </summary>
+    private static readonly HashSet<string> CalculationViews = new(StringComparer.Ordinal)
+    {
+        "rpt.v_Project", "rpt.v_Period", "rpt.v_Document", "rpt.v_MethodologyVersion", "rpt.v_MethodologyOutput",
+        "rpt.v_CalculationResult", "rpt.v_CalculationIssue",
+    };
+
+    private static bool IsCalculationView(Match view) => CalculationViews.Contains(view.Groups[1].Value);
 
     private static bool IsRawDocumentView(string body) =>
         body.Contains("doc.CellValue", StringComparison.Ordinal)

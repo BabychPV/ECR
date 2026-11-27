@@ -359,4 +359,36 @@ public sealed class PeriodAccessRuleTests
             () => PeriodAccessRuleDef.ForExpression(Version, "   ", OutOfWindowBehavior.ReadOnly));
         Assert.Equal("err.ECR-TMPL-0422.expressionRequired", expressionError.Details?["messageKey"]);
     }
+    /// <summary>
+    /// ✎ 25.11 («чому помилки українською»): пояснення правила йде в діалог підтвердження сітки й матрицю доступу —
+    /// мовою читача (<see cref="PeriodRuleOutcome.DetailIn"/>), а не українським літералом.
+    /// </summary>
+    /// <remarks>Мутація: <c>DetailIn</c> повертає <c>Detail</c> — тест червоний (українське речення).</remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [InlineData("en", "Month 08.2026 is outside the validity period (2026-01-01 — 2026-06-30).")]
+    [InlineData("ru", "Месяц 08.2026 вне срока действия (2026-01-01 — 2026-06-30).")]
+    [InlineData("kz", "08.2026 айы жарамдылық мерзімінен тыс (2026-01-01 — 2026-06-30).")]
+    public void Пояснення_правила_мовою_читача(string language, string expected)
+    {
+        var rule = PeriodAccessRuleDef
+            .ForSourceWindow(Version, PermitColumn, OutOfWindowBehavior.AllowWithConfirmation)
+            .ForSheet(Sheet);
+        var permit = ((DateOnly?)new DateOnly(2026, 1, 1), (DateOnly?)new DateOnly(2026, 7, 1));
+
+        var outcome = Run(rule, Facts(month: 8, permit: permit));
+
+        Assert.Equal(expected, outcome.DetailIn(language));
+        Assert.Contains("поза вікном", outcome.Detail, StringComparison.Ordinal); // журнали — як і доти
+        foreach (var other in new[]
+                 {
+                     Run(PeriodAccessRuleDef.AlwaysReadOnly(Version).ForSheet(Sheet), Facts()),
+                     Run(PeriodAccessRuleDef.HeaderRows(Version).ForSheet(Sheet), Facts(rowKind: RowKind.Header)),
+                     Run(PeriodAccessRuleDef.EditablePeriodOnly(Version, OutOfWindowBehavior.ReadOnly, 2, 4).ForSheet(Sheet), Facts(sequence: 5)),
+                     Run(PeriodAccessRuleDef.ForRelativeWindow(Version, 1, OutOfWindowBehavior.ReadOnly).ForSheet(Sheet), Facts(sequence: 3, current: 6)),
+                 })
+        {
+            Assert.DoesNotMatch("[\u0400-\u04FF]", other.DetailIn("en") ?? string.Empty);
+        }
+    }
 }

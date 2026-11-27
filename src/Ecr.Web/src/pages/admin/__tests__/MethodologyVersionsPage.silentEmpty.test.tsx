@@ -12,15 +12,8 @@ import { testTheme } from '@/test/render';
  * «Відмова сервера ≠ порожньо» на конфігураторі версій
  * (`DIRECTIVE-15-FRONTEND.md` §0, L10).
  *
- * ⛔ Два переліки цього екрана збиралися через `?? []`, і відмова читання
- * робила їх порожніми МОВЧКИ. Порожнеча в обох місцях має готове прочитання —
- * і воно хибне:
- *
- * 1. `GET /api/v1/units` → `Select` «Output unit» у діалозі формули. Нуль
- *    варіантів поруч із плейсхолдером «без одиниці» читається як «одиниць у
- *    системі не заведено», і методолог зберігає ЧИСЛОВУ формулу безрозмірною.
- *    Сервер таку приймає (`outputUnitId` необов'язковий) — тобто помилка не
- *    спливає ніде, а число без виміру (`ФВ-16.6`) доїжджає до звіту.
+ * ⛔ Перелік версій збирався через `?? []`, і відмова читання робила його порожнім МОВЧКИ. Порожнеча має готове
+ * прочитання — і воно хибне (✎ 24.11: діалог формули з переліком одиниць прибрано разом із формульним рушієм):
  *
  * 2. `GET …/versions` → `Select` «Copy from» у діалозі нової версії. Нуль
  *    варіантів поруч із плейсхолдером «порожня чернетка» читається як
@@ -37,53 +30,11 @@ import { testTheme } from '@/test/render';
  */
 
 vi.mock('@/features/methodologies/MethodologyContentPanels', () => ({
-  MethodologyConstantsPanel: () => null,
-  MethodologyOutputsPanel: () => null,
-  MethodologyRulesPanel: () => null,
-  MethodologyRequiredInputsPanel: () => null,
-  MethodologyTestsPanel: () => null,
   MethodologyBindingsPanel: () => null,
   MethodologyModesForm: () => null,
 }));
-
-/**
- * ⚠ Monaco заглушено тим самим прийомом, що й у
- * `MethodologyVersionsPage.formulaSyntaxError.test.tsx`: справжній редактор у
- * jsdom не потрібен жодному твердженню цього файлу, а тягне він увесь пакет.
- */
-vi.mock('@/features/expressions/monaco', () => {
-  const model = { getValue: () => '', dispose: () => {} };
-
-  return {
-    LightTheme: 'ecr-light',
-    DarkTheme: 'ecr-dark',
-    prepare: () => 'ecr-methodology',
-    applyGrammar: () => {},
-    setTheme: () => {},
-    showDiagnostics: vi.fn(),
-    create: () => ({
-      getValue: () => '',
-      setValue: () => {},
-      getModel: () => model,
-      onDidChangeModelContent: () => {},
-      dispose: () => {},
-    }),
-  };
-});
-
-vi.mock('@/features/expressions/api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/features/expressions/api')>();
-
-  return {
-    ...actual,
-    expressionMetadata: vi.fn().mockResolvedValue({ functions: [], constants: [] }),
-    validateExpression: vi.fn().mockResolvedValue({
-      diagnostics: [],
-      resultType: 'Number',
-      skippedChecks: [],
-    }),
-  };
-});
+vi.mock('@/features/methodologies/MethodologyPublicationsPanel', () => ({ MethodologyPublicationsPanel: () => null }));
+vi.mock('@/features/methodologies/TraceStepsPanel', () => ({ MethodologyTraceStepsPanel: () => null }));
 
 const DraftVersion = {
   id: 10,
@@ -96,6 +47,7 @@ const DraftVersion = {
   traceLevel: 'Off',
   createdByUserId: 1,
   level: 'Configuration',
+  engine: 'Script',
 };
 
 const PublishedVersion = {
@@ -112,16 +64,6 @@ const PublishedVersion = {
  * (написаним розробником, не з каталогу) і на екран його НЕ пускає — тоді
  * твердження про текст відмови було б хибно-червоним із іншої причини.
  */
-const UnitsRefusal = {
-  type: 'about:blank',
-  title: 'Internal Server Error',
-  status: 500,
-  detail: 'довідник одиниць прочитати не вдалося',
-  errorCode: 'ECR-SYS-0500',
-  correlationId: 'cid-units-1',
-  messageKey: 'err.ECR-SYS-0500.unexpected',
-};
-
 const VersionsRefusal = {
   type: 'about:blank',
   title: 'Internal Server Error',
@@ -140,26 +82,6 @@ const Strings = {
   'methodologies.effectiveFrom': 'Effective from',
   'methodologies.effectiveFromHint': 'Periods from this date on are calculated by this version.',
   'methodologies.openVersion': 'Open',
-  'methodologies.noVersions': 'This methodology has no versions',
-  'methodologies.noVersionsHint': 'A version is what actually calculates.',
-  'methodologies.formulas': 'Formulas',
-  'methodologies.addFormula': 'Add formula',
-  'methodologies.formulaTitle': 'Formula',
-  'methodologies.formulaCode': 'Code',
-  'methodologies.formulaCodeHint': 'It cannot be renamed: other formulas point at it.',
-  'methodologies.expression': 'Expression',
-  'methodologies.resultType': 'Result type',
-  'methodologies.resultTypeHint': 'What the formula produces.',
-  'methodologies.resultNumber': 'Number',
-  'methodologies.resultText': 'Text',
-  'methodologies.arguments': 'Arguments',
-  'methodologies.argumentsHint': 'Comma-separated.',
-  'methodologies.outputUnit': 'Output unit',
-  'methodologies.outputUnitHint': 'Unit of the result.',
-  'methodologies.noUnit': 'No unit',
-  'methodologies.saveFormula': 'Save formula',
-  'methodologies.noFormulas': 'This version has no formulas',
-  'methodologies.noFormulasHint': 'Add one.',
   'methodologies.readOnly': 'Read only',
   'methodologies.readOnlyHint': 'This version is published.',
   'methodologies.newVersion': 'New version',
@@ -179,7 +101,6 @@ const Strings = {
 };
 
 interface Scenario {
-  readonly unitsFail: boolean;
   readonly versionsFail: boolean;
 
   /**
@@ -188,7 +109,7 @@ interface Scenario {
    * ⚠ Саме він відрізняє «ще не прочитали» від «прочитали, і там порожньо»:
    * без нього запобіжник `isPending` не перевіряє ніщо.
    */
-  readonly hangs?: 'units' | 'versions';
+  readonly hangs?: 'versions';
 }
 
 function mockApi(options: Scenario): void {
@@ -224,28 +145,6 @@ function mockApi(options: Scenario): void {
 
       /** Відповідь, якої не буде: запит лишається в дорозі до кінця тесту. */
       const never = (): Promise<Response> => new Promise<Response>(() => {});
-
-      if (url.includes('/api/v1/units')) {
-        if (options.hangs === 'units') return never();
-
-        return options.unitsFail ? json(UnitsRefusal, 500) : json([{ id: 3, code: 't CO2-eq' }]);
-      }
-
-      // ⚠ Вужчий маршрут — ПЕРЕД ширшим: `…/versions/10/formulas` містить
-      // `…/versions` як префікс.
-      if (/\/methodologies\/1\/versions\/\d+\/formulas$/.test(url) && method === 'GET') {
-        return json([]);
-      }
-
-      /*
-       * ⚠ Панелі змісту версії заглушені вище, але читання все одно доходять
-       * сюди (`lazyPanel` тягне модуль через `import()`). Порожня відповідь
-       * дешевша за розбір: ці п'ять переліків не є предметом жодного
-       * твердження, а їхні відмови засипали б сторінку чужими банерами.
-       */
-      if (/\/versions\/\d+\/(constants|rules|required-inputs|tests|outputs|modes)$/.test(url)) {
-        return json([]);
-      }
 
       if (url.endsWith('/api/v1/methodologies/1/bindings')) {
         return json([]);
@@ -314,94 +213,9 @@ afterEach(() => {
 
 describe('MethodologyVersionsPage: відмова читання не виглядає як «нічого не заведено»', () => {
   it(
-    'довідник одиниць не приїхав — у діалозі формули причина з кодом, а переліку немає зовсім',
-    async () => {
-      const user = await arrange({ unitsFail: true, versionsFail: false });
-
-      await screen.findByText('1.0');
-      await user.click(await screen.findByRole('button', { name: 'Add formula' }));
-
-      const dialog = await screen.findByRole('dialog', { name: 'Formula' });
-
-      /*
-       * ⛔ ГОЛОВНЕ твердження. До правки перелік одиниць збирався як
-       * `(units.data ?? [])`, тож відмова давала `Select` із нулем варіантів —
-       * і жодного тексту про те, що читання не вдалося.
-       */
-      const alert = await waitFor(() => {
-        const found = refusalIn(dialog);
-
-        if (found === undefined) throw new Error('банера відмови в діалозі формули немає');
-
-        return found;
-      });
-
-      expect(alert.textContent ?? '').toContain('довідник одиниць прочитати не вдалося');
-      expect(within(dialog).getByRole('button', { name: 'Retry' })).toBeDefined();
-
-      /*
-       * ⚠ Перелік не просто вимкнений — його НЕМАЄ. Вимкнений `Select` із
-       * нулем варіантів однаково виглядав би як факт про світ («одиниць
-       * немає»), лише сірий.
-       */
-      expect(within(dialog).queryByLabelText('Output unit')).toBeNull();
-    },
-    30_000,
-  );
-
-  it(
-    'одиниці приїхали — перелік доступний, і банера в діалозі формули немає',
-    async () => {
-      /*
-       * ⚠ Дзеркало, без якого перше твердження нічого не варте: найпростіший
-       * спосіб «полагодити» мовчазну порожнечу — не малювати перелік ніколи.
-       */
-      const user = await arrange({ unitsFail: false, versionsFail: false });
-
-      await screen.findByText('1.0');
-      await user.click(await screen.findByRole('button', { name: 'Add formula' }));
-
-      const dialog = await screen.findByRole('dialog', { name: 'Formula' });
-
-      // ⚠ Чекаємо саме на ДОСТУПНИЙ контрол: доки запит у дорозі, він
-      // вимкнений, і твердження «елемент є» було б зеленим на будь-якому коді.
-      await waitFor(() => {
-        expect(within(dialog).getByLabelText('Output unit')).toHaveProperty('disabled', false);
-      });
-
-      expect(refusalIn(dialog)).toBeUndefined();
-      expect(within(dialog).queryByRole('button', { name: 'Retry' })).toBeNull();
-    },
-    30_000,
-  );
-
-  it(
-    'одиниці ще в дорозі — перелік НЕДОСТУПНИЙ, а не порожній',
-    async () => {
-      /*
-       * ⛔ Другий запобіжник того ж місця, і перевіряє він інше: «ще не
-       * прочитали» — теж не «прочитали, і там порожньо». Доступний `Select` із
-       * нулем варіантів у цю мить каже неправду так само, як і після відмови.
-       */
-      const user = await arrange({ unitsFail: false, versionsFail: false, hangs: 'units' });
-
-      await screen.findByText('1.0');
-      await user.click(await screen.findByRole('button', { name: 'Add formula' }));
-
-      const dialog = await screen.findByRole('dialog', { name: 'Formula' });
-
-      expect(within(dialog).getByLabelText('Output unit')).toHaveProperty('disabled', true);
-
-      // ⚠ Дорогою нічого не зламалося — банера відмови тут бути не повинно.
-      expect(refusalIn(dialog)).toBeUndefined();
-    },
-    30_000,
-  );
-
-  it(
     'перелік версій не приїхав — у діалозі нової версії причина з кодом, а не «копіювати нема з чого»',
     async () => {
-      const user = await arrange({ unitsFail: false, versionsFail: true });
+      const user = await arrange({ versionsFail: true });
 
       await user.click(await screen.findByRole('button', { name: 'New version' }));
 
@@ -434,9 +248,9 @@ describe('MethodologyVersionsPage: відмова читання не вигля
   it(
     'версії приїхали — «Copy from» доступний, і банера в діалозі нової версії немає',
     async () => {
-      const user = await arrange({ unitsFail: false, versionsFail: false });
+      const user = await arrange({ versionsFail: false });
 
-      await screen.findByText('1.0');
+      await screen.findByTestId('script-versions');
       await user.click(await screen.findByRole('button', { name: 'New version' }));
 
       const dialog = await screen.findByRole('dialog', { name: 'New methodology version' });
@@ -458,9 +272,9 @@ describe('MethodologyVersionsPage: відмова читання не вигля
        * ⛔ Прохід «від першого обличчя» 2026-10-11, P2: «New version» за замовчуванням створює ПОРОЖНЮ
        * чернетку, і той, хто просто хоче змінити константу, не бачить, що треба обрати «Copy from».
        */
-      const user = await arrange({ unitsFail: false, versionsFail: false });
+      const user = await arrange({ versionsFail: false });
 
-      await screen.findByText('1.0');
+      await screen.findByTestId('script-versions');
       await user.click(await screen.findByRole('button', { name: 'New version' }));
 
       const dialog = await screen.findByRole('dialog', { name: 'New methodology version' });
@@ -484,7 +298,7 @@ describe('MethodologyVersionsPage: відмова читання не вигля
   it(
     'FP-3: перелік версій не приїхав — попередження про порожню чернетку не вигадується',
     async () => {
-      const user = await arrange({ unitsFail: false, versionsFail: true });
+      const user = await arrange({ versionsFail: true });
 
       await user.click(await screen.findByRole('button', { name: 'New version' }));
       const dialog = await screen.findByRole('dialog', { name: 'New methodology version' });
@@ -498,7 +312,7 @@ describe('MethodologyVersionsPage: відмова читання не вигля
   it(
     'версії ще в дорозі — «Copy from» НЕДОСТУПНИЙ, а не порожній',
     async () => {
-      const user = await arrange({ unitsFail: false, versionsFail: false, hangs: 'versions' });
+      const user = await arrange({ versionsFail: false, hangs: 'versions' });
 
       await user.click(await screen.findByRole('button', { name: 'New version' }));
 

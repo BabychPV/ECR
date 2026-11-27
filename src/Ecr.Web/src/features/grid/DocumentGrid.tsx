@@ -144,6 +144,12 @@ import { GridAriaPlugin } from './gridAria';
 import { attachStickyGroupLabels, withHeaderGroups } from './headerGroups';
 import { installTruncationTooltip } from './truncationTooltip';
 import { mergePatchNotices, PatchNoticesAlert, type PatchNotice } from './patchNotices';
+import {
+  dedupeRequiredInputs,
+  liveRequiredInputs,
+  RequiredInputsBlockedAlert,
+  RequiredInputsSummary,
+} from './requiredInputsAlert';
 // ⚠ Ключ комірки СХОВИЩА під власним іменем: у цьому файлі вже є `cellKey`
 // з `permissions.ts`, і хоч обидва дають `rowKey:columnCode`, ключем мапи
 // правок має бути рівно той, яким її будує сам сховищний модуль.
@@ -159,6 +165,7 @@ import {
   usePendingSlice,
 } from './pendingStore';
 import { rowDisplayName } from '@/features/permits/history/rowName';
+import { isOpaqueRowKey } from './rowKeyText';
 import { installF2Edit } from './f2Edit';
 import { installEnterKeyCompat } from './keyboardCompat';
 import {
@@ -793,7 +800,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // інакше сервер відхилив би весь батч (ECR-CALC-0437), а не повернув
           // 200. Warn — навпаки, приходить САМЕ в успішній відповіді.
           setRequiredInputBlocked((prev) => prev.filter((c) => !touchedRowKeys.has(c.rowKey)));
-          setRequiredInputWarnings((prev) => [
+          setRequiredInputWarnings((prev) => dedupeRequiredInputs([
             ...prev.filter((c) => !touchedRowKeys.has(c.rowKey)),
             ...response.validation
               .filter(
@@ -805,8 +812,9 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
                 columnCode: m.columnCode,
                 ruleCode: m.ruleCode,
                 message: m.message,
+                methodologies: m.methodologies ?? null,
               })),
-          ]);
+          ]));
           setPatchNotices((prev) => mergePatchNotices(prev, touchedRowKeys, response.validation));
 
           // ⚠ Успіх ЦЬОГО патчу знімає банер. Маркери відхилених комірок живуть у
@@ -1674,6 +1682,12 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const rows = useMemo(
     () => (data === undefined ? [] : rowsCache(data, shownOverrides)),
     [data, shownOverrides],
+  );
+
+  // ✎ 25.11 (документ 100 LAND_UI: уже заповнена «Land_TypeFuel» лишалась у переліку): Warn — з ПОТОЧНИХ даних.
+  const liveRequiredWarnings = useMemo(
+    () => liveRequiredInputs(requiredInputWarnings, data === undefined ? null : rows),
+    [requiredInputWarnings, rows, data],
   );
 
   /**
@@ -3062,6 +3076,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             {t(saveStatus === 'saving' ? 'grid.saving' : 'grid.saved')}
           </Text>
         )}
+        {/* ✎ 25.11: незаповнені обов'язкові колонки (Warn) — одна кнопка тут, перелік у спливаючому вікні. */}
+        <RequiredInputsSummary cells={liveRequiredWarnings} columns={data?.columns ?? []} rows={data?.rows ?? []} />
         {/* ⚠ AN-123: нейтральний, як «зберігається», — не колір відмови. */}
         {busyWaiting && (
           <Text size="xs" c="dimmed" role="status" aria-live="polite" data-save-status="waiting">
@@ -3260,36 +3276,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         />
       )}
 
-      {requiredInputBlocked.length > 0 && (
-        // ⛔ Директива «обов'язкові вхідні колонки методології»: батч
-        // ВІДХИЛЕНО (ECR-CALC-0437), комірки лишаються dirty. Перелік називає
-        // КОНКРЕТНІ колонки — «дані неповні» саме по собі нічого не пояснює.
-        <Alert
-          color="statusError"
-          title={t('grid.requiredInputBlockedTitle', { count: requiredInputBlocked.length })}
-        >
-          <List size="sm">
-            {requiredInputBlocked.map((cell) => (
-              <List.Item key={`${cell.rowKey}:${cell.columnCode}`}>{cell.message}</List.Item>
-            ))}
-          </List>
-        </Alert>
-      )}
-
-      {requiredInputWarnings.length > 0 && (
-        // ⚠ На відміну від блоку вище — запис ПРОЙШОВ. Це підказка, а не
-        // відмова, і лишається видимою, доки колонку не заповнять.
-        <Alert
-          color="statusWarning"
-          title={t('grid.requiredInputWarningTitle', { count: requiredInputWarnings.length })}
-        >
-          <List size="sm">
-            {requiredInputWarnings.map((cell) => (
-              <List.Item key={`${cell.rowKey}:${cell.columnCode}`}>{cell.message}</List.Item>
-            ))}
-          </List>
-        </Alert>
-      )}
+      {/* ⛔ Директива «обов'язкові вхідні колонки методології»: Block — батч ВІДХИЛЕНО (ECR-CALC-0437),
+          комірки лишаються dirty, перелік розгорнуто. Warn (запис ПРОЙШОВ) — кнопкою в рядку інструментів вище
+          (`RequiredInputsSummary`, ✎ 25.11: не штовхає сітку під час введення). */}
+      <RequiredInputsBlockedAlert cells={requiredInputBlocked} columns={data?.columns ?? []} rows={data?.rows ?? []} />
 
       <PatchNoticesAlert notices={patchNotices} onDismiss={() => setPatchNotices([])} />
 
@@ -3354,7 +3344,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         <List size="sm">
           {rounded.map((cell) => (
             <List.Item key={cellKey(cell.rowKey, cell.columnCode)}>
-              {cell.rowKey} · {cell.columnCode} — {cell.original} → {cell.applied}
+              {isOpaqueRowKey(cell.rowKey) ? rowDisplayName(data, cell.rowKey) : cell.rowKey} · {cell.columnCode} — {cell.original} →{' '}
+              {cell.applied}
             </List.Item>
           ))}
         </List>

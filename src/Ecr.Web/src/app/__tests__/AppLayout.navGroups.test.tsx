@@ -118,19 +118,20 @@ afterEach(() => {
 });
 
 describe('AppLayout: групи бічного меню (UI-12)', () => {
-  it('розгорнуте меню: підписи груп, порядок макета, порожньої групи Access немає', async () => {
+  it('розгорнуте меню: підписи груп, порядок макета, My groups — у Access (25.11)', async () => {
     renderShell();
     await screen.findByRole('link', { name: 'Registries' });
 
     expect(groupsOnScreen()).toEqual([
-      { name: 'Work', items: ['Documents', 'My groups'] },
+      { name: 'Work', items: ['Documents'] },
       { name: 'Configure', items: ['Templates', 'Registries', 'Permits'] },
+      { name: 'Access', items: ['My groups'] },
       { name: 'Operate', items: ['Jobs', 'Consistency issues', 'Health'] },
     ]);
 
-    // Підпис — видимий текст (не лише ім'я для читалки), і групи Access немає ніде.
+    // Підпис — видимий текст (не лише ім'я для читалки); My groups не в Work.
     expect(within(navbar()).getByText('Configure')).toBeTruthy();
-    expect(within(navbar()).queryByText('Access')).toBeNull();
+    expect(within(navbar()).getByText('Access')).toBeTruthy();
     // Розгорнуте меню — без роздільників.
     expect(navbar().querySelectorAll('[data-nav-group-divider]')).toHaveLength(0);
   });
@@ -140,10 +141,10 @@ describe('AppLayout: групи бічного меню (UI-12)', () => {
     renderShell();
     await screen.findByRole('link', { name: 'Registries' });
 
-    expect(navbar().querySelectorAll('[data-nav-group-divider]')).toHaveLength(2);
+    expect(navbar().querySelectorAll('[data-nav-group-divider]')).toHaveLength(3);
     expect(navbar().querySelector('[data-nav-group="work"] [data-nav-group-divider]')).toBeNull();
     expect(within(navbar()).queryByText('Configure')).toBeNull();
-    expect(groupsOnScreen().map((group) => group.name)).toEqual(['Work', 'Configure', 'Operate']);
+    expect(groupsOnScreen().map((group) => group.name)).toEqual(['Work', 'Configure', 'Access', 'Operate']);
 
     // ⛔ Роздільник — оздоба: не фокусується і схований від читалки.
     for (const divider of navbar().querySelectorAll('[data-nav-group-divider]')) {

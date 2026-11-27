@@ -8,6 +8,7 @@ using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Registries.Hierarchy;
 
@@ -40,7 +41,8 @@ public sealed class UnretireRegistryEntryHandler(
     ICurrentUser currentUser,
     IClock clock,
     Keys.RegistryKeyService? keys = null,
-    Nae.NaeTreeNodePolicy? nae = null)
+    Nae.NaeTreeNodePolicy? nae = null,
+    FlaringRegistryLock? flaring = null)
 {
     // ⚠ `keys` and `nae` — the container supplies both; without them (hand-built tests) a restore checks neither.
 
@@ -75,6 +77,16 @@ public sealed class UnretireRegistryEntryHandler(
         {
             return new UnretireRegistryEntryResponse([], 0);
         }
+
+        // ✎ DESIGN-sg-flaring §5.7 (C4): відновлення відкриває вікно запису довідника факелів (кінець — без меж).
+        // ⚠ Лише вузол запиту: довідники факелів не ієрархічні, тож предків у ланцюжку немає.
+        await ExternalRegistryGuard.EnsureFlaringEditAllowedAsync(
+                definition,
+                () => Task.FromResult<IReadOnlyCollection<FlaringRegistryEdit>>(
+                    [new FlaringRegistryEdit(entry.Window, new ValidityWindow(entry.ValidFrom, null))]),
+                flaring,
+                ct)
+            .ConfigureAwait(false);
 
         var restored = new List<long>();
         var affected = 0;
@@ -201,7 +213,8 @@ public sealed class PurgeRegistryEntryHandler(
     IAuditWriter audit,
     IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    FlaringRegistryLock? flaring = null)
 {
     /// <summary>Permission to change registry data.</summary>
     public const string Permission = "Registry.EditData";
@@ -237,6 +250,16 @@ public sealed class PurgeRegistryEntryHandler(
                 $"Entry {entry.Code} is active: retire it first, then delete it for good.",
                 new Dictionary<string, object?> { ["code"] = entry.Code });
         }
+
+        // ✎ DESIGN-sg-flaring §5.7 (C4): виведений запис довідника факелів видно в його вікні — очищення його прибирає;
+        // видалений уже невидимий, тож для нього лише право GasComposition.Edit.
+        await ExternalRegistryGuard.EnsureFlaringEditAllowedAsync(
+                definition,
+                () => Task.FromResult<IReadOnlyCollection<FlaringRegistryEdit>>(
+                    entry.IsDeleted ? [] : [FlaringRegistryEdit.Remove(entry.Window)]),
+                flaring,
+                ct)
+            .ConfigureAwait(false);
 
         await uow.ExecuteInTransactionAsync(
             async token =>

@@ -485,6 +485,10 @@ public sealed partial class RecalculationJob(
                     && periodRuns.TryGetValue(namedAnchor, out var unusedRun))
                 {
                     periodRuns.Remove(namedAnchor);
+
+                    // ✎ P-1124: проблеми прогону (FK_CIssue_Run) — до рядка прогону. У свіжого прогону їх бути не
+                    // повинно (пишуться лише на перемиканні); виклик тримає інваріант «без сиріт» за будь-якого стану.
+                    await CalculationIssueRunCleanup.DeleteForRunsAsync(db, [unusedRun.Run.Id], ct).ConfigureAwait(false);
                     db.CalculationRuns.Remove(unusedRun.Run);
                     await db.SaveChangesAsync(ct).ConfigureAwait(false);
                 }

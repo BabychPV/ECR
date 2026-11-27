@@ -66,7 +66,7 @@ public sealed class RejectedSheetHttpFlowTests(SqlServerFixture sql)
         Assert.Equal(10m, await StoredValueAsync(s).ConfigureAwait(true));
 
         // 2. Submit → Submitted; ФВ-5.13: автору запис заморожено.
-        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(author, s, "submit")).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(app, author, s, "submit")).ConfigureAwait(true);
         Assert.Equal(DocumentStatus.Submitted, await StatusAsync(s).ConfigureAwait(true));
 
         var frozen = await ExpectAsync(
@@ -76,21 +76,21 @@ public sealed class RejectedSheetHttpFlowTests(SqlServerFixture sql)
 
         // 3. Відхилення без причини → 422, стан не змінився.
         var noReason = await ExpectAsync(
-            app, HttpStatusCode.UnprocessableEntity, ApproveAsync(approver, s, approved: false, reason: null))
+            app, HttpStatusCode.UnprocessableEntity, ApproveAsync(app, approver, s, approved: false, reason: null))
             .ConfigureAwait(true);
         Assert.Contains("ECR-DOC-0422", noReason, StringComparison.Ordinal);
         Assert.Equal(DocumentStatus.Submitted, await StatusAsync(s).ConfigureAwait(true));
 
         // 4. Відхилення з причиною → 204, Rejected, причина збережена.
         await ExpectAsync(
-            app, HttpStatusCode.NoContent, ApproveAsync(approver, s, approved: false, reason: RejectReason))
+            app, HttpStatusCode.NoContent, ApproveAsync(app, approver, s, approved: false, reason: RejectReason))
             .ConfigureAwait(true);
         Assert.Equal(DocumentStatus.Rejected, await StatusAsync(s).ConfigureAwait(true));
         Assert.Equal(RejectReason, await RejectedReasonAsync(s).ConfigureAwait(true));
 
         // 5. Rejected не затверджується: це вже не «подане».
         var notSubmitted = await ExpectAsync(
-            app, HttpStatusCode.Forbidden, ApproveAsync(approver, s, approved: true, reason: null)).ConfigureAwait(true);
+            app, HttpStatusCode.Forbidden, ApproveAsync(app, approver, s, approved: true, reason: null)).ConfigureAwait(true);
         Assert.Equal("BusinessRule", ReasonOf(notSubmitted));
         Assert.Equal(DocumentStatus.Rejected, await StatusAsync(s).ConfigureAwait(true));
 
@@ -101,7 +101,7 @@ public sealed class RejectedSheetHttpFlowTests(SqlServerFixture sql)
 
         // 7. Повторне подання з Rejected → Submitted; причина відхилення скинута, зріз подання новий.
         var snapshotsBeforeResubmit = await SubmissionSnapshotsAsync(s).ConfigureAwait(true);
-        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(author, s, "submit")).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(app, author, s, "submit")).ConfigureAwait(true);
         Assert.Equal(DocumentStatus.Submitted, await StatusAsync(s).ConfigureAwait(true));
         Assert.Null(await RejectedReasonAsync(s).ConfigureAwait(true));
 
@@ -128,7 +128,7 @@ public sealed class RejectedSheetHttpFlowTests(SqlServerFixture sql)
 
         // 8. Затвердження → Approved; ФВ-5.14: запис заборонено, зафіксована версія не змінилась.
         await ExpectAsync(
-            app, HttpStatusCode.NoContent, ApproveAsync(approver, s, approved: true, reason: null)).ConfigureAwait(true);
+            app, HttpStatusCode.NoContent, ApproveAsync(app, approver, s, approved: true, reason: null)).ConfigureAwait(true);
         Assert.Equal(DocumentStatus.Approved, await StatusAsync(s).ConfigureAwait(true));
 
         var fixedVersion = await SubmissionSnapshotsAsync(s).ConfigureAwait(true);
@@ -171,15 +171,26 @@ public sealed class RejectedSheetHttpFlowTests(SqlServerFixture sql)
             : $"немає reason у відповіді: {body}";
     }
 
-    private static Task<HttpResponseMessage> WorkflowAsync(HttpClient client, Scenario s, string action)
-        => client.PostAsJsonAsync(
+    /// <remarks>
+    /// ✎ Подання/рішення — лише коли власний перерахунок документа після попереднього запису завершився
+    /// (<see cref="DocumentRecalculationWait"/>): інакше гонитва з воротами <c>ownRecalculationPending</c> (422).
+    /// </remarks>
+    private static async Task<HttpResponseMessage> WorkflowAsync(EcrApiFactory app, HttpClient client, Scenario s, string action)
+    {
+        await DocumentRecalculationWait.UntilSettledAsync(app, s.Document.DocumentId, s.PeriodKey).ConfigureAwait(false);
+        return await client.PostAsJsonAsync(
             new Uri($"/api/v1/documents/{s.Document.DocumentId}/{action}", UriKind.Relative),
-            new { sheetDefId = s.Document.SheetDefId, periodKey = s.PeriodKey });
+            new { sheetDefId = s.Document.SheetDefId, periodKey = s.PeriodKey }).ConfigureAwait(false);
+    }
 
-    private static Task<HttpResponseMessage> ApproveAsync(HttpClient client, Scenario s, bool approved, string? reason)
-        => client.PostAsJsonAsync(
+    private static async Task<HttpResponseMessage> ApproveAsync(
+        EcrApiFactory app, HttpClient client, Scenario s, bool approved, string? reason)
+    {
+        await DocumentRecalculationWait.UntilSettledAsync(app, s.Document.DocumentId, s.PeriodKey).ConfigureAwait(false);
+        return await client.PostAsJsonAsync(
             new Uri($"/api/v1/documents/{s.Document.DocumentId}/approve", UriKind.Relative),
-            new { sheetDefId = s.Document.SheetDefId, periodKey = s.PeriodKey, approved, reason });
+            new { sheetDefId = s.Document.SheetDefId, periodKey = s.PeriodKey, approved, reason }).ConfigureAwait(false);
+    }
 
     private static Task<HttpResponseMessage> PatchAsync(
         HttpClient client, Scenario s, string rowKey, string columnCode, decimal value, string? baseVersion)

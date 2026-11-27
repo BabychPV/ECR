@@ -46,7 +46,6 @@ describe('jobKindLabel', () => {
     ['RegistrySyncJob', 'registrySync'],
     ['Ecr.Infrastructure.Jobs.OrphanScanJob', 'orphanScan'],
     ['ReportRetentionJob', 'reportRetention'],
-    ['ReportSnapshotFormatJob', 'reportSnapshotFormat'],
     ['SubmissionSnapshotRetentionJob', 'submissionSnapshotRetention'],
     ['SupersededResultsSweepJob', 'supersededResultsSweep'],
     ['FlertCompositionSyncJob', 'flertCompositionSync'],

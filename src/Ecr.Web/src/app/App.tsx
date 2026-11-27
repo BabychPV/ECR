@@ -67,7 +67,12 @@ export function App(): JSX.Element {
     <MantineProvider {...mantineProviderProps} defaultColorScheme="auto">
       <QueryClientProvider client={queryClient}>
         <Suspense fallback={null}>
-          <Notifications position="top-right" />
+          {/* ✎ P-1124-1 (UI-прохід 24.11): тости справа вгорі перекривали дії заголовка сторінки (Save / Publish
+              редактора скрипта, «New version» тощо). Зверху по центру й нижче за шапку застосунку (40 px, відступ —
+              controls.css, лише для [data-position="top-center"]) вони не лягають ні на дії (праворуч), ні на нижні
+              панелі документа (стрічка аркушів, інспектор, чат таблиці). ⛔ Не style на <Notifications>: Mantine
+              ставить його на КОЖЕН із шести контейнерів, і нижні розтягувались на всю висоту, перехоплюючи кліки. */}
+          <Notifications position="top-center" />
         </Suspense>
 
         {/*

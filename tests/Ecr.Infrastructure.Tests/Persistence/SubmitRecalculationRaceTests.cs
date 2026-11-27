@@ -1,7 +1,6 @@
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
-using Ecr.Application.Reporting;
 using Ecr.Application.Security;
 using Ecr.Application.Workflow;
 using Ecr.Domain.Abstractions;
@@ -344,12 +343,6 @@ public sealed class SubmitRecalculationRaceTests(SqlServerFixture sql)
                   return (ApprovalStepView?)null;
               });
 
-        var snapshots = Substitute.For<IReportSnapshotBuilder>();
-        snapshots.ListAsync(
-                     Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<IReadOnlyCollection<int>?>(),
-                     Arg.Any<CancellationToken>())
-                 .Returns<IReadOnlyList<ReportSnapshotSummary>>([]);
-
         var headers = Substitute.For<IDocumentHeaderStore>();
         headers.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
                .Returns(new Dictionary<string, ExpressionValue>());
@@ -368,7 +361,6 @@ public sealed class SubmitRecalculationRaceTests(SqlServerFixture sql)
             Metadata(doc), access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
             headers,
-            new ReportSnapshotSync(snapshots, documents),
             new UnitOfWork(db), User(), clock, new SheetEditGate(db),
 
             // ⛔ ТОЙ САМИЙ контекст, що й у подання: перерахунок має йти в його

@@ -69,6 +69,10 @@ public static class DependencyInjection
         services.AddScoped<IExternalDataSource>(sp => sp.GetRequiredService<PiWebApiDataSource>());
         services.AddScoped<IExternalDataSource, PiSqlClientDataSource>();
 
+        // P-1126-SRCCRED: перевірка з тіла форми (§13.1) і скидання пулу ODBC після заміни облікових даних (R-20).
+        services.AddScoped<IExternalConnectionProbe, PiSqlClientDataSource>();
+        services.AddSingleton<IConnectionPoolReset, OdbcPoolReset>();
+
         services.AddScoped<SourceUnitConverter>();
         services.AddScoped<CatchUpPlanner>();
         services.AddScoped<PiAfCatalogReader>();
@@ -87,4 +91,11 @@ public static class DependencyInjection
 
         return services;
     }
+}
+
+/// <summary>Скидає пул ODBC процесу (R-20): з'єднання зі старим паролем не повертаються з пулу драйвер-менеджера.</summary>
+public sealed class OdbcPoolReset : IConnectionPoolReset
+{
+    /// <inheritdoc />
+    public void Reset() => System.Data.Odbc.OdbcConnection.ReleaseObjectPool();
 }

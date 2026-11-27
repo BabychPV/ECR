@@ -50,7 +50,6 @@ public sealed class D148ScalePrecheckTests(SqlServerFixture sql)
     [
         ("doc.CellValue", "ValueNumeric", 1),
         ("doc.DocumentIndexValue", "ValueNumeric", -1),
-        ("rpt.ReportRow", "ValueNumeric", 1),
         ("ext.RawDataPoint", "ValueNumeric", -1),
         ("dic.RegistryValue", "ValueNumeric", 1),
         ("calc.CalculationResult", "Value", -1),

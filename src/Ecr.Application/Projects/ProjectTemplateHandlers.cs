@@ -22,6 +22,10 @@ namespace Ecr.Application.Projects;
 /// <param name="Layout">Розкладка чинної версії.</param>
 /// <param name="IsPrimary">Основний шаблон проєкту: не від'єднується до P6.</param>
 /// <param name="DocumentCount">Документів цього шаблону в проєкті; &gt; 0 — від'єднання відмовить.</param>
+/// <param name="SingleDocumentPerProject">
+/// ✎ B74 (24.11): шаблон дозволяє щонайбільше один документ у проєкті (B151); з <c>DocumentCount</c> &gt; 0 майстер
+/// нового документа замість Next пропонує відкрити наявний — створення однаково дало б <c>409 ECR-DOC-4092</c>.
+/// </param>
 public sealed record ProjectTemplateDto(
     int ProjectTemplateId,
     int TemplateId,
@@ -31,11 +35,12 @@ public sealed record ProjectTemplateDto(
     string Version,
     string Layout,
     bool IsPrimary,
-    int DocumentCount)
+    int DocumentCount,
+    bool SingleDocumentPerProject)
 {
     internal static ProjectTemplateDto From(ProjectTemplateRow row) => new(
         row.ProjectTemplateId, row.TemplateId, row.TemplateCode, row.TemplateNameL10n, row.CurrentTemplateVersionId,
-        row.Version, row.Layout.ToString(), row.IsPrimary, row.DocumentCount);
+        row.Version, row.Layout.ToString(), row.IsPrimary, row.DocumentCount, row.SingleDocumentPerProject);
 }
 
 /// <summary>

@@ -116,7 +116,7 @@
         @{ Id = 3; Part = 2; Seconds = 787; Prefixes = @('DocumentVersionMigrationTests', 'DocumentsControllerTests', 'B') }
         @{ Id = 4; Part = 3; Seconds = 775; Prefixes = @('P', 'DocumentP', 'De', 'Ret', 'I', 'Rec', 'O', 'MainPathLocalizedErrorTests', 'GenericMessageKeyLocalizationTests', 'RequestNumberCultureTests') }
         @{ Id = 5; Part = 3; Seconds = 151; Prefixes = @('Security.S', 'Security.T') }
-        @{ Id = 6; Part = 4; Seconds = 926; Prefixes = @('C', 'T', 'Su', 'L', 'F', 'SmtpSettingsHttpTests', 'RuleCoverageTests', 'V', 'RejectedSheetHttpFlowTests', 'DocumentListTemplateVersionTests') }
+        @{ Id = 6; Part = 4; Seconds = 926; Prefixes = @('C', 'T', 'Su', 'L', 'F', 'SmtpSettingsHttpTests', 'V', 'RejectedSheetHttpFlowTests', 'DocumentListTemplateVersionTests') }
         @{ Id = 7; Part = 5; Seconds = 769; Prefixes = @('Reg', 'Sc', 'Sh', 'H', 'DocumentR', 'Ad') }
         @{ Id = 8; Part = 5; Seconds = 157; Prefixes = @('Security.C', 'Security.A', 'Security.VerifyValidateRateLimitTests') }
         @{ Id = 9; Part = 6; Seconds = 922; Prefixes = @('Ai', 'So', 'Ro', 'DocumentT', 'Da', 'W', 'DocumentDeleteTests', 'DocumentKeyChangeTests', 'AcceptLanguageTagTests') }

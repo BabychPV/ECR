@@ -33,6 +33,11 @@ namespace Ecr.Application.Integration;
 /// стану СЕРЕДОВИЩА: <c>true</c> означає, що секрет під це джерело все-таки
 /// заданий у конфігурації процесу, і адміністратор має це бачити, не бачачи
 /// значення.
+/// <para>
+/// ⛔ P-1126-SRCCRED: облікові дані джерела, задані адміністратором, видно ЛИШЕ як <see cref="AuthMode"/>,
+/// <see cref="UserName"/> (не секрет) і <see cref="HasPassword"/>. Ні пароля, ні блоба, ні довжини, ні «маски»
+/// фіксованої довжини — сторож <c>DataSourceCredentialContractTests</c> перевіряє це рефлексією.
+/// </para>
 /// </remarks>
 public sealed record DataSourceView(
     int Id,
@@ -47,7 +52,32 @@ public sealed record DataSourceView(
     bool HasSecret,
     int SourceEntities,
     int CollectionSchedules,
-    string RowVersion);
+    string RowVersion,
+    SourceAuthMode AuthMode,
+    string? UserName,
+    bool HasPassword,
+    SourceCredentialsState CredentialsState,
+    DateTime? CredentialsRejectedAt);
+
+/// <summary>
+/// Стан облікових даних джерела для значка в переліку (P-1126-SRCCRED, R-03) — без розшифрування пароля.
+/// </summary>
+/// <remarks>
+/// ⚠ <see cref="Unreadable"/> видно без <c>Unprotect</c> лише в одному випадку: UserPassword без блоба. Блоб, який не
+/// розшифровується (кільце ключів після відновлення бази), перелік не бачить — його показує перевірка з'єднання
+/// (<c>credentialsUnreadable</c>).
+/// </remarks>
+public enum SourceCredentialsState
+{
+    /// <summary>Windows або UserPassword без відмови.</summary>
+    Ok = 0,
+
+    /// <summary>Джерело відхилило збережений пароль; збір і перевірка за id зупинені до заміни пароля.</summary>
+    Rejected = 1,
+
+    /// <summary>UserPassword, а пароля немає — треба ввести заново.</summary>
+    Unreadable = 2,
+}
 
 /// <summary>Наслідок перевірки з'єднання; <c>Entities</c> — розмір каталогу джерела.</summary>
 /// <remarks>
@@ -103,7 +133,19 @@ public sealed class ListDataSourcesHandler(
             secrets.Find(source.SecretName) is not null,
             usage.SourceEntities,
             usage.CollectionSchedules,
-            Convert.ToBase64String(source.RowVersion));
+            Convert.ToBase64String(source.RowVersion),
+            source.AuthMode,
+            source.UserName,
+            source.HasPassword,
+            StateOf(source),
+            source.CredentialsRejectedAt);
+
+    /// <summary>Стан облікових даних без розшифрування.</summary>
+    internal static SourceCredentialsState StateOf(DataSource source)
+        => source.AuthMode != SourceAuthMode.UserPassword ? SourceCredentialsState.Ok
+            : !source.HasPassword ? SourceCredentialsState.Unreadable
+            : source.CredentialsRejectedAt is not null ? SourceCredentialsState.Rejected
+            : SourceCredentialsState.Ok;
 
     /// <summary>
     /// Звіряє <c>If-Match</c> із версією рядка — той самий контракт, що в розкладах
@@ -175,7 +217,9 @@ public sealed partial class SaveDataSourceHandler(
     ICurrentUser currentUser,
     IClock clock,
     IEndpointNetwork? network = null,
-    ILogger<SaveDataSourceHandler>? logger = null)
+    ILogger<SaveDataSourceHandler>? logger = null,
+    IDataSourceCredentialResolver? credentials = null,
+    IEnumerable<IConnectionPoolReset>? pools = null)
 {
     /// <summary>Negotiate-джерело збережено без allowlist хостів: службові облікові дані підуть на будь-який дозволений блок-листом хост.</summary>
     [LoggerMessage(
@@ -205,6 +249,9 @@ public sealed partial class SaveDataSourceHandler(
 
     /// <summary>Тип події в журналі безпеки.</summary>
     public const string EventType = "DataSourceSaved";
+
+    /// <summary>Тип події безпеки: облікові дані джерела замінено або стерто (P-1126-SRCCRED, R-14).</summary>
+    public const string CredentialEventType = "DataSourceCredentialChanged";
 
     /// <summary>Ключ відмови: адреса змінюється, а секрет не підтверджено.</summary>
     public const string SecretReentryRequiredKey = "err.ECR-REQ-0422.dataSourceSecretReentryRequired";
@@ -259,7 +306,7 @@ public sealed partial class SaveDataSourceHandler(
     /// лише коли він там заданий (див. <see cref="RequireSecretConfirmation"/>).
     /// Не зберігається.
     /// </remarks>
-    public async Task<DataSourceView> CreateAsync(
+    public Task<DataSourceView> CreateAsync(
         string code,
         IReadOnlyDictionary<string, string>? name,
         ExternalTransport transport,
@@ -269,7 +316,25 @@ public sealed partial class SaveDataSourceHandler(
         int? maxParallel,
         string? secretConfirmation,
         CancellationToken ct)
+        => CreateAsync(
+            code, name, transport, endpoint, secondaryEndpoint, catalog, maxParallel, secretConfirmation,
+            SourceCredentialsInput.Unchanged, ct);
+
+    /// <summary>Заводить джерело разом з обліковими даними (P-1126-SRCCRED).</summary>
+    public async Task<DataSourceView> CreateAsync(
+        string code,
+        IReadOnlyDictionary<string, string>? name,
+        ExternalTransport transport,
+        string? endpoint,
+        string? secondaryEndpoint,
+        string? catalog,
+        int? maxParallel,
+        string? secretConfirmation,
+        SourceCredentialsInput input,
+        CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(input);
+
         var profile = await PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
@@ -278,16 +343,31 @@ public sealed partial class SaveDataSourceHandler(
             ecrCode.Value, name, transport, endpoint, secondaryEndpoint, catalog, maxParallel, exceptId: null, ct)
             .ConfigureAwait(false);
 
+        var plan = DataSourceCredentialRules.Decide(
+            existing: null, transport, targetChanged: true, input, parsed.Endpoint, parsed.SecondaryEndpoint);
+
         // ⛔ Створення — теж прив'язка секрету до адреси: ім'я секрету виводиться
         // з КОДУ, і секрет, що лишився в середовищі після видаленого джерела,
         // інакше поїхав би на будь-яку адресу нового джерела з тим самим кодом.
-        RequireSecretConfirmation(SecretNamePrefix + ecrCode.Value, secretConfirmation, ecrCode.Value);
+        // ✎ R-05: UserPassword секрет середовища ігнорує повністю — підтверджувати нічого.
+        if (plan.Mode == SourceAuthMode.Windows)
+        {
+            RequireSecretConfirmation(SecretNamePrefix + ecrCode.Value, secretConfirmation, ecrCode.Value);
+        }
+
+        var blob = ProtectPassword(plan);
 
         DataSource NewSource()
         {
             var created = new DataSource(
                 ecrCode, parsed.Name, transport, parsed.Endpoint, SecretNamePrefix + ecrCode.Value);
             created.Configure(parsed.SecondaryEndpoint, Trim(catalog), parsed.MaxParallel);
+
+            if (plan.Changed)
+            {
+                created.ReplaceCredentials(plan.Mode, plan.UserName, blob);
+            }
+
             return created;
         }
 
@@ -319,10 +399,13 @@ public sealed partial class SaveDataSourceHandler(
                 oldJson: null, newJson: IntegrationConfigAudit.Snapshot(source),
                 reason: IntegrationConfigAudit.Reason("integrationAudit.dataSourceCreated", ("connection", source.Code)),
                 innerCt).ConfigureAwait(false);
+
+            await AuditCredentialsAsync(profile.UserId, source, plan, hadPassword: false, innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
         await AuditAsync(profile.UserId, new { id = source.Id, code = source.Code, created = true }, ct)
             .ConfigureAwait(false);
+        ResetPools(plan);
 
         return ListDataSourcesHandler.ToView(source, new DataSourceUsage(0, 0), secrets);
     }
@@ -333,7 +416,7 @@ public sealed partial class SaveDataSourceHandler(
     /// змінюється адреса (<see cref="DataSourceAddress.SameTarget"/>) джерела,
     /// під яке секрет заданий. Не зберігається й не пишеться нікуди.
     /// </remarks>
-    public async Task<DataSourceView> UpdateAsync(
+    public Task<DataSourceView> UpdateAsync(
         int id,
         IReadOnlyDictionary<string, string>? name,
         ExternalTransport transport,
@@ -346,7 +429,28 @@ public sealed partial class SaveDataSourceHandler(
         string? secretConfirmation,
         bool confirmEndpointChange,
         CancellationToken ct)
+        => UpdateAsync(
+            id, name, transport, endpoint, secondaryEndpoint, catalog, maxParallel, isActive, ifMatch,
+            secretConfirmation, confirmEndpointChange, SourceCredentialsInput.Unchanged, ct);
+
+    /// <summary>Змінює джерело разом з обліковими даними (P-1126-SRCCRED, R-08/R-09).</summary>
+    public async Task<DataSourceView> UpdateAsync(
+        int id,
+        IReadOnlyDictionary<string, string>? name,
+        ExternalTransport transport,
+        string? endpoint,
+        string? secondaryEndpoint,
+        string? catalog,
+        int? maxParallel,
+        bool isActive,
+        string? ifMatch,
+        string? secretConfirmation,
+        bool confirmEndpointChange,
+        SourceCredentialsInput input,
+        CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(input);
+
         var profile = await PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
@@ -365,7 +469,15 @@ public sealed partial class SaveDataSourceHandler(
             source.Transport, source.Endpoint, source.SecondaryEndpoint,
             transport, parsed.Endpoint, parsed.SecondaryEndpoint);
 
-        if (addressChanged)
+        // ⛔ R-09: повторне введення пароля — РАНІШЕ за S3: збережений пароль не їде на нову ціль (адреса, транспорт,
+        // логін), навіть коли адміністратор підтвердив зміну адреси.
+        var plan = DataSourceCredentialRules.Decide(
+            source, transport, addressChanged, input, parsed.Endpoint, parsed.SecondaryEndpoint);
+        var hadPassword = source.HasPassword;
+
+        // ✎ R-05: UserPassword ігнорує секрет середовища; доказ наміру — щойно введений пароль (Decide вимагає його на
+        // новій цілі). S3 і підтвердження зміни адреси лишаються для Windows.
+        if (addressChanged && plan.Mode == SourceAuthMode.Windows)
         {
             // ⛔ Negotiate-джерело (секрету немає або він «Negotiate») несе
             // облікові дані СЛУЖБОВОГО акаунта процесу: повторно вводити нічого,
@@ -395,11 +507,17 @@ public sealed partial class SaveDataSourceHandler(
         var oldSecondary = source.SecondaryEndpoint;
 
         var before = IntegrationConfigAudit.Snapshot(source);
+        var blob = ProtectPassword(plan);
 
         void Apply(DataSource target)
         {
             target.Update(parsed.Name, transport, parsed.Endpoint, isActive);
             target.Configure(parsed.SecondaryEndpoint, Trim(catalog), parsed.MaxParallel);
+
+            if (plan.Changed)
+            {
+                target.ReplaceCredentials(plan.Mode, plan.UserName, blob);
+            }
         }
 
         Apply(source);
@@ -423,6 +541,10 @@ public sealed partial class SaveDataSourceHandler(
             }
 
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            // ⛔ R-14: подія облікових даних — ЗАВЖДИ при заміні чи стиранні, навіть коли знімок не змінився (новий
+            // пароль на місці старого: hasPassword true → true).
+            await AuditCredentialsAsync(profile.UserId, source, plan, hadPassword, innerCt).ConfigureAwait(false);
 
             var after = IntegrationConfigAudit.Snapshot(source);
             if (string.Equals(before, after, StringComparison.Ordinal))
@@ -458,9 +580,51 @@ public sealed partial class SaveDataSourceHandler(
             },
             ct).ConfigureAwait(false);
 
+        ResetPools(plan);
+
         var usage = await store.CountUsageAsync(id, ct).ConfigureAwait(false);
 
         return ListDataSourcesHandler.ToView(source, usage, secrets);
+    }
+
+    /// <summary>
+    /// ⛔ R-20: після заміни чи стирання облікових даних пули драйверів процесу скидаються — з'єднання зі старим паролем
+    /// не повертаються з пулу. Свідомо поза: пули чужих процесів.
+    /// </summary>
+    private void ResetPools(SourceCredentialPlan plan)
+    {
+        if (!plan.Changed)
+        {
+            return;
+        }
+
+        foreach (var pool in pools ?? [])
+        {
+            pool.Reset();
+        }
+    }
+
+    /// <summary>
+    /// Адреса з форми перевірки з'єднання проходить ТУ САМУ перевірку, що й при збереженні (§13.1 a): облікові дані в
+    /// рядку, транспорт/поле, політика адреси. Без запису, без перевірки коду.
+    /// </summary>
+    /// <returns>Основна й запасна адреса після <c>Trim</c>.</returns>
+    public async Task<(string Endpoint, string? SecondaryEndpoint)> ValidateConnectionAsync(
+        string code, ExternalTransport transport, string? endpoint, string? secondaryEndpoint, string? catalog,
+        CancellationToken ct)
+    {
+        var address = Trim(endpoint);
+        var spare = Trim(secondaryEndpoint);
+
+        if (!Enum.IsDefined(transport) || address is not { Length: > 0 and <= 400 } || spare is { Length: > 400 })
+        {
+            throw ListDataSourcesHandler.Invalid(
+                "err.ECR-REQ-0422.dataSourceInvalid", "Перевірка потребує відомого транспорту й адреси до 400 символів.", code);
+        }
+
+        await ValidateAddressAsync(code, transport, address, spare, catalog, ct).ConfigureAwait(false);
+
+        return (address, spare);
     }
 
     private sealed record Parsed(LocalizedText Name, string Endpoint, string? SecondaryEndpoint, int MaxParallel);
@@ -499,8 +663,23 @@ public sealed partial class SaveDataSourceHandler(
         // ⛔ Облікові дані в адресі ловляться ДО перевірки унікальності коду:
         // інакше перший же дублікат ховав би причину, через яку відмовляти
         // треба в будь-якому разі.
-        RequireNoCredentials(address, "endpoint");
-        RequireNoCredentials(spare, "secondaryEndpoint");
+        await ValidateAddressAsync(code, transport, address, spare, catalog, ct).ConfigureAwait(false);
+
+        if (await store.IsCodeTakenAsync(code, exceptId, ct).ConfigureAwait(false))
+        {
+            throw ListDataSourcesHandler.Invalid(
+                "err.ECR-REQ-0422.dataSourceCodeTaken", $"Джерело з кодом «{code}» уже є.", code);
+        }
+
+        return new Parsed(new LocalizedText(named), address, spare, parallel);
+    }
+
+    /// <summary>Адресна частина валідації: облікові дані в рядку, поле транспорту, політика адреси.</summary>
+    private async Task ValidateAddressAsync(
+        string code, ExternalTransport transport, string address, string? spare, string? catalog, CancellationToken ct)
+    {
+        RequireNoCredentials(transport, address, "endpoint");
+        RequireNoCredentials(transport, spare, "secondaryEndpoint");
 
         RequireReadByTransport(transport, spare, Trim(catalog), code);
 
@@ -535,14 +714,6 @@ public sealed partial class SaveDataSourceHandler(
                 await RequireSqlServerAddressAsync(spare, "secondaryEndpoint", code, sqlClient, ct).ConfigureAwait(false);
             }
         }
-
-        if (await store.IsCodeTakenAsync(code, exceptId, ct).ConfigureAwait(false))
-        {
-            throw ListDataSourcesHandler.Invalid(
-                "err.ECR-REQ-0422.dataSourceCodeTaken", $"Джерело з кодом «{code}» уже є.", code);
-        }
-
-        return new Parsed(new LocalizedText(named), address, spare, parallel);
     }
 
     /// <summary>
@@ -691,31 +862,94 @@ public sealed partial class SaveDataSourceHandler(
     /// <c>secondaryEndpoint</c>), а не вміст. Несуть обидві — називається
     /// <c>endpoint</c>: перевірка йде в порядку полів форми і зупиняється на першому.
     /// </remarks>
-    internal static void RequireNoCredentials(string? address, string field)
+    internal static void RequireNoCredentials(ExternalTransport transport, string? address, string field)
     {
         if (string.IsNullOrWhiteSpace(address))
         {
             return;
         }
 
-        // Пробіли прибираються: `Password = x` у рядку з'єднання законне.
-        var packed = address.Replace(" ", string.Empty, StringComparison.Ordinal);
-
-        var carries = CredentialMarkers.Any(
-            marker => packed.Contains(marker, StringComparison.OrdinalIgnoreCase))
-            || HasUserInfo(address);
-
-        if (carries)
+        // ⛔ R-04, перша лінія: рядок з'єднання розбирається правилами драйвера, і відмова — за ІМЕНЕМ ключа (`uid`,
+        // `user id`, `userid`, `pwd`, …). Підрядок не бачив `userid=` і ламався на табуляції перед `=`. Рядок, що не
+        // розбирається, відхиляється без повтору вмісту.
+        if (SourceConnectionString.IsConnectionString(transport) && address.Contains('=', StringComparison.Ordinal))
         {
-            throw new BusinessRuleException(
-                ErrorCodes.RequestInvalid,
-                "Адреса джерела не має нести облікових даних: джерела ходять під службовим обліковим записом.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-REQ-0422.dataSourceEndpointCarriesSecret",
-                    ["field"] = field,
-                });
+            var builder = SourceConnectionString.Parse(transport, address)
+                          ?? throw new BusinessRuleException(
+                              ErrorCodes.RequestInvalid,
+                              "Рядок з'єднання джерела не розбирається.",
+                              new Dictionary<string, object?>
+                              {
+                                  ["messageKey"] = "err.ECR-REQ-0422.dataSourceEndpointMalformed",
+                                  ["field"] = field,
+                              });
+
+            if (SourceConnectionString.HasCredentialKey(builder))
+            {
+                throw CarriesSecret(field);
+            }
         }
+
+        // Друга лінія — підрядок: прибираються ВСІ пробільні символи (`Password = x`, табуляція, перенос рядка).
+        var packed = string.Concat(address.Where(c => !char.IsWhiteSpace(c)));
+
+        if (CredentialMarkers.Any(marker => packed.Contains(marker, StringComparison.OrdinalIgnoreCase))
+            || HasUserInfo(address))
+        {
+            throw CarriesSecret(field);
+        }
+    }
+
+    private static BusinessRuleException CarriesSecret(string field)
+        => new(
+            ErrorCodes.RequestInvalid,
+            "Адреса джерела не має нести облікових даних: логін і пароль задаються полями автентифікації.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-REQ-0422.dataSourceEndpointCarriesSecret",
+                ["field"] = field,
+            });
+
+    /// <summary>Шифрує новий пароль плану ДО транзакції: повтор стратегії не шифрує вдруге.</summary>
+    private byte[]? ProtectPassword(SourceCredentialPlan plan)
+    {
+        if (plan.NewPassword is not { } password)
+        {
+            return null;
+        }
+
+        var resolver = credentials
+                       ?? throw new InvalidOperationException("IDataSourceCredentialResolver не зареєстровано.");
+
+        return resolver.Protect(password);
+    }
+
+    /// <summary>
+    /// Подія безпеки <see cref="CredentialEventType"/> (R-14): режим, логін і ФАКТ зміни пароля — без значення й довжини.
+    /// </summary>
+    private Task AuditCredentialsAsync(
+        int byUserId, DataSource source, SourceCredentialPlan plan, bool hadPassword, CancellationToken ct)
+    {
+        if (!plan.Changed)
+        {
+            return Task.CompletedTask;
+        }
+
+        var details = new
+        {
+            id = source.Id,
+            code = source.Code,
+            authMode = source.AuthMode.ToString(),
+            userName = source.UserName,
+            passwordChanged = plan.NewPassword is not null,
+            passwordCleared = plan.NewPassword is null && hadPassword && !source.HasPassword,
+        };
+
+        return audit.WriteSecurityEventAsync(
+            new SecurityEventRecord(
+                clock.UtcNow, CredentialEventType, TargetUserId: null, TargetRoleId: null,
+                JsonSerializer.Serialize(details), byUserId, currentUser.CorrelationId),
+            ct);
     }
 
     /// <summary>Чи адреса має частину <c>scheme://user:pass@host</c>.</summary>
@@ -834,10 +1068,26 @@ public static class DataSourceAddress
         ExternalTransport oldTransport, string? oldEndpoint, string? oldSecondary,
         ExternalTransport newTransport, string? newEndpoint, string? newSecondary)
         => oldTransport == newTransport
-           && string.Equals(Canonical(oldEndpoint), Canonical(newEndpoint), StringComparison.Ordinal)
-           && string.Equals(Canonical(oldSecondary), Canonical(newSecondary), StringComparison.Ordinal);
+           && string.Equals(Canonical(newTransport, oldEndpoint), Canonical(newTransport, newEndpoint), StringComparison.Ordinal)
+           && string.Equals(Canonical(newTransport, oldSecondary), Canonical(newTransport, newSecondary), StringComparison.Ordinal);
 
     /// <summary>Канонічна форма адреси; <c>null</c> — адреси немає.</summary>
+    /// <remarks>
+    /// ✎ R-10: рядок з'єднання розбирається правилами ТРАНСПОРТУ (ODBC для PiSqlClient, SqlClient для Sql) — тими,
+    /// якими його читатиме драйвер. Загальний розбір бачив <c>AF Server={x;Server=evil}</c> і переставлену пару як
+    /// «те саме», а ODBC — ні.
+    /// </remarks>
+    public static string? Canonical(ExternalTransport transport, string? address)
+    {
+        if (SourceConnectionString.IsConnectionString(transport) && !string.IsNullOrWhiteSpace(address))
+        {
+            return SourceConnectionString.Canonical(transport, address.Trim()) ?? address.Trim();
+        }
+
+        return Canonical(address);
+    }
+
+    /// <summary>Канонічна форма адреси без знання транспорту (URL або рядок за загальними правилами).</summary>
     public static string? Canonical(string? address)
     {
         if (string.IsNullOrWhiteSpace(address))
@@ -959,11 +1209,19 @@ public sealed class SourceProbeGate
 {
     private readonly ConcurrentDictionary<int, byte> inFlight = new();
 
+    private readonly ConcurrentDictionary<string, byte> inFlightTargets = new(StringComparer.Ordinal);
+
     /// <summary>Займає джерело; <c>false</c> — проба вже йде.</summary>
     public bool TryBegin(int dataSourceId) => inFlight.TryAdd(dataSourceId, 0);
 
     /// <summary>Звільняє джерело.</summary>
     public void End(int dataSourceId) => inFlight.TryRemove(dataSourceId, out _);
+
+    /// <summary>Займає ціль перевірки з форми (користувач + відбиток цілі, §13.1 e); <c>false</c> — уже йде.</summary>
+    public bool TryBegin(string targetKey) => inFlightTargets.TryAdd(targetKey, 0);
+
+    /// <summary>Звільняє ціль.</summary>
+    public void End(string targetKey) => inFlightTargets.TryRemove(targetKey, out _);
 }
 
 /// <summary>
@@ -1006,11 +1264,37 @@ public sealed partial class TestDataSourceConnectionHandler(
     /// <summary>Транспорт джерела не має адаптера.</summary>
     public const string FailureAdapterNotRegistered = "adapterNotRegistered";
 
+    /// <summary>
+    /// Джерело не налаштоване до кінця (немає запиту, рядок з'єднання не читається, адресу відхиляє політика): до
+    /// джерела ніхто не ходив, лагодити треба налаштування (b14 source-test-flert, AC-3).
+    /// </summary>
+    public const string FailureNotConfigured = "notConfigured";
+
+    /// <summary>З'єднання відкрилося, а налаштований запит упав на боці джерела (AC-3).</summary>
+    public const string FailureQuery = "query";
+
+    /// <summary>Збережений пароль не читається — ввести заново (R-03).</summary>
+    public const string FailureCredentialsUnreadable = "credentialsUnreadable";
+
+    /// <summary>Джерело вже відхилило збережений пароль; до заміни пароля з'єднання не відкривається (R-03).</summary>
+    public const string FailureCredentialsRejected = "credentialsRejected";
+
     /// <summary>Усі категорії відмови, які може віддати проба.</summary>
     public static readonly IReadOnlyList<string> FailureCategories =
     [
         FailureAuth, FailureUnreachable, FailureTls, FailureTimeout, FailureOther, FailureAdapterNotRegistered,
+        FailureNotConfigured, FailureQuery, FailureCredentialsUnreadable, FailureCredentialsRejected,
     ];
+
+    /// <summary>Відповідь «відмова» з категорією.</summary>
+    internal static DataSourceTestResult Failed(string category)
+        => new(false, category, 0, "integration.test.failed." + category);
+
+    /// <summary>
+    /// Ключ успіху без каталогу: з'єднання ціле, а запиту каталогу сутностей немає (AC-2). Не відмова — джерело
+    /// на кшталт FLERT (склад газу) каталогу не має за задумом.
+    /// </summary>
+    public const string ConnectedNoCatalogKey = "integration.test.connectedNoCatalog";
 
     /// <summary>Код відмови: перевірка цього джерела вже виконується.</summary>
     public const string AlreadyRunningErrorCode = ErrorCodes.JobStateConflict;
@@ -1058,7 +1342,10 @@ public sealed partial class TestDataSourceConnectionHandler(
 
         try
         {
-            result = await ProbeAsync(source, ct).ConfigureAwait(false);
+            // ⛔ R-03: джерело вже відхилило збережений пароль — до драйвера не йдемо (AC-6b).
+            result = source is { AuthMode: SourceAuthMode.UserPassword, CredentialsRejectedAt: not null }
+                ? Failed(FailureCredentialsRejected)
+                : await ProbeAsync(source, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -1090,9 +1377,22 @@ public sealed partial class TestDataSourceConnectionHandler(
 
         try
         {
-            var catalog = await adapter.DiscoverAsync(source.Id, ct).ConfigureAwait(false);
+            try
+            {
+                var catalog = await adapter.DiscoverAsync(source.Id, ct).ConfigureAwait(false);
 
-            return new DataSourceTestResult(true, null, catalog.Count);
+                return new DataSourceTestResult(true, null, catalog.Count);
+            }
+            catch (SourceNotConfiguredException missing)
+                when (missing.CatalogOnly && adapter is IExternalConnectionCheck check)
+            {
+                // ⛔ AC-2: бракує лише запиту каталогу — це не відмова з'єднання. Перевіряємо саме з'єднання; його
+                // відмова класифікується нижче, як і відмова каталогу. Факт «каталогу немає» — у журнал сервера.
+                LogCatalogNotConfigured(logger, missing, source.Code);
+                await check.CheckConnectionAsync(source.Id, ct).ConfigureAwait(false);
+
+                return new DataSourceTestResult(true, null, 0, ConnectedNoCatalogKey);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -1108,21 +1408,30 @@ public sealed partial class TestDataSourceConnectionHandler(
             // з'єднання, і він же — відповідь сканера мережі, якщо віддати його
             // в тіло: «connection refused» проти «timeout» проти «TLS» проти
             // банера чужого сервера.
-            LogProbeFailed(logger, e, source.Code, category);
+            LogProbeFailed(logger, source.Code, category, SafeLogException.Of(e, null));
 
-            return new DataSourceTestResult(false, category, 0, "integration.test.failed." + category);
+            return Failed(category);
         }
     }
 
     /// <summary>Рядок серверного журналу з винятком адаптера — єдине місце його тексту.</summary>
     /// <param name="logger">Журнал.</param>
-    /// <param name="error">Виняток адаптера.</param>
     /// <param name="dataSource">Код джерела.</param>
     /// <param name="category">Категорія, яку побачив клієнт.</param>
+    /// <param name="error">⛔ R-02: безпечний запис винятку (тип, код, скрабоване повідомлення), не сам виняток.</param>
     [LoggerMessage(
         Level = LogLevel.Warning,
-        Message = "Перевірка з'єднання з джерелом {DataSource} не пройшла: {Category}.")]
-    private static partial void LogProbeFailed(ILogger logger, Exception error, string dataSource, string category);
+        Message = "Перевірка з'єднання з джерелом {DataSource} не пройшла: {Category}; {Error}.")]
+    internal static partial void LogProbeFailed(ILogger logger, string dataSource, string category, SafeLogException error);
+
+    /// <summary>Каталогу в джерела немає — проба йде самим з'єднанням (AC-2).</summary>
+    /// <param name="logger">Журнал.</param>
+    /// <param name="error">Відмова каталогу з ключем налаштування, якого бракує.</param>
+    /// <param name="dataSource">Код джерела.</param>
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Перевірка з'єднання з джерелом {DataSource}: запиту каталогу немає, перевіряється лише з'єднання.")]
+    private static partial void LogCatalogNotConfigured(ILogger logger, Exception error, string dataSource);
 
     /// <summary>Виняток адаптера → одна з кількох категорій; текст винятку не читається.</summary>
     /// <remarks>
@@ -1145,9 +1454,26 @@ public sealed partial class TestDataSourceConnectionHandler(
             chain.Add(e);
         }
 
+        // ✎ R-03: раніше за «auth» — це підтипи відмови автентифікації з власною дією для людини.
+        if (chain.Exists(e => e is CredentialsUnreadableException))
+        {
+            return FailureCredentialsUnreadable;
+        }
+
+        if (chain.Exists(e => e is CredentialsRejectedException))
+        {
+            return FailureCredentialsRejected;
+        }
+
         if (chain.Exists(e => e is SourceAuthenticationException))
         {
             return FailureAuth;
+        }
+
+        // ⚠ AC-3: раніше за «недоступне» — код у цих винятків той самий ECR-INT-0503, розрізняє тип.
+        if (chain.Exists(e => e is SourceNotConfiguredException))
+        {
+            return FailureNotConfigured;
         }
 
         if (chain.Exists(e => e is AuthenticationException
@@ -1161,6 +1487,11 @@ public sealed partial class TestDataSourceConnectionHandler(
                               || (e is EcrException ecr && ecr.Details?.GetValueOrDefault("reason") is "timeout")))
         {
             return FailureTimeout;
+        }
+
+        if (chain.Exists(e => e is SourceQueryFailedException))
+        {
+            return FailureQuery;
         }
 
         if (chain.Exists(e => e is HttpRequestException or SocketException or DbException or IOException

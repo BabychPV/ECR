@@ -1,36 +1,24 @@
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
-import type { UsageResponse } from '@/features/registries/api';
 import type {
   CalculationBindingDto,
   CalculationLevel,
   CalculationResultDto,
   CreateMethodologyRequest,
   CreateMethodologyVersionRequest,
-  MethodologyCategoryRuleDto,
-  MethodologyConstantDto,
   MethodologyDraftVersionDto,
-  MethodologyFormulaDto,
-  MethodologyOutputDto,
   MethodologyPublicationDiff,
   MethodologyRequiredInputDto,
-  MethodologyRuleDto,
   MethodologySummaryDto,
   MethodologyTestCaseDto,
   MethodologyTraceStepsDto,
   PublishMethodologyRequest,
   SaveCalculationBindingRequest,
-  SaveMethodologyCategoryRuleRequest,
-  SaveMethodologyConstantRequest,
-  SaveMethodologyFormulaRequest,
-  SaveMethodologyOutputRequest,
   SaveMethodologyRequiredInputRequest,
-  SaveMethodologyRuleRequest,
   SaveMethodologyTestCaseRequest,
   SetMethodologyModesRequest,
   SetTraceStepsRequest,
 } from '@/api/types';
-import { formulaBody, type FormulaDraft } from './draft';
 
 /*
  * ⛔ Адреса в КОЖНІЙ функції записана повністю, а не збирається з помічника.
@@ -59,16 +47,6 @@ export function methodologyVersions(
   );
 }
 
-/** Формули версії в порядку обчислення. */
-export function methodologyFormulas(
-  methodologyId: number,
-  versionId: number,
-): Promise<MethodologyFormulaDto[]> {
-  return apiFetch<MethodologyFormulaDto[]>(
-    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/formulas`,
-  );
-}
-
 /**
  * Створює версію-чернетку: клон наявної або порожню.
  *
@@ -81,8 +59,8 @@ export function createMethodologyVersion(
     readonly versionNumber: string;
     readonly copyFromVersionId: number | null;
     readonly level: CalculationLevel;
-    /** ⛔ Явно: пропущений рушій сервер читає як `Formulas`. */
-    readonly engine: 'Formulas' | 'Script';
+    /** ⛔ Явно і лише скрипт (✎ 24.11: формульний рушій виведено з інтерфейсу). */
+    readonly engine: 'Script';
   },
 ): Promise<MethodologyDraftVersionDto> {
   return apiFetch<MethodologyDraftVersionDto>(
@@ -125,45 +103,6 @@ export function publishMethodologyVersion(
 }
 
 /**
- * Записує формулу чернетки; створює її, якщо коду ще немає.
- *
- * ⚠ `PUT`, а не `POST`: адресою формули є її **код** у межах версії — те, чим
- * на неї посилаються вирази (`!Name`). Тому створення й зміна — одна дія, і
- * повторний запит із тим самим тілом дає той самий стан.
- *
- * ⚠ Код іде через `encodeURIComponent`: у ньому дозволені лише латиниця,
- * цифри й підкреслення (`EcrCode`), але покладатися на це в побудові адреси
- * означало б, що перша ж послаблена перевірка коду ламає маршрутизацію мовчки.
- */
-export function saveMethodologyFormula(
-  methodologyId: number,
-  draft: FormulaDraft,
-): Promise<MethodologyFormulaDto> {
-  const body: SaveMethodologyFormulaRequest = formulaBody(draft);
-
-  return apiFetch<MethodologyFormulaDto>(
-    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(draft.versionId)}/formulas/${encodeURIComponent(draft.code)}`,
-    {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    },
-  );
-}
-
-/** Прибирає формулу з чернетки. */
-export function deleteMethodologyFormula(
-  methodologyId: number,
-  versionId: number,
-  code: string,
-): Promise<void> {
-  return apiFetch<void>(
-    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/formulas/${encodeURIComponent(code)}`,
-    { method: 'DELETE' },
-  );
-}
-
-/**
  * Заводить методологію-контейнер — **без жодної версії**.
  *
  * ⛔ Перша версія створюється окремою дією, і це не зайвий крок: у неї свій
@@ -177,188 +116,6 @@ export function createMethodology(body: CreateMethodologyRequest): Promise<Metho
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-}
-
-/** Звіт імпорту пакета методологій — однаковий для перевірки й запису. */
-export type MethodologyImportReportDto = components['schemas']['MethodologyImportReportDto'];
-
-/**
- * Імпорт пакета `ecr-methodology-package` v1 (крок V, FEATURE-HSE301-VIEW §11.6).
- *
- * ⚠ Пакет передається як є — розібраним JSON із файлу, без перетворень у клієнті:
- * його схему тримає інструмент експорту, а перевіряє сервер. `dryRun = true`
- * нічого не пише і повертає звіт навіть із блокерами; запис із блокерами — 422,
- * із конфліктами — 409, обидва зі звітом у `report`.
- */
-export function importMethodologyPackage(
-  pkg: unknown,
-  dryRun: boolean,
-): Promise<MethodologyImportReportDto> {
-  return apiFetch<MethodologyImportReportDto>(
-    `/api/v1/methodologies/import?dryRun=${dryRun ? 'true' : 'false'}`,
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pkg) },
-  );
-}
-
-/** Константи версії — усі, включно з мітками категорій. */
-export function methodologyConstants(
-  methodologyId: number,
-  versionId: number,
-): Promise<MethodologyConstantDto[]> {
-  return apiFetch<MethodologyConstantDto[]>(
-    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/constants`,
-  );
-}
-
-/**
- * Записує константу чернетки; створює її, якщо коду ще немає.
- *
- * ⚠ `validTo` — перший НЕчинний день (виключна межа): коефіцієнт, чинний увесь
- * 2024 рік, має тут `2025-01-01`.
- */
-export function saveMethodologyConstant(
-  methodologyId: number,
-  versionId: number,
-  code: string,
-  body: SaveMethodologyConstantRequest,
-): Promise<MethodologyConstantDto> {
-  return apiFetch<MethodologyConstantDto>(
-    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/constants/${encodeURIComponent(code)}`,
-    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
-  );
-}
-
-/**
- * Де використовується константа версії (ФВ-8.14): формули, що на неї
- * посилаються. Право `Calculation.View`.
- */
-export function methodologyConstantUsage(
-  methodologyId: number,
-  versionId: number,
-  code: string,
-): Promise<UsageResponse> {
-  return apiFetch<UsageResponse>(
-    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/constants/${encodeURIComponent(code)}/usage`,
-  );
-}
-
-/** Категорія констант версії (план CONST-CATEGORY). */
-export type MethodologyCategoryDto = components['schemas']['MethodologyCategoryDto'];
-
-/** Тіло запису категорії переліку версії-чернетки. */
-export type SaveMethodologyCategoryRequest = components['schemas']['SaveMethodologyCategoryRequest'];
-
-/**
- * Перелік категорій констант версії з кількістю констант під кожною. Право `Calculation.View`.
- *
- * ⚠ Категорія константи — значення ЛИШЕ з цього переліку або порожнє (= спільна): описка в
- * категорії доти тихо робила константу мертвою (план CONST-CATEGORY).
- */
-export function methodologyCategories(
-  methodologyId: number,
-  versionId: number,
-): Promise<MethodologyCategoryDto[]> {
-  return apiFetch<MethodologyCategoryDto[]>(
-    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/categories`,
-  );
-}
-
-/**
- * Заводить категорію або змінює її опис, порядок, стан. Право `Calculation.EditConstant`.
- *
- * ⛔ Код — адреса, перейменування немає (`409 categoryRename`); вивести з ужитку зайняту — `409 categoryInUse`.
- */
-export function saveMethodologyCategory(
-  methodologyId: number,
-  versionId: number,
-  code: string,
-  body: SaveMethodologyCategoryRequest,
-): Promise<MethodologyCategoryDto> {
-  return apiFetch<MethodologyCategoryDto>(
-    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/categories/${encodeURIComponent(code)}`,
-    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
-  );
-}
-
-/** Прибирає незайняту категорію з переліку чернетки (`409 categoryInUse` — є константи). */
-export function deleteMethodologyCategory(
-  methodologyId: number,
-  versionId: number,
-  code: string,
-): Promise<void> {
-  return apiFetch<void>(
-    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/categories/${encodeURIComponent(code)}`,
-    { method: 'DELETE' },
-  );
-}
-
-/** Правила відбору рядків версії — включно з вимкненими. */
-export function methodologyRules(
-  methodologyId: number,
-  versionId: number,
-): Promise<MethodologyRuleDto[]> {
-  return apiFetch<MethodologyRuleDto[]>(
-    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/rules`,
-  );
-}
-
-/**
- * Записує правило відбору рядків документа.
- *
- * ⚠ Предикат **структурований**, а не вираз: діалект методологій посилань на
- * комірки документів не має за побудовою (`Q-026`). «Уся таблиця» пишеться як
- * `{}` — і саме тому таке правило має найнижчий пріоритет: інакше воно
- * перекрило б усі точніші (`ФВ-13.4`).
- */
-export function saveMethodologyRule(
-  methodologyId: number,
-  versionId: number,
-  code: string,
-  body: SaveMethodologyRuleRequest,
-): Promise<MethodologyRuleDto> {
-  return apiFetch<MethodologyRuleDto>(
-    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/rules/${encodeURIComponent(code)}`,
-    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
-  );
-}
-
-/**
- * Читає правило категорії константи версії (L-2, `calc.CategoryRule`): вираз діалекту Methodology над
- * рядком документа, що дає ключ категорії (`Diesel`, `Loc_BeforeMR_B`). `expression = null` — правила
- * немає. Право `Calculation.View`.
- */
-export function methodologyCategoryRule(
-  methodologyId: number,
-  versionId: number,
-): Promise<MethodologyCategoryRuleDto> {
-  return apiFetch<MethodologyCategoryRuleDto>(
-    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/category-rule`,
-  );
-}
-
-/**
- * Ставить правило категорії версії-чернетки. Право `Calculation.EditRule`.
- *
- * ⚠ Одне правило на версію. Порожній, нерозібраний або числовий вираз сервер відхиляє `422`; на
- * опублікованій версії — `409`. Посилання на константи й формули перевіряє публікація.
- */
-export function saveMethodologyCategoryRule(
-  methodologyId: number,
-  versionId: number,
-  body: SaveMethodologyCategoryRuleRequest,
-): Promise<MethodologyCategoryRuleDto> {
-  return apiFetch<MethodologyCategoryRuleDto>(
-    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/category-rule`,
-    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
-  );
-}
-
-/** Прибирає правило категорії версії-чернетки (ідемпотентно). Право `Calculation.EditRule`. */
-export function deleteMethodologyCategoryRule(methodologyId: number, versionId: number): Promise<void> {
-  return apiFetch<void>(
-    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/category-rule`,
-    { method: 'DELETE' },
-  );
 }
 
 /**
@@ -393,31 +150,15 @@ export function saveMethodologyRequiredInput(
   );
 }
 
-/** Оголошені виходи версії. */
-export function methodologyOutputs(
+/** Прибирає обов'язкову вхідну колонку чернетки (✎ P-1124-1: «list/edit/remove»). */
+export function deleteMethodologyRequiredInput(
   methodologyId: number,
   versionId: number,
-): Promise<MethodologyOutputDto[]> {
-  return apiFetch<MethodologyOutputDto[]>(
-    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/outputs`,
-  );
-}
-
-/**
- * Оголошує вихід версії.
- *
- * ⛔ Без жодного виходу методологія рахує всі формули і не записує **нічого**:
- * цикл запису результату йде по оголошених виходах, а не по формулах.
- */
-export function saveMethodologyOutput(
-  methodologyId: number,
-  versionId: number,
-  code: string,
-  body: SaveMethodologyOutputRequest,
-): Promise<MethodologyOutputDto> {
-  return apiFetch<MethodologyOutputDto>(
-    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/outputs/${encodeURIComponent(code)}`,
-    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+  columnDefId: number,
+): Promise<void> {
+  return apiFetch<void>(
+    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/required-inputs/${String(columnDefId)}`,
+    { method: 'DELETE' },
   );
 }
 

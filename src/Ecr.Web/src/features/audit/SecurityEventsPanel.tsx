@@ -1,8 +1,9 @@
 import { useMemo, type JSX } from 'react';
-import { Select, Table, Text, TextInput } from '@mantine/core';
+import { Select, Table, Text } from '@mantine/core';
 import {
   fetchSecurityExport,
   securityEventsQuery,
+  useSecurityEventTypes,
   type SecurityEventPage,
 } from '@/features/audit/api';
 import { useSecurityEventPages } from '@/features/audit/journalPages';
@@ -15,13 +16,34 @@ import { SortableTh } from '@/features/audit/SortableTh';
 import { FilterHints, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
-import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { securityEventLabel } from './auditLabels';
-import { auditDetailsText } from './auditDetails';
-import { SiteChangedAt } from './SiteChangedAt';
+import { auditDetails } from './auditDetails';
+import { AuditChangedAt } from './AuditChangedAt';
 import './auditTable.css';
+
+/**
+ * «Details» події: читабельний текст першим рядком, технічні ідентифікатори (задача, GUID) — другим, приглушеним
+ * (✎ P-1124-4); повний JSON — у підказці.
+ */
+function SecurityDetails({ raw }: { raw: string | null | undefined }): JSX.Element {
+  const view = auditDetails(raw);
+
+  return (
+    <>
+      {/* ✎ debt-1109 x10: читабельні пари замість сирого JSON; точне значення — у підказці. */}
+      <Text size="xs" style={{ overflowWrap: 'anywhere' }} title={raw ?? undefined} data-audit-details="">
+        {view.text}
+      </Text>
+      {view.technical.length > 0 && (
+        <Text size="xs" ff="monospace" c="var(--ecr-muted)" data-audit-technical="">
+          {view.technical.join(' · ')}
+        </Text>
+      )}
+    </>
+  );
+}
 
 /**
  * Журнал подій безпеки (ФВ-5.24, ФВ-6.11) — третя вкладка екрана аудиту: зміни прав і ролей та
@@ -34,31 +56,46 @@ export function SecurityEventsPanel({ from, to }: { from: string; to: string }):
   const [eventType, setEventType] = useUrlState('eventType');
   const [changedBy, setChangedBy] = useUrlNumber('changedBy');
 
-  const appliedEventType = useDebouncedFilter(eventType);
+  // ✎ P-1124-4: тип події — ВИБОРОМ (дискретне значення, без паузи), автор — теж вибором.
   const appliedChangedBy = useDebouncedFilter(changedBy);
-  const eventTypeField = useFieldDraft(eventType ?? '');
   const [sort, setSort] = useAuditSort();
 
-  const applied = { from, to, eventType: appliedEventType, changedByUserId: appliedChangedBy, sort, limit: 100 };
+  const applied = { from, to, eventType, changedByUserId: appliedChangedBy, sort, limit: 100 };
   // ✎ W-3d: курсор — параметр сторінки `useInfiniteQuery`; ключ — застосований фільтр без курсора.
   const listKey = securityEventsQuery(applied);
   const events = useSecurityEventPages(applied);
   const eventPage = useMemo(() => mergePages(events.data?.pages), [events.data]);
   const authorOptions = useAuthorOptions(eventPage?.items, changedBy);
+  const eventTypes = useSecurityEventTypes(from, to);
+  const eventTypeOptions = useMemo(() => {
+    const codes = new Set(Array.isArray(eventTypes.data) ? eventTypes.data : []);
+    for (const item of eventPage?.items ?? []) codes.add(item.eventType);
+    // Обраний тип лишається в переліку завжди — інакше поле показувало б порожнечу при чинному фільтрі.
+    if (eventType !== null && eventType !== '') codes.add(eventType);
+
+    return [...codes]
+      .map((value) => ({ value, label: securityEventLabel(value) }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [eventTypes.data, eventPage, eventType]);
 
   return (
     <>
       <FilterRow mb="xs" data-audit-filter-row="security">
-        <TextInput
+        {/* ⛔ Було: вільний текст із точним збігом КОДУ (`AccessDenied`) на сервері — «Access denied» чи «access»
+            давали порожній журнал. Тепер — типи, що є у вікні (`/audit/security/event-types`), підписами мовою
+            інтерфейсу; значення — код сервера. */}
+        <Select
           size="xs"
-          miw={200}
+          miw={220}
+          searchable
+          clearable
           label={t('audit.eventType')}
-          value={eventTypeField.value}
-          onFocus={eventTypeField.onFocus}
-          onBlur={eventTypeField.onBlur}
-          onChange={(event) => {
-            eventTypeField.setValue(event.currentTarget.value);
-            setEventType(event.currentTarget.value);
+          placeholder={t('audit.eventTypeAny')}
+          nothingFoundMessage={t('audit.filterNothing')}
+          data={eventTypeOptions}
+          value={eventType === '' ? null : eventType}
+          onChange={(value) => {
+            setEventType(value);
           }}
         />
         <Select
@@ -70,6 +107,7 @@ export function SecurityEventsPanel({ from, to }: { from: string; to: string }):
           description={t('audit.authorHint')}
           styles={readerOnlyDescription}
           placeholder={t('audit.authorAny')}
+          nothingFoundMessage={t('audit.filterNothing')}
           data={authorOptions}
           value={changedBy === null ? null : String(changedBy)}
           onChange={(value) => {
@@ -113,26 +151,22 @@ export function SecurityEventsPanel({ from, to }: { from: string; to: string }):
               <Table.Tbody>
                 {page.items.map((event, index) => (
                   <Table.Tr key={`${event.changedAt}:${event.eventType}:${index}`}>
-                    <Table.Td>
-                      {/* ✎ debt-1110: час у поясі майданчика (`siteTimeZoneId` з сервера), не браузера. */}
-                      <SiteChangedAt value={event.changedAt} zone={event.siteTimeZoneId} />
+                    <Table.Td data-audit-time-cell="">
+                      {/* ✎ P-1124-4: місцевий час читача; час майданчика (`siteTimeZoneId`) — у підказці. */}
+                      <AuditChangedAt value={event.changedAt} zone={event.siteTimeZoneId} />
                     </Table.Td>
                     {/* `R-18`: ім'я з сервера; номер — у підказці. */}
-                    <Table.Td title={`#${String(event.changedByUserId)}`}>{authorName(event)}</Table.Td>
-                    <Table.Td title={event.eventType}>{securityEventLabel(event.eventType)}</Table.Td>
-                    <Table.Td>
-                      {/* ✎ debt-1109 x10: читабельні пари замість сирого JSON; точне значення — у підказці. */}
-                      <Text
-                        size="xs"
-                        style={{ overflowWrap: 'anywhere' }}
-                        title={event.detailsJson ?? undefined}
-                        data-audit-details=""
-                      >
-                        {auditDetailsText(event.detailsJson)}
-                      </Text>
+                    <Table.Td title={`#${String(event.changedByUserId)}`} data-audit-author="">
+                      {authorName(event)}
+                    </Table.Td>
+                    <Table.Td title={event.eventType} data-audit-event-type={event.eventType}>
+                      {securityEventLabel(event.eventType)}
                     </Table.Td>
                     <Table.Td>
-                      <Text size="xs" ff="monospace">
+                      <SecurityDetails raw={event.detailsJson} />
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="xs" ff="monospace" c="var(--ecr-muted)" data-audit-technical="">
                         {event.correlationId ?? '—'}
                       </Text>
                     </Table.Td>

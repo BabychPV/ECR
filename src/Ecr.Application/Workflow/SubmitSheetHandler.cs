@@ -32,7 +32,6 @@ public sealed class SubmitSheetHandler(
     // рядки». Тепер обіцянка виконується, і придушення прибране.
     Validation.ValidationEngine validation,
     IDocumentHeaderStore headers,
-    Reporting.ReportSnapshotSync reports,
     IUnitOfWork uow,
     ICurrentUser currentUser,
     IClock clock,
@@ -746,10 +745,9 @@ public sealed class SubmitSheetHandler(
                 });
         }
 
-        // ⛔ `DAT-06`. Зріз, стан аркуша й проведення в звітність — ОДНИМ
-        // комітом. Доти їх було три: `WorkflowStore.SaveSnapshotAsync` кличе
-        // `SaveChangesAsync` сам (йому потрібен `IDENTITY` зрізу), далі
-        // `ReportSnapshotSync.MarkSubmittedAsync` пише своє, і аж наприкінці
+        // ⛔ `DAT-06`. Зріз подання і стан аркуша — ОДНИМ
+        // комітом. Доти їх було кілька: `WorkflowStore.SaveSnapshotAsync` кличе
+        // `SaveChangesAsync` сам (йому потрібен `IDENTITY` зрізу), і аж наприкінці
         // йшов `uow.SaveChangesAsync`. Збій між ними лишав у базі рівно той
         // стан, якого не має бути ніколи: зріз подання є, а аркуш не поданий —
         // або навпаки. Обидві половини — «доказ того, що пішло регуляторові»
@@ -881,24 +879,10 @@ public sealed class SubmitSheetHandler(
         // коміту (`SheetWorkflowNotifier`). Тут, під винятковим блокуванням
         // аркуша, — як і доти, нічого.
 
-        // ⛔ Подання МОРОЗИТЬ зріз звітності, якщо в періоді не лишилося
-        // неподаних аркушів (`H-23b`, ФВ-9.17). На цьому тримається `ER-C-11`:
-        // «подане не перераховується». Доти позначку `Submitted` не ставив
-        // ніхто, і гарантія існувала лише на письмі — зріз, за яким звіт уже
-        // пішов регуляторові, спокійно перебудовувався з іншими числами.
-        //
-        // ⛔ R5-W1 / W1-01: перехід аркуша СКИДАЄТЬСЯ в БД (у тій самій
-        // транзакції) ДО перерахунку статусу зрізу. Будівник рахує статус
-        // запитом `AsNoTracking`, а EF не скидає трекер перед запитом: без
-        // цього рядка подання бачило свій аркуш ще `Draft` і не морозило зріз
-        // НІКОЛИ — навіть подання останнього аркуша. Конфлікт `RowVersion`
-        // стану тепер ловить `UnitOfWork` (409), а не сирий `SaveChanges`
-        // будівника (500).
+        // ✎ P-1124-3 (D-NEW): замороження зрізу звітності при поданні прибрано разом зі зрізами
+        // (звітність — SSRS над сирим шаром). Перехід скидається в БД тут, у тій самій транзакції:
+        // конфлікт `RowVersion` стану ловить `UnitOfWork` (409).
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        await reports
-            .MarkSubmittedAsync(documentId, key, userId, ct)
-            .ConfigureAwait(false);
 
         // ФВ-5.19: подавач підтвердив попередження — слід у журналі, тією самою
         // транзакцією, що й зріз (результатна подія, C4): відкат подання не

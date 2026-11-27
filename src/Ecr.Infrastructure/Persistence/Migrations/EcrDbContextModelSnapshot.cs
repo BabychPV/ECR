@@ -130,6 +130,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CalculationRunId")
+                        .HasDatabaseName("IX_CalculationIssue_Run");
+
                     b.HasIndex("DocumentId", "PeriodKey", "TableDefId", "SheetCopyId")
                         .HasDatabaseName("IX_CalculationIssue_Address");
 
@@ -4802,44 +4805,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.ToTable("CollectionSchedule", "ext");
                 });
 
-            modelBuilder.Entity("Ecr.Domain.Entities.External.ConsistencyRule", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("Expression")
-                        .IsRequired()
-                        .HasMaxLength(2000)
-                        .HasColumnType("nvarchar(2000)");
-
-                    b.Property<bool>("IsActive")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
-                    b.Property<byte>("Severity")
-                        .HasColumnType("tinyint");
-
-                    b.Property<int?>("SourceEntityId")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Code")
-                        .IsUnique()
-                        .HasDatabaseName("UQ_ConsistencyRule");
-
-                    b.ToTable("ConsistencyRule", "ext");
-                });
-
             modelBuilder.Entity("Ecr.Domain.Entities.External.DataSource", b =>
                 {
                     b.Property<int>("Id")
@@ -4847,6 +4812,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<byte>("AuthMode")
+                        .HasColumnType("tinyint");
 
                     b.Property<string>("Catalog")
                         .HasMaxLength(200)
@@ -4857,6 +4825,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime?>("CredentialsRejectedAt")
+                        .HasColumnType("datetime2(3)");
 
                     b.Property<string>("Endpoint")
                         .IsRequired()
@@ -4877,6 +4848,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<byte[]>("PasswordProtected")
+                        .HasColumnType("varbinary(max)");
+
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .IsRequired()
@@ -4894,6 +4868,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.Property<byte>("Transport")
                         .HasColumnType("tinyint");
+
+                    b.Property<string>("UserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
 
                     b.HasKey("Id");
 
@@ -6362,174 +6340,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         });
                 });
 
-            modelBuilder.Entity("Ecr.Domain.Entities.Reporting.ReportDef", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<bool>("IsActive")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
-                    b.Property<bool>("IsRegulatory")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
-
-                    b.Property<string>("NameL10n")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Code")
-                        .IsUnique()
-                        .HasDatabaseName("UQ_ReportDef");
-
-                    b.ToTable("ReportDef", "rpt");
-                });
-
-            modelBuilder.Entity("Ecr.Domain.Entities.Reporting.ReportRow", b =>
-                {
-                    b.Property<long>("SnapshotId")
-                        .HasColumnType("bigint");
-
-                    b.Property<int>("RowNo")
-                        .HasColumnType("int");
-
-                    b.Property<string>("ColumnCode")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime?>("ValueDate")
-                        .HasColumnType("datetime2(3)");
-
-                    b.Property<decimal?>("ValueNumeric")
-                        .HasPrecision(34, 16)
-                        .HasColumnType("decimal(34,16)");
-
-                    b.Property<string>("ValueString")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.HasKey("SnapshotId", "RowNo", "ColumnCode")
-                        .HasName("PK_ReportRow");
-
-                    b.ToTable("ReportRow", "rpt");
-                });
-
-            modelBuilder.Entity("Ecr.Domain.Entities.Reporting.ReportSnapshot", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
-
-                    b.Property<DateTime>("BuiltAt")
-                        .HasColumnType("datetime2(3)");
-
-                    b.Property<int?>("BuiltByUserId")
-                        .HasColumnType("int");
-
-                    b.Property<long?>("CalculationRunId")
-                        .HasColumnType("bigint");
-
-                    b.Property<byte[]>("ContentHash")
-                        .HasColumnType("varbinary(32)");
-
-                    b.Property<string>("HashFormat")
-                        .HasColumnType("varchar(8)");
-
-                    b.Property<bool>("IsCurrent")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
-
-                    b.Property<string>("ParametersJson")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int?>("PeriodKey")
-                        .HasColumnType("int");
-
-                    b.Property<int>("ProjectId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("ReportVersionId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("RowCount")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(0)
-                        .HasColumnName("RowCount");
-
-                    b.Property<byte>("Status")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("tinyint")
-                        .HasDefaultValue((byte)0);
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ReportVersionId", "ProjectId", "PeriodKey")
-                        .IsUnique()
-                        .HasDatabaseName("UX_ReportSnapshot_Current")
-                        .HasFilter("[IsCurrent] = 1");
-
-                    b.ToTable("ReportSnapshot", "rpt", t =>
-                        {
-                            t.HasCheckConstraint("CK_ReportSnapshot_HashFormat", "[HashFormat] IN ('current', 'legacy')");
-                        });
-                });
-
-            modelBuilder.Entity("Ecr.Domain.Entities.Reporting.ReportVersion", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("ColumnsJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2(3)");
-
-                    b.Property<int>("ReportDefId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("RulesJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<byte>("Status")
-                        .HasColumnType("tinyint");
-
-                    b.Property<string>("Version")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ReportDefId", "Version")
-                        .IsUnique()
-                        .HasDatabaseName("UQ_ReportVersion");
-
-                    b.ToTable("ReportVersion", "rpt");
-                });
-
             modelBuilder.Entity("Ecr.Domain.Entities.Security.LoginAttempt", b =>
                 {
                     b.Property<long>("Id")
@@ -7392,6 +7202,16 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_CIn_Run");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Calculations.CalculationIssue", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Calculations.CalculationRun", null)
+                        .WithMany()
+                        .HasForeignKey("CalculationRunId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_CIssue_Run");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.CalculationResult", b =>
@@ -9119,43 +8939,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_NotificationRule_Channel");
-                });
-
-            modelBuilder.Entity("Ecr.Domain.Entities.Reporting.ReportRow", b =>
-                {
-                    b.HasOne("Ecr.Domain.Entities.Reporting.ReportSnapshot", null)
-                        .WithMany()
-                        .HasForeignKey("SnapshotId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("FK_RepRow_Snap");
-                });
-
-            modelBuilder.Entity("Ecr.Domain.Entities.Reporting.ReportSnapshot", b =>
-                {
-                    b.HasOne("Ecr.Domain.Entities.Documents.Project", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("FK_Snap_Project");
-
-                    b.HasOne("Ecr.Domain.Entities.Reporting.ReportVersion", null)
-                        .WithMany()
-                        .HasForeignKey("ReportVersionId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("FK_Snap_Version");
-                });
-
-            modelBuilder.Entity("Ecr.Domain.Entities.Reporting.ReportVersion", b =>
-                {
-                    b.HasOne("Ecr.Domain.Entities.Reporting.ReportDef", null)
-                        .WithMany()
-                        .HasForeignKey("ReportDefId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("FK_RV_Def");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Security.ResourceGrant", b =>

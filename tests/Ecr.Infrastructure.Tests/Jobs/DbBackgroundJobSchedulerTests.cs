@@ -43,7 +43,6 @@ public sealed class DbBackgroundJobSchedulerTests(SqlServerFixture sql) : DbJobQ
         // AN-116: експорт і імпорт Excel — свій лейн з власною межею, не default.
         Assert.Equal(JobLanes.Excel, JobLaneMap.Of<IExcelExportJob>());
         Assert.Equal(JobLanes.Excel, JobLaneMap.Of<IExcelImportJob>());
-        Assert.Equal(JobLanes.Default, JobLaneMap.Of<IReportSnapshotJob>());
         Assert.Equal(JobLanes.Recalc, JobLaneMap.Of<RecalculationJob>());
     }
 

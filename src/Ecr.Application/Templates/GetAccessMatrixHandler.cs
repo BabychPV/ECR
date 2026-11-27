@@ -74,7 +74,7 @@ public sealed class GetAccessMatrixHandler(
 
             for (byte sequence = 1; sequence <= PeriodCount; sequence++)
             {
-                cells.Add(Cell(rules, sheet.Id, tableIds, sequence));
+                cells.Add(Cell(rules, sheet.Id, tableIds, sequence, currentUser.Language));
             }
 
             sheets.Add(new AccessMatrixSheetDto(
@@ -94,7 +94,7 @@ public sealed class GetAccessMatrixHandler(
     /// перегляд існує.
     /// </remarks>
     private static AccessMatrixCellDto Cell(
-        IReadOnlyList<PeriodAccessRuleDef> rules, int sheetDefId, List<int> tableIds, byte sequence)
+        IReadOnlyList<PeriodAccessRuleDef> rules, int sheetDefId, List<int> tableIds, byte sequence, string? language)
     {
         var blocked = 0;
         EditDenyReason reason = EditDenyReason.None;
@@ -129,7 +129,7 @@ public sealed class GetAccessMatrixHandler(
             {
                 blocked++;
                 reason = outcome.Reason;
-                detail ??= outcome.Detail;
+                detail ??= outcome.DetailIn(language); // ✎ 25.11: підказка матриці — мовою читача
             }
         }
 

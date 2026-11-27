@@ -46,7 +46,8 @@ public sealed partial class RegistryBatchHandler(
     ICurrentUser currentUser,
     Rules.IRegistryRuleEngine rules,
     IRegistryHierarchyStore? hierarchy = null,
-    Nae.NaeTreeSettings? naeTree = null)
+    Nae.NaeTreeSettings? naeTree = null,
+    FlaringRegistryLock? flaring = null)
 {
     /// <summary>Право на зміну даних довідника (`02-contracts.md` §9).</summary>
     public const string Permission = "Registry.EditData";
@@ -92,6 +93,18 @@ public sealed partial class RegistryBatchHandler(
 
         var states = items.Select(i => new RowState(i)).ToList();
         await ResolveAsync(definition, states, ct).ConfigureAwait(false);
+
+        // ✎ DESIGN-sg-flaring §5.7 (C4): довідник факелів — ДО dryRun, як і D-211: прев'ю, що «проходить», обіцяло б запис,
+        // якого не буде. Новий рядок — вставка з вікном рядка; наявний — зміна на його вікні; видалення — його вікно.
+        await ExternalRegistryGuard.EnsureFlaringEditAllowedAsync(
+                definition,
+                () => Task.FromResult<IReadOnlyCollection<FlaringRegistryEdit>>(
+                    [.. states.Select(s => s.Entry is { } entry
+                        ? s.Item.Op == "delete" ? FlaringRegistryEdit.Remove(entry.Window) : FlaringRegistryEdit.Change(entry.Window)
+                        : FlaringRegistryEdit.Insert(WindowOf(s.Item)))]),
+                flaring,
+                ct)
+            .ConfigureAwait(false);
         ParseNumbers(definition, states);
         await CheckPermitNaeSourceAsync(definition, states, ct).ConfigureAwait(false);
 

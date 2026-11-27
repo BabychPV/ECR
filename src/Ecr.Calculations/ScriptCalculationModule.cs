@@ -150,7 +150,7 @@ public sealed class ScriptCalculationModule(
             substanceIds = map;
         }
 
-        var snapshot = await RegistriesAsync(methodology.MethodologyId, program, period, registries, ct).ConfigureAwait(false);
+        var (snapshot, dated) = await RegistriesAsync(methodology.MethodologyId, program, period, registries, ct).ConfigureAwait(false);
         var units = await UnitsAsync(ct).ConfigureAwait(false);
         var entries = await EntriesAsync(program, ct).ConfigureAwait(false);
 
@@ -163,7 +163,10 @@ public sealed class ScriptCalculationModule(
             units.Table,
             units.Codes,
             units.Ids,
-            entries);
+            entries)
+        {
+            DatedRegistries = dated,
+        };
 
         return new CalculationBindingContext(
             methodology,
@@ -441,7 +444,8 @@ public sealed class ScriptCalculationModule(
                 }
 
                 if (!arguments.TryGetValue(field.Name, out var argument)
-                    || (argument.Value is null && string.IsNullOrWhiteSpace(argument.ValueString) && argument.EntryId is null))
+                    || (argument.Value is null && string.IsNullOrWhiteSpace(argument.ValueString) && argument.EntryId is null
+                        && (argument.ValueDate is null || program.Main.RegistryAsOf is null)))
                 {
                     missing.Add(field.Name);
                 }
@@ -505,7 +509,12 @@ public sealed class ScriptCalculationModule(
     }
 
     /// <summary>Знімок довідників скрипта й бібліотек — раз на прив'язку (шлях <c>GenericCalculationModule.RegistriesAsync</c>).</summary>
-    private async Task<IRegistrySnapshot?> RegistriesAsync(
+    /// <remarks>
+    /// ✎ DESIGN-sg-flaring §5.2a (E4): скрипт із <c>registry as of</c> бере ДЖЕРЕЛО знімків (одне читання БД на набір
+    /// довідників за прогін, спільне для документів через <see cref="RegistrySnapshotCache"/>); типовий знімок прив'язки —
+    /// з того самого джерела на кінець періоду, знімок рядка — на дату рядка, раз на інтервал чинності.
+    /// </remarks>
+    private async Task<(IRegistrySnapshot? Snapshot, Ecr.Application.Registries.DatedRegistrySnapshots? Dated)> RegistriesAsync(
         int methodologyId,
         LoadedProgram program,
         Expressions.PeriodContext period,
@@ -515,7 +524,7 @@ public sealed class ScriptCalculationModule(
         var scripts = ScriptRuntime.AllScripts(program).ToList();
         if (!scripts.Any(s => s.NeedsRegistries) || registryStore is null || registryLoader is null)
         {
-            return null;
+            return (null, null);
         }
 
         var codes = scripts
@@ -546,12 +555,17 @@ public sealed class ScriptCalculationModule(
                 .ConfigureAwait(false);
         if (ids.Count == 0)
         {
-            return null;
+            return (null, null);
+        }
+
+        var runCache = cache ?? new RegistrySnapshotCache(registryAsOfUtc: null);
+        if (program.Main.RegistryAsOf is not null)
+        {
+            var dated = await runCache.GetOrLoadSourceAsync(ids, registryLoader, ct).ConfigureAwait(false);
+            return (dated.Get(period.End), dated);
         }
 
         // Бізнес-дата — останній день ПЕРІОДУ, а не «сьогодні» (§5.7).
-        return await (cache ?? new RegistrySnapshotCache(registryAsOfUtc: null))
-            .GetOrLoadAsync(ids, period.End, registryLoader, ct)
-            .ConfigureAwait(false);
+        return (await runCache.GetOrLoadAsync(ids, period.End, registryLoader, ct).ConfigureAwait(false), null);
     }
 }

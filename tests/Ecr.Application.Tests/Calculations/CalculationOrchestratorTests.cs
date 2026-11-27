@@ -25,8 +25,6 @@ public sealed class CalculationOrchestratorTests
 
     private static readonly DateTime Now = new(2026, 4, 10, 9, 0, 0, DateTimeKind.Utc);
 
-    private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
-
     private readonly IPeriodStore _periods = Substitute.For<IPeriodStore>();
     private readonly IWorkflowStore _workflow = Substitute.For<IWorkflowStore>();
     private readonly ICalculationResultStore _results = Substitute.For<ICalculationResultStore>();
@@ -294,62 +292,8 @@ public sealed class CalculationOrchestratorTests
         await _results.Received(1).SwitchCurrentRunAsync(
             77, Arg.Any<string>(), Arg.Any<CancellationToken>());
 
-        // І один коміт на все завершення: профіль, перемикання й інвалідація
-        // зрізів — одна транзакція, а не три.
+        // І один коміт на все завершення: профіль і перемикання — одна транзакція.
         await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
-        await _results.Received(1).InvalidateReportSnapshotsAsync(77, Arg.Any<CancellationToken>());
-    }
-
-    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    public async Task Застарілі_зрізи_пишуться_в_журнал_у_транзакції_перемикання()
-    {
-        // ⛔ ФВ-10.5: зріз, що застарів після перерахунку, лишає слід у журналі —
-        // по записові на зріз, з прогоном, який його зістарив. Мутаційний
-        // доказ: прибрати цикл запису в `SwitchAsync` — тест червоний на
-        // `Received(2)`; записати без `TemplateVersionId` зрізу — червоний на
-        // предикаті.
-        _clock.UtcNow.Returns(Now);
-        _results.InvalidateReportSnapshotsAsync(77, Arg.Any<CancellationToken>())
-            .Returns(new List<InvalidatedReportSnapshot>
-            {
-                new(501, 3, Project, 42, Period, "Draft", Now.AddDays(-1)),
-                new(502, 4, Project, 42, null, "Submitted", Now.AddDays(-2)),
-            });
-
-        await Handler().CompleteAsync(77, new ModuleProfile(), CancellationToken.None);
-
-        await _audit.Received(2).WriteStructureChangeAsync(
-            Arg.Is<StructureChangeRecord>(r =>
-                r.EntityType == RunCalculationHandler.SnapshotAuditEntityType
-                && r.Operation == RunCalculationHandler.SnapshotInvalidatedOperation
-                && r.TemplateVersionId == 42
-                && r.ChangedAt == Now
-                && r.CorrelationId == "calc-run:77"
-                && r.NewJson!.Contains("\"calculationRunId\":77", StringComparison.Ordinal)),
-            Arg.Any<CancellationToken>());
-        await _audit.Received(1).WriteStructureChangeAsync(
-            Arg.Is<StructureChangeRecord>(r => r.EntityId == 502), Arg.Any<CancellationToken>());
-
-        // Журнал — до коміту: інакше відкат перемикання лишив би в ньому подію,
-        // якої не сталося (C4).
-        Received.InOrder(() =>
-        {
-            _audit.WriteStructureChangeAsync(Arg.Any<StructureChangeRecord>(), Arg.Any<CancellationToken>());
-            _audit.WriteStructureChangeAsync(Arg.Any<StructureChangeRecord>(), Arg.Any<CancellationToken>());
-            _uow.SaveChangesAsync(Arg.Any<CancellationToken>());
-        });
-    }
-
-    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    public async Task Без_застарілих_зрізів_журнал_не_пишеться()
-    {
-        _results.InvalidateReportSnapshotsAsync(77, Arg.Any<CancellationToken>())
-            .Returns(new List<InvalidatedReportSnapshot>());
-
-        await Handler().CompleteAsync(77, new ModuleProfile(), CancellationToken.None);
-
-        await _audit.DidNotReceive().WriteStructureChangeAsync(
-            Arg.Any<StructureChangeRecord>(), Arg.Any<CancellationToken>());
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
@@ -389,7 +333,7 @@ public sealed class CalculationOrchestratorTests
     }
 
     private RunCalculationHandler Handler()
-        => new(_periods, _workflow, _results, _jobs, _uow, _access, _user, _clock, _audit);
+        => new(_periods, _workflow, _results, _jobs, _uow, _access, _user, _clock);
 
     private void States(PeriodState state)
         => _periods.GetPeriodStatesAsync(Project, Period, Arg.Any<CancellationToken>())

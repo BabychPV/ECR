@@ -16,29 +16,27 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Ecr.Infrastructure.Jobs;
 
 /// <summary>
-/// Синк складу газу FLERT → дзеркало ECR <c>STREAM</c> → <c>STREAM_CASE</c> → <c>GAS_COMPOSITION</c> (<c>D-476</c>,
-/// план FLERT F2): щодня о 02:00 часу сервера (<see cref="FlertCompositionSyncOptions.Cron"/>).
+/// Разовий імпорт складу газу FLERT → довідники ECR <c>STREAM</c> → <c>STREAM_CASE</c> → <c>GAS_COMPOSITION</c> (<c>D-476</c>
+/// F2; D-NEW, людина 24.11: власник — ECR, FLERT читається один раз). Ставить кнопка «Імпортувати з FLERT» сторінки
+/// «Склад газу»; розкладу немає.
 /// </summary>
 /// <remarks>
 /// <list type="number">
+/// <item><b>Лише в порожню базу</b>: у ECR уже є потік — відмова <see cref="AlreadyImportedReason"/> без читання FLERT
+/// (правки ECR не перетираються; повторний запуск — безпечна відмова).</item>
 /// <item><b>Читання</b> — порт <see cref="IExternalTableSource"/> джерела <c>ext.DataSource</c> (транспорт <c>Sql</c>) за
 /// НАЛАШТОВАНИМ запитом <see cref="FlertCompositionSchema.QueryKey"/>; адаптер у FLERT не пише (транзакція завжди
-/// відкочується). FLERT недоступний — виняток адаптера (<c>ECR-INT-0503</c>), прогін <c>Failed</c>, копія незмінна.</item>
-/// <item><b>Зіставлення</b> — <see cref="FlertCompositionMapping"/>. Помилка зіставлення (дрейф схеми, нечитане значення),
-/// обрізаний знімок — <c>Failed</c>, у копію не пишеться нічого.</item>
-/// <item><b>Порожній результат НЕ видаляє нічого</b>: статус <c>Degraded</c> (запит, що раптом повернув 0 рядків, —
-/// ознака збою, а не «FLERT видалив усі потоки»; той самий запобіжник, що в синку довідників AF, <c>L4-02</c>).</item>
+/// відкочується). FLERT недоступний — виняток адаптера (<c>ECR-INT-0503</c>), прогін <c>Failed</c>, ECR незмінний.</item>
+/// <item><b>Зіставлення</b> — <see cref="FlertCompositionMapping"/> (усі Id FLERT, вікна, значення повної точності; розбіжні
+/// дублі — у <c>FLERT_ALIASES</c>). Помилка зіставлення чи обрізаний знімок — <c>Failed</c>, не пишеться нічого.</item>
+/// <item><b>Порожній результат НЕ пише нічого</b>: статус <c>Degraded</c>.</item>
 /// <item><b>Запис</b> — лише через <see cref="RegistryEntryWriter"/> від <c>svc-integration</c>, ОДНІЄЮ транзакцією на
-/// весь знімок (довідники F0 — <see cref="FlertRegistryProvisioner"/> — у тій самій): потоки → кейси (вікно дії) → склад
-/// → вимкнення відсутніх (<c>IsActive = false</c>, не видалення: повернення в FLERT вмикає запис знову). Повтор того
-/// самого знімка — 0 змін і без нової ревізії даних (writer не зберігає незмінне). Рядки, які writer відхилив, —
-/// одним повтором без них (і без складу їхніх кейсів), статус <c>Degraded</c>; другий відказ — <c>Failed</c>, копія незмінна.</item>
+/// весь знімок (довідники — <see cref="FlertRegistryProvisioner"/>, <c>Local</c>, у тій самій). Рядки, які writer відхилив, —
+/// одним повтором без них, статус <c>Degraded</c>; другий відказ — <c>Failed</c>, нічого не записано.</item>
 /// </list>
-/// ⚠ Одночасний другий прогін (розклад + майбутня кнопка) — <see cref="JobDeferredException"/> за applock-ом.
-/// <para>
-/// ⚠ Перерахунок залежних документів після зміни — F6, <see cref="FlertSyncDependentsTrigger"/> за ключем
-/// <c>Flert:Sync:RecalculateDependents</c> (типово вимкнено).
-/// </para>
+/// ⚠ Рушій (<see cref="RunAsync"/>) лишився ідемпотентним застосуванням знімка (повтор — 0 змін, зникле — вимикається);
+/// «лише в порожню базу» — правило задачі (<see cref="ExecuteAsync"/>), тож тести рушія кличуть його напряму.
+/// ⚠ Одночасний другий прогін — <see cref="JobDeferredException"/> за applock-ом.
 /// </remarks>
 public sealed class FlertCompositionSyncJob(
     EcrDbContext db,
@@ -80,20 +78,13 @@ public sealed class FlertCompositionSyncJob(
 
         try
         {
-            var outcome = await RunAsync(FlertCompositionSyncOptions.Read(configuration), Codes, ct)
-                .ConfigureAwait(false);
+            // D-NEW: задача — РАЗОВИЙ імпорт (кнопка «Імпортувати з FLERT»), не щоденний синк: у ECR уже є потоки — відмова
+            // без читання FLERT, правки ECR не перетираються. Явна дія адміністратора — ключ Enabled її не вимикає.
+            var outcome = await AlreadyHasDataAsync(Codes, ct).ConfigureAwait(false)
+                ? FlertSyncOutcome.Refused(Degraded, AlreadyImportedReason, 0, [])
+                : await RunAsync(FlertCompositionSyncOptions.Read(configuration), Codes, ct).ConfigureAwait(false);
             run.Complete(outcome.Status, outcome.ToJson(), clock.UtcNow);
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
-
-            // F6: змінене дзеркало — перерахунок залежних документів відкритих періодів (типово вимкнено).
-            if (FlertSyncDependentsTrigger.IsEnabled(configuration) && outcome.Counts is { AnyChange: true })
-            {
-                await using var scope = scopes.CreateAsyncScope();
-                await ActivatorUtilities
-                    .CreateInstance<FlertSyncDependentsTrigger>(scope.ServiceProvider, true)
-                    .OnSyncedAsync(outcome, Codes, ct)
-                    .ConfigureAwait(false);
-            }
 
             await progress.ReportAsync(100, null, ct).ConfigureAwait(false);
         }
@@ -104,7 +95,23 @@ public sealed class FlertCompositionSyncJob(
         }
     }
 
-    /// <summary>Один прохід синку. Публічний для тестів і майбутнього ручного запуску (F3).</summary>
+    /// <summary>Причина відмови: у ECR уже є потоки складу газу (D-NEW: імпорт лише в порожню базу).</summary>
+    public const string AlreadyImportedReason = "alreadyImported";
+
+    /// <summary>Чи в довіднику потоків уже є хоч один живий запис.</summary>
+    private async Task<bool> AlreadyHasDataAsync(FlertRegistryCodes codes, CancellationToken ct)
+        => await (
+                from e in db.RegistryEntries.AsNoTracking()
+                join d in db.RegistryDefs.AsNoTracking() on e.RegistryDefId equals d.Id
+                where d.Code == codes.Stream && !e.IsDeleted
+                select e.Id)
+            .AnyAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <summary>
+    /// Один прохід застосування знімка FLERT (рушій імпорту). Сам не перевіряє «база порожня» — це робить
+    /// <see cref="ExecuteAsync"/>; тести рушія викликають його напряму.
+    /// </summary>
     /// <param name="options">Налаштування.</param>
     /// <param name="codes">Коди довідників дзеркала.</param>
     /// <param name="ct">Скасування.</param>
@@ -138,7 +145,8 @@ public sealed class FlertCompositionSyncJob(
 
         // ⛔ Читання ДО будь-якого запису: недоступний FLERT кидає тут, копія незмінна.
         var table = await adapter
-            .ReadTableAsync(dataSource.Id, FlertCompositionSchema.QueryKey, FlertCompositionSyncOptions.MaxRows, ct)
+            .ReadTableAsync(
+                dataSource.Id, FlertCompositionSchema.QueryKey, options.CompositionQuery, FlertCompositionSyncOptions.MaxRows, ct)
             .ConfigureAwait(false);
 
         if (table.Truncated)
@@ -330,7 +338,8 @@ public sealed class FlertCompositionSyncJob(
                         await uow.SaveChangesAsync(tx).ConfigureAwait(false);
                     }
 
-                    var status = excluded.Count > 0 || issues.Any(i => i.Severity == FlertIssueSeverity.Warning && i.Kind is "componentMissing" or "registrySource")
+                    // D-NEW: «registrySource» (колишнє дзеркало перейшло у власність ECR) — довідкове, не погіршення.
+                    var status = excluded.Count > 0 || issues.Any(i => i.Severity == FlertIssueSeverity.Warning && i.Kind is "componentMissing")
                         ? Degraded
                         : Succeeded;
                     outcome = new FlertSyncOutcome(status, null, mirror.SourceRows, counts, set.Created, set.ComponentsAdded,
@@ -430,6 +439,7 @@ public sealed class FlertCompositionSyncJob(
             [FlertCompositionSchema.CaseLegacyTypeId] = c.LegacyTypeId,
             [FlertCompositionSchema.CaseLegacyCompositionId] = c.LegacyCompositionId,
             [FlertCompositionSchema.CaseNoComposition] = c.NoComposition,
+            [FlertCompositionSchema.CaseFlertAliases] = c.FlertAliases,
         })
         {
             DisplayName = c.CaseName,

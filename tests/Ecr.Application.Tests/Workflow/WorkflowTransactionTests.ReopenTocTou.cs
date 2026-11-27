@@ -1,6 +1,5 @@
 // tests/Ecr.Application.Tests/Workflow/WorkflowTransactionTests.ReopenTocTou.cs
 using Ecr.Application.Errors;
-using Ecr.Application.Reporting;
 using Ecr.Application.Security;
 using Ecr.Application.Workflow;
 using Ecr.Domain.Enums;
@@ -40,8 +39,7 @@ public sealed partial class WorkflowTransactionTests
         await using (var db = CreateContext())
         {
             var handler = new ReopenDocumentHandler(
-                new WorkflowStore(db), access, new UnitOfWork(db), User(), new TestClock(Now), Documents(world),
-                new ReportSnapshotSync(NoSnapshots(), Documents(world)));
+                new WorkflowStore(db), access, new UnitOfWork(db), User(), new TestClock(Now), Documents(world));
 
             var error = await Assert.ThrowsAsync<AccessDeniedException>(
                     () => handler.HandleAsync(

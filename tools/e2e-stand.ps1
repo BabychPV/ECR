@@ -571,6 +571,9 @@ $env:ECR_Auth__IdleTimeout__MinimumMinutes = '1'
 $env:ECR_Collection__MonthColumnRouting = 'true'
 # RPT-STABLE Part B: перенос версії «з місяця» (на живому стенді прапор увімкнено; типово false) - потрібен versionMigrationRange.spec.ts.
 $env:ECR_Documents__VersionMigration__FromMonthEnabled = 'true'
+# P-1124-1: формульний авторинг у продукті вимкнено; calculationIssues/calculationMissingInputs.spec.ts будують
+# заготовку розрахунку формульною методологією через API. Лише на одноразовому стенді; типове значення - false.
+$env:ECR_Calculations__FormulaEngineAuthoring__Enabled = 'true'
 # S-6: межа запису в чат (20/хв на користувача). `tableChatLiveRefresh.spec.ts` пише 25 повідомлень поспіль від
 # адміністратора, і інші специ чату пишуть від того самого користувача. Лише на одноразовому стенді; типове значення не змінюється.
 $env:ECR_Security__RateLimit__DiscussionPostPermitPerMinute = '1000'
@@ -648,6 +651,10 @@ try {
             'Document.OverrideFormula',
             # ✎ B75: блокування рядків — e2e UI-lane (заблокувати, зняти чуже блокування). Лише тестова роль.
             'Document.RowLock',
+            # ✎ D-NEW: сторінка «Склад газу» — e2e UI-lane (потік, версії, видалення). Лише тестова роль стенда.
+            'GasComposition.View', 'GasComposition.Edit',
+            # ✎ 25.11: видалення проєкту з даними — e2e projectPurge.spec (проєкт-жертва створюється тестом). Лише тестова роль.
+            'Project.DeleteWithData',
             'Project.Manage', 'Period.Configure', 'Period.Reopen',
             # ✎ P44: `Calculation.EditFormula` — `resizableModal.spec` заводить методологію з чернеткою й відкриває
             # вікно формули. Лише тестова роль стенда; ролі продукту не змінюються.
@@ -659,11 +666,13 @@ try {
             'Calculation.RecalculateApprovedDependents',
             'Security.ManageUsers', 'Security.ManageRoles', 'Security.ViewAudit',
             'Security.Simulate',
-            'Report.ViewRegulatory', 'Report.BuildSnapshot', 'Report.ViewCampaign',
+            'Report.ViewRegulatory', 'Report.ViewCampaign',
             # ✎ Q-2 (06.11): `Integration.EditSchedule` — частота синку подій PI (`piEventFrequencyLive.spec`): без нього
             # перелік розкладів `403`, а поля частоти на «Events from PI» немає.
             'Integration.View', 'Integration.Manage', 'Integration.EditSchedule', 'System.ViewHealth', 'System.ManageLocalization',
-            'System.ManageNotifications')
+            # ✎ 24.11: `System.RunJob` — `consistencyChecks.spec` запускає перевірку узгодженості кнопкою «Run check now»
+            # (без права кнопки немає). Лише тестова роль стенда; ролі продукту не змінюються.
+            'System.ManageNotifications', 'System.RunJob')
     } | Out-Null
 
     $roles = Call GET '/api/v1/roles'

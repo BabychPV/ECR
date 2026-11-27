@@ -11,6 +11,7 @@ import { projectsQuery } from '@/features/projects/allProjects';
 import { MountedLazyConfirmModal } from '@/features/projects/lazyPeriodsDialogs';
 import { projectTabPath } from '@/features/projects/projectPaths';
 import { useDeleteProject } from '@/features/projects/deleteProject';
+import { PurgeProjectModal } from '@/features/projects/PurgeProjectModal';
 import { archiveBlock, calendarYears, deleteAllowed, monthList, type ArchiveBlock } from '@/features/projects/projectYear';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
@@ -123,6 +124,8 @@ export function ProjectLifecycleTab({ projectId }: { readonly projectId: number 
   const [cloneCode, setCloneCode] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [deleteCode, setDeleteCode] = useState('');
+  // ✎ 25.11: видалення проєкту з усіма даними — лише `Project.DeleteWithData` (SystemAdministrator).
+  const [purging, setPurging] = useState(false);
 
   const refresh = async (): Promise<void> => {
     await queryClient.invalidateQueries({ queryKey: projectsQuery.queryKey });
@@ -151,7 +154,7 @@ export function ProjectLifecycleTab({ projectId }: { readonly projectId: number 
     onError: showApiError,
   });
 
-  // ⚠ Клон копіює довідники, налаштування і склад аркушів; ДАНІ — ні (`ФВ-1.3`). Новий — чернетка, далі Settings.
+  // ⚠ Клон копіює довідники, налаштування і склад аркушів; ДАНІ — ні (`ФВ-1.3`). Новий — чернетка, далі Templates (✎ 24.11).
   const clone = useMutation({
     mutationFn: () =>
       apiFetch<ProjectIdResponse>(`/api/v1/projects/${String(projectId)}/clone`, {
@@ -163,7 +166,7 @@ export function ProjectLifecycleTab({ projectId }: { readonly projectId: number 
       setCloning(false);
       setCloneCode('');
       showDone(t('periods.cloned'));
-      void navigate(projectTabPath(result.projectId, 'settings'));
+      void navigate(projectTabPath(result.projectId, 'templates'));
     },
     onError: showApiError,
   });
@@ -189,6 +192,7 @@ export function ProjectLifecycleTab({ projectId }: { readonly projectId: number 
 
   const manages = can(session.data, 'Project.Manage') && hasProjectGrant(session.data ?? undefined, projectId, 'Manage');
   const noRight = manages ? null : t('projects.lifecycle.noRight');
+  const purges = can(session.data, 'Project.DeleteWithData');
   const activateWhy = noRight ?? activateReason(project.status);
   const block = archiveBlock(project, calendar.data);
   const archiveWhy = noRight ?? (block === null ? null : archiveReason(block));
@@ -266,7 +270,32 @@ export function ProjectLifecycleTab({ projectId }: { readonly projectId: number 
             </Button>
           )}
         />
+        {purges && (
+          <ActionRow
+            id="purge"
+            description={t('projects.lifecycle.purge.desc')}
+            reason={null}
+            button={(describedBy) => (
+              <Button variant="outline" color="statusError" onClick={() => setPurging(true)} aria-describedby={describedBy}>
+                {t('projects.lifecycle.purge')}
+              </Button>
+            )}
+          />
+        )}
       </div>
+      {purges && (
+        <PurgeProjectModal
+          projectId={projectId}
+          code={project.code}
+          opened={purging}
+          onClose={() => setPurging(false)}
+          onDeleted={() => {
+            setPurging(false);
+            showDone(t('projects.purged', { code: project.code }));
+            void navigate('/projects');
+          }}
+        />
+      )}
       {documents !== null && (
         <Text size="xs" c="dimmed" mt="xs" data-project-documents={documents}>
           {t('projects.lifecycle.documents', { count: documents })}

@@ -1523,10 +1523,30 @@ public sealed record ExternalTable(
     bool Truncated);
 ```
 
-✎ 2026-11-12 (`D-476`, FLERT F3): «Синхронізувати зараз» і стан синку складу газу FLERT.
-`POST /api/v1/integration/flert-sync` (право `Integration.Manage`) → `202 JobAcceptedResponse` (злита постановка
-`IFlertCompositionSyncJob`); `GET /api/v1/integration/flert-sync/status` (`Integration.View` або `Integration.Manage`) →
-`200 FlertSyncStatusDto` (чи увімкнено, коди довідників-дзеркала, останній прогін із `itg.MaintenanceRun`).
+✎ 2026-11-25 (b14 source-test-flert, AC-2/AC-3): перевірка самого з'єднання для джерела без запиту каталогу (FLERT —
+склад газу). Проба `POST /api/v1/data-sources/{id}/test` іде каталогом, а при `SourceNotConfiguredException.CatalogOnly`
+— цим портом (відкриття + `SELECT 1`) і відповідає `{ ok: true, entities: 0, messageKey:
+"integration.test.connectedNoCatalog" }`. Категорії відмови проби доповнено `notConfigured`
+(`SourceNotConfiguredException`) і `query` (`SourceQueryFailedException`, ключ `err.ECR-INT-0422.catalogQueryFailed`);
+коди помилок ті самі (`ECR-INT-0503`, `ECR-INT-0422`), нових немає.
+
+```csharp
+// src/Ecr.Application/Ports/IExternalConnectionCheck.cs
+public interface IExternalConnectionCheck
+{
+    public Task CheckConnectionAsync(int dataSourceId, CancellationToken ct);
+}
+```
+
+✎ 2026-11-12 (`D-476`, FLERT F3) → ✎ 2026-11-24 (D-NEW): склад газу — власник ECR. Щоденного синку й «Синхронізувати
+зараз» немає; `POST /api/v1/gas-composition/import` (`GasComposition.Edit` + `Integration.Manage`) → `202 JobAcceptedResponse`
+(злита постановка `IFlertCompositionSyncJob`, лише в порожню базу); стан останнього прогону — у відповіді
+`GET /api/v1/gas-composition/streams` (`import.lastRun`, той самий `FlertSyncRunDto`).
+
+Порти сторінки «Склад газу» (`src/Ecr.Application/Ports/IGasCompositionStore.cs`): `IGasCompositionStore` — читання
+потоків, версій кейсів із рядками складу, компонентів, замкнених періодів (закритий період або затверджений аркуш оригіналу,
+що читав склад) і років залежних документів; `IGasCompositionProvisioning` — заведення довідників складу (`Local`) і
+перехід колишнього дзеркала `External` у власність ECR.
 
 ```csharp
 // src/Ecr.Application/Ports/IFlertSyncStatusReader.cs
@@ -2628,6 +2648,31 @@ public interface IDocumentDeletionStore
 }
 ```
 
+#### `IProjectPurgeStore`
+
+✎ 25.11 (людина: видалити АКТИВНІ проєкти через інтерфейс). Видалення проєкту будь-якого стану з усіма даними
+(`GET /api/v1/projects/{id}/deletion-preview`, `POST /api/v1/projects/{id}/purge` з `{ code, reason }`, право
+`Project.DeleteWithData` — глобальне, з вбудованих ролей лише `SystemAdministrator`). Обробник `PurgeProjectHandler`, одна
+транзакція: рядок проєкту під `UPDLOCK`, структура кожного документа виключно (`ISheetEditGate`); далі історія погодження
+(`wf.ApprovalEvent`, `calc.SubmissionSnapshot`) + `IDocumentDeletionStore.DeleteAsync` на кожен документ, прогони проєкту,
+`calc.RecalculationApproval`, `itg.ArchiveRun`, `cfg.ColumnRenameProject`, `rpt.ViewProjectScope`, наприкінці
+`IProjectStore.DeleteAsync`; `aud.SecurityEvent` `ProjectDeletedWithData` (причина, кількості, документи) і журнал змін.
+Відмови: `422 ECR-PRD-0422` — `purgeCodeMismatch`, `purgeReasonRequired`; `409 ECR-PRD-0409` — `purgeArchived` (Archived,
+архівація або дані в `arc.*`, B69), `purgeHasDependants` (документ проєкту — обране джерело зв'язки B80 за рік і за той рік
+є документи-споживачі інших проєктів), `purgeHasEventMap` (✎ R3: мапи подій джерела на ВЛАСНИХ документах — прибрати в
+Sources), `purgeConcurrentChange` (FK 547 — у проєкті з'явився рядок, якого немає у фактах; відкат). Задачі документів
+проєкту в `itg.JobProgress` скасовуються (Queued → Cancelled, Running → `CancelRequestedAt`); у журнал — затверджені місяці,
+видалені без повернення, і кількість скасованих задач; `warnings` (`hse400Tools` для HSE400_GOLD) не блокують. `aud.*` не
+чіпається.
+
+```csharp
+public interface IProjectPurgeStore
+{
+    public Task<ProjectPurgeFacts?> ReadFactsAsync(int projectId, bool lockForDelete, CancellationToken ct);
+    public Task<long> PurgeAsync(int projectId, IReadOnlyList<long> documentIds, CancellationToken ct);
+}
+```
+
 #### `IDocumentSheetCopyStore`
 
 Копії аркушів документа (RS, рішення людини 03.11; обробник `DocumentSheetCopyHandler`, право `Document.Create` +
@@ -3673,6 +3718,38 @@ public interface ISecretProvider
 }
 ```
 
+#### `IDataSourceCredentialResolver`
+
+✎ P-1126-SRCCRED: облікові дані джерела (логін і пароль для `PiSqlClient`/`Sql`). Пароль шифрується перед записом у
+`ext.DataSource.PasswordProtected` (DataProtection, призначення `Ecr.DataSource.Credential.v1`) і розшифровується
+ЛИШЕ в момент з'єднання адаптером чи перевіркою з'єднання — API не розшифровує ніколи. Поряд у тому самому файлі:
+`IDataSourceCredentialRejections` (мітка `CredentialsRejectedAt` після відмови входу збереженим паролем, лише для
+завантаженої версії рядка), `IConnectionPoolReset` (скидання пулів драйверів після заміни облікових даних; по
+реалізації на драйвер) і `IExternalConnectionProbe` (перевірка з'єднання з незбережених значень форми).
+
+```csharp
+public sealed record ResolvedCredentials(string UserName, SecretString Password);
+
+public interface IDataSourceCredentialResolver
+{
+    public byte[] Protect(SecretString password);
+    public ResolvedCredentials? Resolve(DataSource source);   // Windows → null; не читається → CredentialsUnreadableException
+}
+
+public interface IDataSourceCredentialRejections
+{
+    public Task ReportRejectedAsync(DataSource source, CancellationToken ct);
+}
+
+public interface IConnectionPoolReset { public void Reset(); }
+
+public interface IExternalConnectionProbe
+{
+    public ExternalTransport Transport { get; }
+    public Task ProbeAsync(DataSource spec, ResolvedCredentials? credentials, CancellationToken ct);
+}
+```
+
 #### `IEndpointNetwork`
 
 Мережеві відомості для політики адреси джерела PI Web API
@@ -4266,6 +4343,12 @@ public interface IScriptPreviewRunner
   entries: [{ methodologyCode, version, versionId, status: applied|wouldApply|refused, reason, message, details[] }] }`.
   Відбиток джерела рахується з БАЗИ тим самим `Fingerprint`, що й в інструменті; текст мусить компілюватися без
   діагностик (бібліотеки з тіньовим скриптом із цього ж пакета годяться, порядок не важить). Рушій не змінюється.
+- ✎ P-1124-2: `POST /methodologies/script-migration/finalize` — тіло `{ reason, entries: [{ versionId, scriptHash, proof, provenValues, text? }] }`;
+  відповідь `{ finalized: [{ versionId, methodologyCode, version, proof }], formulasVersionsLeft }`. ОДНОРАЗОВЕ остаточне перенесення
+  НЕ чинних формульних версій (витіснених, виведених, чернеток) на Script тим самим Id: хеш тексту = доведеному, доказ із ≥ 1
+  значенням (`reference|synthetic|legacy|stored`) або перевірений `noRules`/`unusedLibrary`, компіляція, склад = наявному; вміст
+  формул — у `aud.PublicationEvent` (`scriptMigration.finalize`). Будь-яка проблема — `422 finalizeRefused`, нічого не змінено;
+  формульних версій немає — `409 finalizeNothingLeft`.
 - `POST /methodologies/script-migration/switch` — тіло `{ versionIds[], engine: Script|Formulas, reason }`; відповідь
   `{ engine, versions: [{ versionId, methodologyCode, version }] }`. Одна транзакція; на `Script` — текст без
   діагностик, склад зі скрипта (виходи/речовини/імпорти) збігається з наявним (`422 switchChecksFailed`, `problems[]`),
@@ -4662,10 +4745,6 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-INT-0405` | 404 | ціль мапінгу поля джерела (колонка або поле реєстру) не існує (`CreateEntityFieldMapHandler`, Прогалина 1 директиви паритету) |
 | `ECR-INT-0409` | 409 | дія над мапінгом суперечить його стану (`BE-27`): повторна пауза, відновлення непризупиненого, приймання вже оголошеної одиниці, видалення мапінгу, за яким уже зібрано дані (`details.collectedPoints`); **або** сутність збору з таким кодом у з'єднанні вже є (`POST /sources`, `messageKey` `sourceEntityDuplicate`); **або** довідник уже прив'язаний до іншої сутності цього з'єднання (`PUT /sources/{id}/registry`, `registryAlreadyBound`) |
 | `ECR-INT-0502` | 502 | джерело **відмовило в автентифікації**: збір зупинено, у наздоганяння НЕ йде (`H-20`) |
-| `ECR-RPT-0404` | 404 | звіту з таким кодом немає або жодну версію не опубліковано |
-| `ECR-RPT-0409` | 409 | зріз подано або версію звіту вже опубліковано: обидва іммутабельні, потрібен новий (ФВ-9.17) |
-| `ECR-RPT-4091` | 409 | опис звіту з таким кодом уже є (`UQ_ReportDef`); код і є адресою побудови |
-| `ECR-RPT-0422` | 422 | опис звіту не складається: порожня назва, немає колонок, невідомий тип колонки чи джерело рядків |
 | `ECR-PRM-0405` | 404 | групи типів дозволів з таким кодом немає або заборона S18 на її прихований реєстр (Permits PRMG; `messageKey` `group`) |
 | `ECR-PRM-4097` | 409 | група типів дозволів з таким кодом уже є (`code`, `UQ_PermitGroup`) або код прихованого реєстру групи `PRMG_<код>` зайнятий (`registryCode`); префікс `PRMG_` зарезервований за групами: звичайний довідник з таким кодом не створюється (`registryReserved`) |
 | `ECR-PRM-4098` | 409 | групу не видаляють, бо її використовують колонки чи поля шаблонів (`inUse`, `columns`, `templates`): використану групу можна лише деактивувати (`PUT permit-groups/{code}`, `isActive=false`) |
@@ -5001,6 +5080,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/projects/{id}/archive` | `Project.Manage` | 1 |
 | `DELETE` | `/api/v1/projects/{id}` | `Project.Manage` | 3 |
 | `POST` | `/api/v1/projects/{id}/clone` | `Project.Manage` | 3 |
+| `GET` | `/api/v1/projects/{id}/deletion-preview` | `Project.DeleteWithData` (✎ 25.11) | 8 |
+| `POST` | `/api/v1/projects/{id}/purge` | `Project.DeleteWithData` (✎ 25.11) | 8 |
 | `PUT` | `/api/v1/projects/{id}/current-period` | `Period.Configure` (✎ 2026-11-07: **застаріло** — `…/settings/current-period`) | 3 |
 | `GET` | `/api/v1/projects/{id}/settings/current-period` | `Document.View` | 3 |
 | `PUT` | `/api/v1/projects/{id}/settings/current-period` | `Period.Configure` | 3 |
@@ -5126,7 +5207,6 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}/formulas/{code}` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/constants` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/constants/{code}` | `Calculation.EditConstant` | 7 |
-| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/constants/{code}/usage` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/rules` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/rules/{code}` | `Calculation.EditRule` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/category-rule` | `Calculation.View` | 7 |
@@ -5139,6 +5219,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}/categories/{code}` | `Calculation.EditConstant` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/required-inputs` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/required-inputs/{columnDefId}` | `Calculation.ManageRequiredInputs` | 7 |
+| `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}/required-inputs/{columnDefId}` | `Calculation.ManageRequiredInputs` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/outputs` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/outputs/{code}` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/tests` | `Calculation.View` | 7 |
@@ -5148,7 +5229,6 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/methodologies/{id}/trace-steps` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/trace-steps` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/coverage` | `Calculation.View` | 7 |
-| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/rule-coverage` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/diff` | `Calculation.View` | 7 |
 | `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/script` | `Calculation.View` | 7 |
@@ -5160,6 +5240,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/methodologies/{id}/versions/{vid}/script/parity` | `Calculation.Publish` (+ доступ до документа) | 7 |
 | `POST` | `/api/v1/methodologies/script-migration/apply?dryRun=` | `Calculation.Publish` | 7 |
 | `POST` | `/api/v1/methodologies/script-migration/switch` | `Calculation.Publish` | 7 |
+| `POST` | `/api/v1/methodologies/script-migration/finalize` | `Calculation.Publish` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/bindings` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/bindings/{columnDefId}/{outputCode}` | `Calculation.EditRule` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/publications` | `Calculation.View` | 7 |
@@ -5199,6 +5280,10 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/audit/security/export.csv` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/audit/workflow` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/audit/workflow/export.csv` | `Security.ViewAudit` | 7 |
+| `GET` | `/api/v1/audit/security/event-types` | `Security.ViewAudit` | 7 |
+| `GET` | `/api/v1/audit/structure/entity-types` | `Security.ViewAudit` | 7 |
+| `GET` | `/api/v1/audit/authors` | `Security.ViewAudit` | 7 |
+| `GET` | `/api/v1/audit/cells/columns` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/consistency/issues` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/consistency/summary` | `System.ViewHealth` | 5 |
 | `POST` | `/api/v1/consistency/run` | `System.RunJob` | 5 |
@@ -5220,8 +5305,17 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/sources/{id}/registry/policy` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/sources/{id}/collect` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/sources/{id}/mapping/preview` | `Integration.Manage` | 5 |
-| `POST` | `/api/v1/integration/flert-sync` | `Integration.Manage` (D-476 F3: «Синхронізувати зараз» — злита постановка синку складу газу FLERT; `202 JobAcceptedResponse`) | 8 |
-| `GET` | `/api/v1/integration/flert-sync/status` | `Integration.View` (або `Integration.Manage`; D-476 F3: чи увімкнено, коди довідників-дзеркала, останній прогін `itg.MaintenanceRun` `flert-composition-sync` — < 1 КБ) | 8 |
+| `GET` | `/api/v1/gas-composition/streams` | `GasComposition.View` (D-NEW: потоки зі зведенням версій, `canEdit`/`canImport`, стан разового імпорту FLERT) | 8 |
+| `GET` | `/api/v1/gas-composition/components` | `GasComposition.View` (D-NEW: компоненти для редактора складу, з групою показу) | 8 |
+| `GET` | `/api/v1/gas-composition/streams/{id}` | `GasComposition.View` (D-NEW: потік, кейси, версії з компонентами й замкненими періодами) | 8 |
+| `POST` | `/api/v1/gas-composition/streams` | `GasComposition.Edit` (D-NEW: новий потік, Id = найбільший + 1) | 8 |
+| `PUT` | `/api/v1/gas-composition/streams/{id}` | `GasComposition.Edit` (D-NEW: атрибути потоку; поля, які читають розрахунки, — лише без замкнених версій) | 8 |
+| `DELETE` | `/api/v1/gas-composition/streams/{id}` | `GasComposition.Edit` (D-NEW: логічне видалення потоку з версіями; 409 — замкнено або є посилання) | 8 |
+| `POST` | `/api/v1/gas-composition/streams/{id}/versions` | `GasComposition.Edit` (D-NEW: нова версія кейсу з 1-го числа місяця; версія, що містить дату, обрізається) | 8 |
+| `PUT` | `/api/v1/gas-composition/streams/{id}/cases` | `GasComposition.Edit` (D-NEW: перейменування кейсу — усіх версій) | 8 |
+| `PUT` | `/api/v1/gas-composition/versions/{versionId}` | `GasComposition.Edit` (D-NEW: значення і/або місяць версії; сусід тягнеться) | 8 |
+| `DELETE` | `/api/v1/gas-composition/versions/{versionId}` | `GasComposition.Edit` (D-NEW: видалення версії; попередня продовжується) | 8 |
+| `POST` | `/api/v1/gas-composition/import` | `GasComposition.Edit` + `Integration.Manage` (D-NEW: разовий імпорт FLERT лише в порожню базу; `202 JobAcceptedResponse`, 409 — дані вже є) | 8 |
 | `GET` | `/api/v1/sources/{id}/raw-data/tags` | `Integration.View` (або `Integration.Manage`; D-463: теги сутності — поля мапінгів, без мапінгів — шлях сутності) | 5 |
 | `GET` | `/api/v1/sources/{id}/raw-data/points` | `Integration.View` (або `Integration.Manage`; D-463: `path` 1..400, вікно `fromUtc`/`toUtc` ≤ 400 діб, типово 7 діб; keyset за міткою часу, новіші першими; `limit` 1..500, типово 100) | 5 |
 | `GET` | `/api/v1/sources/{id}/raw-data/series` | `Integration.View` (або `Integration.Manage`; D-463: ≤ `buckets` (1..2000, типово 500) кошиків мін/макс/середнє на все вікно, згортка в SQL) | 5 |
@@ -5243,6 +5337,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/data-sources/{id}` | `Integration.Manage` | 7 |
 | `DELETE` | `/api/v1/data-sources/{id}` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/data-sources/{id}/test` | `Integration.Manage` | 7 |
+| `POST` | `/api/v1/data-sources/test-connection` | `Integration.Manage` (P-1126-SRCCRED §13.1: перевірка з незбережених значень форми, лише PiSqlClient/Sql; пароль з тіла або збережений за `sourceId` при тій самій цілі й логіні; 5/хв на користувача → `429 tooManySourceTests`, 3 відмови входу поспіль → пауза цілі 15 хв `429 sourceTestTargetPaused`; нічого не зберігає) | 7 |
 | `GET` | `/api/v1/data-sources/{id}/catalog` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/data-sources/{id}/probe` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/entity-field-maps` | `Integration.Manage` | 5 |
@@ -5265,11 +5360,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/row-window-maps/{id}` | `Integration.Manage` | 7 |
 | `DELETE` | `/api/v1/row-window-maps/{id}` | `Integration.Manage` | 7 |
 | `GET` | `/api/v1/campaign/summary` | `Report.ViewCampaign` | 5 |
-| `GET` | `/api/v1/reports/snapshots` | `Report.ViewRegulatory` | 5 |
-| `POST` | `/api/v1/reports/snapshots/{id}/verify` | `Report.ViewRegulatory` | 5 |
-| `GET` | `/api/v1/reports/snapshots/{id}/rows` | `Report.ViewRegulatory` | 5 |
-| `GET` | `/api/v1/reports/snapshots/{id}/export.xlsx` | `Report.Export` | 5 |
-| `POST` | `/api/v1/reports/{code}/build` | `Report.BuildSnapshot` (PT-6: той самий кошик `document-export`, 429 `tooManyExports`) | 5 |
+| — | ~~`/api/v1/reports*`~~ (описи звітів, зрізи: перелік, побудова, перевірка, рядки, XLSX) | ✎ 2026-11-24, `D-NEW` (P-1124-3): прибрано разом із конструктором звітів; звітність — SSRS над сирим шаром `rpt.*` | — |
 | `GET` | `/api/v1/languages` | — (будь-який автентифікований) | 3 |
 | `GET` | `/api/v1/public/bootstrap` | — (анонімний) | 7 |
 | `POST` | `/api/v1/csp-report` | — (анонімний; приймач звітів CSP від браузера, S14) | 7 |
@@ -5389,10 +5480,6 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/permits/{id}/activate` | `Registry.EditData` | 8 |
 | `POST` | `/api/v1/permits/{id}/end` | `Registry.EditData` | 8 |
 | `POST` | `/api/v1/permits/{id}/renew` | `Registry.EditData` | 8 |
-| `GET` | `/api/v1/reports` | `Report.ViewRegulatory` | 5 |
-| `POST` | `/api/v1/reports` | `Report.EditDefinition` | 5 |
-| `POST` | `/api/v1/reports/{id}/versions` | `Report.EditDefinition` | 5 |
-| `POST` | `/api/v1/reports/{id}/versions/{vid}/publish` | `Report.EditDefinition` | 5 |
 | `GET` | `/api/v1/search` | — (кожен тип під правом свого переліку й грантами проєкту) | 8 |
 | `GET` | `/api/v1/registries/{code}/external-keys?entryId=&dataSourceId=&cursor=&limit=` | `Registry.View` | 8 |
 | `POST` | `/api/v1/registries/{code}/external-keys` | `Registry.EditData` | 8 |
@@ -5705,6 +5792,8 @@ public sealed class NotFoundException(string errorCode, string message)
 > `OutboxDispatcher` лишає події в черзі без спроби. Умова одна —
 > `SmtpNotificationSender.IsConfigured`.
 
+> ✎ **2026-11-24, `D-NEW` (P-1124-3): ендпоінти `/api/v1/reports*` і порт `IReportSnapshotBuilder` прибрано разом із конструктором звітів і зрізами. Абзаци нижче про `/reports` — історія рішень.**
+>
 > ✎ **R7 — `GET /reports/snapshots/{id}/export.xlsx`.** Книга приходить
 > ВІДПОВІДДЮ, без `202` і фонової задачі: аркуш плаский, стеля —
 > `ExportSnapshotHandler.MaxRows` = 50 000 рядків, понад неї `422 ECR-RPT-0422`,
@@ -6810,6 +6899,26 @@ public sealed record RowDto(
   (лише біт зв'язки; ключ `Calculations:Hse400CompositionFromDocument` виведено, P-0118-31/33); за `any` знахідок немає, а старі знахідки
   правила закриваються (прохід повний). Тексти en/ru/kz — сід `B80-stale-approved-dependent.sql`; переклад на клієнті —
   N6.
+- ✎ 2026-11-24 (аудит «Consistency issues», lane `integ-consistency-checks`) — правила результатів розрахунку й
+  методологій (`CalculationConsistencyChecks`; чинна версія — правило оркестратора: Published, `EffectiveFrom ≤ кінець
+  періоду`, `MethodologyVersionKey.Currency`). Код → вага, сутність, підстановки конверта `consistency.finding.<CODE>`:
+  - `CALC_RESULT_VERSION_NOT_EFFECTIVE` — 2, `calc.CalculationResult` (найменший id групи прогін × документ × період ×
+    версія); `documentId`, `period`, `methodology`, `methodologyId`, `resultVersion`, `effectiveVersion`, `results`,
+    `runId`. Місяць із затвердженим аркушем оригіналу — ключ `…_APPROVED` (та сама вага 2, рішення людини 24.11).
+  - `EFFECTIVE_VERSION_FORMULAS` — 2, `calc.MethodologyVersion`; `methodology`, `methodologyId`, `version`, `effectiveFrom`.
+  - `ROW_INPUTS_COMPLETE_NO_RESULT` — 2, `doc.TableRow` (≤ 50 на документ × період); `documentId`, `period`, `table`,
+    `row`, `methodology`, `methodologyId`, `runId`; надлишок — одна знахідка `calc.CalculationRun` з ключем `…_MORE`
+    (`documentId`, `period`, `more`, `runId`).
+  - `CURRENT_RUN_NO_RESULTS_WITH_BINDINGS` — 3, `calc.CalculationRun`; `runId`, `documentId`, `period`, `tables`,
+    `methodologies`.
+  - `CALC_ISSUE_WITHOUT_RUN` — 3, `calc.CalculationRun` (id зниклого прогону); `runId`, `documentId`, `period`, `issues`.
+  - `OUTPUT_WITHOUT_BINDING` — 1, `calc.MethodologyOutput`; `methodology`, `methodologyId`, `version`, `output`.
+  - `BINDING_DEAD_COLUMN` — 1, `cfg.CalculationBinding` (лише живі версії шаблонів); `methodology`, `methodologyId`,
+    `table`, `column`, `version`, `bindingId`.
+  Деталі прогону (`itg.MaintenanceRun.DetailsJson`) — масив `checks` (`code`, `found`, `complete`, `skipped`, `ms`) у
+  порядку `ConsistencyCheckJob.KnownRules`; `GET /api/v1/consistency/summary` віддає його як `lastRun`
+  (`startedAt`, `finishedAt`, `status`, `checks[]` — `ruleCode`, `found`, `complete`, `skipped`; `null` — завершених
+  прогонів ще не було). Тексти — сід `CONS-calc-checks.sql`; назви правил `consistency.rule.<CODE>`.
 
 ## ✎ 2026-11-18 B179 L1: граф залежностей документів (без ендпоінтів, міграцій і сіду)
 

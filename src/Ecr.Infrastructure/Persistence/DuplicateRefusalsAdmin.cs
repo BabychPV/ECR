@@ -2,7 +2,6 @@ using Ecr.Application.Errors;
 using Ecr.Application.Permits.AirLimits;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
-using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Errors;
 using Microsoft.EntityFrameworkCore;
@@ -74,22 +73,6 @@ internal static class DuplicateRefusalsAdmin
             && ex.Entries.Any(e => e.State == EntityState.Added && e.Entity is RegistryDefinitionDraft))
         {
             return Concurrent("Чернетку опису цього довідника щойно зберіг інший запит.");
-        }
-
-        // d6. `POST /reports/{id}/versions` (`VersionExistsAsync`) → `ECR-RPT-4091 version {version}`. Доти — арм
-        // middleware з ключем `versionConcurrent` без номера, тобто інша відповідь, ніж у послідовного повтору.
-        if (SqlConflict.ViolatesIndex(ex, "'UQ_ReportVersion'")
-            && ex.Entries.FirstOrDefault(e => e.State == EntityState.Added && e.Entity is ReportVersion)
-                is { Entity: ReportVersion version })
-        {
-            return new BusinessRuleException(
-                ErrorCodes.ReportDefDuplicate,
-                $"Версія «{version.Version}» у описі звіту {version.ReportDefId} уже є: номер версії унікальний.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-RPT-4091.version",
-                    ["version"] = version.Version,
-                });
         }
 
         // d7. `POST /security/group-assignments` (перелік без блокування): загальний 409; обробник перечитує призначення і

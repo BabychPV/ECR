@@ -56,6 +56,11 @@ namespace Ecr.Application.Ports;
 /// Масштаб колонки (<c>cfg.ColumnDef.Scale</c>): клієнт показує число з НЕ МЕНШЕ стількома знаками після коми, як
 /// сітка (U-05); <c>null</c> — масштабу не задано або колонки вже немає.
 /// </param>
+/// <param name="RowOrdinal">
+/// ✎ AC-13: порядковий номер рядка на екрані (<c>doc.TableRow.Ordinal</c>, від 1) — щоб рядок, доданий людиною (без
+/// мітки шаблону, ключ — GUID), читався «Row N». <c>null</c> — рядка вже немає в <c>doc.TableRow</c> (видалено фізично,
+/// період в архіві).
+/// </param>
 public sealed record CellChangeView(
     DateTime ChangedAt,
     int PeriodKey,
@@ -83,7 +88,28 @@ public sealed record CellChangeView(
     bool IsOverwrite = false,
     [property: System.Text.Json.Serialization.JsonIgnore] long Id = 0,
     string? Reason = null,
-    int? ColumnScale = null);
+    int? ColumnScale = null,
+    int? RowOrdinal = null);
+
+/// <summary>
+/// ✎ AC-8: колонка, яку змінювали в документі у вікні, — варіант фільтра «Column» (незалежно від завантажених сторінок
+/// журналу). Лише структура: значень тут немає.
+/// </summary>
+/// <param name="ColumnDefId">Колонка — значення фільтра.</param>
+/// <param name="ColumnCode">Код колонки; <c>null</c> — колонки вже немає.</param>
+/// <param name="ColumnHeaderL10n">Заголовок колонки мовами каталогу.</param>
+/// <param name="SheetCode">Код аркуша колонки.</param>
+/// <param name="SheetNameL10n">Назва аркуша мовами каталогу.</param>
+/// <param name="TableCode">Код таблиці колонки.</param>
+/// <param name="TableNameL10n">Назва таблиці мовами каталогу.</param>
+public sealed record CellChangeColumnView(
+    int ColumnDefId,
+    string? ColumnCode = null,
+    Ecr.Domain.ValueObjects.LocalizedText? ColumnHeaderL10n = null,
+    string? SheetCode = null,
+    Ecr.Domain.ValueObjects.LocalizedText? SheetNameL10n = null,
+    string? TableCode = null,
+    Ecr.Domain.ValueObjects.LocalizedText? TableNameL10n = null);
 
 /// <summary>Підсумок журналу змін комірок за вікном (UI-38, C2) — лише те, що читач бачить.</summary>
 /// <param name="Total">Усього змін у вікні й за фільтром.</param>
@@ -325,6 +351,18 @@ public interface IAuditReader
         CellChangeFilter filter, DateTime todayStartUtc, CancellationToken ct);
 
     /// <summary>
+    /// ✎ AC-8: різні колонки журналу змін комірок у вікні й за фільтром (гаряче + архів) з підписами — варіанти фільтра
+    /// «Column».
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Межі читання <see cref="CellChangeFilter.VisibleColumnIds"/> — у ЗАПИТІ тим самим текстом умови, що й у
+    /// сторінці (<c>@visibleSet</c>): прихована колонка не потрапляє в перелік навіть підписом. Порожній перелік — жодної.
+    /// </remarks>
+    /// <param name="filter">Вікно й звуження журналу (курсор не застосовується).</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<CellChangeColumnView>> ReadChangedColumnsAsync(CellChangeFilter filter, CancellationToken ct);
+
+    /// <summary>
     /// Історія структурних змін однієї сутності конфігурації.
     /// </summary>
     /// <remarks>
@@ -402,6 +440,28 @@ public interface IAuditReader
     /// <param name="ct">Токен скасування.</param>
     public Task<PagedResult<SecurityEventView>> ReadSecurityEventsAsync(
         SecurityEventFilter filter, CursorRequest page, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ P-1124-4: різні типи подій безпеки у вікні — для вибору у фільтрі «Event type» (точний збіг коду замість
+    /// вільного тексту, якого людина не знає).
+    /// </summary>
+    /// <param name="from">Початок вікна в UTC, включно.</param>
+    /// <param name="to">Кінець вікна в UTC, виключно.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<string>> ReadSecurityEventTypesAsync(DateTime from, DateTime to, CancellationToken ct);
+
+    /// <summary>✎ P-1124-4: різні типи сутностей журналу структурних змін у вікні — для вибору у фільтрі «Entity type».</summary>
+    /// <param name="from">Початок вікна в UTC, включно.</param>
+    /// <param name="to">Кінець вікна в UTC, виключно.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<string>> ReadStructureEntityTypesAsync(DateTime from, DateTime to, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ P-1124-4: усі користувачі (Id + ім'я; логін — лише за збігу імені, AC-7; SID — ніколи) — для фільтра «By user» журналів аудиту за правом
+    /// <c>Security.ViewAudit</c>, без <c>Security.ManageUsers</c>.
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<AuditAuthorView>> ReadAuditAuthorsAsync(CancellationToken ct);
 
     /// <summary>
     /// Остання зміна кожної названої комірки — ОДНИМ запитом на весь перелік

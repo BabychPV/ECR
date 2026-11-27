@@ -426,7 +426,7 @@ public sealed partial class EndpointCoverageTests
         new("features/workflow/jobLabel.ts", "key", 3, "features/workflow/jobLabel.ts",
             [
                 "jobs.kind.recalculation", "jobs.kind.formulaRecalculation", "jobs.kind.excelExport",
-                "jobs.kind.excelImport", "jobs.kind.materializeCollectedData", "jobs.kind.reportSnapshot",
+                "jobs.kind.excelImport", "jobs.kind.materializeCollectedData",
                 "jobs.kind.collection", "jobs.kind.sourceEventSync", "jobs.kind.rowWindowFetch",
                 "jobs.kind.consistencyCheck", "jobs.kind.orphanScan", "jobs.kind.registryImpactRecalculation",
                 "jobs.kind.migrateDocumentVersion", "jobs.kind.outboxFlush", "jobs.kind.flertCompositionSync",
@@ -437,7 +437,7 @@ public sealed partial class EndpointCoverageTests
                 // FP-7: повторювані задачі конкретного класу (`typeof(TJob).FullName`).
                 "jobs.kind.archive", "jobs.kind.notification", "jobs.kind.partitionCheck",
                 "jobs.kind.periodState", "jobs.kind.registrySync", "jobs.kind.reportRetention",
-                "jobs.kind.reportSnapshotFormat", "jobs.kind.rowWindowRefetch",
+                "jobs.kind.rowWindowRefetch",
                 "jobs.kind.submissionSnapshotRetention", "jobs.kind.supersededResultsSweep",
             ],
             "Назва типу фонової задачі (KindKeys)."),
@@ -515,16 +515,6 @@ public sealed partial class EndpointCoverageTests
             ],
             "Короткий опис функції в переліку доповнення й при наведенні."),
 
-        new("pages/admin/SnapshotsPage.tsx", "blockedReason", 1, "pages/admin/SnapshotsPage.tsx",
-            ["snapshots.parametersUnknown", "snapshots.parametersBlocked"],
-            "Причина, чому зріз не можна замовити."),
-        new("features/reports/SnapshotFormatBadge.tsx", "look.label", 1, "features/reports/SnapshotFormatBadge.tsx",
-            ["snapshots.formatLegacy", "snapshots.formatUnknown"],
-            "Позначка формату чисел зрізу (legacy/unknown; current не позначається)."),
-        new("features/reports/SnapshotFormatBadge.tsx", "look.hint", 1, "features/reports/SnapshotFormatBadge.tsx",
-            ["snapshots.formatLegacyHint", "snapshots.formatUnknownHint"],
-            "Підказка до позначки формату чисел зрізу."),
-
         new("features/integration/CollectionScheduleTab.tsx", "problem.key", 1, "features/integration/cronFormat.ts",
             ["schedule.cronEmpty", "schedule.cronTooLong", "schedule.cronFieldCount", "schedule.cronDayQuestion", "schedule.cronField"],
             "Помилка cron-виразу (cronProblem)."),
@@ -539,6 +529,11 @@ public sealed partial class EndpointCoverageTests
                 "err.ECR-REQ-0422.dataSourceEndpointSqlScheme", "err.ECR-REQ-0422.dataSourceEndpointSqlLinkLocal",
                 "err.ECR-REQ-0422.dataSourceEndpointSqlForbiddenOption",
                 "err.ECR-REQ-0422.dataSourceEndpointNotConnectionString", "err.ECR-REQ-0422.dataSourceFieldNotRead",
+
+                // P-1126-SRCCRED: облікові дані джерела — поле форми за ключем відмови і стан «ввести пароль заново».
+                "err.ECR-REQ-0422.dataSourcePasswordReentryRequired", "err.ECR-REQ-0422.dataSourceCredentialsInvalid",
+                "err.ECR-REQ-0422.dataSourcePasswordUnencrypted",
+                "err.ECR-INT-0502.credentialsRejected", "err.ECR-INT-0502.credentialsUnreadable",
             ],
             "messageKey сервера, але лише з FieldOfKey — інші сюди не доходять."),
 
@@ -584,7 +579,7 @@ public sealed partial class EndpointCoverageTests
         new("shared/ui/StatusBadge.tsx", "statusKey(kind, state)", 1, "shared/ui/StatusBadge.tsx",
             [.. StatusKeys("sheet"), .. StatusKeys("period"), .. StatusKeys("job"), .. StatusKeys("version"),
              .. StatusKeys("project"), .. StatusKeys("health"), .. StatusKeys("severity"),
-             .. StatusKeys("collectionRun"), .. StatusKeys("coverage"), .. StatusKeys("snapshot"),
+             .. StatusKeys("collectionRun"), .. StatusKeys("coverage"),
              .. StatusKeys("notificationDelivery")],
             "Бейдж статусу: уся таблиця statusTable."),
         new("pages/admin/ExpressionsPage.tsx", "statusKey('version', v.status)", 1, "shared/ui/StatusBadge.tsx",
@@ -618,7 +613,7 @@ public sealed partial class EndpointCoverageTests
         new("shared/ui/SegmentBar/SegmentBar.tsx", "statusKey(kind, segment.state)", 1, "shared/ui/StatusBadge.tsx",
             [.. StatusKeys("sheet"), .. StatusKeys("period"), .. StatusKeys("job"), .. StatusKeys("version"),
              .. StatusKeys("project"), .. StatusKeys("health"), .. StatusKeys("severity"),
-             .. StatusKeys("collectionRun"), .. StatusKeys("coverage"), .. StatusKeys("snapshot"),
+             .. StatusKeys("collectionRun"), .. StatusKeys("coverage"),
              .. StatusKeys("notificationDelivery")],
             "UI-19: підпис сегмента смужки станів — та сама statusTable, що й у бейджа."),
         new("features/audit/CellChangesTable.tsx", "`audit.originLabel.${origin}`", 1,
@@ -763,13 +758,13 @@ public sealed partial class EndpointCoverageTests
         "nav.documents", "password.title", "nav.templates", "version.title", "tables.relationsTitle",
         "nav.registries", "registries.constructor", "nav.methodologies", "methodologies.versionsTitle",
         "nav.expressions", "nav.units", "nav.security", "nav.projects", "nav.sources", "nav.mapping", "nav.pipeline",
-        "nav.jobs", "nav.snapshots", "nav.campaign", "nav.audit", "nav.consistency", "nav.uiStrings",
+        "nav.jobs", "nav.campaign", "nav.audit", "nav.consistency", "nav.uiStrings",
         "nav.notifications", "nav.health", "nav.myGroups", "documents.title", "nav.dependencyGraph",
         "registries.data.title",
         "nav.permits", "permits.types.title", "permits.typeEditor.title", "permits.lists.title",
         "permits.bindings.title", "permits.binding.title", "permits.detail.title",
-        "nav.piData",
-        "projects.tab.periods", "projects.tab.settings", "projects.tab.lifecycle",
+        "nav.piData", "nav.gasComposition",
+        "projects.tab.periods", "projects.tab.templates", "projects.tab.lifecycle", "projects.tab.general",
     ];
 
     /// <summary>Підписи груп бічного меню (UI-12, <c>navGroups</c> у <c>routes.ts</c>).</summary>
@@ -782,10 +777,10 @@ public sealed partial class EndpointCoverageTests
         "nav.documents.description", "nav.myGroups.description", "nav.templates.description",
         "nav.registries.description", "nav.methodologies.description", "nav.units.description",
         "nav.sources.description", "nav.mapping.description", "nav.projects.description",
-        "nav.jobs.description", "nav.snapshots.description", "nav.audit.description",
+        "nav.jobs.description", "nav.audit.description",
         "nav.consistency.description", "nav.uiStrings.description", "nav.health.description", "nav.dependencyGraph.description",
         "nav.permits.description", "permits.types.description", "permits.lists.description",
-        "permits.bindings.description", "nav.piData.description",
+        "permits.bindings.description", "nav.piData.description", "nav.gasComposition.description",
     ];
 
     /// <summary>Назви прав <c>permission.&lt;Code&gt;</c> — 45 прав каталогу <c>sec.Permission</c>.</summary>
@@ -819,10 +814,6 @@ public sealed partial class EndpointCoverageTests
         "permission.Calculation.Recalculate",
         "permission.Calculation.ManageRequiredInputs",
         "permission.Report.ViewRegulatory",
-        "permission.Report.BuildSnapshot",
-        "permission.Report.Export",
-        "permission.Report.ViewSnapshot",
-        "permission.Report.EditDefinition",
         "permission.Report.ViewCampaign",
         "permission.Integration.View",
         "permission.Integration.Manage",
@@ -867,7 +858,6 @@ public sealed partial class EndpointCoverageTests
             "RegistryAutoCreated", "RegistryDeactivated", "RegistryReactivated",
             "RegistryRuleViolation", "RegistryExternalKeyRelinked", "SkippedDependency",
             "PartialCoverage", "SkippedNoData"),
-        "snapshot" => Status(kind, "Draft", "Approved", "Submitted"),
         "notificationDelivery" => Status(kind, "Sent", "Failed", "Suppressed"),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Невідомий різновид статусу."),
     };
@@ -1443,9 +1433,37 @@ public sealed partial class EndpointCoverageTests
         // MS 8.5: перенесення на проді викликає оператор у вікні (curl/скрипт), екрана немає й не планується.
         "POST /api/v1/methodologies/script-migration/apply",
         "POST /api/v1/methodologies/script-migration/switch",
+        // P-1124-2: остаточне перенесення формульних версій викликає фаза вікна (window/Invoke-MsMigrationPhase.ps1 -Stage
+        // Finalize); одноразове, після нього відмовляє (finalizeNothingLeft) — екрана немає й не буде.
+        "POST /api/v1/methodologies/script-migration/finalize",
         // MS 8.4: паритет «формули проти скрипта» на документі запускає оператор перед перемиканням рушія (curl/скрипт, поруч
         // із `script-migration/switch`); кнопки в редакторі немає й не планується — редактор працює з версіями на рушії Script.
         "POST /api/v1/methodologies/{p}/versions/{p}/script/parity",
+
+        // ✎ 24.11 (P-1124-1), рішення людини «має бути тільки наш новий редактор»: формульний авторинг виведено з
+        // інтерфейсу (сторінка методології — лише версії-скрипти; формульних версій в UI немає). Споживачі, що лишилися:
+        //   formulas/constants/categories/rules/category-rule/outputs/import — інструменти tools/land/Build-LandTemplate.ps1,
+        //   tools/hse400/Build-Hse400Template.ps1, tools/Ecr.MethodologyImport і tools/Ecr.MethodologyScriptMigration
+        //   (збирання з AF і перенесення на скрипт; на стенді збирання — Calculations:FormulaEngineAuthoring:Enabled=true).
+        //   Дії без жодного споживача (constants/{p}/usage, rule-coverage) прибрано з сервера в тій самій lane.
+        // Решта прибирається разом із формульним рушієм у lane виведення після вікна P-1124-2 (картка
+        // .sync-local/ready/integ-ms-formulas-api-retire.md) — одним зміненням контракту, а не по одній.
+        "GET /api/v1/methodologies/{p}/versions/{p}/formulas",
+        "PUT /api/v1/methodologies/{p}/versions/{p}/formulas/{p}",
+        "DELETE /api/v1/methodologies/{p}/versions/{p}/formulas/{p}",
+        "GET /api/v1/methodologies/{p}/versions/{p}/constants",
+        "PUT /api/v1/methodologies/{p}/versions/{p}/constants/{p}",
+        "GET /api/v1/methodologies/{p}/versions/{p}/categories",
+        "PUT /api/v1/methodologies/{p}/versions/{p}/categories/{p}",
+        "DELETE /api/v1/methodologies/{p}/versions/{p}/categories/{p}",
+        "GET /api/v1/methodologies/{p}/versions/{p}/rules",
+        "PUT /api/v1/methodologies/{p}/versions/{p}/rules/{p}",
+        "GET /api/v1/methodologies/{p}/versions/{p}/category-rule",
+        "PUT /api/v1/methodologies/{p}/versions/{p}/category-rule",
+        "DELETE /api/v1/methodologies/{p}/versions/{p}/category-rule",
+        "GET /api/v1/methodologies/{p}/versions/{p}/outputs",
+        "PUT /api/v1/methodologies/{p}/versions/{p}/outputs/{p}",
+        "POST /api/v1/methodologies/import",
 
         // D-425 (Land «лише Running»): прапорець фільтра активності рядків ставить скрипт розгортання шаблону
         // (`tools/land/Build-LandTemplate.ps1`, етап RowFilter) за переліком `tools/land/land-row-filter.json`;

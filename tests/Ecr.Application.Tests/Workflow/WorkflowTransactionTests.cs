@@ -1,7 +1,6 @@
 // tests/Ecr.Application.Tests/Workflow/WorkflowTransactionTests.cs
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
-using Ecr.Application.Reporting;
 using Ecr.Application.Security;
 using Ecr.Application.Workflow;
 using Ecr.Domain.Abstractions;
@@ -27,8 +26,8 @@ namespace Ecr.Application.Tests.Workflow;
 /// <remarks>
 /// ⛔ Обидва обробники писали в базу кількома комітами. У <c>Submit</c> їх було
 /// три: <c>WorkflowStore.SaveSnapshotAsync</c> кличе <c>SaveChangesAsync</c>
-/// сам (йому потрібен <c>IDENTITY</c> зрізу), потім
-/// <c>ReportSnapshotSync.MarkSubmittedAsync</c>, і аж наприкінці
+/// сам (йому потрібен <c>IDENTITY</c> зрізу), потім проведення в зріз звітності
+/// (✎ P-1124-3: прибрано разом зі зрізами), і аж наприкінці
 /// <c>uow.SaveChangesAsync</c>. У <c>Approve</c> транзакції не було зовсім, а
 /// <c>AuditWriter</c> поза транзакцією комітить свій <c>INSERT</c> одразу
 /// (<c>AuditWriter.CreateCommand</c>).
@@ -134,19 +133,13 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
         // якого не сталося. Проміжні кроки заводять саме заради
         // відповідальності — журнал, що розходиться зі станом, її підробляє.
         //
-        // ⚠ Збій вноситься в `ReportSnapshotSync` (через його `IReportSnapshotBuilder`)
-        // — перший виклик ПІСЛЯ запису в аудит (`ApproveSheetHandler:108`).
+        // ⚠ Збій вноситься в `IUnitOfWork.SaveChangesAsync` — перший виклик ПІСЛЯ запису в аудит
+        // (✎ P-1124-3: доти — у проведення стану в зрізи звітності, яке прибрано разом зі зрізами).
+        // Транзакцію відкриває справжній `UnitOfWork`, тож відкат іде тим самим шляхом, що в застосунку.
         var world = await ArrangeAsync(submitted: true).ConfigureAwait(true);
 
         await using var db = CreateContext();
-        var snapshots = Substitute.For<IReportSnapshotBuilder>();
-        snapshots.ListAsync(
-                     Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<IReadOnlyCollection<int>?>(),
-                     Arg.Any<CancellationToken>())
-                 .Returns<Task<IReadOnlyList<ReportSnapshotSummary>>>(
-                     _ => throw new InvalidOperationException(Marker));
-
-        var handler = Approve(world, db, snapshots);
+        var handler = Approve(world, db, new FailingSaveUnitOfWork(new UnitOfWork(db)));
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(
             () => handler.HandleAsync(
@@ -174,13 +167,8 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
         var world = await ArrangeAsync(submitted: true).ConfigureAwait(true);
 
         await using var db = CreateContext();
-        var snapshots = Substitute.For<IReportSnapshotBuilder>();
-        snapshots.ListAsync(
-                     Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<IReadOnlyCollection<int>?>(),
-                     Arg.Any<CancellationToken>())
-                 .Returns<IReadOnlyList<ReportSnapshotSummary>>([]);
 
-        await Approve(world, db, snapshots)
+        await Approve(world, db)
             .HandleAsync(
                 world.DocumentId, world.SheetDefId, PeriodKeyValue, approved: true, reason: null,
                 CancellationToken.None)
@@ -193,7 +181,7 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
 
     private SubmitSheetHandler Submit(
         World world, EcrDbContext db, IAccessDecisionService access, ISheetEditGate? gate = null,
-        IReportSnapshotBuilder? reportSnapshots = null, SheetWorkflowNotifier? notifier = null,
+        SheetWorkflowNotifier? notifier = null,
         IDocumentStore? documents = null, ISourceMonthApprovalGate? sourceMonthGate = null,
         ISourceCascadePendingGate? cascadeGate = null)
     {
@@ -235,21 +223,6 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
                     ColumnsById: new Dictionary<int, ColumnDef>(),
                     RowsByKey: new Dictionary<(int, string), RowDef>()));
 
-        // ⚠ Зрізів звітності у цього проєкту немає — `ReportSnapshotSync` тоді
-        // законно не робить нічого. Предмет тесту — межа коміту, а не побудова
-        // зрізів, і зайвий рухомий шматок лише зробив би падіння двозначним.
-        //
-        // ⚠ R5-W1: тести статусу зрізу (`WorkflowTransactionTests.SnapshotStatus`)
-        // підставляють справжній будівник — там предмет саме він.
-        var snapshots = reportSnapshots ?? Substitute.For<IReportSnapshotBuilder>();
-        if (reportSnapshots is null)
-        {
-            snapshots.ListAsync(
-                         Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<IReadOnlyCollection<int>?>(),
-                         Arg.Any<CancellationToken>())
-                     .Returns<IReadOnlyList<ReportSnapshotSummary>>([]);
-        }
-
         var headers = Substitute.For<IDocumentHeaderStore>();
         headers.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<string, ExpressionValue>());
@@ -265,7 +238,6 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
             cells, rows, new WorkflowStore(db), documents, metadata, access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
             headers,
-            new ReportSnapshotSync(snapshots, documents),
             new UnitOfWork(db), User(), new TestClock(Now), gate ?? new SheetEditGate(db),
             NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
             methodologies,
@@ -277,15 +249,29 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
             cascadeGate: cascadeGate);
     }
 
-    private ApproveSheetHandler Approve(World world, EcrDbContext db, IReportSnapshotBuilder snapshots)
+    private ApproveSheetHandler Approve(World world, EcrDbContext db, IUnitOfWork? uow = null)
     {
         var documents = Substitute.For<IDocumentStore>();
         documents.FindProjectIdAsync(world.DocumentId, Arg.Any<CancellationToken>())
                  .Returns(world.ProjectId);
 
         return new ApproveSheetHandler(
-            new WorkflowStore(db), Access(), new ReportSnapshotSync(snapshots, documents),
-            new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db), documents);
+            new WorkflowStore(db), Access(),
+            uow ?? new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db), documents);
+    }
+
+    /// <summary>
+    /// Справжня транзакція, але збереження всередині неї падає з <see cref="Marker"/> — збій ПІСЛЯ побічних
+    /// записів (аудит), тобто рівно те вікно, яке має закрити транзакція.
+    /// </summary>
+    private sealed class FailingSaveUnitOfWork(IUnitOfWork inner) : IUnitOfWork
+    {
+        public Task<int> SaveChangesAsync(CancellationToken ct) => throw new InvalidOperationException(Marker);
+
+        public Task<IAsyncDisposable> BeginTransactionAsync(CancellationToken ct) => inner.BeginTransactionAsync(ct);
+
+        public Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, CancellationToken ct)
+            => inner.ExecuteInTransactionAsync(operation, ct);
     }
 
     /// <summary>Дозволяє все і повертає маршрут із ДВОХ кроків.</summary>

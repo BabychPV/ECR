@@ -1,24 +1,27 @@
 import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 
 /**
- * Вікно формули методології: на весь екран і ручка розміру (P44) — на живому стенді.
+ * Вікно з Monaco на весь екран і ручка розміру (P44) — на живому стенді.
+ *
+ * ✎ 24.11 («має бути тільки наш новий редактор»): діалог формули методології прибрано разом із формульним рушієм;
+ * той самий `ResizableModal` із Monaco тепер — «Compare with version…» редактора скрипта (diff-редактор).
  *
  * Що доводиться тут, а не у vitest: у jsdom немає розкладки, тож ні те, що кут іде за курсором,
- * ні те, що Monaco справді росте з вікном (`automaticLayout`, ланцюжок `flex` у
+ * ні те, що Monaco справді перерозкладається з вікном (`automaticLayout`, ланцюжок `flex` у
  * `ResizableModal.css`), там не видно. Тут:
- *   1. «Add formula» → діалог «Formula» з редактором Monaco;
- *   2. кнопка «Full screen» → `aria-pressed=true`, вікно на всю ширину, редактор вищий, ніж був;
+ *   1. редактор скрипта → «Compare with version…» → обрана версія → діалог із diff-редактором Monaco;
+ *   2. кнопка «Full screen» → `aria-pressed=true`, вікно на всю ширину, редактор ширший, ніж був;
  *      повторний натиск — звичайний розмір;
  *   3. перетягування ручки в правому нижньому куті → вікно ширшає, розмір запам'ятовано
  *      (`localStorage`) і відновлюється після перезавантаження.
  *
  * ⚠ Дані — свої: `beforeAll` від імені `e2e-admin` (✎ P44: йому видано `Calculation.EditFormula`,
- * `tools/e2e-stand.ps1`) заводить методологію `E2E_RM_<час>` і порожню чернетку. Видалення
- * методології API не має — залишок на одноразовому стенді.
+ * `tools/e2e-stand.ps1`) заводить методологію `E2E_RM_<час>` і дві чернетки-скрипти (друга — копія першої).
+ * Видалення методології API не має — залишок на одноразовому стенді.
  *
  * ⛔ Без стенда файл ПАДАЄ (`beforeAll`), а не пропускається — як `registryEntryDrawer.spec.ts`.
  *
- * Запуск: workflow `e2e-stand` з `grep="Вікно формули методології"`.
+ * Запуск: workflow `e2e-stand` з `grep="Вікно з Monaco"`.
  */
 const Admin = { userName: 'e2e-admin', password: 'E2E-Adm1n-Work-2026!' };
 
@@ -26,14 +29,19 @@ const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';
 
 interface Seed {
   readonly methodologyId: number;
+  /** Друга чернетка-скрипт — та, що відкривається в редакторі. */
+  readonly versionId: number;
 }
+
+const SizeKey = 'ecr.modalSize.methodology.scriptCompare';
 
 async function login(context: BrowserContext, userName: string, password: string): Promise<void> {
   const response = await context.request.post('/api/v1/login/local', { data: { userName, password } });
   expect(response.ok(), `вхід ${userName}: ${String(response.status())} ${await response.text()}`).toBe(true);
 }
 
-/** Методологія з порожньою чернеткою — тим самим API, що й екран. */
+/** Методологія з двома чернетками-скриптами — тим самим API, що й екран. */
+
 async function prepare(browser: Browser): Promise<Seed> {
   const stamp = String(Date.now());
   const admin = await browser.newContext();
@@ -47,11 +55,17 @@ async function prepare(browser: Browser): Promise<Seed> {
     const methodologyId = ((await created.json()) as { id: number }).id;
 
     const draft = await admin.request.post(`/api/v1/methodologies/${String(methodologyId)}/versions`, {
-      data: { versionNumber: '1.0', copyFromVersionId: null, level: 'Configuration' },
+      data: { versionNumber: '1.0', copyFromVersionId: null, level: 'Configuration', engine: 'Script' },
     });
     expect(draft.ok(), `чернетка: ${String(draft.status())} ${await draft.text()}`).toBe(true);
+    const first = ((await draft.json()) as { id: number }).id;
 
-    return { methodologyId };
+    const copy = await admin.request.post(`/api/v1/methodologies/${String(methodologyId)}/versions`, {
+      data: { versionNumber: '2.0', copyFromVersionId: first, level: 'Configuration', engine: 'Script' },
+    });
+    expect(copy.ok(), `копія: ${String(copy.status())} ${await copy.text()}`).toBe(true);
+
+    return { methodologyId, versionId: ((await copy.json()) as { id: number }).id };
   } finally {
     await admin.close();
   }
@@ -67,28 +81,31 @@ async function signIn(page: Page): Promise<void> {
   await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 });
 }
 
-async function openFormula(page: Page, seed: Seed): Promise<Locator> {
-  await page.goto(`/admin/methodologies/${String(seed.methodologyId)}/versions`);
-  const add = page.getByRole('button', { name: /Add formula|Добавить формулу/i });
-  await expect(add, 'немає кнопки «Add formula» — чернетка не обрана або немає права').toBeVisible({
-    timeout: 30_000,
+async function openCompare(page: Page, seed: Seed): Promise<Locator> {
+  await page.goto(`/admin/methodologies/${String(seed.methodologyId)}/versions/${String(seed.versionId)}/script`);
+  await expect(page.getByTestId('script-editor').locator('.monaco-editor').first(), 'редактор скрипта не завантажився').toBeVisible({
+    timeout: 60_000,
   });
-  await add.click();
+  const compare = page.getByRole('button', { name: /Compare with version/i });
+  await expect(compare).toBeEnabled({ timeout: 30_000 });
+  await compare.click();
 
-  const dialog = page.getByRole('dialog', { name: /Formula|Формула/i });
+  const dialog = page.getByRole('dialog', { name: /Compare the script with another version/i });
   await expect(dialog).toBeVisible({ timeout: 10_000 });
-  // ⚠ Чанк Monaco великий (~818 КБ gzip): редактор з'являється пізніше за діалог.
-  await expect(dialog.locator('.monaco-editor')).toBeVisible({ timeout: 60_000 });
+  await dialog.getByRole('textbox', { name: 'Compare with version' }).click();
+  await page.getByRole('option', { name: /^1\.0/ }).click();
+  // ⚠ Чанк Monaco великий: diff-редактор з'являється пізніше за діалог.
+  await expect(dialog.locator('.monaco-diff-editor')).toBeVisible({ timeout: 60_000 });
   return dialog;
 }
 
-async function heightOf(locator: Locator): Promise<number> {
+async function widthOf(locator: Locator): Promise<number> {
   const box = await locator.boundingBox();
   expect(box, 'елемент не має розміру на екрані').not.toBeNull();
-  return box?.height ?? 0;
+  return box?.width ?? 0;
 }
 
-test.describe('Вікно формули методології: на весь екран і ручка розміру (P44)', () => {
+test.describe('Вікно з Monaco (порівняння скрипта): на весь екран і ручка розміру (P44)', () => {
   test.describe.configure({ timeout: 180_000 });
   // Просторий екран: на весь екран редактор має куди рости, а потягнуте вікно — куди ширшати.
   test.use({ viewport: { width: 1440, height: 900 } });
@@ -102,15 +119,15 @@ test.describe('Вікно формули методології: на весь �
     seed = await prepare(browser);
   });
 
-  test('кнопка «Full screen» розгортає вікно, редактор росте; ручка змінює розмір і він запам’ятовується', async ({
+  test('кнопка «Full screen» розгортає вікно, редактор ширшає; ручка змінює розмір і він запам’ятовується', async ({
     page,
   }) => {
     if (seed === null) throw new Error('дані не підготовлені');
     await signIn(page);
-    const dialog = await openFormula(page, seed);
-    const editor = dialog.locator('.monaco-editor');
+    const dialog = await openCompare(page, seed);
+    const editor = dialog.locator('.monaco-diff-editor');
 
-    const normalEditor = await heightOf(editor);
+    const normalEditor = await widthOf(editor);
     const toggle = dialog.getByRole('button', { name: /Full screen|Во весь экран|Толық экран/i });
     await expect(toggle).toHaveAttribute('aria-pressed', 'false');
 
@@ -123,13 +140,13 @@ test.describe('Вікно формули методології: на весь �
     const fullBox = await dialog.boundingBox();
     expect(fullBox?.width ?? 0, 'на весь екран — на всю ширину').toBeGreaterThanOrEqual((viewport?.width ?? 0) - 2);
 
-    // ⛔ Головне: зайва висота віддана полю формули (Monaco перерозклався), а не порожнечі.
-    await expect.poll(() => heightOf(editor), { timeout: 10_000 }).toBeGreaterThan(normalEditor + 50);
+    // ⛔ Головне: зайва ширина віддана редактору (Monaco перерозклався), а не порожнечі.
+    await expect.poll(() => widthOf(editor), { timeout: 10_000 }).toBeGreaterThan(normalEditor + 50);
 
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-pressed', 'false');
     await expect(dialog).toHaveAttribute('data-rm-size', 'normal');
-    await expect.poll(() => heightOf(editor), { timeout: 10_000 }).toBeLessThan(normalEditor + 5);
+    await expect.poll(() => widthOf(editor), { timeout: 10_000 }).toBeLessThan(normalEditor + 5);
 
     // ── Ручка розміру ─────────────────────────────────────────────────────────
     const before = await dialog.boundingBox();
@@ -153,14 +170,14 @@ test.describe('Вікно формули методології: на весь �
     expect(after?.width ?? 0).toBeGreaterThan(before.width + 200);
 
     const width = await dialog.getAttribute('data-rm-width');
-    const stored = await page.evaluate(() => globalThis.localStorage.getItem('ecr.modalSize.methodology.formula'));
+    const stored = await page.evaluate((key) => globalThis.localStorage.getItem(key), SizeKey);
     expect(stored, 'розмір не запам’ятовано').toContain('"mode":"custom"');
 
     // ── Після перезавантаження — той самий розмір ─────────────────────────────
     await page.keyboard.press('Escape');
     await expect(dialog).toBeHidden();
     await page.reload();
-    const reopened = await openFormula(page, seed);
+    const reopened = await openCompare(page, seed);
     await expect(reopened).toHaveAttribute('data-rm-width', width ?? '');
 
     // Прибирання: «Згорнути» стирає запам'ятоване.
@@ -168,7 +185,7 @@ test.describe('Вікно формули методології: на весь �
     await again.click();
     await again.click();
     expect(
-      await page.evaluate(() => globalThis.localStorage.getItem('ecr.modalSize.methodology.formula')),
+      await page.evaluate((key) => globalThis.localStorage.getItem(key), SizeKey),
     ).toBeNull();
   });
 });

@@ -48,7 +48,7 @@ public sealed class NotificationJobJobFailureDigestTests(SqlServerFixture sql)
 
         // Рівно ті п'ять видів, що вимагає REQ-CLOSURE №36.
         Assert.Equal(
-            ["excel-export", "excel-import", "formula-recalculation", "recalculation", "report-snapshot"],
+            ["excel-export", "excel-import", "formula-recalculation", "recalculation"],
             [.. alerted.Keys.Order(StringComparer.Ordinal)]);
 
         await using (var setup = CreateContext())

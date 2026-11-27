@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { t } from '@/shared/i18n';
 import type { MonacoModule } from '../expressions/monaco';
+import { loadScriptEditorModules } from './preloadScriptEditor';
 import {
   scriptCompletions,
   ScriptTriggerCharacters,
@@ -37,6 +38,10 @@ export interface ScriptEditorHandle {
   readonly replaceRange: (start: number, end: number, text: string) => void;
   /** Зміщення курсора в тексті. */
   readonly cursorOffset: () => number;
+  /** Фокус у редактор (курсор і виділення лишаються). */
+  readonly focus: () => void;
+  /** Перерозкладка під нову рамку (вхід/вихід «на весь екран»). */
+  readonly layout: () => void;
 }
 
 export interface ScriptEditorProps {
@@ -189,6 +194,12 @@ export function ScriptEditor(props: ScriptEditorProps): JSX.Element {
         }
         return model.getOffsetAt(position);
       },
+      focus() {
+        editor.current?.focus();
+      },
+      layout() {
+        editor.current?.layout();
+      },
     }),
     [],
   );
@@ -199,8 +210,8 @@ export function ScriptEditor(props: ScriptEditorProps): JSX.Element {
 
     void (async () => {
       try {
-        const expressions = await import('../expressions/monaco');
-        const monaco = await import('monaco-editor/editor/editor.api');
+        // ✎ P-1124-1: обидва чанки паралельно й спільним запитом із прогрівом сторінки версій.
+        const [expressions, monaco] = await loadScriptEditorModules();
         if (disposed || host.current === null) return;
 
         // ⚠ Теми визначає лише `prepare` наявного модуля; виклик заодно реєструє

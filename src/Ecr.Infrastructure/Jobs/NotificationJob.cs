@@ -449,7 +449,9 @@ public sealed class NotificationJob(
             ? value
             : fallback;
 
-        return Application.Localization.UiStringResolver.Format(template, parameters);
+        return Application.Localization.UiStringResolver.Format(
+            template,
+            parameters is null ? null : Application.Localization.RowKeyText.Humanize(parameters, strings?.LanguageCode, strings));
     }
 
     /// <summary>Звичайний вид рядка про збій збору.</summary>
@@ -491,7 +493,6 @@ public sealed class NotificationJob(
             [typeof(IFormulaRecalculationJob).FullName!] = "formula-recalculation",
             [typeof(IExcelImportJob).FullName!] = "excel-import",
             [typeof(IExcelExportJob).FullName!] = "excel-export",
-            [typeof(IReportSnapshotJob).FullName!] = "report-snapshot",
         };
 
     /// <summary>

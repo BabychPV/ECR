@@ -9,8 +9,9 @@ namespace Ecr.Application.Ports;
 /// </summary>
 /// <remarks>
 /// ⛔ Лише ЧИТАННЯ. Реалізація виконує запит у транзакції, яку завжди відкочує, і в джерело не пише нічого
-/// (<c>D-44</c>; сторож <c>FlertReadOnlyAdapterTests</c>). Текст запиту — конфігурація, типового тексту немає
-/// (як у <c>SqlDataSource</c>): ненаштований запит — відмова <c>ECR-INT-0503</c> <c>.queryNotConfigured</c>.
+/// (<c>D-44</c>; сторож <c>FlertReadOnlyAdapterTests</c>). Текст запиту — конфігурація: канал секретів, а за його
+/// відсутності — <c>fallbackQuery</c> викликача (несекретний ключ appsettings). Немає ні того, ні іншого — відмова
+/// <c>ECR-INT-0503</c> <c>.queryNotConfigured</c>.
 /// </remarks>
 public interface IExternalTableSource
 {
@@ -20,12 +21,14 @@ public interface IExternalTableSource
     /// <summary>Виконує налаштований запит <paramref name="queryKey"/> джерела і повертає всі рядки (до стелі).</summary>
     /// <param name="dataSourceId">Джерело (<c>ext.DataSource</c>).</param>
     /// <param name="queryKey">Ключ запиту в каналі налаштувань, напр. <c>Sql:CompositionQuery</c>.</param>
+    /// <param name="fallbackQuery">Текст запиту, коли канал секретів ключа не має; <c>null</c> — лише канал секретів.</param>
     /// <param name="maxRows">Стеля рядків; більше — <see cref="ExternalTable.Truncated"/>.</param>
     /// <param name="ct">Скасування.</param>
     /// <exception cref="Errors.BusinessRuleException">
     /// <c>ECR-INT-0503</c> — джерело недоступне, ненаштоване чи відхилене політикою адреси.
     /// </exception>
-    public Task<ExternalTable> ReadTableAsync(int dataSourceId, string queryKey, int maxRows, CancellationToken ct);
+    public Task<ExternalTable> ReadTableAsync(
+        int dataSourceId, string queryKey, string? fallbackQuery, int maxRows, CancellationToken ct);
 }
 
 /// <summary>Результат <see cref="IExternalTableSource.ReadTableAsync"/>.</summary>

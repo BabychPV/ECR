@@ -26,6 +26,15 @@
                   атомарний switch на кожну версію (причина журналу називає джерело доказу); відмова воріт однієї — BLOCKED у
                   журналі фази, версія лишається на Formulas, інші перемикаються.
       Rollback  — POST switch Formulas на версії з switch-result.json; ворота: рушій Formulas у кожної, таблиці читання зняті.
+      ✎ P-1124-2 (людина 24.11: «без втрат … лише новий редактор скриптів»; вода — вирішити, а не виключити):
+      WaterV2   — нова версія ECW_C09_02_01 ОДРАЗУ на Script (-WaterText: місячні псевдоніми Concentration/Volume, D-425 active when,
+                  k1 = 1e6: мг/л · м3 = г -> т) з золотим набором із 25 рядків старої системи (-WaterGolden, parity-cases --golden-all
+                  на CalcResult_Emissions_Water_Land); публікація з «чинна + 1 день». Після неї V1 витіснена і йде у Finalize.
+      FinalizeProve — для КОЖНОЇ формульної версії: текст (тінь або convert --include-drafts), паритет на рядках (ref/syn-cases фази,
+                  перенесені на старі Id за кодом методології, + -ExtraCases: синтетика C07_07, вода) з --texts; ворота — 0 розбіжностей;
+                  план Get-MsFinalizePlan -> finalize-request.json; будь-яка недоведена версія — СТОП.
+      Finalize  — один атомарний script-migration/finalize (копія: інструмент finalize). Ворота: на формулах 0 версій; кожна
+                  результат/знімок посилається на наявну версію.
     Усе, що зроблено, — у теці -Work (phase-log.ndjson, *.json відповідей) і в журналі застосунку (aud.PublicationEvent).
 .PARAMETER Stage           GoldenVersions | Convert | Apply | Parity | Reference | Switch | Verify | Rollback.
 .PARAMETER ReferenceDatabase  Reference: база старої системи з еталонними даними (ECR; лише читання).
@@ -45,7 +54,7 @@
                            будь-яка ІНША відмова сухого прогону зупиняє фазу.
 #>
 param(
-    [Parameter(Mandatory)][ValidateSet('GoldenVersions', 'Convert', 'Apply', 'Parity', 'Reference', 'Switch', 'Verify', 'Rollback')][string]$Stage,
+    [Parameter(Mandatory)][ValidateSet('GoldenVersions', 'Convert', 'Apply', 'Parity', 'Reference', 'Switch', 'Verify', 'Rollback', 'WaterV2', 'FinalizeProve', 'Finalize')][string]$Stage,
     [Parameter(Mandatory)][string]$Work,
     [string]$Server = 'localhost',
     [Parameter(Mandatory)][string]$Database,
@@ -58,12 +67,16 @@ param(
     [int]$CopyAsUser = 0,
     [string]$ReferenceDatabase = 'ECR',
     [string]$ReviewerCredentialFile,
-    [switch]$ConfirmCopy
+    [switch]$ConfirmCopy,
+    [string]$WaterText,
+    [string]$WaterGolden,
+    [string[]]$ExtraCases = @()
 )
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 # powershell -File передає «a,b» одним рядком: розбити за комами.
 $Exclude = @($Exclude | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$ExtraCases = @($ExtraCases | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 . (Join-Path $PSScriptRoot 'MsPhase.Lib.ps1')
 if (-not $ToolDll) { $ToolDll = Join-Path $PSScriptRoot '..\bin\Debug\net10.0\Ecr.MethodologyScriptMigration.dll' }
 New-Item -ItemType Directory -Force -Path $Work | Out-Null
@@ -78,7 +91,7 @@ function Write-Phase([string]$what, $data) {
 function Stop-Phase([string]$why, $data) { Write-Phase "STOP: $why" $data; throw "MS phase $Stage stopped: $why" }
 function Invoke-Tool([string[]]$toolArgs) {
     if (-not (Test-Path -LiteralPath $ToolDll)) { Stop-Phase "tool not built: $ToolDll" $null }
-    if ($ConfirmCopy -and $CopyAsUser -gt 0 -and $toolArgs[0] -in 'apply', 'switch', 'golden-versions') { $toolArgs = @($toolArgs) + @('--i-know-this-is-a-copy') }
+    if ($ConfirmCopy -and $CopyAsUser -gt 0 -and $toolArgs[0] -in 'apply', 'switch', 'golden-versions', 'finalize', 'script-version') { $toolArgs = @($toolArgs) + @('--i-know-this-is-a-copy') }
     & dotnet $ToolDll @toolArgs | ForEach-Object { Write-Host "  $_" }
     return $LASTEXITCODE
 }
@@ -398,6 +411,148 @@ WHERE v.Status = 1 AND m.Kind <> 2 AND v.ScriptText IS NOT NULL
                 Write-Phase "sample parity $($v.methodologyCode) $($v.version) doc $($c[1]) period $($c[2]): 0 mismatches" $null
             }
         }
+    }
+    'WaterV2' {
+        if (-not $WaterText) { $WaterText = Join-Path $PSScriptRoot 'finalize-cases\ECW_C09_02_01-V2.ecrs' }
+        if (-not $WaterGolden) { $WaterGolden = Join-Path $PSScriptRoot 'finalize-cases\ECW_C09_02_01-golden.json' }
+        if (-not (Test-Path -LiteralPath $WaterText) -or -not (Test-Path -LiteralPath $WaterGolden)) { Stop-Phase 'WaterV2: water text / golden set not found' $null }
+        $cur = @(Invoke-Sql "SELECT TOP 1 v.Id, v.Engine, v.Version FROM calc.MethodologyVersion v JOIN calc.Methodology m ON m.Id = v.MethodologyId WHERE m.Code = 'ECW_C09_02_01' AND v.Status = 1 ORDER BY v.EffectiveFrom DESC, v.Id DESC")
+        if ($cur.Count -eq 0) { Stop-Phase 'water methodology has no published version' $null }
+        $c = $cur[0] -split '\|'
+        if ([int]$c[1] -eq 1) { Write-Phase "water already on Script ($($c[2]), id $($c[0])): nothing to do" $null; break }
+        $why = 'P-1124-2: water ECW_C09_02_01 on ECR Script (month aliases, D-425, k1 = 1e6 mg/l*m3 -> t); golden = 25 rows of the old system (CalcResult_Emissions_Water_Land)'
+        if ($CopyAsUser -gt 0) {
+            $code = Invoke-Tool @('script-version', '--connection', $cs, '--from', $c[0], '--text', $WaterText, '--golden', $WaterGolden, '--reason', $why, '--as-user', $CopyAsUser, '--out', (Join-Path $Work 'water-v2.json'))
+            if ($code -ne 0) { Stop-Phase "water V2 refused (exit $code)" $null }
+        } else {
+            Connect-Api
+            $mid = @(Invoke-Sql "SELECT MethodologyId FROM calc.MethodologyVersion WHERE Id = $($c[0])")[0]
+            $nums = @(Invoke-Sql "SELECT Version FROM calc.MethodologyVersion WHERE MethodologyId = $mid")
+            $n = 1 + (@($nums | ForEach-Object { if ($_ -match '^V(\d+)$') { [int]$Matches[1] } else { 0 } }) | Measure-Object -Maximum).Maximum
+            $r = Invoke-Api POST "/api/v1/methodologies/$mid/versions" (@{ versionNumber = "V$n"; copyFromVersionId = $null; level = 'Configuration'; engine = 'Script' } | ConvertTo-Json)
+            if ($r.StatusCode -notin 200, 201) { Stop-Phase "create water V$n HTTP $($r.StatusCode)" $r.Content }
+            $vid = ($r.Content | ConvertFrom-Json).id
+            $text = ([IO.File]::ReadAllText($WaterText)).TrimStart([char]0xFEFF).Replace("`r`n", "`n")
+            $r = Invoke-Api PUT "/api/v1/methodologies/$mid/versions/$vid/script" (@{ text = $text } | ConvertTo-Json)
+            if ($r.StatusCode -ne 200) { Stop-Phase "save water script HTTP $($r.StatusCode)" $r.Content }
+            $g = (Get-Content -LiteralPath $WaterGolden -Raw -Encoding UTF8 | ConvertFrom-Json).versions | Where-Object { [int]$_.versionId -eq [int]$c[0] }
+            $i = 0
+            foreach ($case in @($g.cases)) {
+                $codeT = $case.key; $i++
+                $in = @{ documentId = [long]$g.documentId; periodKey = @{ value = [int]$g.periodKey }; arguments = @($case.arguments | ForEach-Object { @{ argumentCode = $_.argumentCode; value = $_.value; valueString = $null; unitId = $null; entryId = $null } }) } | ConvertTo-Json -Depth 6 -Compress
+                $r = Invoke-Api PUT "/api/v1/methodologies/$mid/versions/$vid/tests/$codeT" (@{ inputJson = $in; expectedJson = ($case.expected | ConvertTo-Json -Compress); tolerance = 0.000000001 } | ConvertTo-Json -Depth 4)
+                if ($r.StatusCode -ne 200) { Stop-Phase "water test $codeT HTTP $($r.StatusCode)" $r.Content }
+            }
+            $eff = ([datetime]@(Invoke-Sql "SELECT CONVERT(varchar(10), EffectiveFrom, 23) FROM calc.MethodologyVersion WHERE Id = $($c[0])")[0]).AddDays(1).ToString('yyyy-MM-dd')
+            $r = Invoke-Api POST "/api/v1/methodologies/$mid/versions/$vid/publish" (@{ changeReason = $why; effectiveFrom = $eff } | ConvertTo-Json)
+            if ($r.StatusCode -ne 200) { $null = Invoke-Api DELETE "/api/v1/methodologies/$mid/versions/$vid" $null; Stop-Phase "publish water V$n HTTP $($r.StatusCode) (draft deleted)" $r.Content }
+        }
+        $after = @(Invoke-Sql "SELECT TOP 1 v.Id, v.Engine, v.Version FROM calc.MethodologyVersion v JOIN calc.Methodology m ON m.Id = v.MethodologyId WHERE m.Code = 'ECW_C09_02_01' AND v.Status = 1 ORDER BY v.EffectiveFrom DESC, v.Id DESC")[0] -split '\|'
+        if ([int]$after[1] -ne 1) { Stop-Phase "current water version is not Script: $($after -join ' ')" $null }
+        Write-Phase "water current = $($after[2]) (id $($after[0])) on Script; previous $($c[2]) (id $($c[0])) superseded -> Finalize" @{ from = [int]$c[0]; to = [int]$after[0] }
+    }
+    'FinalizeProve' {
+        # 1. Кандидати: усі формульні версії з фактами для плану.
+        $rows = @(Invoke-Sql @"
+SELECT v.Id, m.Code, v.Version, v.Status, m.Kind,
+ (SELECT COUNT(*) FROM calc.MethodologyRule r WHERE r.MethodologyVersionId = v.Id),
+ (SELECT COUNT(DISTINCT i.MethodologyVersionId) FROM calc.MethodologyImport i WHERE i.ImportedMethodologyId = m.Id),
+ CASE WHEN v.Status = 1 AND NOT EXISTS (SELECT 1 FROM calc.MethodologyVersion n WHERE n.MethodologyId = v.MethodologyId AND n.Id <> v.Id AND n.Status = 1 AND ISNULL(n.EffectiveFrom, '19000101') > ISNULL(v.EffectiveFrom, '19000101')) THEN 1 ELSE 0 END,
+ LOWER(CONVERT(varchar(64), v.ScriptHash, 2))
+FROM calc.MethodologyVersion v JOIN calc.Methodology m ON m.Id = v.MethodologyId WHERE v.Engine = 0 ORDER BY m.Code, v.Id
+"@)
+        if ($rows.Count -eq 0) { Write-Phase 'no formula versions left: nothing to finalize' $null; break }
+        # 2. Тексти версій без тіні: convert --include-drafts (база лише читається).
+        $texts = Join-Path $Work 'finalize-convert'
+        if (Test-Path -LiteralPath $texts) { Remove-Item -LiteralPath $texts -Recurse -Force }
+        # --full-life: витіснена версія рахувала й періоди після дати наступної (поки була чинною) — константи з усіма періодами чинності.
+        $null = Invoke-Tool @('convert', '--connection', $cs, '--out', $texts, '--include-drafts', '--full-life')
+        # Тексти, яких convert не дає (C11_15 V1: правил рядків немає — rowsNoRules), — рецензовані файли поруч зі скриптом фази.
+        $hand = Join-Path $PSScriptRoot 'finalize-texts'
+        if (Test-Path -LiteralPath $hand) { foreach ($hf in Get-ChildItem -LiteralPath $hand -Recurse -Filter *.ecrs) { $dst = Join-Path (Join-Path $texts $hf.Directory.Name) $hf.Name; if (-not (Test-Path -LiteralPath $dst)) { New-Item -ItemType Directory -Force (Split-Path $dst) | Out-Null; Copy-Item -LiteralPath $hf.FullName $dst } } }
+        $sha = [Security.Cryptography.SHA256]::Create()
+        $cands = New-Object System.Collections.Generic.List[object]
+        foreach ($r0 in $rows) {
+            $c = $r0 -split '\|'
+            # Текст finalize — convert «повного життя» (замінює тінь); немає файла (convert не зміг) — тінь із бази, якщо є.
+            $text = $null; $hash = if ($c[8] -and $c[8] -ne 'NULL') { $c[8] } else { $null }
+            $f0 = Join-Path (Join-Path $texts $c[1]) ($c[2] + '.ecrs')
+            if (Test-Path -LiteralPath $f0) {
+                $text = ([IO.File]::ReadAllText($f0)).Replace("`r`n", "`n")
+                $hash = ([BitConverter]::ToString($sha.ComputeHash((New-Object Text.UTF8Encoding($false)).GetBytes($text))) -replace '-', '').ToLowerInvariant()
+            }
+            $cands.Add([pscustomobject]@{ VersionId = [int]$c[0]; Code = $c[1]; Version = $c[2]; Current = ($c[7] -eq '1'); IsLibrary = ($c[4] -eq '2'); RuleCount = [int]$c[5]; Importers = [int]$c[6]; TextHash = $hash; Text = $text })
+        }
+        # 3. Випадки: ref/syn-cases фази на КОЖНУ формульну версію за кодом методології + додаткові файли.
+        $proofs = @{}
+        # Випадки — у теці фази поруч зі скриптом (finalize-cases: ref/syn W15z, синтетика B-1, вода), щоб вікно не копіювало файли руками;
+        # ref/syn-cases.json із -Work (якщо Reference цього вікна їх перебудував) мають перевагу.
+        $bundle = Join-Path $PSScriptRoot 'finalize-cases'
+        $refF = if (Test-Path -LiteralPath (Join-Path $Work 'ref-cases.json')) { Join-Path $Work 'ref-cases.json' } else { Join-Path $bundle 'ref-cases.json' }
+        $synF = if (Test-Path -LiteralPath (Join-Path $Work 'syn-cases.json')) { Join-Path $Work 'syn-cases.json' } else { Join-Path $bundle 'syn-cases.json' }
+        if ($ExtraCases.Count -eq 0) { $ExtraCases = @(Get-ChildItem -LiteralPath $bundle -Filter '*-*.json' | Where-Object { $_.Name -match '-(synthetic|legacy)\.json$' } | ForEach-Object { $_.FullName }) }
+        $sources = @(@{ f = $refF; s = 'reference' }, @{ f = $synF; s = 'synthetic' }) + @($ExtraCases | ForEach-Object { @{ f = $_; s = $(if ($_ -match 'synthetic') { 'synthetic' } else { 'legacy' }) } })
+        foreach ($src in $sources) {
+            if (-not (Test-Path -LiteralPath $src.f)) { Write-Phase "no case file $($src.f) - skipped" $null; continue }
+            $doc = Get-Content -LiteralPath $src.f -Raw -Encoding UTF8 | ConvertFrom-Json
+            $vers = New-Object System.Collections.Generic.List[object]
+            foreach ($v in @($doc.versions)) {
+                foreach ($cand in @($cands | Where-Object { $_.Code -eq $v.methodologyCode })) {
+                    $vers.Add([pscustomobject]@{ versionId = $cand.VersionId; methodologyCode = $cand.Code; version = $cand.Version; cases = $v.cases })
+                }
+            }
+            if ($vers.Count -eq 0) { continue }
+            $doc.versions = $vers.ToArray()
+            $name = 'finalize-cases-' + [IO.Path]::GetFileNameWithoutExtension($src.f) + '.json'
+            [IO.File]::WriteAllText((Join-Path $Work $name), ($doc | ConvertTo-Json -Depth 12), (New-Object Text.UTF8Encoding($false)))
+            $rep = Join-Path $Work ('finalize-parity-' + [IO.Path]::GetFileNameWithoutExtension($src.f) + '.json')
+            $code = Invoke-Tool @('parity-cases', '--connection', $cs, '--in', (Join-Path $Work $name), '--out', $rep, '--texts', $texts)
+            $res = Get-Content -LiteralPath $rep -Raw -Encoding UTF8 | ConvertFrom-Json
+            if (@($res.mismatches).Count -gt 0) { Stop-Phase "parity mismatches in $($src.f): $(@($res.mismatches).Count)" @($res.mismatches | Select-Object -First 5) }
+            foreach ($x in @($res.versions)) {
+                $k = [int]$x.versionId; $vals = [int]$x.valuesCompared
+                if ($vals -le 0) { continue }
+                if (-not $proofs.ContainsKey($k) -or [int]$proofs[$k].Values -lt $vals) { $proofs[$k] = @{ Source = $src.s; Values = $vals; Mismatches = [int]$x.mismatchCount; Hash = [string]$x.scriptHash } }
+            }
+        }
+        # 4. Збережені результати: та сама версія на тих самих входах (екземпляр, з якого результат) дає ті самі числа (текст finalize).
+        $hist = Join-Path $Work 'finalize-history'
+        $code = Invoke-Tool @('p11242-evidence', 'history', '--connection', $cs, '--out', $hist, '--texts', $texts)
+        $sum = @(Import-Csv -LiteralPath (Join-Path $hist 'history-parity-summary.csv'))
+        $bad = @($sum | Where-Object { [int]$_.storedVsScriptMismatches -gt 0 -or [int]$_.oldVsScriptMismatches -gt 0 })
+        if ($bad.Count -gt 0) { Stop-Phase "stored results not reproduced by the finalize text: $(@($bad | ForEach-Object { "$($_.code) $($_.version) $($_.period)" }) -join '; ')" $null }
+        foreach ($g in @($sum | Group-Object versionId)) {
+            $k = [int]$g.Name; $vals = [int](($g.Group | Measure-Object storedValues -Sum).Sum)
+            if ($vals -le 0) { continue }
+            if (-not $proofs.ContainsKey($k) -or [int]$proofs[$k].Values -lt $vals) { $proofs[$k] = @{ Source = 'stored'; Values = $vals; Mismatches = 0; Hash = [string]$g.Group[0].scriptHash } }
+        }
+        $plan = Get-MsFinalizePlan -Candidates $cands.ToArray() -Proofs $proofs -Reason $Reason
+        [IO.File]::WriteAllText((Join-Path $Work 'finalize-request.json'), ($plan.Request | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
+        [IO.File]::WriteAllText((Join-Path $Work 'finalize-blocked.json'), (ConvertTo-Json @($plan.Blocked) -Depth 4), (New-Object Text.UTF8Encoding($false)))
+        Write-Phase "finalize plan: $(@($plan.Request.entries).Count) proven, blocked $(@($plan.Blocked).Count)" @{ blocked = @($plan.Blocked) }
+        if (@($plan.Blocked).Count -gt 0) { Stop-Phase "versions without proof: $(@($plan.Blocked | ForEach-Object { "$($_.Code) $($_.Version): $($_.Reason)" }) -join '; ')" $null }
+    }
+    'Finalize' {
+        $req = Join-Path $Work 'finalize-request.json'
+        if (-not (Test-Path -LiteralPath $req)) { Stop-Phase 'missing finalize-request.json (run FinalizeProve)' $null }
+        $body = [IO.File]::ReadAllText($req)
+        # Ідемпотентно: формульних версій уже немає (повтор стадії) — запиту немає, лише перевірка нижче.
+        $before = [int]@(Invoke-Sql 'SELECT COUNT(*) FROM calc.MethodologyVersion WHERE Engine = 0')[0]
+        if ($before -eq 0) { Write-Phase 'no formula versions: finalize already done' $null }
+        elseif ($CopyAsUser -gt 0) {
+            $code = Invoke-Tool @('finalize', '--connection', $cs, '--in', $req, '--as-user', $CopyAsUser, '--out', (Join-Path $Work 'finalize-result.json'))
+            if ($code -ne 0) { Stop-Phase "finalize refused (exit $code): nothing changed" $null }
+        } else {
+            Connect-Api
+            $r = Invoke-Api POST '/api/v1/methodologies/script-migration/finalize' $body
+            [IO.File]::WriteAllText((Join-Path $Work 'finalize-result.json'), $r.Content, (New-Object Text.UTF8Encoding($false)))
+            if ($r.StatusCode -ne 200) { Stop-Phase "finalize HTTP $($r.StatusCode): nothing changed" $r.Content }
+        }
+        $left = [int]@(Invoke-Sql 'SELECT COUNT(*) FROM calc.MethodologyVersion WHERE Engine = 0')[0]
+        $dangling = [int]@(Invoke-Sql "SELECT (SELECT COUNT(*) FROM calc.CalculationResult r WHERE NOT EXISTS (SELECT 1 FROM calc.MethodologyVersion v WHERE v.Id = r.MethodologyVersionId)) + (SELECT COUNT(*) FROM calc.SubmissionSnapshot s CROSS APPLY OPENJSON(s.MethodologyVersionsJson) j WHERE ISJSON(s.MethodologyVersionsJson) = 1 AND TRY_CAST(JSON_VALUE(j.value, '$.methodologyVersionId') AS int) IS NOT NULL AND NOT EXISTS (SELECT 1 FROM calc.MethodologyVersion v WHERE v.Id = TRY_CAST(JSON_VALUE(j.value, '$.methodologyVersionId') AS int)))")[0]
+        Write-Phase "finalize done: formula versions left $left, dangling result/snapshot links $dangling" @{ left = $left; dangling = $dangling }
+        if ($left -ne 0) { Stop-Phase "formula versions left: $left" $null }
+        if ($dangling -ne 0) { Stop-Phase "dangling links: $dangling" $null }
     }
     'Rollback' {
         $p = Join-Path $Work 'switch-result.json'

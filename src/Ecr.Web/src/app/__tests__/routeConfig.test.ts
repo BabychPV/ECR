@@ -82,8 +82,8 @@ describe('app/routes — реєстр маршрутів', () => {
     // Макет `docs/design/hybrid` (`kit.js` GROUPS, `order` у `screens-*.js`); пункти, яких у
     // макеті немає (кампанія, конвеєр, сповіщення), — у кінці своєї групи.
     expect(navGroups.map((group) => [group.id, group.routes.map((route) => route.path)])).toEqual([
-      // ✎ Projects (людина 08.11: «проджект перенеси в розділ work»): Documents, Projects, My groups, кампанія.
-      ['work', ['/', '/projects', '/my-groups', '/admin/campaign']],
+      // ✎ Projects (людина 08.11: «проджект перенеси в розділ work»): Documents, Projects, кампанія.
+      ['work', ['/', '/projects', '/admin/campaign']],
       [
         'configure',
         [
@@ -93,6 +93,7 @@ describe('app/routes — реєстр маршрутів', () => {
           '/admin/methodologies',
           '/admin/expressions',
           '/admin/units',
+          '/admin/gas-composition',
           '/admin/sources',
           '/admin/dependency-graph',
           '/admin/mapping',
@@ -101,12 +102,12 @@ describe('app/routes — реєстр маршрутів', () => {
         ],
       ],
       // ✎ Projects (08.11): «Periods» і «Project settings» стали одним «Projects» у групі Work.
-      ['access', ['/admin/security']],
+      // ✎ людина 25.11: «my groups перенеси в секюріті» — My groups у Access після Security.
+      ['access', ['/admin/security', '/my-groups']],
       [
         'operate',
         [
           '/admin/jobs',
-          '/admin/snapshots',
           '/admin/audit',
           '/admin/consistency',
           '/admin/ui-strings',
@@ -137,13 +138,13 @@ describe('app/routes — реєстр маршрутів', () => {
         '/admin/permits/nae',
         '/admin/methodologies',
         '/admin/units',
+        '/admin/gas-composition',
         '/admin/sources',
         '/admin/dependency-graph',
         '/admin/mapping',
         '/admin/pi-data',
         '/projects',
         '/admin/jobs',
-        '/admin/snapshots',
         '/admin/audit',
         '/admin/consistency',
         '/admin/ui-strings',

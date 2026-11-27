@@ -1,10 +1,11 @@
-﻿import { Suspense, createElement, lazy, type JSX } from 'react';
+import { Suspense, createElement, lazy, type JSX } from 'react';
 import { Loader, Center } from '@mantine/core';
 import { createBrowserRouter, Navigate, type RouteObject } from 'react-router-dom';
 import { AdminLayout } from './AdminLayout';
-import { LegacyProjectRedirect, ProjectTab } from './projectRoutes';
+import { LegacyProjectRedirect, LegacyProjectTabRedirect, ProjectTab } from './projectRoutes';
 import { AppLayout } from './AppLayout';
 import { HomeRoute } from './HomeRoute';
+import { RootErrorPage } from './RootErrorPage';
 import { RouteErrorPage } from './RouteErrorPage';
 import { RouteGuard } from './RouteGuard';
 import {
@@ -16,6 +17,7 @@ import {
   DocumentPage,
   DocumentsPage,
   ExpressionsPage,
+  GasCompositionPage,
   HealthPage,
   JobsPage,
   MappingPreviewPage,
@@ -32,7 +34,6 @@ import {
   RegistriesPage,
   RegistryConstructorPage,
   SecurityPage,
-  SnapshotsPage,
   SourcesPage,
   TableRelationsPage,
   TemplateVersionPage,
@@ -57,9 +58,8 @@ import { childPath, relativePath, routes, type RouteHandle } from './routes';
  * (`useRoutePrefetch.ts`) — одна фабрика `import()` на сторінку, а не дві
  * незалежні (по одній на "монтування" і на "прогрів"), які могли б розійтися.
  *
- * ⛔ Маршрутів `/reports/*` НЕМАЄ: звітність лишається в SSRS (D-52).
- * `/admin/snapshots` — не виняток із цього правила, а його межа: там
- * будують і бачать ЗРІЗ (`rpt.*`), який SSRS читає, а не сам звіт.
+ * ⛔ Маршрутів `/reports/*` НЕМАЄ: звітність лишається в SSRS (D-52) над сирим шаром `rpt.*`.
+ * ✎ P-1124-3 (D-NEW, людина 24.11): `/admin/snapshots` (зрізи звітів) прибрано повністю.
  */
 const LoginPage = lazy(async () => ({ default: (await import('@/pages/LoginPage')).LoginPage }));
 // ✎ b4b: 403/404 за макетом стали більшими (піктограма, «Did you mean», копіювання) —
@@ -274,7 +274,23 @@ const devRoutes = import.meta.env.DEV
     ]
   : [];
 
-export const router = createBrowserRouter([
+/**
+ * Межа помилки на КОЖНОМУ маршруті верхнього рівня (✎ 25.11) — останній рубіж під маршрутизатором.
+ *
+ * ⚠ Ловить те, що падає ВИЩЕ за `withRenderErrorBoundary`: сам каркас `AppLayout` (його лінивий шматок
+ * `IdleSignOut` після оновлення — live 25.11), сторінку входу, службові стенди. Без неї React Router малює
+ * власний розробницький екран («Unexpected Application Error! … Hey developer 👋»).
+ *
+ * ⚠ Функцією над усім масивом, а не рядком у кожному записі: новий маршрут верхнього рівня захищений за
+ * побудовою. Наявний `errorElement` не перезаписується.
+ */
+export function withRootErrorElement(routes: RouteObject[]): RouteObject[] {
+  return routes.map((route) => ('errorElement' in route && route.errorElement !== undefined
+    ? route
+    : { ...route, errorElement: <RootErrorPage /> }) as RouteObject);
+}
+
+export const router = createBrowserRouter(withRootErrorElement([
   ...devRoutes,
   { path: '/login', element: <Chunk><LoginPage /></Chunk> },
   {
@@ -317,7 +333,7 @@ export const router = createBrowserRouter([
         handle: routes.documentResults.handle,
       },
 
-      // ✎ Projects (макет 08.11): перелік проєктів і проєкт із вкладками Periods · Settings · Lifecycle.
+      // ✎ Projects (макет 08.11): перелік проєктів і проєкт із вкладками Periods · Templates · Lifecycle · General (✎ 24.11).
       {
         path: childPath(routes.projects),
         element: guarded(routes.projects.handle, <ProjectsPage />),
@@ -335,15 +351,22 @@ export const router = createBrowserRouter([
             handle: routes.projectPeriods.handle,
           },
           {
-            path: relativePath(routes.projectSettings, 'projects/:id'),
-            element: <ProjectTab tab="settings" />,
-            handle: routes.projectSettings.handle,
+            path: relativePath(routes.projectTemplates, 'projects/:id'),
+            element: <ProjectTab tab="templates" />,
+            handle: routes.projectTemplates.handle,
           },
           {
             path: relativePath(routes.projectLifecycle, 'projects/:id'),
             element: <ProjectTab tab="lifecycle" />,
             handle: routes.projectLifecycle.handle,
           },
+          {
+            path: relativePath(routes.projectGeneral, 'projects/:id'),
+            element: <ProjectTab tab="general" />,
+            handle: routes.projectGeneral.handle,
+          },
+          // ✎ 24.11: колишня вкладка Settings — закладки й посилання ведуть на Templates.
+          { path: 'settings', element: <LegacyProjectTabRedirect tab="templates" /> },
         ],
       },
 
@@ -550,7 +573,7 @@ export const router = createBrowserRouter([
            * крихт у них немає, як і в `/403`.
            */
           { path: 'periods', element: <LegacyProjectRedirect tab="periods" /> },
-          { path: 'projects', element: <LegacyProjectRedirect tab="settings" /> },
+          { path: 'projects', element: <LegacyProjectRedirect tab="templates" /> },
           {
             path: relativePath(routes.adminSources, 'admin'),
             element: guarded(routes.adminSources.handle, <SourcesPage />),
@@ -582,11 +605,6 @@ export const router = createBrowserRouter([
             handle: routes.adminJobs.handle,
           },
           {
-            path: relativePath(routes.adminSnapshots, 'admin'),
-            element: guarded(routes.adminSnapshots.handle, <SnapshotsPage />),
-            handle: routes.adminSnapshots.handle,
-          },
-          {
             path: relativePath(routes.adminCampaign, 'admin'),
             element: guarded(routes.adminCampaign.handle, <CampaignOverviewPage />),
             handle: routes.adminCampaign.handle,
@@ -600,6 +618,11 @@ export const router = createBrowserRouter([
             path: relativePath(routes.adminUnits, 'admin'),
             element: guarded(routes.adminUnits.handle, <UnitsPage />),
             handle: routes.adminUnits.handle,
+          },
+          {
+            path: relativePath(routes.adminGasComposition, 'admin'),
+            element: guarded(routes.adminGasComposition.handle, <GasCompositionPage />),
+            handle: routes.adminGasComposition.handle,
           },
           {
             path: relativePath(routes.adminConsistency, 'admin'),
@@ -654,4 +677,4 @@ export const router = createBrowserRouter([
       { path: '*', element: <NotFoundPage />, handle: { labelKey: 'nav.notFound.title' } },
     ]),
   },
-]);
+]));

@@ -3,23 +3,19 @@ using System.Text.Json;
 using Ecr.Application.Ports;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 
 namespace Ecr.Infrastructure.Jobs;
 
 /// <summary>
-/// Стан синку FLERT із журналу обслуговування (<c>itg.MaintenanceRun</c>, код <see cref="FlertCompositionSyncJob.Code"/>):
+/// Стан імпорту FLERT із журналу обслуговування (<c>itg.MaintenanceRun</c>, код <see cref="FlertCompositionSyncJob.Code"/>):
 /// останній прогін і підсумок із його <c>DetailsJson</c> (<see cref="FlertSyncOutcome.ToJson"/> або текст збою).
 /// </summary>
-/// <remarks>⚠ Відповідь мала (один рядок журналу, без переліку зауважень) — сторінка довідника читає її при кожному відкритті.</remarks>
-public sealed class FlertSyncStatusReader(EcrDbContext db, IConfiguration configuration) : IFlertSyncStatusReader
+/// <remarks>⚠ Відповідь мала (один рядок журналу, без переліку зауважень) — сторінка «Склад газу» читає її при кожному відкритті.</remarks>
+public sealed class FlertSyncStatusReader(EcrDbContext db) : IFlertSyncStatusReader
 {
     /// <inheritdoc />
     public async Task<FlertSyncStatusDto> ReadAsync(CancellationToken ct)
     {
-        var options = FlertCompositionSyncOptions.Read(configuration);
-        var codes = FlertRegistryCodes.Default;
-
         var run = await db.MaintenanceRuns
             .AsNoTracking()
             .Where(r => r.JobCode == FlertCompositionSyncJob.Code)
@@ -28,8 +24,6 @@ public sealed class FlertSyncStatusReader(EcrDbContext db, IConfiguration config
             .ConfigureAwait(false);
 
         return new FlertSyncStatusDto(
-            options.Enabled,
-            [codes.Stream, codes.Case, codes.Composition],
             run is null ? null : Map(run.StartedAt, run.FinishedAt, run.Status, run.DetailsJson));
     }
 

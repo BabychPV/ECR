@@ -31,6 +31,18 @@ public sealed class DataSourceConfiguration : IEntityTypeConfiguration<DataSourc
         builder.Property(x => x.MaxParallel).HasDefaultValue(4);
         builder.Property(x => x.IsActive).HasDefaultValue(true);
         builder.Property(x => x.RowVersion).IsRowVersion();
+
+        // P-1126-SRCCRED: облікові дані джерела. ⚠ AuthMode без HasDefaultValue у моделі (як D-212): умовчання
+        // Windows = 0 = CLR-умовчання, EF кладе DEFAULT 0 в AddColumn сам — наявні рядки стають Windows без UPDATE.
+        builder.Property(x => x.AuthMode).HasColumnType("tinyint");
+        builder.Property(x => x.UserName).HasMaxLength(DataSource.UserNameMaxLength);
+        builder.Property(x => x.PasswordProtected).HasColumnType("varbinary(max)");
+        builder.Property(x => x.CredentialsRejectedAt).HasColumnType("datetime2(3)");
+        builder.Ignore(x => x.HasPassword);
+
+        // ⛔ Лише в пам'яті прогону (L2): мітка в базі — тільки через IDataSourceCredentialRejections з умовою на версію.
+        builder.Ignore(x => x.CredentialsRejectedInProcess);
+        builder.Ignore(x => x.CredentialsBlocked);
         builder.HasIndex(x => x.Code).IsUnique().HasDatabaseName("UQ_DataSource");
     }
 }
@@ -218,23 +230,6 @@ public sealed class RawDataPointConfiguration : IEntityTypeConfiguration<RawData
                .HasConstraintName("FK_RDP_Entity");
         builder.HasOne<Unit>().WithMany().HasForeignKey(x => x.UnitId)
                .HasConstraintName("FK_RDP_Unit");
-    }
-}
-
-/// <summary>Конфігурація <see cref="ConsistencyRule"/>.</summary>
-public sealed class ConsistencyRuleConfiguration : IEntityTypeConfiguration<ConsistencyRule>
-{
-    /// <inheritdoc />
-    public void Configure(EntityTypeBuilder<ConsistencyRule> builder)
-    {
-        ArgumentNullException.ThrowIfNull(builder);
-
-        builder.ToTable("ConsistencyRule", "ext");
-        builder.HasKey(x => x.Id);
-        builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
-        builder.Property(x => x.Expression).HasMaxLength(2000).IsRequired();
-        builder.Property(x => x.IsActive).HasDefaultValue(true);
-        builder.HasIndex(x => x.Code).IsUnique().HasDatabaseName("UQ_ConsistencyRule");
     }
 }
 

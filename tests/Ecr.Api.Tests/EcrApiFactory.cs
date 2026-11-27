@@ -157,6 +157,11 @@ public sealed class EcrApiFactory(
         builder.UseSetting(Ecr.Infrastructure.Jobs.EditPathWarmer.EnabledKey, "false");
         builder.UseSetting(Ecr.Infrastructure.Jobs.FirstEditWarmer.EnabledKey, "false");
 
+        // ✎ P-1124-1: у продукті формульний авторинг вимкнено, але сотні сценаріїв розрахунку будують методологію
+        // формулами як найкоротшу заготовку рантайму — для них ключ увімкнено. Продуктову відмову доводить
+        // `FormulaEngineAuthoringApiTests` (той самий хост із вимкненим ключем).
+        builder.UseSetting(Ecr.Application.Calculations.FormulaEngineAuthoring.EnabledKey, "true");
+
         // ⛔ Наздоганяння нічних задач (`NightlyCatchUp`) — вимкнено: журнал обслуговування спільної бази колекції пишуть
         // інші тести старими годинниками, і кожен старт хоста ставив би справжні нічні задачі проти чужих даних — той
         // самий клас, що й cron-вето нижче (`RecurringTriggerVeto`).

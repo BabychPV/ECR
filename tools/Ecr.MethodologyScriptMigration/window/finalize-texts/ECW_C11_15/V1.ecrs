@@ -1,0 +1,25 @@
+// Methodology ECW_C11_15, version V1
+// Effective from 2024-01-01
+// P-1124-2: V1 has NO row rules, so the old engine selected no row and computed nothing. The script keeps V1's outputs and
+// arithmetic (identical to V2, which only added the rule) and selects no row: no NAE code equals the text below.
+
+rows from T9a_21a
+    where row.IDCodeNAEProject == "P-1124-2: V1 has no row rules"
+    active when row.Status == entry("LAND_GENERIC_EQUIPSTATUS", "RUNNING");
+
+const a_ECW_C11_15_ : one = 300;
+const b_ECW_C11_15_ : one = 110;
+const v_ECW_C11_15_ : one = 3.5;
+const C_ECW_C11_15_ : one = 0.013;
+const k_ECW_C11_15_ : one = 0.001;
+const k4_ECW_C11_15_ : one = 1000;
+const H2S_ECW_C11_15_ : one = 3;
+const k3_ECW_C11_15_ : one = 24;
+const k2_ECW_C11_15_ : one = 3600;
+const k5_ECW_C11_15_ : one = 1000000;
+const k1_ECW_C11_15_ : one = 1000000000.0000000000000000;
+
+output ECW_EC_gsec_331 : g_per_s = row.Land_Measure_DurationSulfurPlacement == 0 ? 0 : a_ECW_C11_15_ * b_ECW_C11_15_ * row.Land_Measure_NumberFilledSulfurBlocks * v_ECW_C11_15_ * C_ECW_C11_15_ * k_ECW_C11_15_ / k4_ECW_C11_15_;
+output ECW_EC_gsec_333 : g_per_s = row.Land_Measure_DurationSulfurPlacement == 0 ? 0 : H2S_ECW_C11_15_ * k4_ECW_C11_15_ / (k3_ECW_C11_15_ * k2_ECW_C11_15_) * row.Land_Measure_AmountSulfurPlacement / k5_ECW_C11_15_ * k_ECW_C11_15_;
+output ECW_EC_tons_331 : t = a_ECW_C11_15_ * b_ECW_C11_15_ * row.Land_Measure_NumberFilledSulfurBlocks * v_ECW_C11_15_ * C_ECW_C11_15_ * k_ECW_C11_15_ / k1_ECW_C11_15_ * k2_ECW_C11_15_ * k3_ECW_C11_15_ * row.Land_Measure_DurationSulfurPlacement;
+output ECW_EC_tons_333 : t = H2S_ECW_C11_15_ / k4_ECW_C11_15_ * row.Land_Measure_AmountSulfurPlacement / k5_ECW_C11_15_ * k_ECW_C11_15_ * row.Land_Measure_DurationSulfurPlacement;

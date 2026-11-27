@@ -5,8 +5,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
-import { isExternalRegistry, isFlertMirrorCode } from '@/features/registries/externalRegistry';
-import { FlertSyncPanel } from '@/features/registries/flert/FlertSyncPanel';
+import { isExternalRegistry, isGasCompositionRegistryCode } from '@/features/registries/externalRegistry';
 import { RegistryExportButton } from '@/features/registries/export/RegistryExportButton';
 import { saveBatch, type RegistryBatchResult, type RegistryRow } from '@/features/registries/rows/api';
 import { formatDateOnly, formatTime, parseDateOnly, todayDateOnly } from '@/shared/format';
@@ -78,10 +77,10 @@ export function RegistryDataPage(): JSX.Element {
   const session = useSession();
   const list = useRegistryList();
   const registry = list.data?.find((r) => r.code === code);
-  // P3 F13 #841: дзеркало FLERT до першого синку не існує — спершу перелік, і лише якщо довідник у ньому є, опис.
-  // Інакше кожне відкриття давало `404` у консолі браузера на запиті, відповідь якого відома наперед.
-  const mirrorCode = isFlertMirrorCode(code);
-  const definition = useRegistryDefinition(code, !mirrorCode || (list.isSuccess && registry !== undefined));
+  // P3 F13 #841: довідники складу газу до імпорту чи першого потоку не існують — спершу перелік, і лише якщо довідник у ньому є,
+  // опис. Інакше кожне відкриття давало `404` у консолі браузера на запиті, відповідь якого відома наперед.
+  const gasCode = isGasCompositionRegistryCode(code);
+  const definition = useRegistryDefinition(code, !gasCode || (list.isSuccess && registry !== undefined));
   const temporal = definition.data?.isTemporal ?? registry?.isTemporal ?? false;
 
   const [asOfParam, setAsOf] = useUrlState('asOf');
@@ -112,16 +111,14 @@ export function RegistryDataPage(): JSX.Element {
   // бачить права цілі: без цієї умови сітка правилась би, а кожне збереження й жива перевірка
   // `dryRun` (теж POST) падали б 403 (L9-18; так само, як `SheetActions` у сітці документа).
   const simulation = session.data?.isSimulation === true;
-  // D-476 (AU F13 #827): дзеркала FLERT (`STREAM`, `STREAM_CASE`, `GAS_COMPOSITION`) заводить перший увімкнений синк.
-  // До нього довідника немає — це очікуваний стан, а не помилка: нейтральний текст замість червоного «не знайдено»
-  // і жодного «New entry» (ECR тримає лише копію, master — FLERT).
+  // D-NEW (людина 24.11): довідники складу газу (`STREAM`, `STREAM_CASE`, `GAS_COMPOSITION`) пише лише сторінка «Склад газу»
+  // (шкала версій, замкнені періоди, Σ) — тут вони лише для читання, з посиланням туди. До імпорту з FLERT чи першого потоку
+  // довідника немає — це очікуваний стан, а не помилка: нейтральний текст замість червоного «не знайдено» і жодного «New entry».
   const definitionMissing = definition.error instanceof EcrApiError && definition.error.problem.status === 404;
-  const mirrorNotSynced = mirrorCode && ((list.isSuccess && registry === undefined) || definitionMissing);
-  // P3 F13 #841 (d): з нейтральної сторінки — посилання на конструктор довідників, якщо людині він відкритий
-  // (те саме право, що `mayView` у `RegistryConstructorPage`).
-  const canDesign = can(session.data, 'Registry.EditDefinition');
+  const gasMissing = gasCode && ((list.isSuccess && registry === undefined) || definitionMissing);
+  const canOpenGas = can(session.data, 'GasComposition.View');
   const readOnly =
-    simulation || !can(session.data, 'Registry.EditData') || isExternalRegistry(registry) || mirrorNotSynced;
+    simulation || !can(session.data, 'Registry.EditData') || isExternalRegistry(registry) || gasCode;
   const manualCode = definition.data?.codeMode !== 'Auto';
 
   const gridRows = useMemo<GridRow[]>(
@@ -356,10 +353,10 @@ export function RegistryDataPage(): JSX.Element {
       <PageHeader
         title={name}
         badge={name === code ? undefined : <Text size="sm" ff="monospace" c="dimmed">{code}</Text>}
-        count={mirrorNotSynced ? undefined : totalCount}
+        count={gasMissing || (gasCode && registry === undefined) ? undefined : totalCount}
         back={{ label: t('registries.data.back'), href: `/admin/registries?code=${encodeURIComponent(code)}` }}
         secondary={
-          mirrorNotSynced
+          gasMissing
             ? []
             : [{ label: t('registries.constructor'), href: `/admin/registries/${encodeURIComponent(code)}/definition` }]
         }
@@ -374,10 +371,27 @@ export function RegistryDataPage(): JSX.Element {
         }
       />
 
-      {/* D-476 F3: дзеркало FLERT — стан синку і «Синхронізувати зараз» (сам ховається на інших довідниках). */}
-      <FlertSyncPanel registryCode={code} />
+      {gasCode && (
+        <Banner
+          tone="info"
+          testId="gas-composition-managed"
+          text={
+            <span>
+              {t('gasComposition.registryManaged')}
+              {canOpenGas && (
+                <>
+                  {' '}
+                  <Anchor component={Link} to="/admin/gas-composition" data-testid="gas-composition-link">
+                    {t('gasComposition.open')}
+                  </Anchor>
+                </>
+              )}
+            </span>
+          }
+        />
+      )}
 
-      {readOnly && registry !== undefined && (
+      {readOnly && !gasCode && registry !== undefined && (
         <Banner
           tone="info"
           text={
@@ -397,24 +411,9 @@ export function RegistryDataPage(): JSX.Element {
         />
       )}
 
-      {mirrorNotSynced ? (
-        <Banner
-          tone="info"
-          testId="flert-mirror-pending"
-          text={
-            <span>
-              {t('flert.mirror.pending')}
-              {canDesign && (
-                <>
-                  {' '}
-                  <Anchor component={Link} to="/admin/registries" data-testid="flert-mirror-designer">
-                    {t('registries.constructor')}
-                  </Anchor>
-                </>
-              )}
-            </span>
-          }
-        />
+      {gasMissing ? (
+        // Довідника складу газу ще немає: смуга «керується сторінкою Склад газу» вище вже пояснює, що робити.
+        null
       ) : (
         <>
           <Group gap="sm" align="end" justify="space-between">

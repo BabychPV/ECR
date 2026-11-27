@@ -2,7 +2,6 @@ using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
-using Ecr.Application.Reporting;
 using Ecr.Application.Security;
 using Ecr.Application.Workflow;
 using Ecr.Domain.Abstractions;
@@ -243,6 +242,12 @@ public sealed class ServiceAccountLeastPrivilegeTests(ServiceAccountLeastPrivile
         {
             superseded = await PurgeKit.AddRunAsync(admin, stand, "Superseded", Now);
             await PurgeKit.InsertRowsAsync(admin, stand, superseded, 3, 2, 2, "S");
+
+            // ✎ P-1124: проблема розрахунку прибраного прогону зникає разом із ним (нічна задача, FK_CIssue_Run).
+            admin.CalculationIssues.Add(new Ecr.Domain.Entities.Calculations.CalculationIssue(
+                stand.Document.DocumentId, stand.Period, stand.Document.TableDefId, null, "R-1", 1, stand.MethodologyId,
+                superseded, Now));
+            await admin.SaveChangesAsync();
         }
 
         var recovery = await database.AdminScalarAsync<string>(
@@ -270,6 +275,8 @@ public sealed class ServiceAccountLeastPrivilegeTests(ServiceAccountLeastPrivile
         Assert.Equal(string.Equals(recovery, "SIMPLE", StringComparison.OrdinalIgnoreCase), outcome.CheckpointSkipped);
         Assert.Equal(0, await database.AdminScalarAsync<int>(
             $"SELECT COUNT(*) FROM calc.CalculationRun WHERE Id = {superseded}"));
+        Assert.Equal(0, await database.AdminScalarAsync<int>(
+            $"SELECT COUNT(*) FROM calc.CalculationIssue WHERE CalculationRunId = {superseded}"));
     }
 
     /// <summary>
@@ -461,10 +468,6 @@ public sealed class ServiceAccountLeastPrivilegeTests(ServiceAccountLeastPrivile
         access.CurrentApprovalStepAsync(doc.DocumentId, doc.SheetDefId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
               .Returns((ApprovalStepView?)null);
 
-        var snapshots = Substitute.For<IReportSnapshotBuilder>();
-        snapshots.ListAsync(Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
-                 .Returns<IReadOnlyList<ReportSnapshotSummary>>([]);
-
         var methodologies = Substitute.For<IMethodologyStore>();
         methodologies.GetCalculationFreshnessAsync(
                          Arg.Any<long>(), Arg.Any<int>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
@@ -474,8 +477,7 @@ public sealed class ServiceAccountLeastPrivilegeTests(ServiceAccountLeastPrivile
             new NormalizedCellStore(db), new RowStore(db, bulk, clock), new WorkflowStore(db), documents,
             Metadata(doc), access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-            Headers(), new ReportSnapshotSync(snapshots, documents),
-            new UnitOfWork(db), User(), clock, new SheetEditGate(db),
+            Headers(), new UnitOfWork(db), User(), clock, new SheetEditGate(db),
             Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
             methodologies, new TemplateVersionStore(db), new RegistryStore(db), new AuditWriter(db));
     }

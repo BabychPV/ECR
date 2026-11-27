@@ -113,7 +113,7 @@ public sealed record DialectSyntax(
             // ⚠ Діалект звітів — граматика ШАБЛОНІВ (кома, `^` — степінь): чужого
             // рушія, який треба відтворювати, у нього немає. Режим імпорту до
             // нього не застосовний: голе ім'я лишається помилкою.
-            ExpressionDialect.Template or ExpressionDialect.Report => TemplateSyntax,
+            ExpressionDialect.Template => TemplateSyntax,
             _ => mode == ExpressionParseMode.Import ? MethodologyImportSyntax : MethodologySyntax,
         };
 }

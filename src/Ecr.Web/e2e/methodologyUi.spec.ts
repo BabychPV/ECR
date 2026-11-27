@@ -1,24 +1,22 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
-import { ForbiddenExamples, SyntaxExamples } from '../src/features/methodologies/formulaSyntax';
+import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { axeViolations } from './axeRule';
 
 /**
- * Сторінка версії методології (lane/integ-methodology-ui) на живому стенді:
- *   1. довідка синтаксису в діалозі формули відкривається кнопкою (і клавіатурою), не перекриває
- *      редактор і пояснює `@`, `CST.`, `!`, `HDR.`, `[Period]`; кожен приклад довідки СПРАВЖНІЙ
- *      розбір сервера приймає, кожен заборонений — відхиляє зі своєю причиною
- *      (`POST /api/v1/expressions/validate`, діалект `Methodology`);
- *   2. матриця покриття: межі — два PeriodPicker; нова межа йде в запит, перевернуте вікно й
- *      очищене поле — відмова без запиту;
- *   3. секції згортаються мишею й клавіатурою, `aria-expanded` і вибір переживають перезавантаження;
- *   4. справжній axe `color-contrast` у світлій і темній темі на 1440 і 500 px, без горизонтальної
- *      прокрутки на 500 px; знімки в `ECR_E2E_SHOTS_DIR`.
+ * Сторінка методології на живому стенді — ✎ 24.11, рішення людини: «має бути тільки наш новий редактор».
+ *   1. сторінка відкривається на ПОТОЧНІЙ версії-скрипті: картка з переходом у редактор скрипта; жодної панелі
+ *      формульного рушія (формули, константи, виходи, правила, правило категорії, золотий набір, покриття правил);
+ *   2. «New version» — без вибору рушія, джерело копії — лише скрипти; створена версія — скрипт, і сторінка веде в
+ *      редактор скрипта;
+ *   3. методологічні секції (прив'язки, трасування, журнал публікацій) згортаються мишею й клавіатурою, вибір
+ *      переживає перезавантаження;
+ *   4. справжній axe `color-contrast` у світлій і темній темі на 1440 і 500 px, без горизонтальної прокрутки на 500 px;
+ *      знімки в `ECR_E2E_SHOTS_DIR`.
  *
- * ⚠ Дані — свої: методологія `E2E_MUI_<час>` і чернетка. `afterAll` видаляє чернетку
- * (`DELETE …/versions/{id}`) і повертає тему `e2e-admin` до світлої; саму методологію API не
- * видаляє — порожній залишок на одноразовому стенді (як `resizableModal.spec.ts`).
+ * ⚠ Дані — свої: методологія `E2E_MUI_<час>` і чернетки-скрипти. `afterAll` видаляє чернетки
+ * (`DELETE …/versions/{id}`) і повертає тему `e2e-admin` до світлої; саму методологію API не видаляє — порожній
+ * залишок на одноразовому стенді (як `resizableModal.spec.ts`).
  *
  * Запуск (стенд — `tools/e2e-stand.ps1`): `npx playwright test -g "Methodology page UI"`.
  */
@@ -26,18 +24,15 @@ const Admin = { userName: 'e2e-admin', password: 'E2E-Adm1n-Work-2026!' };
 const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';
 const ShotsDir = process.env['ECR_E2E_SHOTS_DIR'] ?? '';
 
+/** Секції формульного рушія, яких на сторінці бути не може. */
+const FormulaSections = ['formulas', 'constants', 'outputs', 'rules', 'categoryRule', 'requiredInputs', 'tests', 'ruleCoverage', 'outputCoverage'];
+
 interface Seed {
   readonly methodologyId: number;
   readonly versionId: number;
 }
 
 let seed: Seed | null = null;
-
-interface Diagnostic {
-  readonly code: string;
-  readonly message: string;
-  readonly messageKey?: string | null;
-}
 
 async function signedIn(browser: Browser): Promise<BrowserContext> {
   const context = await browser.newContext();
@@ -69,19 +64,13 @@ async function signIn(page: Page, scheme: 'light' | 'dark'): Promise<void> {
 }
 
 const pageUrl = (data: Seed): string => `/admin/methodologies/${String(data.methodologyId)}/versions`;
+const scriptUrl = (methodologyId: number, versionId: number): string =>
+  `/admin/methodologies/${String(methodologyId)}/versions/${String(versionId)}/script`;
 
 async function openPage(page: Page, data: Seed): Promise<void> {
   await page.goto(pageUrl(data));
-  await expect(page.getByTestId('methodology-section-toggle-formulas')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('methodology-section-toggle-ruleCoverage')).toBeVisible({ timeout: 30_000 });
-}
-
-async function openFormula(page: Page): Promise<Locator> {
-  await page.getByRole('button', { name: /Add formula/i }).click();
-  const dialog = page.getByRole('dialog', { name: /Formula/i });
-  await expect(dialog).toBeVisible({ timeout: 10_000 });
-  await expect(dialog.locator('.monaco-editor')).toBeVisible({ timeout: 60_000 });
-  return dialog;
+  await expect(page.getByTestId('current-script-version')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('methodology-section-toggle-bindings')).toBeVisible({ timeout: 30_000 });
 }
 
 async function shot(page: Page, testInfo: { attach: (n: string, o: { body: Buffer; contentType: string }) => Promise<void> }, name: string): Promise<void> {
@@ -93,7 +82,7 @@ async function shot(page: Page, testInfo: { attach: (n: string, o: { body: Buffe
   }
 }
 
-test.describe('Methodology page UI: syntax help, rule coverage periods, collapsible sections', () => {
+test.describe('Methodology page UI: script versions only, new version is a script, collapsible sections', () => {
   test.describe.configure({ timeout: 240_000, mode: 'serial' });
 
   test.beforeAll(async ({ browser }) => {
@@ -109,9 +98,9 @@ test.describe('Methodology page UI: syntax help, rule coverage periods, collapsi
       const methodologyId = ((await created.json()) as { id: number }).id;
 
       const draft = await admin.request.post(`/api/v1/methodologies/${String(methodologyId)}/versions`, {
-        data: { versionNumber: '1.0', copyFromVersionId: null, level: 'Configuration' },
+        data: { versionNumber: '1.0', copyFromVersionId: null, level: 'Configuration', engine: 'Script' },
       });
-      expect(draft.ok(), `чернетка: ${await draft.text()}`).toBe(true);
+      expect(draft.ok(), `чернетка-скрипт: ${await draft.text()}`).toBe(true);
       const versionId = ((await draft.json()) as { id: number }).id;
 
       seed = { methodologyId, versionId };
@@ -125,115 +114,120 @@ test.describe('Methodology page UI: syntax help, rule coverage periods, collapsi
     try {
       await admin.request.put('/api/v1/me/preferences/theme', { headers: { 'Content-Type': 'application/json' }, data: JSON.stringify('light') });
       if (seed !== null) {
-        const removed = await admin.request.delete(`/api/v1/methodologies/${String(seed.methodologyId)}/versions/${String(seed.versionId)}`);
-        expect([200, 204, 404], `видалення чернетки: ${String(removed.status())}`).toContain(removed.status());
+        const listed = await admin.request.get(`/api/v1/methodologies/${String(seed.methodologyId)}/versions`);
+        const drafts = listed.ok()
+          ? ((await listed.json()) as { id: number; status: string }[]).filter((item) => item.status === 'Draft')
+          : [{ id: seed.versionId, status: 'Draft' }];
+        for (const item of drafts) {
+          const removed = await admin.request.delete(`/api/v1/methodologies/${String(seed.methodologyId)}/versions/${String(item.id)}`);
+          expect([200, 204, 404], `видалення чернетки ${String(item.id)}: ${String(removed.status())}`).toContain(removed.status());
+        }
       }
     } finally {
       await admin.close();
     }
   });
 
-  test('help examples: the real parser accepts every example and rejects every forbidden one', async ({ browser }) => {
+  test('opens on the current script version; no formula-engine panels', async ({ page }) => {
+    const data = seed!;
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page, 'light');
+    await openPage(page, data);
+
+    const card = page.getByTestId('current-script-version');
+    await expect(card).toContainText('1.0');
+    await expect(card.getByRole('link', { name: 'Open script editor' })).toHaveAttribute(
+      'href',
+      scriptUrl(data.methodologyId, data.versionId),
+    );
+
+    // Робоча таблиця — лише скрипти, «Open» — посилання в редактор скрипта.
+    const table = page.getByTestId('script-versions');
+    await expect(table.getByRole('link', { name: 'Open', exact: true })).toHaveAttribute(
+      'href',
+      scriptUrl(data.methodologyId, data.versionId),
+    );
+
+    // Режими поточної версії — на сторінці (скрипт їх читає).
+    await expect(page.getByTestId('methodology-section-toggle-modes')).toBeVisible();
+
+    for (const section of FormulaSections) {
+      await expect(page.getByTestId(`methodology-section-toggle-${section}`), `секція ${section}`).toHaveCount(0);
+    }
+    await expect(page.getByRole('button', { name: /Add formula|Add constant|Add rule|Add output/i })).toHaveCount(0);
+    await expect(page.locator('.monaco-editor')).toHaveCount(0);
+
+    // Перехід із картки — у редактор скрипта.
+    await card.getByRole('link', { name: 'Open script editor' }).click();
+    await page.waitForURL((url) => url.pathname === scriptUrl(data.methodologyId, data.versionId), { timeout: 30_000 });
+    await expect(page.getByTestId('script-editor')).toBeVisible({ timeout: 60_000 });
+  });
+
+  test('"New version": no engine choice, copy from lists only script versions, the created version opens in the script editor', async ({ page }) => {
+    const data = seed!;
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page, 'light');
+    await openPage(page, data);
+
+    await page.getByRole('button', { name: 'New version', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'New draft version' });
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByRole('radiogroup')).toHaveCount(0);
+    await expect(dialog.getByText(/^Formulas$/)).toHaveCount(0);
+
+    await dialog.getByRole('textbox', { name: 'Copy from' }).click();
+    const options = page.getByRole('option');
+    await expect(options).toHaveCount(1);
+    await expect(options.first()).toContainText('1.0');
+    await page.keyboard.press('Escape');
+
+    await dialog.getByLabel('Version number').fill('2.0');
+    const created = page.waitForResponse(
+      (r) => r.request().method() === 'POST' && r.url().endsWith(`/api/v1/methodologies/${String(data.methodologyId)}/versions`),
+    );
+    await dialog.getByRole('button', { name: 'Create draft' }).click();
+    const response = await created;
+    expect(response.ok(), `створення версії: ${String(response.status())}`).toBe(true);
+    const body = JSON.parse(response.request().postData() ?? '{}') as { engine?: string };
+    expect(body.engine).toBe('Script');
+    const version = (await response.json()) as { id: number; engine?: string };
+    expect(version.engine).toBe('Script');
+
+    await page.waitForURL((url) => url.pathname === scriptUrl(data.methodologyId, version.id), { timeout: 30_000 });
+    await expect(page.getByTestId('script-editor')).toBeVisible({ timeout: 60_000 });
+  });
+
+  test('a methodology with only a formula-engine version shows "being moved", no editor and no version row', async ({ page, browser }) => {
+    // ⚠ Формульну версію заводить API лише з увімкненим формульним авторингом — стенд e2e його вмикає
+    // (`tools/e2e-stand.ps1`, P-1124-1); у продукті — вимкнено, і така методологія буває лише до вікна P-1124-2.
     const admin = await signedIn(browser);
+    let methodologyId = 0;
+    let versionId = 0;
     try {
-      const validate = async (expression: string): Promise<Diagnostic[]> => {
-        const response = await admin.request.post('/api/v1/expressions/validate', {
-          data: { expression, dialect: 'Methodology', templateVersionId: null, tableDefId: null, rowKey: null, columnDefId: null },
-        });
-        expect(response.ok(), `validate «${expression}»: ${String(response.status())} ${await response.text()}`).toBe(true);
-        return ((await response.json()) as { diagnostics: Diagnostic[] }).diagnostics;
-      };
+      const stamp = String(Date.now());
+      const created = await admin.request.post('/api/v1/methodologies', {
+        data: { code: `E2E_MUF_${stamp}`, group: null, kind: 'DataDriven', nameL10n: { en: `E2E formulas only ${stamp}` } },
+      });
+      expect(created.ok(), `методологія: ${await created.text()}`).toBe(true);
+      methodologyId = ((await created.json()) as { id: number }).id;
+      const draft = await admin.request.post(`/api/v1/methodologies/${String(methodologyId)}/versions`, {
+        data: { versionNumber: 'F1', copyFromVersionId: null, level: 'Configuration', engine: 'Formulas' },
+      });
+      expect(draft.ok(), `формульна чернетка: ${await draft.text()}`).toBe(true);
+      versionId = ((await draft.json()) as { id: number }).id;
 
-      for (const example of SyntaxExamples) {
-        const diagnostics = await validate(example.code);
-        expect(diagnostics, `приклад ${example.id} «${example.code}»: ${JSON.stringify(diagnostics)}`).toEqual([]);
-      }
-
-      const expectedKey: Record<string, string> = {
-        caret: 'expr.caretNotPower',
-        ampersand: 'expr.ampersandNotConcat',
-        bareName: 'expr.bareNameNeedsAt',
-        cellRef: 'expr.cellReferencesForbiddenInMethodology',
-        caseSensitive: 'expr.unknownFunctionCase',
-      };
-      for (const example of ForbiddenExamples) {
-        const diagnostics = await validate(example.code);
-        expect(
-          diagnostics.map((d) => d.messageKey),
-          `заборонений ${example.id} «${example.code}»: ${JSON.stringify(diagnostics)}`,
-        ).toContain(expectedKey[example.id]);
-      }
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await signIn(page, 'light');
+      await page.goto(pageUrl({ methodologyId, versionId }));
+      await expect(page.getByTestId('methodology-converting')).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId('current-script-version')).toHaveCount(0);
+      await expect(page.getByTestId('script-versions')).toHaveCount(0);
+      await expect(page.getByText('F1', { exact: true })).toHaveCount(0);
+      await expect(page.locator('.monaco-editor')).toHaveCount(0);
     } finally {
+      if (versionId !== 0) await admin.request.delete(`/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}`);
       await admin.close();
     }
-  });
-
-  test('syntax help opens with mouse and keyboard, shows the tokens and does not cover the editor', async ({ page }) => {
-    const data = seed!;
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await signIn(page, 'light');
-    await openPage(page, data);
-    const dialog = await openFormula(page);
-
-    const toggle = dialog.getByTestId('syntax-help-toggle');
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await expect(dialog.getByTestId('syntax-help')).toBeHidden();
-
-    await toggle.focus();
-    await page.keyboard.press('Enter');
-    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    const help = dialog.getByTestId('syntax-help');
-    await expect(help).toBeVisible();
-    for (const token of ['@Name', 'CST.Name', '!Name', 'HDR.Name', '[Period].Days']) {
-      await expect(help.locator(`[data-syntax-token="${token}"]`), token).toBeVisible();
-    }
-    await expect(help.getByTestId('syntax-help-functions').locator('[data-function="Pow"]')).toBeVisible({ timeout: 15_000 });
-    await expect(help.locator('[data-example]')).toHaveCount(SyntaxExamples.length);
-
-    // Панель — під редактором, а не поверх нього: прямокутники не перетинаються.
-    const editor = await dialog.locator('.monaco-editor').boundingBox();
-    const panel = await help.boundingBox();
-    expect(editor).not.toBeNull();
-    expect(panel).not.toBeNull();
-    expect(panel!.y, 'довідка нижче за редактор').toBeGreaterThanOrEqual(editor!.y + editor!.height - 1);
-
-    await page.keyboard.press('Space');
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await expect(help).toBeHidden();
-  });
-
-  test('rule coverage: two period pickers; a new bound filters, reversed and empty windows are refused without a request', async ({ page }) => {
-    const data = seed!;
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await signIn(page, 'light');
-    await openPage(page, data);
-
-    const section = page.locator('[data-section="ruleCoverage"]');
-    const filters = section.getByTestId('rule-coverage-filters');
-    await expect(filters.locator('.ecr-period')).toHaveCount(2);
-
-    const year = new Date().getFullYear();
-    const narrowed = String(year * 100 + 3);
-    const request = page.waitForRequest((r) => r.url().includes('/rule-coverage') && r.url().includes(`periodFrom=${narrowed}`));
-    const from = section.getByLabel('Period from');
-    await from.click();
-    await from.fill(narrowed);
-    await request;
-    await page.keyboard.press('Enter');
-
-    // Перевернуте вікно: нижня межа пізніше за верхню — відмова, запиту немає.
-    let sent = 0;
-    page.on('request', (r) => {
-      if (r.url().includes('/rule-coverage')) sent += 1;
-    });
-    const to = section.getByLabel('Period to');
-    await to.click();
-    await to.fill(String((year - 2) * 100 + 12));
-    await expect(section.getByTestId('rule-coverage-window')).toContainText(/empty/i);
-
-    await to.fill('');
-    await expect(section.getByTestId('rule-coverage-window')).toContainText(/both periods/i);
-    expect(sent, 'жодного запиту на відхилене вікно').toBe(0);
   });
 
   test('sections collapse with mouse and keyboard; aria-expanded and the choice survive a reload', async ({ page }) => {
@@ -242,41 +236,41 @@ test.describe('Methodology page UI: syntax help, rule coverage periods, collapsi
     await signIn(page, 'light');
     await openPage(page, data);
 
-    const constants = page.getByTestId('methodology-section-toggle-constants');
-    await expect(constants).toHaveAttribute('aria-expanded', 'true');
-    const bodyId = await constants.getAttribute('aria-controls');
+    const bindings = page.getByTestId('methodology-section-toggle-bindings');
+    await expect(bindings).toHaveAttribute('aria-expanded', 'true');
+    const bodyId = await bindings.getAttribute('aria-controls');
     expect(bodyId).not.toBeNull();
     await expect(page.locator(`[id="${bodyId!}"]`)).toBeVisible();
 
-    await constants.click();
-    await expect(constants).toHaveAttribute('aria-expanded', 'false');
+    await bindings.click();
+    await expect(bindings).toHaveAttribute('aria-expanded', 'false');
     await expect(page.locator(`[id="${bodyId!}"]`)).toBeHidden();
 
     // Клавіатура: Enter на кнопці в заголовку розгортає назад.
-    await constants.focus();
+    await bindings.focus();
     await page.keyboard.press('Enter');
-    await expect(constants).toHaveAttribute('aria-expanded', 'true');
+    await expect(bindings).toHaveAttribute('aria-expanded', 'true');
 
-    // Згорнути «Rules» і перезавантажити — вибір пам'ятається.
-    const rules = page.getByTestId('methodology-section-toggle-rules');
-    await rules.focus();
+    // «Трасування» згорнуте за замовчуванням (`defaultExpanded={false}`): пробіл розгортає, вибір переживає
+    // перезавантаження.
+    const trace = page.getByTestId('methodology-section-toggle-traceSteps');
+    await expect(trace).toHaveAttribute('aria-expanded', 'false');
+    await trace.focus();
     await page.keyboard.press('Space');
-    await expect(rules).toHaveAttribute('aria-expanded', 'false');
+    await expect(trace).toHaveAttribute('aria-expanded', 'true');
     await page.reload();
-    await expect(page.getByTestId('methodology-section-toggle-rules')).toHaveAttribute('aria-expanded', 'false', { timeout: 30_000 });
-    await expect(page.getByTestId('methodology-section-toggle-constants')).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByTestId('methodology-section-toggle-traceSteps')).toHaveAttribute('aria-expanded', 'true', { timeout: 30_000 });
+    await expect(page.getByTestId('methodology-section-toggle-bindings')).toHaveAttribute('aria-expanded', 'true');
     // Журнал публікацій — згорнутий за замовчуванням.
     await expect(page.getByTestId('methodology-section-toggle-publications')).toHaveAttribute('aria-expanded', 'false');
 
     // Заголовки секцій — h2 з кнопкою всередині.
-    // ⚠ Через кнопку, а не за назвою: заголовок секції — «Row selection rules» (сід), а /Rules/ чутливий до регістру.
-    await expect(page.getByTestId('methodology-section-toggle-rules').locator('xpath=ancestor::h2')).toHaveCount(1);
+    await expect(page.getByTestId('methodology-section-toggle-traceSteps').locator('xpath=ancestor::h2')).toHaveCount(1);
 
-    // Повернути стан, щоб наступні тести бачили розгорнуту сторінку.
-    await page.getByTestId('methodology-section-toggle-rules').click();
-    await expect(page.getByTestId('methodology-section-toggle-rules')).toHaveAttribute('aria-expanded', 'true');
+    // Повернути типовий стан для наступних тестів.
+    await page.getByTestId('methodology-section-toggle-traceSteps').click();
+    await expect(page.getByTestId('methodology-section-toggle-traceSteps')).toHaveAttribute('aria-expanded', 'false');
   });
-
   for (const scheme of ['light', 'dark'] as const) {
     test(`${scheme}: real axe color-contrast at 1440 and 500 px, no horizontal scroll, screenshots`, async ({ page }, testInfo) => {
       const data = seed!;
@@ -289,11 +283,11 @@ test.describe('Methodology page UI: syntax help, rule coverage periods, collapsi
       expect(await axeViolations(page, 'color-contrast'), `color-contrast page @1440 ${scheme}`).toEqual([]);
       await shot(page, testInfo, `methodology-page-${scheme}-1440`);
 
-      const dialog = await openFormula(page);
-      await dialog.getByTestId('syntax-help-toggle').click();
-      await expect(dialog.getByTestId('syntax-help-functions')).toBeVisible({ timeout: 15_000 });
-      expect(await axeViolations(page, 'color-contrast'), `color-contrast help @1440 ${scheme}`).toEqual([]);
-      await shot(page, testInfo, `methodology-syntax-help-${scheme}-1440`);
+      await page.getByRole('button', { name: 'New version', exact: true }).click();
+      const dialog = page.getByRole('dialog', { name: 'New draft version' });
+      await expect(dialog).toBeVisible({ timeout: 10_000 });
+      expect(await axeViolations(page, 'color-contrast'), `color-contrast new version @1440 ${scheme}`).toEqual([]);
+      await shot(page, testInfo, `methodology-new-version-${scheme}-1440`);
       await page.keyboard.press('Escape');
       await expect(dialog).toBeHidden({ timeout: 10_000 });
 
@@ -303,18 +297,17 @@ test.describe('Methodology page UI: syntax help, rule coverage periods, collapsi
         doc: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         body: document.body.scrollWidth - document.body.clientWidth,
       }));
-      expect(overflow.doc, `горизонтальна прокрутка сторінки @500 ${scheme}`).toBeLessThanOrEqual(1);
+      // Хто вилазить за край — у повідомлення падіння (діагностика, а не здогад).
+      const offenders = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('body *'))
+          .filter((node) => node.getBoundingClientRect().right > document.documentElement.clientWidth + 1)
+          .slice(0, 5)
+          .map((node) => `${node.tagName.toLowerCase()}.${String(node.className).slice(0, 40)}[${node.getAttribute('data-testid') ?? ''}]`),
+      );
+      expect(overflow.doc, `горизонтальна прокрутка сторінки @500 ${scheme}: ${offenders.join(' | ')}`).toBeLessThanOrEqual(1);
       expect(overflow.body).toBeLessThanOrEqual(1);
       expect(await axeViolations(page, 'color-contrast'), `color-contrast page @500 ${scheme}`).toEqual([]);
-      await page.locator('[data-section="ruleCoverage"]').scrollIntoViewIfNeeded();
       await shot(page, testInfo, `methodology-page-${scheme}-500`);
-
-      const small = await openFormula(page);
-      await small.getByTestId('syntax-help-toggle').click();
-      await expect(small.getByTestId('syntax-help-functions')).toBeVisible({ timeout: 15_000 });
-      expect(await axeViolations(page, 'color-contrast'), `color-contrast help @500 ${scheme}`).toEqual([]);
-      await shot(page, testInfo, `methodology-syntax-help-${scheme}-500`);
-      await page.keyboard.press('Escape');
       await page.setViewportSize({ width: 1440, height: 900 });
     });
   }

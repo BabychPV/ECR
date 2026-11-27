@@ -16,15 +16,16 @@ import './projects.css';
 
 /** Підпис вкладки — літералами ключів (сторож каталогу `EndpointCoverageTests` читає літерали). */
 function tabLabel(tab: ProjectTabId): string {
-  if (tab === 'settings') return t('projects.tab.settings');
+  if (tab === 'templates') return t('projects.tab.templates');
+  if (tab === 'general') return t('projects.tab.general');
   if (tab === 'lifecycle') return t('projects.tab.lifecycle');
 
   return t('projects.tab.periods');
 }
 
 /**
- * ✎ Projects (макет 08.11): проєкт — шапка (код, статус, рік, поточний період) і вкладки Periods · Settings ·
- * Lifecycle. Вкладка — в адресі (`/projects/:id/<вкладка>`), тож посилання на неї лишається робочим.
+ * ✎ Projects (макет 08.11): проєкт — шапка (код, статус, рік, поточний період) і вкладки Periods · Templates ·
+ * Lifecycle · General (✎ 24.11: колишня Settings розділена, рішення людини «Одна таблиця шаблонів»). Вкладка — в адресі (`/projects/:id/<вкладка>`), тож посилання на неї лишається робочим.
  *
  * ⚠ Вкладки — навігація посиланнями (`aria-current`), а не `role="tablist"`: кожна — окрема адреса з власною
  * історією «Назад», і вміст змінюється переходом, а не перемиканням панелей на одній сторінці.

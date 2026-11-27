@@ -25,6 +25,19 @@ public sealed record SecurityEventView(
     string? CorrelationId = null,
     string? SiteTimeZoneId = null);
 
+/// <summary>
+/// ✎ P-1124-4: автор для фільтра «By user» журналів аудиту — номер і ім'я. ⛔ Не SID і не e-mail (R-A2, D-86).
+/// </summary>
+/// <param name="UserId">Номер користувача — значення фільтра.</param>
+/// <param name="DisplayName">Ім'я; порожнє ім'я в записі — <c>null</c> (клієнт покаже «користувач #id»).</param>
+/// <param name="Login">
+/// ✎ AC-7 (audit-filters-contract, рішення координатора 26.11): логін (<c>sec.User.UserName</c>) — ЛИШЕ коли таке саме
+/// непорожнє ім'я (точний збіг) має ще бодай один користувач переліку, щоб «By user» розрізнив однакові імена (тимчасові
+/// акаунти вікон) логіном, а не «#id». Унікальне ім'я або без імені — <c>null</c>: логіни решти людей не віддаються.
+/// Право — те саме, що відкриває перелік (<c>Security.ViewAudit</c>).
+/// </param>
+public sealed record AuditAuthorView(int UserId, string? DisplayName, string? Login = null);
+
 /// <summary>Фільтр журналу подій безпеки.</summary>
 /// <remarks>
 /// ⛔ Вікно часу — обов'язкове, як і в інших журналах: <c>aud.SecurityEvent</c>

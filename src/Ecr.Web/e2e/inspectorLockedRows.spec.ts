@@ -109,7 +109,13 @@ test.describe('Locked rows', () => {
     await expect(item).toBeVisible({ timeout: 60_000 });
 
     // Одне коротке речення: рядок, місяць назвою; без сирих заголовків колонок і без старого речення таблиці.
-    await expect(item).toContainText(`Row ${rowKey}`);
+    // ✎ row-label-messages: непрозорий ключ (≥24 hex) людині не показується — «Row N (назва)»; кодовий — як є.
+    if (/^[0-9a-f]{24,}$/i.test(rowKey)) {
+      await expect(item).toContainText(/Row \d+/);
+      await expect(item).not.toContainText(rowKey);
+    } else {
+      await expect(item).toContainText(`Row ${rowKey}`);
+    }
     await expect(item).toContainText(`the ${month} columns are in a closed month and can't be edited here.`);
     await expect(item).not.toContainText('values there are read-only');
     await expect(page.locator('[data-inspector-locked]')).toHaveCount(0);
@@ -119,7 +125,14 @@ test.describe('Locked rows', () => {
 
     // Клік веде в рядок: інспектор показує адресу вибраної комірки цього рядка.
     await item.click();
-    await expect(page.locator('[data-inspector-address]')).toContainText(rowKey, { timeout: 30_000 });
+    // ✎ b17: службовий ключ в адресі не показується — «Row N»; кодовий — як є.
+    const address = page.locator('[data-inspector-address]');
+    if (/^[0-9a-f]{24,}$/i.test(rowKey)) {
+      await expect(address).toContainText(/Row \d+/, { timeout: 30_000 });
+      await expect(address).not.toContainText(rowKey);
+    } else {
+      await expect(address).toContainText(rowKey, { timeout: 30_000 });
+    }
 
     // Дія відкриття — для того, кому сервер дозволяє (оператор має Period.Reopen у своєму проєкті).
     const reopen = page.locator(`[data-inspector-reopen="${String(periodKey)}"]`);

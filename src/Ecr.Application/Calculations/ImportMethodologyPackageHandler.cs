@@ -39,7 +39,8 @@ public sealed class ImportMethodologyPackageHandler(
     IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock,
-    IFormulaEngine? formulaEngine = null)
+    IFormulaEngine? formulaEngine = null,
+    FormulaEngineAuthoring? formulaAuthoring = null)
 {
     /// <summary>Право на імпорт (`02-contracts.md` §9) — як на заведення методології.</summary>
     public const string Permission = "Calculation.EditFormula";
@@ -72,6 +73,13 @@ public sealed class ImportMethodologyPackageHandler(
 
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         await PermissionCheck.RequireAsync(access, currentUser, ConstantPermission, ct).ConfigureAwait(false);
+
+        // ✎ P-1124-1: пакет заводить лише формульні чернетки — з вимкненим формульним авторингом відмова, і для
+        // сухого прогону теж (звіт обіцяв би те, чого запис не зробить).
+        if (!FormulaEngineAuthoring.Allows(formulaAuthoring))
+        {
+            throw FormulaEngineAuthoring.Retired("import", null);
+        }
 
         // ⛔ F3-04: вузол `categoryRule` — це запис правила категорії, а конфігуратор (PUT …/category-rule) вимагає
         // для нього Calculation.EditRule. Імпорт перевіряв лише EditFormula і EditConstant, тож користувач без

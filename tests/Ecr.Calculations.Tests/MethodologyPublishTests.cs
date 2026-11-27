@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Calculations;
+using Ecr.Application.Calculations;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Security;
@@ -498,7 +498,7 @@ public sealed class MethodologyPublishTests
         });
 
         var handler = new RunCalculationHandler(
-            _periods, _workflow, _results, _jobs, _uow, _access, _user, _clock, Substitute.For<IAuditWriter>());
+            _periods, _workflow, _results, _jobs, _uow, _access, _user, _clock);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => handler.HandleAsync(1, 202601, CancellationToken.None));

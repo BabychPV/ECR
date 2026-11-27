@@ -331,7 +331,15 @@ if ($Stage -in 'Template', 'All') {
     $mid = Get-Hse400Id $meth 'id'
     $mv = Get-Hse400MethodologyVersions $mid | Where-Object { [string]$_.versionNumber -eq $plan.Version } | Select-Object -First 1
     if ($null -eq $mv) {
-        $mv = (Invoke-Hse400Ok -Method POST -Path ("/api/v1/methodologies/{0}/versions" -f $mid) -Body (New-Hse400MethodologyVersionBody $model)).Json
+        try {
+            $mv = (Invoke-Hse400Ok -Method POST -Path ("/api/v1/methodologies/{0}/versions" -f $mid) -Body (New-Hse400MethodologyVersionBody $model)).Json
+        } catch {
+            # P-1124-1: формульний авторинг у продукті вимкнено - стенд збирання має його ввімкнути.
+            if ([string]$_ -match 'formulaEngineRetired') {
+                throw 'Стенд відхиляє формульний авторинг (err.ECR-CALC-0422.formulaEngineRetired): підніміть API з ECR_Calculations__FormulaEngineAuthoring__Enabled=true для збирання HSE400 (див. tools/hse400/README.md).'
+            }
+            throw
+        }
         Write-Hse400Log "Створено чернетку методології $($plan.Version) рівня Module (id $($mv.id))."
     }
     $mvid = Get-Hse400Id $mv 'id'

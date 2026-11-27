@@ -48,6 +48,8 @@ public sealed partial class SheetCopyQuerySitesTests
         ["src/Ecr.Infrastructure/Persistence/StepApproverStore.cs"] = "AN-59: подані стани оригіналів І копій документа за період — кожен несе SheetCopyId у SubmittedStepRef",
         ["src/Ecr.Infrastructure/Persistence/ApprovalQueueStore.cs"] = "кандидати несуть SheetCopyId; склад і журнал — своєї копії",
         ["src/Ecr.Infrastructure/Jobs/SubmissionSnapshotRetentionJob.cs"] = "ранжування й зрізи погодження — на (аркуш, копія)",
+        ["src/Ecr.Infrastructure/Jobs/CalculationConsistencyChecks.cs"] =
+            "правила узгодженості розрахунку: екземпляри оригіналів І копій, проблеми й затвердження — на (документ, таблиця/аркуш, копія); R1 «затверджений місяць» — оригінал",
         ["src/Ecr.Infrastructure/Persistence/CalculationIssueStore.cs"] =
             "AN-69: прохід замінює проблеми на (документ, таблиця, копія); читання — за sheetCopyId, null — оригінал",
 
@@ -86,6 +88,8 @@ public sealed partial class SheetCopyQuerySitesTests
             "B80 N5: наслідки зміни джерела (sourceImpact) — затверджені стани споживачів лише оригіналу аркуша (ApprovalState.SheetCopyId == null), як у DocumentSourceIssues",
         ["src/Ecr.Infrastructure/Persistence/RegistryImpactStore.cs"] =
             "B179 L2: «документ-споживач × період є» — екземпляри оригіналу (SheetCopyId == null); перерахунок методологій — лише оригінал",
+        ["src/Ecr.Infrastructure/Persistence/GasCompositionStore.cs"] =
+            "D-NEW: замкнений період складу газу — затверджений аркуш ОРИГІНАЛУ (ApprovalState.SheetCopyId == null), як і результати методологій",
         ["src/Ecr.Infrastructure/Jobs/SourceDocumentChangeHook.cs"] =
             "B179 L2: «чи документ — джерело зв'язки» — за екземплярами оригіналу (SheetCopyId == null), як у завантажувачі складу",
         ["src/Ecr.Infrastructure/Jobs/SourceApprovalChangeTrigger.cs"] =
@@ -130,8 +134,6 @@ public sealed partial class SheetCopyQuerySitesTests
         ["src/Ecr.Infrastructure/Persistence/CellSourceStore.cs"] = "останній запис журналу — екземпляра своєї копії (@copy)",
 
         // ── звітність і зведення (RS7): копія — окремий аркуш складу зі СВОЇМ станом ──
-        ["src/Ecr.Infrastructure/Reporting/ReportSnapshotBuilder.cs"] =
-            "статус зрізу: стан рядка складу (копія — своя); Approved лише коли затверджені оригінал і всі копії",
         ["src/Ecr.Infrastructure/Persistence/CampaignSummaryStore.cs"] =
             "підсумки кампанії: стан СВОГО рядка складу (a.SheetCopyId = s.Id або обидва NULL)",
         ["src/Ecr.Infrastructure/Persistence/DocumentListSummaryStore.cs"] =
@@ -155,6 +157,8 @@ public sealed partial class SheetCopyQuerySitesTests
             "додає/перейменовує/видаляє копії; видалення — по періодах за SheetCopyId, потім перенумерація",
         ["src/Ecr.Infrastructure/Persistence/DocumentDeletionStore.cs"] =
             "видалення документа забирає ВСІ екземпляри, стани й склад (копії теж); стани копій входять у «чернетка»",
+        ["src/Ecr.Infrastructure/Persistence/ProjectPurgeStore.cs"] =
+            "✎ 25.11: видалення проєкту з даними забирає ВСІ екземпляри, стани, події й зрізи (копії теж); вибір джерела B80 — лише оригінал (SheetCopyId == null), як у завантажувачі",
         ["src/Ecr.Infrastructure/Persistence/DocumentVersionMigrationStore.cs"] =
             "перенос версії міняє TableDefId/SheetDefId на місці — SheetCopyId лишається; значення копій входять у «втрату» (Q4)",
         ["src/Ecr.Infrastructure/Persistence/DocumentVersionStore.cs"] =

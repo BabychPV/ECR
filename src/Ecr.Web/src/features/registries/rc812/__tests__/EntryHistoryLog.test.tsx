@@ -83,7 +83,7 @@ function showDrawer(): void {
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={['/admin/registries/STREAM_CASE/entries?panel=entry-4411']}>
+        <MemoryRouter initialEntries={['/admin/registries/FLARE_CASE/entries?panel=entry-4411']}>
           <Routes>
             <Route path="/admin/registries/:code/entries" element={<RegistryDataPage />} />
           </Routes>
@@ -109,7 +109,7 @@ describe('Журнал змін запису довідника (RT-15)', () => 
     expect(historyUrls).toEqual([]);
 
     await openHistory();
-    expect(historyUrls).toEqual(['/api/v1/registries/STREAM_CASE/entries/4411/history?limit=50']);
+    expect(historyUrls).toEqual(['/api/v1/registries/FLARE_CASE/entries/4411/history?limit=50']);
   });
 
   it('рядок зміни Lookup: поле назвою, «було» і «стало» — назвами цілей, автор — ім\'ям', async () => {
@@ -144,7 +144,7 @@ describe('Журнал змін запису довідника (RT-15)', () => 
     fireEvent.click(screen.getByRole('button', { name: 'Show earlier changes' }));
 
     expect(await screen.findByText('Entry created')).toBeDefined();
-    expect(historyUrls[1]).toBe('/api/v1/registries/STREAM_CASE/entries/4411/history?cursor=c2&limit=50');
+    expect(historyUrls[1]).toBe('/api/v1/registries/FLARE_CASE/entries/4411/history?cursor=c2&limit=50');
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Show earlier changes' })).toBeNull();
     });

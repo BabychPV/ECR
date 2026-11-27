@@ -480,12 +480,16 @@ public sealed partial class ExceptionHandlingMiddleware(
             // користувачу `{maxLength}` фігурними дужками (клас `D1`).
             return UiStringResolver.Format(
                 template,
-                UiStringResolver.WithLocalizedPeriods(
-                    strings,
-                    UiStringResolver.WithLocalizedStates(
+                // ✎ integ-row-label-messages: службовий ключ рядка (GUID) у текст не потрапляє.
+                RowKeyText.Humanize(
+                    UiStringResolver.WithLocalizedPeriods(
                         strings,
-                        messageKey,
-                        UiStringResolver.WithLocalizedReason(strings, UiStringResolver.Parameters(details)))));
+                        UiStringResolver.WithLocalizedStates(
+                            strings,
+                            messageKey,
+                            UiStringResolver.WithLocalizedReason(strings, UiStringResolver.Parameters(details)))),
+                    strings.LanguageCode,
+                    strings));
         }
 #pragma warning disable CA1031 // Причина — та сама, що й у LocalizedTitleAsync: обробник помилок не падає вдруге.
         catch (Exception)
@@ -561,24 +565,6 @@ public sealed partial class ExceptionHandlingMiddleware(
                  ["messageKey"] = "err.ECR-CALC-0409.categoryRuleConcurrent",
              }),
 
-        // ⛔ Хвіст інтеграції 11.10: два одночасні створення версії звіту з тим самим номером
-        // (`POST /reports/{id}/versions`) проходять перевірку `VersionExistsAsync` обидва (check-then-insert,
-        // `CreateReportVersionHandler`), і другу відбиває лише `UQ_ReportVersion`. Без арма це
-        // `DbUpdateException` у fallback — голий 500 на звичайну гонку. Конфлікт стану: 409, код той самий
-        // `ECR-RPT-4091`, що й у перевірці обробника.
-        // ⚠ Ключ каталогу ІНШИЙ: `err.ECR-RPT-4091.version` вимагає `{version}`, а номер версії з тексту
-        // порушення SQL Server витягати крихко (ключ індексу — `(ReportDefId, Version)`), тож власний
-        // `versionConcurrent` без підстановок: повторний запит із тим самим номером уже дасть звичайну
-        // відмову обробника з номером у тексті.
-        Microsoft.EntityFrameworkCore.DbUpdateException e
-            when e.GetBaseException().Message.Contains("UQ_ReportVersion", StringComparison.Ordinal) =>
-            (StatusCodes.Status409Conflict, ErrorCodes.ReportDefDuplicate,
-             "Версію з таким номером у цьому описі звіту щойно створив хтось інший: номер версії унікальний.",
-             new Dictionary<string, object?>
-             {
-                 ["messageKey"] = "err.ECR-RPT-4091.versionConcurrent",
-             }),
-
         // ⛔ P1 (людина 08.11, кореляція e16184de): повторне призначення ролі, чий рядок уже є
         // (сплила строкова підміна), давало `UQ_RoleAssignment_User` у fallback — голий 500
         // «Internal error». `UserStore.ReplaceRolesAsync` тепер оновлює наявний рядок; арм лишається
@@ -643,17 +629,6 @@ public sealed partial class ExceptionHandlingMiddleware(
         // не пускають не його, а нас.
         SourceAuthenticationException e =>
             (StatusCodes.Status502BadGateway, e.ErrorCode, e.Message, e.Details),
-
-        // ⛔ Той самий клас розбіжності, що й `ECR-ROW-0409` вище (`D2-294`),
-        // і та сама причина: цифри коду — це НАШ статус відповіді
-        // (`ECR-<ДОМЕН>-<HTTP>`). `ECR-RPT-0409` каже 409 і доїжджав як 422
-        // обома шляхами: зайнятий код опису звіту (`BusinessRuleException`) і
-        // спроба опублікувати вже опубліковану версію (`DomainException` із
-        // самої сутності). Клієнт, що читає статус раніше за код, показував
-        // «дані невірні» там, де правильна відповідь — «цей звіт уже є» і
-        // «цю версію вже опубліковано».
-        BusinessRuleException e when e.ErrorCode == ErrorCodes.ReportDefDuplicate =>
-            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
         // ⛔ Той самий клас розбіжності, що й `ECR-RPT-4091` вище: цифри коду
         // означають наш HTTP-статус, і «цей довідник уже є» — конфлікт, а не

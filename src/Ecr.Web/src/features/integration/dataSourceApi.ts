@@ -81,3 +81,21 @@ export function testDataSource(id: number, reason: string): Promise<DataSourceTe
     body: JSON.stringify({ reason }),
   });
 }
+
+/**
+ * Тіло «Test connection» з НЕЗБЕРЕЖЕНОЇ форми (DESIGN-source-credentials §13.1).
+ *
+ * ⛔ `password` — лише те, що людина ввела в формі; збережений пароль сервер бере за `sourceId` при незмінній цілі.
+ */
+export type TestConnectionBody = components['schemas']['TestDataSourceConnectionRequest'];
+
+/**
+ * Перевіряє з'єднання за значеннями форми, нічого не зберігаючи. Відповідь — та сама, що в `testDataSource`
+ * (категорія відмови, не текст винятку). `429` — ліміт проб; відмова входу з тіла не ставить «відхилено».
+ */
+export function testConnectionFromBody(body: TestConnectionBody): Promise<DataSourceTestResult> {
+  return apiFetch<DataSourceTestResult>('/api/v1/data-sources/test-connection', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}

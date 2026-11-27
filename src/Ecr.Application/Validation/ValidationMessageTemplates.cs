@@ -87,8 +87,71 @@ public static class ValidationMessageTemplates
     /// <summary>The same as <see cref="PermitHeaderCalculatedNotCovering"/> when exactly one month is named.</summary>
     public const string PermitHeaderCalculatedNotCoveringOne = "validation.permit.headerCalculatedNotCoveringOne";
 
+    /// <summary>✎ 25.11: обов'язкова колонка однієї методології не заповнена (<c>ECR-CALC-0437</c>).</summary>
+    public const string RequiredInputOne = "validation.methodology.requiredInput";
+
+    /// <summary>✎ 25.11: та сама колонка потрібна кільком методологіям — одне повідомлення з переліком.</summary>
+    public const string RequiredInputMany = "validation.methodology.requiredInputMany";
+
+    /// <summary>✎ 25.11: колонку вимоги методології не знайдено у версії шаблону (C1) — перевірку пропущено.</summary>
+    public const string RequiredInputUnmapped = "validation.methodology.requiredInputUnmapped";
+
+    /// <summary>✎ 25.11: правило доступу «лише читання» (<c>PeriodAccessRules</c>, підтвердження в сітці).</summary>
+    public const string AccessReadOnly = "validation.access.readOnly";
+
+    /// <summary>✎ 25.11: рядок-заголовок не заповнюється.</summary>
+    public const string AccessHeaderRow = "validation.access.headerRow";
+
+    /// <summary>✎ 25.11: період поза вікном введення.</summary>
+    public const string AccessPeriodOutsideWindow = "validation.access.periodOutsideWindow";
+
+    /// <summary>✎ 25.11: період далі за «поточний ± N».</summary>
+    public const string AccessPeriodTooFar = "validation.access.periodTooFar";
+
+    /// <summary>✎ 25.11: місяць поза строком дії запису довідника (дозволу).</summary>
+    public const string AccessMonthOutsideValidity = "validation.access.monthOutsideValidity";
+
+    /// <summary>✎ 25.11: спрацювала умова правила доступу.</summary>
+    public const string AccessExpression = "validation.access.expression";
+
     private static readonly Dictionary<string, (string En, string Ru, string Kz)> Table = new(StringComparer.Ordinal)
     {
+        [AccessReadOnly] = (
+            "Access rule: read only.",
+            "Правило доступа: только чтение.",
+            "Қол жеткізу ережесі: тек оқу."),
+        [AccessHeaderRow] = (
+            "A header row is not filled in.",
+            "Строка-заголовок не заполняется.",
+            "Тақырып жолы толтырылмайды."),
+        [AccessPeriodOutsideWindow] = (
+            "Period {period} is outside the data entry window.",
+            "Период {period} вне окна ввода.",
+            "{period} кезеңі енгізу терезесінен тыс."),
+        [AccessPeriodTooFar] = (
+            "Period {period} is more than {offset} away from the current period {current}.",
+            "Период {period} дальше, чем на {offset} от текущего {current}.",
+            "{period} кезеңі ағымдағы {current} кезеңінен {offset} кезеңнен артық қашықта."),
+        [AccessMonthOutsideValidity] = (
+            "Month {month} is outside the validity period ({from} — {to}).",
+            "Месяц {month} вне срока действия ({from} — {to}).",
+            "{month} айы жарамдылық мерзімінен тыс ({from} — {to})."),
+        [AccessExpression] = (
+            "Access rule: {expression}.",
+            "Правило доступа: {expression}.",
+            "Қол жеткізу ережесі: {expression}."),
+        [RequiredInputOne] = (
+            "Column \"{column}\" is required for methodology {methodologies}.",
+            "Колонка «{column}» обязательна для методологии {methodologies}.",
+            "«{column}» бағаны {methodologies} әдістемесі үшін міндетті."),
+        [RequiredInputMany] = (
+            "Column \"{column}\" is required for methodologies {methodologies}.",
+            "Колонка «{column}» обязательна для методологий {methodologies}.",
+            "«{column}» бағаны {methodologies} әдістемелері үшін міндетті."),
+        [RequiredInputUnmapped] = (
+            "A required column of the methodology is not in this template version; the check was skipped.",
+            "Обязательной колонки методологии нет в этой версии шаблона; проверка пропущена.",
+            "Әдістеменің міндетті бағаны шаблонның бұл нұсқасында жоқ; тексеру өткізіп жіберілді."),
         [PermitHeaderCalculatedNotCovering] = (
             "Header field \"{column}\": permit {permit} is valid {validity} and does not cover the months the document holds calculated values in: {months}. Saving and submitting are allowed. Pick a permit valid in those months or extend the permit's validity.",
             "Поле шапки «{column}»: разрешение {permit} действует {validity} и не покрывает месяцы, за которые в документе есть вычисленные значения: {months}. Сохранение и подача разрешены. Выберите разрешение, действующее в эти месяцы, или продлите срок действия разрешения.",
@@ -187,7 +250,7 @@ public static class ValidationMessageTemplates
     /// <param name="language">Мова.</param>
     /// <param name="parameters">Підстановки.</param>
     public static string Render(string key, string? language, IReadOnlyDictionary<string, string> parameters)
-        => UiStringResolver.Format(Template(key, language) ?? key, parameters);
+        => UiStringResolver.Format(Template(key, language) ?? key, Localization.RowKeyText.Humanize(parameters, language));
 
     /// <summary>
     /// Повідомлення мовою читача: текст каталогу за <see cref="ValidationMessage.MessageKey"/> із підстановками
@@ -212,7 +275,7 @@ public static class ValidationMessageTemplates
 
         return template is null
             ? message
-            : message with { Message = UiStringResolver.Format(template, message.Params) };
+            : message with { Message = UiStringResolver.Format(template, Localization.RowKeyText.Humanize(message.Params, language, catalog)) };
     }
 
     /// <summary>Підстановка-число: інваріантна культура, як у каталозі помилок.</summary>

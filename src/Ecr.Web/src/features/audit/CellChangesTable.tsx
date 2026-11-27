@@ -7,8 +7,9 @@ import { SortableTh } from '@/features/audit/SortableTh';
 import { decimalDelta } from '@/features/audit/changeDelta';
 import { NumericTypes, auditValueText } from '@/features/audit/auditValue';
 import { cellChangeReasonText } from '@/features/audit/cellChangeReason';
-import { Timestamp } from '@/shared/ui/Timestamp';
+import { AuditChangedAt } from '@/features/audit/AuditChangedAt';
 import { TwoLine } from '@/shared/ui/TwoLine';
+import { isOpaqueRowKey } from '@/features/grid/rowKeyText';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { formatDecimal, formatPeriodKey } from '@/shared/format';
@@ -66,6 +67,26 @@ function columnText(change: CellChange): string {
   if (header.length > 0) return code === null ? header : `${header} (${code})`;
 
   return code ?? t('audit.columnGone', { id: change.columnDefId });
+}
+
+/**
+ * ✎ audit-filters-followup AC-12: рядок комірки для людини. Джерело мітки — `cfg.RowDef.LabelL10n` фіксованого рядка
+ * шаблону (`rowLabelL10n` рядка журналу); у динамічного (доданого людиною) рядка мітки немає ніде, а його ключ —
+ * GUID. Тоді «Row» + початок ключа (повний — у підказці), а не 32 символи. Короткі коди («LTD-A02») — як були.
+ * ✎ AC-13: для такого рядка — його номер на екрані «Row N» (`rowOrdinal`, `doc.TableRow.Ordinal`); номера немає (рядок
+ * видалено, період в архіві) — як раніше, «Row» + початок ключа.
+ */
+export function rowText(change: Pick<CellChange, 'rowKey' | 'rowLabelL10n' | 'rowOrdinal'>): string {
+  const label = localized(change.rowLabelL10n);
+  if (label.length > 0) return label;
+  if (isOpaqueRowKey(change.rowKey)) {
+    const ordinal = change.rowOrdinal;
+    return typeof ordinal === 'number'
+      ? `${t('grid.rowLabelHeader')} ${String(ordinal)}`
+      : `${t('grid.rowLabelHeader')} ${change.rowKey.slice(0, 8)}…`;
+  }
+
+  return change.rowKey;
 }
 
 /** Походження зміни: піктограма + слово макета (`ORIGIN_LABEL`/`ORIGIN_ICON`). */
@@ -283,10 +304,11 @@ export const CellChangesTable = memo(function CellChangesTable({
       <Table.Tbody>
         {items.map((change, index) => (
           <Table.Tr key={`${change.documentId}:${change.rowKey}:${change.columnDefId}:${index}`}>
-            <Table.Td>
-              {/* ⛔ Саме `Timestamp`, а не сирий рядок: точне значення лишається в `dateTime`/`title`. */}
+            <Table.Td data-audit-time-cell="">
+              {/* ⛔ Не сирий рядок: точне значення лишається в `dateTime`/`title`.
+                  ✎ P-1124-4: місцевий час читача, 24 год, одним рядком (`AuditChangedAt`). */}
               <Text span ff="monospace" fz="sm">
-                <Timestamp value={change.changedAt} />
+                <AuditChangedAt value={change.changedAt} />
               </Text>
               {/* НФ-8.9.6 / D-247: рядок із архіву аудиту — позначка джерела, значення й межі читання ті самі. */}
               {change.fromArchive && (
@@ -311,8 +333,8 @@ export const CellChangesTable = memo(function CellChangesTable({
               {/* Макет: верхній рядок — комірка, нижній — документ (там «· sheet › table»: серверу
                   бракує назв аркуша/таблиці, TODO-контракт BE-16 у листі UI-38). */}
               <TwoLine
-                title={`#${String(change.documentId)} · #${String(change.columnDefId)}`}
-                primary={`${change.rowKey} · ${columnText(change)}`}
+                title={`#${String(change.documentId)} · ${change.rowKey} · #${String(change.columnDefId)}`}
+                primary={`${rowText(change)} · ${columnText(change)}`}
                 secondary={
                   <>
                     <span>{documentText(change)}</span>

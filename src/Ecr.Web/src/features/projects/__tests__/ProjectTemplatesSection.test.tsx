@@ -85,6 +85,15 @@ function mockServer(options: { refuseDetach?: Response; refuseAttach?: Response 
         });
       }
 
+      // ✎ B74 UX: шаблон T401 лише з чернеткою — без опублікованої версії його не можна приєднати.
+      if (/\/api\/v1\/templates\/17\/versions$/.test(path)) {
+        return json({
+          items: [{ id: 170, version: '0.1', status: 'Draft', publishedAt: null, presentationRevision: 0, clonedFromVersionId: null }],
+          nextCursor: null,
+          totalCount: 1,
+        });
+      }
+
       if (path.endsWith('/api/v1/templates')) {
         return json({
           items: [
@@ -92,9 +101,10 @@ function mockServer(options: { refuseDetach?: Response; refuseAttach?: Response 
             { id: 8, code: 'LAND', nameL10n: { values: { en: 'Land' } }, isArchived: false, documentCount: 0 },
             { id: 15, code: 'HSE', nameL10n: { values: { en: 'Hazard' } }, isArchived: false, documentCount: 0 },
             { id: 16, code: 'OLD', nameL10n: { values: { en: 'Old' } }, isArchived: true, documentCount: 0 },
+            { id: 17, code: 'T401', nameL10n: { values: { en: 'Draft only' } }, isArchived: false, documentCount: 0 },
           ],
           nextCursor: null,
-          totalCount: 4,
+          totalCount: 5,
         });
       }
 
@@ -196,7 +206,7 @@ describe('B74 P4: вкладка проєкту «Templates»', () => {
     expect(alert.textContent ?? '').toContain('ECR-PRD-0409');
   });
 
-  it('Add template: лише не приєднані й не архівні шаблони; типово — остання опублікована версія; POST з нею', async () => {
+  it('Add template: лише не приєднані й не архівні шаблони З опублікованою версією (T401 лише з чернеткою не пропонується); типово — остання опублікована версія; POST з нею', async () => {
     const server = mockServer();
     show();
     await screen.findByTestId('project-templates');

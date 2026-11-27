@@ -29,6 +29,17 @@ public static class DependencyInjection
         // D-476: знімок довідника складу газу FLERT (лише читання, транзакція завжди відкочується).
         services.AddScoped<IExternalTableSource, SqlDataSource>();
 
+        // P-1126-SRCCRED: перевірка з тіла форми (§13.1) і скидання пулу після заміни облікових даних (R-20).
+        services.AddScoped<IExternalConnectionProbe, SqlDataSource>();
+        services.AddSingleton<IConnectionPoolReset, SqlClientPoolReset>();
+
         return services;
     }
+}
+
+/// <summary>Скидає пул SqlClient процесу (R-20): з'єднання зі старим паролем не повертаються з пулу.</summary>
+public sealed class SqlClientPoolReset : IConnectionPoolReset
+{
+    /// <inheritdoc />
+    public void Reset() => Microsoft.Data.SqlClient.SqlConnection.ClearAllPools();
 }

@@ -5,6 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { RenderErrorCode, RenderErrorScreen, StaleChunkErrorCode } from '@/app/RenderErrorScreen';
 import { isStaleVersion, NewVersionBanner, resetStaleVersion } from '@/app/staleVersion';
 import { theme } from '@/shared/theme/theme';
+import { pageReload } from '@/app/chunkReload';
 import { cancelAutosave, registerSliceSaver } from '@/features/grid/autosave';
 import {
   discardPendingRows,
@@ -244,16 +245,22 @@ describe('DAT-08 — незбережене зберігається до про
 describe('DAT-08 — екран помилки називає справжню причину', () => {
   beforeEach(() => {
     resetStaleVersion();
+    window.sessionStorage.clear();
+    // ✎ 25.11: застаріла збірка тепер перезавантажується автоматично — у jsdom перезавантаження немає.
+    vi.spyOn(pageReload, 'run').mockImplementation(() => {});
   });
 
   afterEach(() => {
     resetStaleVersion();
+    window.sessionStorage.clear();
+    vi.restoreAllMocks();
   });
 
   it('після vite:preloadError екран показує код застарілого чанка, а не загальний', () => {
-    const failedImport = new Error(
-      'Failed to fetch dynamically imported module: /assets/DocumentsPage-a1b2c3.js',
-    );
+    // ✎ 25.11: помилка, яку текстом НЕ впізнати як відмову чанка (так виглядає `React.lazy`, що отримав не-компонент),
+    // — тут причину називає саме подія. Текст `Failed to fetch dynamically imported module` тепер впізнається й без
+    // події (`isChunkLoadError`, `RootErrorPage.chunkReload.test.tsx`) і цього тесту вже не перевіряв би.
+    const failedImport = new Error('Element type is invalid: expected a string or a class/function but got: undefined');
 
     // ⚠ Дерево те саме, що в продукті: банер живе в `App.tsx` (він і тримає
     // слухача `vite:preloadError`), екран помилки — всередині маршруту.

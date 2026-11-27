@@ -414,18 +414,12 @@ try {
     }
 
     Step 'роль із небезпечними правами'
-    # ⚠ Три права `Report.*` — заради кроку «зріз звітності» наприкінці.
-    # Вивантаження зрізу вимагає саме `Report.Export`, окремо від
-    # `Report.ViewRegulatory`: книга ВИХОДИТЬ ІЗ СИСТЕМИ (`R7`), і сценарій
-    # мусить іти тим самим шляхом, що й оператор, а не в обхід права.
-    # ✎ 2026-09-29: плюс `Report.ViewSnapshot` — вміст зрізу (рядки й книга)
-    # за окремим правом, рішення людини.
+    # ✎ P-1124-3: права `Report.*` прибрано разом із кроком «зріз звітності».
     $permissionCodes = @(
         'Template.View', 'Template.Edit', 'Template.Publish',
         'Document.View', 'Document.Create', 'Document.Export',
         'Project.Manage', 'Period.Configure',
         'Calculation.View', 'Calculation.Publish', 'Calculation.Recalculate',
-        'Report.ViewRegulatory', 'Report.BuildSnapshot', 'Report.Export', 'Report.ViewSnapshot',
         'Security.ManageUsers', 'Security.ManageRoles', 'System.ViewHealth')
 
     # ⚠ Наявна база: аркуш, поданий попереднім прогоном, треба повернути в
@@ -674,115 +668,8 @@ try {
         $archive.Dispose()
     }
 
-    # ── Зріз звітності ───────────────────────────────────────────────────
-    # ⚠ Другий шлях вивантаження, і він ІНШИЙ: книга зрізу приходить
-    # відповіддю на `GET`, без `202` і фонової задачі (`R7`). Усе, що
-    # перевірено вище, про нього не говорить нічого — там черга, тут потік у
-    # відповіді й окреме право `Report.Export`.
-    Step 'побудова зрізу звіту'
-    $snapshotJob = Call POST '/api/v1/reports/IEC/build' @{
-        projectId = $projectId
-        periodKey = $periodKey
-    } -Expect @(202)
-
-    # ⚠ Стеля очікування — 300 с, і це не «про всяк випадок». Ретрай задачі
-    # спить 30 с, потім 60 с (`QuartzJobAdapter.MaxRetryAttempts` = 3), тобто
-    # задача, що падає з першого разу, доходить до `Failed` аж на ~95-й
-    # секунді. Стеля в 60 с обривала прогін РАНІШЕ, ніж стан ставав кінцевим,
-    # і причина провалу не потрапляла в повідомлення взагалі — перевірка
-    # казала «завершилася станом Running», тобто рівно те, чого бути не може.
-    $snapshotState = $null
-    $snapshotWait = [System.Diagnostics.Stopwatch]::StartNew()
-    while ($snapshotWait.Elapsed.TotalSeconds -lt 300) {
-        Start-Sleep -Milliseconds 500
-        $snapshotStatus = Call GET "/api/v1/jobs/$($snapshotJob.jobId)"
-        $snapshotState = $snapshotStatus.state
-        if ($snapshotState -in @('Succeeded', 'Failed', 'Cancelled')) { break }
-    }
-
-    $snapshotWait.Stop()
-
-    if ($snapshotState -ne 'Succeeded') {
-        Fail ("побудова зрізу завершилася станом '$snapshotState' за " +
-            "$([math]::Round($snapshotWait.Elapsed.TotalSeconds)) с: $($snapshotStatus.error)")
-    }
-
-    # Час побудови друкуємо завжди: «зелено, але 4 хвилини» — теж знахідка.
-    Write-Host "      зріз побудовано за $([math]::Round($snapshotWait.Elapsed.TotalSeconds, 1)) с"
-
-    # ⛔ `ForEach-Object` розгортає масив. `ConvertFrom-Json` у Windows
-    # PowerShell 5.1 віддає JSON-масив ОДНИМ об'єктом, і `@(…)` загортав його
-    # ще раз: `$snapshots[0]` був усім переліком. На свіжій базі зріз один, і
-    # це не видно; на наявній їх два, і шлях ставав `/snapshots/2 1/rows` → 404.
-    $snapshots = @(Call GET "/api/v1/reports/snapshots?projectId=$projectId&periodKey=$periodKey" | ForEach-Object { $_ })
-    if ($snapshots.Count -eq 0) { Fail 'зрізів немає, хоча побудова відзвітувала успіх' }
-
-    # Перелік іде найновішими вперед — щойно побудований зріз перший.
-    $snapshot = $snapshots[0]
-    $page = Call GET "/api/v1/reports/snapshots/$($snapshot.id)/rows?limit=100"
-    $columns = @($page.columns | ForEach-Object { $_.code })
-    if ($columns.Count -eq 0) { Fail 'зріз не називає жодної колонки' }
-
-    # ⛔ Очікуване беремо з `GET …/rows`, а не з голови: книга мусить містити
-    # ТЕ САМЕ, що застосунок віддає рядками. Літерал тут довів би лише те, що
-    # хтось колись його сюди вписав.
-    $expected = @($columns)
-    if (@($page.rows).Count -gt 0) {
-        $first = @($page.rows)[0]
-        foreach ($column in @($page.columns | Where-Object { $_.kind -eq 'text' })) {
-            $value = $first.cells.$($column.code)
-            if ($value -is [string] -and $value.Trim()) { $expected += $value }
-        }
-    }
-
-    Step 'книга зрізу розбирається і містить значення зрізу'
-    $snapshotBook = Join-Path $root 'artifacts/smoke-snapshot.xlsx'
-    Invoke-WebRequest -Uri "$base/api/v1/reports/snapshots/$($snapshot.id)/export.xlsx" `
-        -WebSession $session -UseBasicParsing -OutFile $snapshotBook | Out-Null
-
-    $snapshotArchive = [System.IO.Compression.ZipFile]::OpenRead($snapshotBook)
-    try {
-        # ⚠ Власна читалка, а не `Read-Entry` вище: та тримає ПОПЕРЕДНІЙ архів
-        # змінною, і після його закриття мовчки читала б закритий потік.
-        function Read-SnapshotEntry {
-            param($Archive, [string] $Name)
-
-            $entry = $Archive.Entries | Where-Object { $_.FullName -eq $Name }
-            if (-not $entry) { return '' }
-
-            $stream = $entry.Open()
-            try {
-                $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::UTF8)
-                try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
-            }
-            finally { $stream.Dispose() }
-        }
-
-        $snapshotSheets = @($snapshotArchive.Entries | Where-Object { $_.FullName -like 'xl/worksheets/*.xml' })
-        if ($snapshotSheets.Count -ne 1) { Fail "у книзі зрізу $($snapshotSheets.Count) аркушів замість одного" }
-
-        $sheetXml = Read-SnapshotEntry $snapshotArchive $snapshotSheets[0].FullName
-        $snapshotStrings = Read-SnapshotEntry $snapshotArchive 'xl/sharedStrings.xml'
-
-        # ⛔ Рядків рівно стільки, скільки в зрізі, плюс заголовок. «Не порожня»
-        # книга виглядала б так само і з половиною рядків.
-        $bookRows = ([regex]::Matches($sheetXml, '<x:row ')).Count
-        if ($bookRows -ne ($snapshot.rowCount + 1)) {
-            Fail "у книзі зрізу $bookRows рядків, а зріз має $($snapshot.rowCount) плюс заголовок"
-        }
-
-        foreach ($value in $expected) {
-            $escaped = [System.Security.SecurityElement]::Escape($value)
-            if ($snapshotStrings -notmatch [regex]::Escape($escaped)) {
-                Fail "у книзі зрізу немає значення «$value»"
-            }
-        }
-
-        Write-Host "      рядків у книзі зрізу: $bookRows; звірено значень: $($expected.Count)"
-    }
-    finally {
-        $snapshotArchive.Dispose()
-    }
+    # ✎ P-1124-3 (D-NEW): кроки «побудова зрізу звіту» і «книга зрізу» прибрано разом зі зрізами звітності
+    # (звітність — SSRS над сирим шаром rpt.*).
 
     Write-Host ''
     Write-Host 'Наскрізний сценарій пройдено.' -ForegroundColor Green

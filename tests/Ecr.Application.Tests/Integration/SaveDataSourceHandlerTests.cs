@@ -88,7 +88,7 @@ public sealed class SaveDataSourceHandlerTests
     [InlineData("Server=flert;Authentication=ActiveDirectoryMSI")]
     [InlineData("Server=flert;Authentication=Active Directory Default")]
     [InlineData("Server=flert;Authentication=Active Directory Integrated")]
-    [InlineData("Server=flert;Authentication=Active Directory Password;User ID=svc")]
+    [InlineData("Server=flert;Authentication=Active Directory Password")]
     [InlineData("Server=flert;Authentication=Active Directory Service Principal")]
     // Рев'ю an33d, P3-2: довільний SPN — Kerberos-квиток на чужу службу хосту з рядка.
     [InlineData("Server=flert;Integrated Security=true;Server SPN=cifs/dc01")]
@@ -146,8 +146,6 @@ public sealed class SaveDataSourceHandlerTests
     [InlineData("Server=10.1.2.3,1433;User Instance=false")]
     [InlineData("Server=flert;Server Certificate=C:\\certs\\flert.cer")]
     [InlineData("Server=flert;Server Certificate=d:/certs/flert.cer")]
-    [InlineData("Server=flert;Authentication=SqlPassword;User ID=svc")]
-    [InlineData("Server=flert;Authentication=Sql Password;User ID=svc")]
     [InlineData("Server=.;Integrated Security=true")]
     [InlineData(@"Server=.\SQLEXPRESS;Integrated Security=true")]
     [InlineData(@"Server=np:\\.\pipe\sql\query")]
@@ -155,6 +153,31 @@ public sealed class SaveDataSourceHandlerTests
     [InlineData("Server=flert;Trust Server Certificate=true;Host Name In Certificate=*.corp.local")]
     public async Task Create_Sql_звичайний_рядок_з_єднання_проходить(string endpoint)
         => Assert.Null(await TryCreate(endpoint, new FakeNetwork("10.0.0.5")));
+
+    /// <summary>
+    /// ✎ P-1126-SRCCRED (R-04): логін у рядку з'єднання — теж облікові дані; він задається полями автентифікації.
+    /// Відмова за ІМЕНЕМ ключа: <c>userid=</c>, табуляція перед <c>=</c> тощо; <c>superuser</c>/<c>guid</c> — не облікові.
+    /// </summary>
+    [Theory]
+    [InlineData("Server=flert;Authentication=SqlPassword;User ID=svc")]
+    [InlineData("Server=flert;Authentication=Sql Password;User ID=svc")]
+    [InlineData("Server=flert;UID=svc")]
+    [InlineData("Server=flert;userid=svc")]
+    [InlineData("Server=flert;User\tId=svc")]
+    [InlineData("Server=flert;user=svc")]
+    [InlineData("Server=flert;Pwd\t=x")]
+    [InlineData("Server=flert;Password\n=x")]
+    public async Task Create_Sql_логін_у_рядку_422(string endpoint)
+    {
+        var refused = await TryCreate(endpoint, new FakeNetwork("10.0.0.5"));
+
+        // Табуляція в імені ключа SqlClient не розбирає взагалі — відмова «рядок не розбирається»; теж без повтору.
+        Assert.NotNull(refused);
+        Assert.Contains(
+            refused.Details!["messageKey"],
+            new object[] { "err.ECR-REQ-0422.dataSourceEndpointCarriesSecret", "err.ECR-REQ-0422.dataSourceEndpointMalformed" });
+        Assert.DoesNotContain("svc", refused.Message, StringComparison.Ordinal);
+    }
 
     private sealed class FakeNetwork(params string[] resolved) : IEndpointNetwork
     {

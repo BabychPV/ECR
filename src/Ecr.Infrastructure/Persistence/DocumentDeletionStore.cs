@@ -324,6 +324,8 @@ public sealed class DocumentDeletionStore(EcrDbContext db, IDependencyGraphProvi
                 await db.CalculationResults.Where(r => r.PeriodKey == key && runIds.Contains(r.CalculationRunId)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
             }
 
+            // ✎ P-1124: проблеми цих прогонів (FK_CIssue_Run) — до рядків прогонів.
+            await CalculationIssueRunCleanup.DeleteForRunsAsync(db, runIds, ct).ConfigureAwait(false);
             await db.CalculationRuns.Where(r => runIds.Contains(r.Id)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         }
 

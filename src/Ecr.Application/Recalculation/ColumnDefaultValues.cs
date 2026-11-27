@@ -196,6 +196,36 @@ public sealed class ColumnDefaultValues(IMetadataCache metadata, IRegistryStore 
     }
 
     /// <summary>
+    /// ✎ 25.11 (живий прохід, документ 100): чи має комірка без запису ДЕФОЛТ, який читання підставить (дефолт рядка
+    /// перекриває дефолт колонки; <c>""</c> рядка — дефолту немає). Потрібно перевірці обов'язкових входів методології:
+    /// вона вважала «Information on overhauled engines» (дефолт <c>NOTPASSEDOVERHAUL</c>) незаповненою, хоча сітка й
+    /// формули бачать значення, — і людина отримувала попередження, яке не могла зняти.
+    /// </summary>
+    /// <param name="table">Таблиця версії.</param>
+    /// <param name="rowKey">Ключ рядка (для дефолту фіксованого рядка).</param>
+    /// <param name="columnDefId">Колонка.</param>
+    public static bool HasEffectiveDefault(TableDef table, string rowKey, int columnDefId)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+
+        var column = table.Columns.FirstOrDefault(c => c.Id == columnDefId && !c.IsDeleted && !c.IsComputed);
+        if (column is null)
+        {
+            return false;
+        }
+
+        var row = table.Rows.FirstOrDefault(r => !r.IsDeleted && string.Equals(r.RowKeyValue, rowKey, StringComparison.Ordinal));
+        if (row is not null && row.CellDefaults.TryGetValue(column.Code, out var rowText))
+        {
+            var text = (rowText ?? string.Empty).Trim();
+            return text.Length > 0 && (column.DataType == CellDataType.Lookup || Parse(column, text) is not null);
+        }
+
+        return !string.IsNullOrWhiteSpace(column.DefaultValue)
+               && (column.DataType == CellDataType.Lookup || Parse(column) is not null);
+    }
+
+    /// <summary>
     /// Текст дефолту → значення за типом колонки (інваріантна культура; запасний — десяткова кома, як у Land-шаблонах).
     /// Непридатний дефолт (текст у числовій колонці) — як відсутній: сітка покаже текст як є.
     /// </summary>

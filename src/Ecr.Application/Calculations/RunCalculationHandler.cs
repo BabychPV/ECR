@@ -26,7 +26,6 @@ public sealed class RunCalculationHandler(
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock,
-    IAuditWriter audit,
     IJobQueue? queue = null,
     IJobLeaseContext? lease = null,
     ICalculationIssueStore? issues = null)
@@ -452,68 +451,20 @@ public sealed class RunCalculationHandler(
                     ],
                     ct)
                 .ConfigureAwait(false);
+
+            // ✎ P-1124: проблеми неперерахованих таблиць (перенесені аркуші, пропущені подані/затверджені) — на новий прогін,
+            // у тій самій транзакції: знятий прогін прибирається після коміту разом зі своїми проблемами (FK_CIssue_Run).
+            if (superseded.Count > 0)
+            {
+                _ = await issues
+                    .CarryOverAsync(calculationRunId, [.. superseded.Select(s => s.RunId)], ct)
+                    .ConfigureAwait(false);
+            }
         }
 
-        var invalidated = await results
-            .InvalidateReportSnapshotsAsync(calculationRunId, ct)
-            .ConfigureAwait(false);
-
-        // ⚠ Журнал — у ТІЙ САМІЙ транзакції, що й перемикання (C4): відкат
-        // перемикання не лишає запису «зріз застарів», а запис не губиться,
-        // якщо перемикання закомітилось.
-        var utcNow = clock.UtcNow;
-        foreach (var snapshot in invalidated)
-        {
-            await audit
-                .WriteStructureChangeAsync(SnapshotInvalidatedRecord(snapshot, calculationRunId, utcNow), ct)
-                .ConfigureAwait(false);
-        }
-
+        // ✎ P-1124-3 (D-NEW): позначка «зріз звітності застарів» (ФВ-10.5) і її запис у журнал прибрані разом
+        // зі зрізами — звітність лише SSRS над сирим шаром rpt.*.
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
         return superseded;
     }
-
-    /// <summary>Тип сутності в журналі для застарілості зрізу (ФВ-10.5).</summary>
-    public const string SnapshotAuditEntityType = "ReportSnapshot";
-
-    /// <summary>Операція журналу: зріз застарів після перерахунку (ФВ-10.5).</summary>
-    public const string SnapshotInvalidatedOperation = "Invalidated";
-
-    /// <summary>Автор системної події — та сама умовність, що й у <c>RecalculationService</c>.</summary>
-    private const int SystemUserId = 0;
-
-    /// <summary>Запис журналу «зріз застарів» (ФВ-10.5).</summary>
-    /// <remarks>
-    /// ⚠ Автор — система, а не той, хто запустив перерахунок: зріз застарів
-    /// як наслідок, а не як його дія, і так само застаріває після нічного
-    /// розкладу, де людини немає. Хто запустив — видно за прогоном
-    /// (<c>calculationRunId</c> у <c>NewJson</c> і в <c>CorrelationId</c>).
-    /// <para>
-    /// <c>ChangeClass.Safe</c>: вміст зрізу не змінюється — змінюється лише те,
-    /// що про нього можна сказати.
-    /// </para>
-    /// </remarks>
-    private static StructureChangeRecord SnapshotInvalidatedRecord(
-        InvalidatedReportSnapshot snapshot, long calculationRunId, DateTime utcNow)
-        => new(
-            utcNow,
-            TemplateVersionId: snapshot.TemplateVersionId,
-            EntityType: SnapshotAuditEntityType,
-            EntityId: checked((int)snapshot.SnapshotId),
-            ChangeClass: ChangeClass.Safe,
-            Operation: SnapshotInvalidatedOperation,
-            OldJson: System.Text.Json.JsonSerializer.Serialize(new { isStale = false }),
-            NewJson: System.Text.Json.JsonSerializer.Serialize(new
-            {
-                isStale = true,
-                calculationRunId,
-                reportVersionId = snapshot.ReportVersionId,
-                projectId = snapshot.ProjectId,
-                periodKey = snapshot.PeriodKey,
-                status = snapshot.Status,
-                builtAt = snapshot.BuiltAt,
-            }),
-            ChangeReason: "calculation-run-current",
-            ChangedByUserId: SystemUserId,
-            CorrelationId: string.Create(CultureInfo.InvariantCulture, $"calc-run:{calculationRunId}"));
 }

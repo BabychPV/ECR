@@ -32,6 +32,13 @@ interface DocumentProgressProps {
    * замість стану аркуша показується позначка «No approval».
    */
   readonly workflowOff?: boolean;
+  /**
+   * ✎ b14 documents-board-yearly (людина 25.11: «Sheet: Draft» без місяця — незрозуміло, чий це стан): ЧИЙ стан у чипі —
+   * «September 2026», «September 2026 · Reopened for this document» або «Year 2026» для документа «рік».
+   */
+  readonly stateScope?: string | undefined;
+  /** ✎ b14: стан, який показати замість стану вкладки (документ «рік» — зведений за розпочаті місяці). */
+  readonly stateOverride?: string | undefined;
 }
 
 /**
@@ -54,6 +61,8 @@ export function DocumentProgress({
   issues,
   onShowIssues,
   workflowOff = false,
+  stateScope,
+  stateOverride,
 }: DocumentProgressProps): JSX.Element {
   const active = sheets.find((sheet) => sheet.code === activeCode);
 
@@ -66,7 +75,16 @@ export function DocumentProgress({
           <Text size="xs" c="dimmed">
             {t('document.sheetStateLabel')}
           </Text>
-          <StatusBadge kind="sheet" state={active.state} />
+          {stateOverride === undefined ? (
+            <StatusBadge kind="sheet" state={active.state} />
+          ) : (
+            <StatusBadge kind="sheet" state={stateOverride} />
+          )}
+          {stateScope !== undefined && stateScope.length > 0 && (
+            <Text size="xs" c="dimmed" data-testid="document-sheet-state-scope">
+              · {stateScope}
+            </Text>
+          )}
         </Group>
       )}
 

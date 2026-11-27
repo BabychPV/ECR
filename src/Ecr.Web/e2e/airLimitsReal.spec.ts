@@ -118,6 +118,14 @@ async function importViaApi(api: APIRequestContext, permitId: number, file: Buff
   );
 }
 
+/** P2 has air-limit sources for the card screens: imported through the API when the serial tests that do it did not run. */
+async function ensureCardData(api: APIRequestContext): Promise<void> {
+  const card = await ok<{ sources: unknown[] }>(await api.get(`/api/v1/permits/${String(ids.p2)}/air-limits`), 'картка P2');
+  if (card.sources.length === 0) {
+    await importViaApi(api, ids.p2, workbook(SmallSources));
+  }
+}
+
 async function treeNodes(api: APIRequestContext): Promise<{ id: number; parentEntryId: number | null; levelCode: string; code: string }[]> {
   const tree = await ok<{ nodes: { id: number; parentEntryId: number | null; levelCode: string; code: string }[] }>(
     await api.get(`/api/v1/registries/${NaeTree}/tree`),
@@ -610,6 +618,10 @@ test.describe('Air limits real', () => {
             await shot(page, scheme, width, label);
           };
 
+          // ⛔ Self-sufficient under `-Grep`: run alone (e.g. `--grep "contrast"`), the serial tests above that import into
+          // P2 do not run and its card has no sources (main, e2e-stand run 45492296797: «Substances of source 0001» never
+          // appears). The card data is ensured here through the API; in the full scenario P2 already has it.
+          await ensureCardData(admin);
           await page.goto(`/admin/permits/${String(ids.p2)}?tab=air`);
           await expect(page.getByTestId('air-counts')).toBeVisible({ timeout: 30_000 });
           await clean('card');

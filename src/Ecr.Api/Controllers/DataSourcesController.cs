@@ -1,3 +1,4 @@
+using Ecr.Application.Common;
 using Ecr.Application.Integration;
 using Ecr.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
@@ -28,6 +29,7 @@ public sealed class DataSourcesController(
     SaveDataSourceHandler save,
     DeleteDataSourceHandler delete,
     TestDataSourceConnectionHandler test,
+    TestDataSourceFormHandler testForm,
     BrowseSourceCatalogHandler catalog,
     ProbeSourcePathHandler probe) : ControllerBase
 {
@@ -109,7 +111,8 @@ public sealed class DataSourcesController(
         var created = await save
             .CreateAsync(
                 request.Code ?? string.Empty, request.NameL10n, request.Transport, request.Endpoint,
-                request.SecondaryEndpoint, request.Catalog, request.MaxParallel, request.SecretConfirmation, ct)
+                request.SecondaryEndpoint, request.Catalog, request.MaxParallel, request.SecretConfirmation?.Reveal(),
+                Credentials(request), ct)
             .ConfigureAwait(false);
 
         return Created(new Uri("/api/v1/data-sources", UriKind.Relative), created);
@@ -146,10 +149,14 @@ public sealed class DataSourcesController(
         return Ok(await save
             .UpdateAsync(
                 id, request.NameL10n, request.Transport, request.Endpoint, request.SecondaryEndpoint,
-                request.Catalog, request.MaxParallel, request.IsActive, ifMatch, request.SecretConfirmation,
-                request.ConfirmEndpointChange, ct)
+                request.Catalog, request.MaxParallel, request.IsActive, ifMatch, request.SecretConfirmation?.Reveal(),
+                request.ConfirmEndpointChange, Credentials(request), ct)
             .ConfigureAwait(false));
     }
+
+    /// <summary>Облікові дані з тіла: відсутні поля — «не змінювати» (R-08).</summary>
+    private static SourceCredentialsInput Credentials(SaveDataSourceRequest request)
+        => new(request.AuthMode, request.UserName, request.Password, request.ClearPassword);
 
     /// <summary>
     /// Прибирає джерело, на яке ніщо не спирається. Право <c>Integration.Manage</c>.
@@ -189,9 +196,11 @@ public sealed class DataSourcesController(
     /// джерела, яка вже виконується, — <c>409 ECR-JOB-0409</c>.
     ///
     /// ⛔ <c>error</c> — лише категорія (<c>auth</c>, <c>unreachable</c>,
-    /// <c>tls</c>, <c>timeout</c>, <c>other</c>, <c>adapterNotRegistered</c>),
-    /// <c>messageKey</c> — <c>integration.test.failed.{категорія}</c>. Сирий
-    /// текст винятку — лише в серверному журналі (S3: інакше кнопка — сканер мережі).
+    /// <c>tls</c>, <c>timeout</c>, <c>notConfigured</c>, <c>query</c>, <c>other</c>,
+    /// <c>adapterNotRegistered</c>), <c>messageKey</c> — <c>integration.test.failed.{категорія}</c>.
+    /// Сирий текст винятку — лише в серверному журналі (S3: інакше кнопка — сканер мережі).
+    /// Джерело без запиту каталогу (FLERT, склад газу) перевіряється самим з'єднанням:
+    /// <c>{ ok: true, entities: 0, messageKey: integration.test.connectedNoCatalog }</c>.
     /// </remarks>
     [HttpPost("{id:int}/test")]
     [ProducesResponseType<DataSourceTestResult>(StatusCodes.Status200OK)]
@@ -205,6 +214,36 @@ public sealed class DataSourcesController(
         ArgumentNullException.ThrowIfNull(request);
 
         return Ok(await test.HandleAsync(id, request.Reason, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Перевіряє з'єднання з НЕЗБЕРЕЖЕНИХ значень форми (P-1126-SRCCRED §13.1). Право <c>Integration.Manage</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Нічого не зберігає. Лише <c>PiSqlClient</c> і <c>Sql</c> (інакше <c>422 dataSourceTestTransport</c>); та сама
+    /// валідація адреси, що при збереженні. Пароль — з тіла; збережений підставляється лише за <c>sourceId</c> при тій
+    /// самій цілі й логіні, інакше <c>422 dataSourcePasswordReentryRequired</c>. Не більше 5 на хвилину на користувача
+    /// (<c>429 tooManySourceTests</c>); після 3 відмов входу поспіль ціль на паузі 15 хв (<c>429 sourceTestTargetPaused</c>).
+    /// Відповідь — як у <c>POST …/{id}/test</c>: лише категорія; у журналі безпеки — без адреси й пароля.
+    /// </remarks>
+    [HttpPost("test-connection")]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting(Ecr.Api.Security.SourceTestRateLimitPolicy.PolicyName)]
+    [ProducesResponseType<DataSourceTestResult>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<IActionResult> TestConnection(
+        [FromBody] TestDataSourceConnectionRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await testForm.HandleAsync(
+            new DataSourceFormTest(
+                request.SourceId, request.Transport, request.Endpoint, request.SecondaryEndpoint, request.Catalog,
+                request.AuthMode, request.UserName, request.Password, request.Reason),
+            ct).ConfigureAwait(false));
     }
 }
 
@@ -234,6 +273,16 @@ public sealed class DataSourcesController(
 /// err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed</c>. Для джерел із
 /// секретом ігнорується; при створенні не потрібне.
 /// </param>
+/// <param name="AuthMode">
+/// Як джерело входить у систему (P-1126-SRCCRED): <c>Windows</c> — обліковий запис служби ECR, <c>UserPassword</c> —
+/// логін і пароль нижче (лише <c>PiSqlClient</c> і <c>Sql</c>). <c>null</c> — не змінювати (клієнт, що не знає поля).
+/// </param>
+/// <param name="UserName">Логін джерела, 1..256 символів; <c>null</c> — не змінювати.</param>
+/// <param name="Password">
+/// ⛔ Лише запис: пароль джерела. <c>null</c> або порожній — не змінювати. Шифрується перед записом і НЕ повертається
+/// ніколи — у відповіді лише <c>hasPassword</c>.
+/// </param>
+/// <param name="ClearPassword">Стерти збережений пароль (як <c>clearPassword</c> у SMTP).</param>
 public sealed record SaveDataSourceRequest(
     string? Code,
     IReadOnlyDictionary<string, string>? NameL10n,
@@ -243,8 +292,12 @@ public sealed record SaveDataSourceRequest(
     string? Catalog = null,
     int? MaxParallel = null,
     bool IsActive = true,
-    string? SecretConfirmation = null,
-    bool ConfirmEndpointChange = false);
+    SecretString? SecretConfirmation = null,
+    bool ConfirmEndpointChange = false,
+    SourceAuthMode? AuthMode = null,
+    string? UserName = null,
+    SecretString? Password = null,
+    bool ClearPassword = false);
 
 /// <summary>Тіло перевірки з'єднання.</summary>
 /// <param name="Reason">Причина; обов'язкова, потрапляє в журнал безпеки.</param>
@@ -253,3 +306,30 @@ public sealed record TestDataSourceRequest(string Reason);
 /// <summary>Тіло проби конфігурації мапінгу (ФВ-13.17).</summary>
 /// <param name="Path">Шлях мапінгу в джерелі, від 1 до 500 символів.</param>
 public sealed record ProbeDataSourceRequest(string? Path);
+
+/// <summary>
+/// Тіло перевірки з'єднання з НЕЗБЕРЕЖЕНИХ значень форми (<c>POST /api/v1/data-sources/test-connection</c>,
+/// P-1126-SRCCRED §13.1). Нічого не зберігає.
+/// </summary>
+/// <param name="SourceId">
+/// Джерело, чий збережений пароль можна підставити, — лише коли ціль (транспорт, адреси, логін) не змінилася;
+/// <c>null</c> — нове з'єднання.
+/// </param>
+/// <param name="Transport">Транспорт: з тіла перевіряються лише <c>PiSqlClient</c> і <c>Sql</c>.</param>
+/// <param name="Endpoint">Рядок з'єднання — без облікових даних (та сама валідація, що при збереженні).</param>
+/// <param name="SecondaryEndpoint">Запасна адреса; <c>null</c> — немає.</param>
+/// <param name="Catalog">Каталог або база джерела.</param>
+/// <param name="AuthMode">Як входити: <c>Windows</c> або <c>UserPassword</c>.</param>
+/// <param name="UserName">Логін за <c>UserPassword</c>.</param>
+/// <param name="Password">⛔ Лише запис: пароль з форми; не зберігається, не повертається, не пишеться в журнал.</param>
+/// <param name="Reason">Причина; обов'язкова, потрапляє в журнал безпеки.</param>
+public sealed record TestDataSourceConnectionRequest(
+    int? SourceId,
+    ExternalTransport Transport,
+    string? Endpoint,
+    string? SecondaryEndpoint = null,
+    string? Catalog = null,
+    SourceAuthMode AuthMode = SourceAuthMode.Windows,
+    string? UserName = null,
+    SecretString? Password = null,
+    string? Reason = null);

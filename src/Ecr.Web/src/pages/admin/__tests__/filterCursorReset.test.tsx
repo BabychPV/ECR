@@ -66,6 +66,7 @@ function serve(path: string, row: unknown): URLSearchParams[] {
       const url = new URL(String(input), 'http://x');
 
       if (url.pathname === '/api/v1/me') return json({ permissions: [], denies: [], grants: {} });
+      if (url.pathname.endsWith('/entity-types')) return json(['cfg.Template']);
       if (url.pathname === path) {
         seen.push(url.searchParams);
         const cursor = url.searchParams.get('cursor');
@@ -94,8 +95,8 @@ function show(page: JSX.Element, path: string): void {
 
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, FilterDebounceMs * 2));
 
-/** Гортає на другу сторінку, набирає `text` у поле й повертає запити ПІСЛЯ гортання. */
-async function pageThenType(seen: URLSearchParams[], label: string, text: string): Promise<URLSearchParams[]> {
+/** Гортає на другу сторінку, обирає варіант `option` у переліку `label` і повертає запити ПІСЛЯ гортання. */
+async function pageThenSelect(seen: URLSearchParams[], label: string, option: string): Promise<URLSearchParams[]> {
   const user = userEvent.setup();
   const more = await screen.findByRole('button', { name: t('documents.more') }, { timeout: SlowEnvTimeout });
 
@@ -103,7 +104,8 @@ async function pageThenType(seen: URLSearchParams[], label: string, text: string
   await waitFor(() => expect(seen).toHaveLength(2));
   expect(seen[1]?.get('cursor')).toBe('page-2');
 
-  await user.type(screen.getByRole('textbox', { name: label }), text);
+  await user.click(screen.getByLabelText(label));
+  await user.click(await screen.findByRole('option', { name: option }));
   await waitFor(() => expect(seen.length).toBeGreaterThan(2));
   await settle();
 
@@ -120,9 +122,19 @@ describe('скидання курсора разом із відкладеним
       const seen = serve('/api/v1/audit/structure', structureRow);
       show(<AuditPage />, '/admin/audit?view=structure');
 
-      const after = await pageThenType(seen, '⟦audit.entityType⟧', 'cfg');
+      // ✎ P-1124-4: «Entity type» — вибір (код типу), не набір; скидання курсора — те саме.
+      const user = userEvent.setup();
+      const more = await screen.findByRole('button', { name: t('documents.more') }, { timeout: SlowEnvTimeout });
+      await user.click(more);
+      await waitFor(() => expect(seen).toHaveLength(2));
+      expect(seen[1]?.get('cursor')).toBe('page-2');
 
-      expect(after.map((query) => [query.get('entityType'), query.get('cursor')])).toEqual([['cfg', null]]);
+      await user.click(screen.getByRole('textbox', { name: '⟦audit.entityType⟧' }));
+      await user.click(await screen.findByRole('option', { name: 'Template' }, { timeout: SlowEnvTimeout }));
+      await waitFor(() => expect(seen.length).toBeGreaterThan(2));
+      await settle();
+
+      expect(seen.slice(2).map((query) => [query.get('entityType'), query.get('cursor')])).toEqual([['cfg.Template', null]]);
     },
     SlowEnvTimeout,
   );
@@ -133,9 +145,11 @@ describe('скидання курсора разом із відкладеним
       const seen = serve('/api/v1/consistency/issues', issueRow);
       show(<ConsistencyIssuesPage />, '/admin/consistency');
 
-      const after = await pageThenType(seen, '⟦consistency.rule⟧', 'CNS');
+      // ✎ 24.11: «Rule» — перелік відомих правил (select), а не поле набору; поведінка та сама — зміна фільтра після
+      // «More» дає рівно один запит із новим правилом і БЕЗ курсора (перша сторінка).
+      const after = await pageThenSelect(seen, '⟦consistency.rule⟧', '⟦consistency.rule.BROKEN_FK⟧');
 
-      expect(after.map((query) => [query.get('ruleCode'), query.get('cursor')])).toEqual([['CNS', null]]);
+      expect(after.map((query) => [query.get('ruleCode'), query.get('cursor')])).toEqual([['BROKEN_FK', null]]);
     },
     SlowEnvTimeout,
   );

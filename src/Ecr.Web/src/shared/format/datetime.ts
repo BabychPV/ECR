@@ -123,6 +123,18 @@ export function formatDateTime(value: DateLike, options?: Intl.DateTimeFormatOpt
 }
 
 /**
+ * ✎ P-1124-4: дата з годиною в 24-годинному записі для ВСІХ мов — стовпець часу журналів аудиту. «9:12 PM» поруч
+ * зі «21:12» майданчика читалося як дві різні події; людина просила один рядок і місцевий час.
+ * ⚠ Пояс — читача (без `timeZone`), якщо місце виклику не задало інший.
+ */
+export const DateTime24Options: Intl.DateTimeFormatOptions = { dateStyle: 'medium', timeStyle: 'short', hourCycle: 'h23' };
+
+/** Дата з годиною в 24-годинному записі (`DateTime24Options`), мовою інтерфейсу; `timeZone` — необов'язковий пояс. */
+export function formatDateTime24(value: DateLike, timeZone?: string, lang?: Language): string {
+  return format(value, timeZone === undefined ? DateTime24Options : { ...DateTime24Options, timeZone }, lang);
+}
+
+/**
  * Лише час.
  *
  * ⚠ 12- чи 24-годинний запис визначає ЛОКАЛЬ, а не наш вибір: `en` дає
@@ -179,7 +191,10 @@ function kzNumeric(at: Date, options: Intl.DateTimeFormatOptions): string | null
   const time: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' };
 
   if (options === DateOptions) return formatter('ru', date).format(at);
-  if (options === DateTimeOptions) return formatter('ru', { ...date, ...time }).format(at);
+  if (options === DateTimeOptions || options === DateTime24Options) return formatter('ru', { ...date, ...time }).format(at);
+  if (options.dateStyle === 'medium' && options.timeStyle === 'short' && options.hourCycle === 'h23' && options.timeZone !== undefined) {
+    return formatter('ru', { ...date, ...time, timeZone: options.timeZone }).format(at);
+  }
   if (options === TimeOptions) return formatter('ru', time).format(at);
 
   return null;

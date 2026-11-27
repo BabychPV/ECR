@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { LegacyProjectRedirect } from '@/app/projectRoutes';
+import { LegacyProjectRedirect, LegacyProjectTabRedirect } from '@/app/projectRoutes';
 import { ProjectsPage } from '@/pages/projects/ProjectsPage';
 import { testTheme } from '@/test/render';
 
@@ -79,7 +79,8 @@ function show(entry = '/projects'): void {
           <Routes>
             <Route path="/projects" element={<ProjectsPage />} />
             <Route path="/admin/periods" element={<LegacyProjectRedirect tab="periods" />} />
-            <Route path="/admin/projects" element={<LegacyProjectRedirect tab="settings" />} />
+            <Route path="/admin/projects" element={<LegacyProjectRedirect tab="templates" />} />
+            <Route path="/projects/:id/settings" element={<LegacyProjectTabRedirect tab="templates" />} />
             <Route path="*" element={<Where />} />
           </Routes>
         </QueryClientProvider>
@@ -147,7 +148,9 @@ describe('Старі адреси (f2)', () => {
     ['/admin/periods', '/projects'],
     ['/admin/projects', '/projects'],
     ['/admin/periods?projectId=7', '/projects/7/periods'],
-    ['/admin/projects?projectId=7', '/projects/7/settings'],
+    ['/admin/projects?projectId=7', '/projects/7/templates'],
+    // ✎ 24.11: колишня вкладка Settings стала Templates і General — стара адреса веде на Templates.
+    ['/projects/7/settings', '/projects/7/templates'],
     ['/admin/projects?projectId=abc', '/projects'],
   ])('%s → %s', async (from, to) => {
     serve(listed);

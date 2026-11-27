@@ -2,6 +2,7 @@ import type { TableSliceDto } from '@/api/types';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { t } from '@/shared/i18n';
 import { cellKey } from './permissions';
+import { rowKeyText } from './rowKeyText';
 import type { LockedRowItem, PeriodRowFindings, RowAttentionItem, TableAttention } from './rowAttentionStore';
 
 export {
@@ -119,7 +120,7 @@ export function lockedRowsOf(
 ): LockedRowItem[] {
   const own: ColumnMonth = { monthNumber: slice.periodKey % 100, periodKey: slice.periodKey };
   const items: LockedRowItem[] = [];
-  for (const row of slice.rows) {
+  for (const [index, row] of slice.rows.entries()) {
     const codes = lockedColumnsOf(slice, row.rowKey);
     if (codes.size === 0) continue;
     const first = slice.columns.find((column) => codes.has(column.code));
@@ -135,6 +136,7 @@ export function lockedRowsOf(
       periodKey: slice.periodKey,
       rowKey: row.rowKey,
       rowName: rowNameOf(slice, row, lookupLabel),
+      rowOrdinal: index + 1,
       months: [...new Set(periodKeys.map((key) => months.get(key) ?? 0))],
       periodKeys,
       columns: describeColumns(slice, codes) ?? '',
@@ -335,7 +337,7 @@ export function tableAttentionOf(
   }
 
   const rows: RowAttentionItem[] = [];
-  for (const row of slice.rows) {
+  for (const [index, row] of slice.rows.entries()) {
     const warning = warnings.get(row.rowKey);
     const reason = row.isOrphaned === true ? rowAttentionReason(slice, row.rowKey, problems.get(row.rowKey)) : null;
     if (reason === null && warning === undefined) continue;
@@ -344,7 +346,8 @@ export function tableAttentionOf(
       tableInstanceId: slice.tableInstanceId,
       periodKey: slice.periodKey,
       rowKey: row.rowKey,
-      rowLabel: row.label ?? row.rowKey,
+      rowLabel: row.label ?? rowKeyText(row.rowKey, index + 1),
+      rowOrdinal: index + 1,
     };
     if (reason !== null) {
       rows.push({ ...base, reason: warning === undefined ? reason : `${reason} ${warning}` });

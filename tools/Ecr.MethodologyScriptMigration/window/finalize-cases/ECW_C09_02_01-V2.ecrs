@@ -1,0 +1,9 @@
+// Methodology ECW_C09_02_01 - P-1124-2 candidate (water), 1.0.20.0 aliases Concentration/Volume (month of the period)
+// Units: Concentration mg_per_l x Volume m3 = g; / 1e6 = t (1 mg/l * 1 m3 = 1 g = 1e-6 t). D-425: Running only.
+
+rows from T7b_00
+    active when row.Land_Status == entry("LAND_GENERIC_EQUIPSTATUS", "RUNNING");
+
+const k1_ECW_C09_02_01_ : one = 1000000;
+
+output ECW_EC_tons : t = row.Concentration * row.Volume / k1_ECW_C09_02_01_;

@@ -40,6 +40,8 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
         await using var connection = new SqlConnection(db.Database.GetConnectionString());
         await connection.OpenAsync(ct).ConfigureAwait(false);
 
+        filter = await NarrowVisibleToWindowAsync(connection, filter, ct).ConfigureAwait(false);
+
         await using var command = connection.CreateCommand();
 
         var where = BuildCellChangeWhere(filter, command, AuditCursor.Decode(page.Cursor, filter.Sort));
@@ -90,6 +92,8 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
         await using var connection = new SqlConnection(db.Database.GetConnectionString());
         await connection.OpenAsync(ct).ConfigureAwait(false);
 
+        filter = await NarrowVisibleToWindowAsync(connection, filter, ct).ConfigureAwait(false);
+
         await using var command = connection.CreateCommand();
 
         // ⚠ Той самий WHERE, що й у читанні сторінки (одне джерело — BuildCellChangeWhere): вікно за
@@ -117,6 +121,135 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                 return (IReadOnlyList<CellChangeColumnCount>)counts;
             },
             log).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<CellChangeColumnView>> ReadChangedColumnsAsync(CellChangeFilter filter, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        // ✎ AC-8: той самий шлях, що й сторінка: десятки тисяч видимих Id документа Land спершу звужуються до колонок
+        // журналу вікна, далі — табличною змінною `@visibleSet` (audit-filters-live D1).
+        filter = await NarrowVisibleToWindowAsync(connection, filter, ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        var whereText = BuildCellChangeWhere(filter, command, after: null).ToString();
+
+        return await WithArchiveFallbackAsync(
+            async withArchive =>
+            {
+                command.CommandText = ChangedColumnsSql(whereText, withArchive);
+
+                var columns = new List<CellChangeColumnView>();
+                await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    columns.Add(new CellChangeColumnView(
+                        reader.GetInt32(0),
+                        StringOrNull(reader, 1),
+                        LocalizedOrNull(reader, 2),
+                        StringOrNull(reader, 3),
+                        LocalizedOrNull(reader, 4),
+                        StringOrNull(reader, 5),
+                        LocalizedOrNull(reader, 6)));
+                }
+
+                return (IReadOnlyList<CellChangeColumnView>)columns;
+            },
+            log).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ AC-8: різні колонки журналу за умовою <see cref="BuildCellChangeWhere"/> (гаряче + архів) з підписами структури.
+    /// </summary>
+    /// <param name="where">Умова — ОДНА для обох таблиць, разом із межами читання <c>@visibleSet</c>.</param>
+    /// <param name="withArchive"><c>false</c> — лише гарячий журнал.</param>
+    internal static string ChangedColumnsSql(string where, bool withArchive = true)
+    {
+        static string Named(string source)
+            => """
+               SELECT x.ColumnDefId, c.Code, c.HeaderL10n, sd.Code, sd.NameL10n, td.Code, td.NameL10n
+                 FROM (
+               """ + "\n" + source + "\n" + """
+                      ) AS x
+                 LEFT JOIN cfg.ColumnDef AS c ON c.Id = x.ColumnDefId
+                 LEFT JOIN cfg.TableDef AS td ON td.Id = c.TableDefId
+                 LEFT JOIN cfg.SheetDef AS sd ON sd.Id = td.SheetDefId
+                ORDER BY x.ColumnDefId;
+               """;
+
+        var hot = Named("SELECT DISTINCT ColumnDefId FROM aud.CellChange WHERE (" + where + ")");
+        if (!withArchive)
+        {
+            return WithVisiblePrelude(where, hot);
+        }
+
+        var archive = Named(
+            "SELECT ColumnDefId FROM aud.CellChange WHERE (" + where + ")\n"
+            + "UNION\n"
+            + "SELECT ColumnDefId FROM arc.AuditCellChange WHERE (" + where + ")");
+
+        return WithVisiblePrelude(where, WithArchiveProbe(hot, archive));
+    }
+
+    /// <summary>Від скількох видимих колонок перелік спершу звужується до колонок, що змінювались у вікні документа.</summary>
+    internal const int NarrowVisibleThreshold = 500;
+
+    /// <summary>
+    /// ✎ audit-filters-live D1: межі читання документа Land — десятки тисяч Id (видимі колонки × версії шаблону; копія
+    /// live, документ 96: 125 263), а у вікні змінювались лічені сотні колонок (114). Перелік звужується до тих, що є в
+    /// журналі документа за ВСЕ вікно (гаряче + архів), — результат той самий (рядки поза цими колонками у вікні не
+    /// існують), а в запит сторінки й підрахунку їде кілька сотень Id замість 766 КБ JSON.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Лише ЗВУЖУЄ <see cref="CellChangeFilter.VisibleColumnIds"/> (перетин), ніколи не розширює: колонка поза
+    /// межами читання не з'явиться, порожній перетин дає <c>1 = 0</c>. Вікно — повне <c>From/To</c> фільтра без
+    /// курсора, тож набір — надмножина колонок будь-якої сторінки.
+    /// </remarks>
+    private async Task<CellChangeFilter> NarrowVisibleToWindowAsync(
+        SqlConnection connection, CellChangeFilter filter, CancellationToken ct)
+    {
+        if (filter.VisibleColumnIds is not { Count: > NarrowVisibleThreshold } visible || filter.DocumentId is not { } documentId)
+        {
+            return filter;
+        }
+
+        await using var command = connection.CreateCommand();
+        foreach (var (name, value) in new[] { ("@from", filter.From), ("@to", filter.To) })
+        {
+            var edge = command.Parameters.Add(name, SqlDbType.DateTime2);
+            edge.Scale = 3;
+            edge.Value = value;
+        }
+
+        command.Parameters.Add("@documentId", SqlDbType.BigInt).Value = documentId;
+        const string hot =
+            "SELECT DISTINCT ColumnDefId FROM aud.CellChange WHERE ChangedAt >= @from AND ChangedAt < @to AND DocumentId = @documentId";
+        const string archive =
+            "\nUNION\nSELECT ColumnDefId FROM arc.AuditCellChange WHERE ChangedAt >= @from AND ChangedAt < @to AND DocumentId = @documentId";
+
+        var present = await WithArchiveFallbackAsync(
+            async withArchive =>
+            {
+                command.CommandText = withArchive
+                    ? "IF OBJECT_ID(N'arc.AuditCellChange', N'U') IS NOT NULL\n" + hot + archive + ";\nELSE\n" + hot + ";"
+                    : hot + ";";
+
+                var ids = new HashSet<int>();
+                await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    ids.Add(reader.GetInt32(0));
+                }
+
+                return ids;
+            },
+            log).ConfigureAwait(false);
+
+        return filter with { VisibleColumnIds = [.. visible.Where(present.Contains)] };
     }
 
     /// <summary>Читає сторінку журналу з вже підготовленої команди.</summary>
@@ -162,7 +295,10 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                     StringOrNull(reader, 25),
 
                     // Масштаб колонки — щоб клієнт показав значення за правилом сітки (не менше Scale знаків, U-05).
-                    reader.IsDBNull(26) ? null : Convert.ToInt32(reader.GetValue(26), CultureInfo.InvariantCulture))));
+                    reader.IsDBNull(26) ? null : Convert.ToInt32(reader.GetValue(26), CultureInfo.InvariantCulture),
+
+                    // ✎ AC-13: номер рядка на екрані — для рядка без мітки шаблону («Row N» замість початку GUID).
+                    reader.IsDBNull(27) ? null : reader.GetInt32(27))));
         }
 
         return rows;
@@ -209,7 +345,7 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
 
     /// <summary>Колонки рядка журналу змін комірок, спільні для <c>aud.CellChange</c> і <c>arc.AuditCellChange</c>.</summary>
     private const string CellChangeColumns =
-        "Id, ChangedAt, PeriodKey, DocumentId, RowKey, ColumnDefId, OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, IsOutOfWindow, IsOverwrite, Reason";
+        "Id, ChangedAt, PeriodKey, DocumentId, RowKey, ColumnDefId, OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, IsOutOfWindow, IsOverwrite, Reason, TableRowId";
 
     /// <summary>
     /// Пробник архіву: чи є в <c>arc.AuditCellChange</c> бодай один рядок у вікні запиту.
@@ -252,19 +388,25 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
     /// так само, як до D-247 (без архіву), а не падає на кожному зверненні до журналу.
     /// </remarks>
     internal static string CellChangesPageSql(string where, string order, string outerOrder)
-        => WithArchiveProbe(
-            CellChangesHotSql(where, order, outerOrder),
-            CellChangesWithArchiveSql(where, order, outerOrder));
+        => WithVisiblePrelude(where, WithArchiveProbe(
+            HotPageBody(where, order, outerOrder),
+            ArchivePageBody(where, order, outerOrder)));
 
     /// <summary>План «лише гаряче»: сторінка журналу над самою <c>aud.CellChange</c> (як до НФ-8.9.6).</summary>
     internal static string CellChangesHotSql(string where, string order, string outerOrder)
+        => WithVisiblePrelude(where, HotPageBody(where, order, outerOrder));
+
+    /// <summary>План «гаряче + архів»: <c>UNION ALL</c> двох таблиць, у кожної гілки свій <c>TOP</c>.</summary>
+    internal static string CellChangesWithArchiveSql(string where, string order, string outerOrder)
+        => WithVisiblePrelude(where, ArchivePageBody(where, order, outerOrder));
+
+    private static string HotPageBody(string where, string order, string outerOrder)
         => PageWithNames(
             AuditPaging.TopPage(CellChangeColumns, "aud.CellChange", where, order),
             fromArchive: "CAST(0 AS bit)",
             outerOrder);
 
-    /// <summary>План «гаряче + архів»: <c>UNION ALL</c> двох таблиць, у кожної гілки свій <c>TOP</c>.</summary>
-    internal static string CellChangesWithArchiveSql(string where, string order, string outerOrder)
+    private static string ArchivePageBody(string where, string order, string outerOrder)
         => PageWithNames(
             "SELECT TOP (@take) " + CellChangeColumns + ", FromArchive\n"
             + "  FROM (\n"
@@ -301,7 +443,7 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
         var hot = select + "\n  FROM aud.CellChange\n WHERE (" + where + ")" + valueChangesOnly + "\n GROUP BY ColumnDefId;";
         if (!withArchive)
         {
-            return hot;
+            return WithVisiblePrelude(where, hot);
         }
 
         var archive = select + "\n"
@@ -310,8 +452,24 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
             + "        SELECT ColumnDefId, ChangedAt, Origin FROM arc.AuditCellChange WHERE (" + where + ")" + valueChangesOnly + ") AS x\n"
             + " GROUP BY ColumnDefId;";
 
-        return WithArchiveProbe(hot, archive);
+        return WithVisiblePrelude(where, WithArchiveProbe(hot, archive));
     }
+
+    /// <summary>Ім'я табличної змінної видимих колонок, на яку посилається умова з <see cref="BuildCellChangeWhere"/>.</summary>
+    internal const string VisibleSetName = "@visibleSet";
+
+    /// <summary>
+    /// ✎ audit-filters-live D1: перелік видимих колонок розбирається з <c>@visibleColumns</c> ОДИН раз — у табличну
+    /// змінну з первинним ключем — на початку пакета, якщо умова на нього посилається.
+    /// </summary>
+    /// <param name="where">Умова з <see cref="BuildCellChangeWhere"/>.</param>
+    /// <param name="sql">Повний текст пакета.</param>
+    internal static string WithVisiblePrelude(string where, string sql)
+        => where.Contains(VisibleSetName, StringComparison.Ordinal)
+            ? "DECLARE " + VisibleSetName + " TABLE (Id int NOT NULL PRIMARY KEY);\n"
+              + "INSERT INTO " + VisibleSetName + " (Id) SELECT DISTINCT CAST([value] AS int) FROM OPENJSON(@visibleColumns);\n"
+              + sql
+            : sql;
 
     /// <summary>Вибір між планом «лише гаряче» і «гаряче + архів» за пробником <see cref="ArchiveWindowProbe"/>.</summary>
     private static string WithArchiveProbe(string hot, string archive)
@@ -336,11 +494,13 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                    a.OldValue, a.NewValue, a.ChangedByUserId, a.Origin, a.IsLateEdit,
                    u.DisplayName, d.BusinessKey, d.NameL10n, c.Code, c.HeaderL10n, c.DataType,
                    a.IsOutOfWindow, sd.Code, sd.NameL10n, td.Code, td.NameL10n, rd.LabelL10n,
-                   {fromArchive}, a.IsOverwrite, a.Reason, c.Scale
+                   {fromArchive}, a.IsOverwrite, a.Reason, c.Scale, tr.Ordinal
               FROM (
                     {pageSource}
                    ) AS a
               LEFT JOIN sec.[User] AS u ON u.Id = a.ChangedByUserId
+              LEFT JOIN doc.TableRow AS tr
+                     ON tr.PeriodKey = a.PeriodKey AND tr.Id = a.TableRowId AND tr.RowKey = a.RowKey
               LEFT JOIN doc.Document AS d ON d.Id = a.DocumentId
               LEFT JOIN cfg.ColumnDef AS c ON c.Id = a.ColumnDefId
               LEFT JOIN cfg.TableDef AS td ON td.Id = c.TableDefId
@@ -513,7 +673,11 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
             }
             else
             {
-                where.Append("\n                   AND ColumnDefId IN (SELECT CAST([value] AS int) FROM OPENJSON(@visibleColumns))");
+                // ✎ audit-filters-live D1: умова — по ТАБЛИЧНІЙ ЗМІННІЙ @visibleSet (PK), яку заповнює ОДИН розбір
+                // OPENJSON на початку пакета (VisibleColumnsPrelude). Підзапит `IN (… OPENJSON(@visibleColumns))`
+                // оптимізатор ставив внутрішньою стороною вкладених циклів і розбирав JSON НА КОЖЕН рядок журналу:
+                // копія live, документ 96 (125 263 Id із родоводом, 766 КБ JSON) — понад 45 с, на live — тайм-аут 503.
+                where.Append("\n                   AND ColumnDefId IN (SELECT Id FROM " + VisibleSetName + ")");
                 command.Parameters.Add("@visibleColumns", SqlDbType.NVarChar, -1).Value =
                     "[" + string.Join(",", visible.Select(v => v.ToString(CultureInfo.InvariantCulture))) + "]";
             }
@@ -1132,6 +1296,98 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                 ? AuditCursor.Encode(filter.Sort, last.View.ChangedAt, last.Id, last.View.ChangedByUserId, last.View.ChangedByDisplayName)
                 : null,
             TotalCount: null);
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<string>> ReadSecurityEventTypesAsync(DateTime from, DateTime to, CancellationToken ct)
+        => DistinctInWindowAsync("EventType", "aud.SecurityEvent", from, to, ct);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<string>> ReadStructureEntityTypesAsync(DateTime from, DateTime to, CancellationToken ct)
+        => DistinctInWindowAsync("EntityType", "aud.StructureChange", from, to, ct);
+
+    /// <summary>
+    /// Різні значення колонки журналу у вікні <c>ChangedAt</c> (✎ P-1124-4). <paramref name="column"/> і
+    /// <paramref name="table"/> — лише константи з цього класу, не з запиту.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> DistinctInWindowAsync(
+        string column, string table, DateTime from, DateTime to, CancellationToken ct)
+    {
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+
+        // ⚠ Вікно ПЕРШИМ — читаються лише партиції вікна, як у переліку.
+        command.CommandText = $"""
+            SELECT DISTINCT {column}
+              FROM {table}
+             WHERE ChangedAt >= @from AND ChangedAt < @to
+             ORDER BY {column};
+            """;
+        foreach (var (name, value) in new[] { ("@from", from), ("@to", to) })
+        {
+            var moment = command.Parameters.Add(name, SqlDbType.DateTime2);
+            moment.Scale = 3;
+            moment.Value = value;
+        }
+
+        var types = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            types.Add(reader.GetString(0));
+        }
+
+        return types;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<AuditAuthorView>> ReadAuditAuthorsAsync(CancellationToken ct)
+    {
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+
+        // ⛔ Номер, ім'я й логін (SID і e-mail не читаються взагалі, R-A2, D-86); логін іде у відповідь ЛИШЕ за збігу
+        // імені (`WithLoginsOnCollision`, AC-7).
+        command.CommandText = "SELECT Id, DisplayName, UserName FROM sec.[User] ORDER BY DisplayName, Id;";
+
+        var rows = new List<(int Id, string? Name, string Login)>();
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var name = StringOrNull(reader, 1);
+            rows.Add((reader.GetInt32(0), string.IsNullOrWhiteSpace(name) ? null : name, reader.GetString(2)));
+        }
+
+        return WithLoginsOnCollision(rows);
+    }
+
+    /// <summary>
+    /// ✎ AC-7: логін — лише авторам, чиє непорожнє ім'я ТОЧНО (ординально, як порівнює клієнт) збігається з ім'ям
+    /// іншого автора переліку; решті — <c>null</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Рішення координатора 26.11 (огляд безпеки P-1124-4): логін потрібен лише, щоб розрізнити однакові імена в
+    /// «By user»; логіни людей з унікальним ім'ям тим самим правом не відкриваються. Збіг — ординальний, як у
+    /// <c>disambiguateNames</c> клієнта: «Ivan» і «ivan» розрізняються й самим ім'ям, тож логін не потрібен.
+    /// </remarks>
+    /// <param name="rows">Усі користувачі: номер, ім'я (порожнє — <c>null</c>), логін.</param>
+    internal static IReadOnlyList<AuditAuthorView> WithLoginsOnCollision(IReadOnlyList<(int Id, string? Name, string Login)> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        var duplicated = rows
+            .Where(r => r.Name is not null)
+            .GroupBy(r => r.Name!, StringComparer.Ordinal)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToHashSet(StringComparer.Ordinal);
+
+        return [.. rows.Select(r => new AuditAuthorView(
+            r.Id, r.Name, r.Name is not null && duplicated.Contains(r.Name) ? r.Login : null))];
     }
 
     /// <summary>
