@@ -34,7 +34,7 @@ async function realJson(route: Route): Promise<Record<string, unknown> | null> {
 
 /**
  * Картка документа `GET /api/v1/documents/{id}?periodKey=…`: `templateVersion` добивається (сторінка показує
- * «Version» лише за ним), `resultsStale` береться з `state.stale`.
+ * «Version» лише за ним), `resultsStale` береться з `state.stale`; ✎ DOCUX L4 — так само `GET …/calc-status` (чип).
  */
 export async function mockDocumentCard(page: Page, state: { stale: boolean }): Promise<void> {
   await page.route(new RegExp(`/api/v1/documents/${DocumentId}\\?`), async (route) => {
@@ -45,5 +45,19 @@ export async function mockDocumentCard(page: Page, state: { stale: boolean }): P
     card['resultsStale'] = state.stale;
     card['resultsStaleSince'] = state.stale ? StaleSince : null;
     return route.fulfill({ json: card });
+  });
+  // ✎ DOCUX L4: стан розрахунку чип читає з `GET …/calc-status` (контракт doc-ux-server) — та сама «правда», що й картка:
+  // застаріло — один місяць, який перерахунок перерахує; без задач у черзі (тихий автоперерахунок тут не потрібен).
+  await page.route(new RegExp(`/api/v1/documents/${DocumentId}/calc-status\\?`), async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    const status = await realJson(route);
+    if (status === null) return;
+    const periodKey = Number(status['periodKey']);
+    status['resultsStale'] = state.stale;
+    status['resultsStaleSince'] = state.stale ? StaleSince : null;
+    status['staleMonths'] = state.stale ? [{ periodKey, since: StaleSince, recalculable: true, lockedReason: null }] : [];
+    status['activeJobs'] = [];
+    status['lastFailure'] = null;
+    return route.fulfill({ json: status });
   });
 }

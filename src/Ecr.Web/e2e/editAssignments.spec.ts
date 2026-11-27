@@ -1,5 +1,6 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { openDocumentMore } from './documentMore';
+import { openNoticeDetails } from './notices';
 
 /**
  * EA-5g: «передача місяця» проти РЕАЛЬНОГО сервера стенда (`tools/e2e-stand.ps1`, workflow `e2e-stand`): шторка
@@ -121,6 +122,8 @@ test.describe('Передача місяця: власник → виконав�
     const page = await asUser(browser, Executor);
     await page.goto(DocumentUrl);
 
+    // ✎ DOCUX L7: передача місяця — у рядку повідомлень; повний блок («Mark as filled», коментар) — у вкладці Status.
+    await openNoticeDetails(page, 'notice-executor');
     const strip = page.getByTestId('executor-strip');
     await expect(strip).toBeVisible({ timeout: 30_000 });
     await expect(strip).toContainText(/January|Январь/);
@@ -156,6 +159,7 @@ test.describe('Передача місяця: власник → виконав�
   test('виконавець бачить причину повернення й заповнює знову; власник валідує', async ({ browser }) => {
     const executor = await asUser(browser, Executor);
     await executor.goto(DocumentUrl);
+    await openNoticeDetails(executor, 'notice-executor');
     await expect(executor.getByTestId('executor-strip')).toContainText('Check row 4', { timeout: 30_000 });
     await executor.getByTestId('executor-strip-fill').click();
     await executor.getByTestId('executor-strip-fill-confirm').click();

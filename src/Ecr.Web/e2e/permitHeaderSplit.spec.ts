@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type APIResponse, type BrowserContext, type Page } from '@playwright/test';
+import { openNoticeDetails } from './notices';
 
 /**
  * Feature (j) Ship 2 (ACCEPTANCE-1108-post15 jh1–jh3, mockup light-1335-jh1…jh3): the document HEADER permit changes
@@ -261,6 +262,9 @@ test.describe('Permit header:', () => {
     expect(await permitSplitFinding(page.request, world), 'PERMIT-SPLIT').toBe(true);
 
     await openDocument(page, world);
+    // ✎ DOCUX L7: підсумок — у рядку повідомлень над сіткою; перелік рядків — повним блоком у вкладці Status.
+    await expect(page.getByTestId('notice-header-split')).toContainText('2 rows', { timeout: 30_000 });
+    await openNoticeDetails(page, 'notice-header-split');
     const banner = page.locator('[data-header-split-banner]');
     await expect(banner).toBeVisible({ timeout: 30_000 });
     await expect(banner).toContainText('2 rows');
@@ -272,7 +276,8 @@ test.describe('Permit header:', () => {
   test('jh3: «Split all…» — rows × A/B, «was X»; partial save keeps Submit blocked; all split clears it', async () => {
     const page = await context.newPage();
     await openDocument(page, world);
-    await page.locator('[data-header-split-banner]').getByRole('button', { name: 'Split all…' }).click();
+    // ✎ DOCUX L7: «Split all…» — головна дія рядка повідомлень.
+    await page.getByTestId('notice-header-split').getByRole('button', { name: 'Split all…' }).click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible({ timeout: 30_000 });
     await expect(dialog.locator('[data-header-split-line]')).toHaveCount(2);
@@ -286,7 +291,7 @@ test.describe('Permit header:', () => {
     await expect(dialog).toBeHidden({ timeout: 30_000 });
     expect(await permitSplitFinding(page.request, world), 'PERMIT-SPLIT лишається (1 з 2)').toBe(true);
 
-    await page.locator('[data-header-split-banner]').getByRole('button', { name: 'Split all…' }).click();
+    await page.getByTestId('notice-header-split').getByRole('button', { name: 'Split all…' }).click();
     const again = page.getByRole('dialog');
     const rest = again.getByRole('textbox');
     // «Split all» lists the rows still to split (F13 p223): only the second row now.
@@ -295,7 +300,7 @@ test.describe('Permit header:', () => {
     await rest.nth(1).fill('3.9');
     await again.getByRole('button', { name: 'Save parts' }).click();
     await expect(again).toBeHidden({ timeout: 30_000 });
-    await expect(page.locator('[data-header-split-banner]')).toBeHidden({ timeout: 30_000 });
+    await expect(page.getByTestId('notice-header-split')).toBeHidden({ timeout: 30_000 });
     expect(await permitSplitFinding(page.request, world), 'PERMIT-SPLIT знято').toBe(false);
   });
 });

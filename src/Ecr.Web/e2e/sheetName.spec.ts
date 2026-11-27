@@ -361,12 +361,20 @@ test('SHEETNAME: debt-1109b — перерахунок проєкту назив
   // ✎ F5 (D-567, огляд b11-2 (A)): поки жива задача перерахунку чи формул документа (тут — SHEETNAME() копії), подання
   // відмовляє 422 `sourceCascadePending`. Чекаємо, доки в черзі проєкту (лише цей документ) не лишиться Queued/Running.
   await settled(page, card.projectId);
-  await ok(
-    await page.request.post(`/api/v1/documents/${id}/submit`, {
+  // ⚠ Тихий автоперерахунок після правок (Q2, doc-ux-server) ставиться з відкладенням ~20 с, тож «черга порожня» ще не
+  // означає «перераховано»: ворота `ownRecalculationPending` свідомо відмовляють поданню, поки власний перерахунок живий.
+  // Чекаємо його кінця повтором (той самий прийом, що `sheetLogLive.spec.ts`), а не гонимося з воротами.
+  const submitCopy = () =>
+    page.request.post(`/api/v1/documents/${id}/submit`, {
       data: { sheetDefId: doc.sheetDefId, periodKey: doc.periodKey, acknowledgeWarnings: true, sheetCopyId: copy.sheetCopyId },
-    }),
-    'подання копії',
-  );
+    });
+  let submitted = await submitCopy();
+  for (let attempt = 0; attempt < 60 && submitted.status() === 422; attempt += 1) {
+    if (!(await submitted.text()).includes('ownRecalculationPending')) break;
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    submitted = await submitCopy();
+  }
+  await ok(submitted, 'подання копії');
   await settled(page, card.projectId);
   await ok(
     await page.request.post(`/api/v1/documents/${id}/approve`, {

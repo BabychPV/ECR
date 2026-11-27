@@ -190,7 +190,8 @@ test.describe('Live refresh: two users on the stand', () => {
       // The reviewer changes row 0: the administrator gets the polite banner within one marker interval.
       const second = `${String(5000 + Math.floor(Math.random() * 999))}`;
       await reviewerWrites(reviewer.page.request, target.row0, target.column, Number(second));
-      const banner = page.getByTestId('sheet-live-banner');
+      // ✎ DOCUX L7: «Updated by … at …» — у рядку повідомлень над сіткою (роль status), «Refresh» — його дія.
+      const banner = page.getByTestId('notice-live-change');
       await expect(banner).toBeVisible({ timeout: SlowPoll });
       await expect(banner).toContainText(`Updated by ${Reviewer.shown} at`);
       await expect(page.getByTestId('sheet-live-host')).toHaveAttribute('aria-live', 'polite');
@@ -199,7 +200,7 @@ test.describe('Live refresh: two users on the stand', () => {
       expect(await axeViolations(page, 'color-contrast'), 'light: axe color-contrast with the banner').toEqual([]);
 
       // Refresh while my PATCH is still held: the reload waits for it — my value stays on screen.
-      await page.getByTestId('sheet-live-refresh').click();
+      await page.getByTestId('notice-live-refresh').click();
       await page.waitForTimeout(1_500);
       await expect(mine).toHaveText(own);
       release();
@@ -242,7 +243,7 @@ test.describe('Live refresh: two users on the stand', () => {
 
         const target = await writableColumn(reviewer.page.request);
         await reviewerWrites(reviewer.page.request, target.row0, target.column, 8000 + Math.floor(Math.random() * 999));
-        await expect(page.getByTestId('sheet-live-banner')).toBeVisible({ timeout: SlowPoll });
+        await expect(page.getByTestId('notice-live-change')).toBeVisible({ timeout: SlowPoll });
 
         await shot(page, `banner-${scheme}-1440`);
         for (const rule of ['color-contrast', 'button-name', 'aria-allowed-attr', 'aria-valid-attr-value']) {
@@ -259,7 +260,7 @@ test.describe('Live refresh: two users on the stand', () => {
         await shot(page, `banner-${scheme}-500`);
         expect(await axeViolations(page, 'color-contrast'), `${scheme} 500px: axe color-contrast`).toEqual([]);
 
-        await page.getByTestId('sheet-live-refresh').click();
+        await page.getByTestId('notice-live-refresh').click();
         await expect(page.getByTestId('sheet-live-banner')).toHaveCount(0, { timeout: 30_000 });
       } finally {
         await admin.context.close();
