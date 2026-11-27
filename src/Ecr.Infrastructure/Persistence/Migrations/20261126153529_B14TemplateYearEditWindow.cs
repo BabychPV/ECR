@@ -27,7 +27,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
         /// <summary>Разове ввімкнення вікна року для шаблону HSE401 (рішення людини 25.11).</summary>
         internal const string Hse401YearWindowSql =
-            "UPDATE cfg.Template SET YearEditWindow = 1 WHERE Code = N'HSE401' AND YearEditWindow = 0;";
+            // ⛔ EXEC: в ідемпотентному скрипті (migrations script --idempotent) пакет компілюється цілком, коли колонки ще нема,
+            // і прямий UPDATE падає «Invalid column name 'YearEditWindow'» (Persistence-тести скрипта, CI b18).
+            "EXEC(N'UPDATE cfg.Template SET YearEditWindow = 1 WHERE Code = N''HSE401'' AND YearEditWindow = 0;');";
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)

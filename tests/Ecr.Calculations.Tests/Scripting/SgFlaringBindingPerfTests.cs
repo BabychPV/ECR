@@ -60,7 +60,8 @@ public sealed class SgFlaringBindingPerfTests(ITestOutputHelper output)
         output.WriteLine(string.Create(CultureInfo.InvariantCulture,
             $"INT month: {inputs.Count} rows, {values} output values in {elapsed.TotalMilliseconds:F0} ms ({elapsed.TotalMilliseconds / inputs.Count:F2} ms/row)"));
         Assert.Equal(inputs.Count * FlertCompositionSchema.ComponentColumns.Select(c => c.Column).Distinct().Count() * 2, values);
-        Assert.True(elapsed < TimeSpan.FromSeconds(5), $"INT month took {elapsed} (measured 0.9 s locally after the pair index; was 1.6-2.2 s)");
+        // ⚠ Вимір, не храповик (як ExcelExporterPerformanceTests): межа сторожить порядок величини — CI-раннер у 4-8 разів повільніший і нестабільний.
+        Assert.True(elapsed < TimeSpan.FromSeconds(30), $"INT month took {elapsed} (measured 0.9 s locally / 7 s on CI after the pair index; was 1.6-2.2 s)");
     }
 
     [Fact]
@@ -97,8 +98,8 @@ public sealed class SgFlaringBindingPerfTests(ITestOutputHelper output)
             $"TOX year: {inputs.Count} rows, {values} output values in {elapsed.TotalSeconds:F1} s ({elapsed.TotalMilliseconds / inputs.Count:F2} ms/row)"));
         Assert.Equal(5840, inputs.Count);
         Assert.True(values > 0);
-        // Стеля 45 с: локально 6,2 с, на CI під навантаженням Evidence — 24 с; без індексу пари — 52-80 с локально (на CI ~4×).
-        Assert.True(elapsed < TimeSpan.FromSeconds(45), $"TOX year took {elapsed} (measured 6.2 s locally / 24 s on CI after the pair index; was 52-80 s)");
+        // ⚠ Вимір, не храповик: локально 6,2 с, на CI 24-47 с; без індексу пари — 52-80 с локально (на CI ~4×, 200+ с) — порядок величини стеля ловить.
+        Assert.True(elapsed < TimeSpan.FromSeconds(150), $"TOX year took {elapsed} (measured 6.2 s locally / 24-47 s on CI after the pair index; was 52-80 s locally)");
     }
 
     private static async Task<(TimeSpan Elapsed, int Values)> RunAsync(ScriptStand stand, List<CalculationInput> inputs)
