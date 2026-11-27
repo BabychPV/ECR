@@ -87,7 +87,7 @@ export function PipelinePage(): JSX.Element {
         isEmpty={(all) => all.length === 0}
         emptyTitle={t('sources.empty')}
         emptyHint={t('sources.emptyHint')}
-        emptyAction={<SourcesSetupLink />}
+        emptyAction={<SourcesSetupLink href={routes.adminSources.path} />}
         onRetry={() => void sources.refetch()}
       >
         {() => null}

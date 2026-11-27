@@ -1,16 +1,16 @@
 import type { JSX } from 'react';
 import { Button } from '@mantine/core';
 import { Link } from 'react-router-dom';
-import { routes } from '@/app/routes';
 import { t } from '@/shared/i18n';
 
 /**
  * ✎ DOCUX (огляд UI 27.11): порожній стан «No collection sources configured» на Mapping preview / Data pipeline / PI data —
  * з переходом туди, де джерела заводять (а не з порожнім вибором сутності й другою підказкою «Pick a source entity…»).
  */
-export function SourcesSetupLink(): JSX.Element {
+/** `href` — адреса екрана Sources з маршрутів сторінки (`features` не імпортує `app`). */
+export function SourcesSetupLink({ href }: { readonly href: string }): JSX.Element {
   return (
-    <Button component={Link} to={routes.adminSources.path} variant="default" data-sources-setup-link="">
+    <Button component={Link} to={href} variant="default" data-sources-setup-link="">
       {t('sources.goToSources')}
     </Button>
   );

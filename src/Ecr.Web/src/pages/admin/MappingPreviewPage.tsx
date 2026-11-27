@@ -1,3 +1,4 @@
+import { routes } from '@/app/routes';
 import { noSourcesYet, SourcesSetupLink } from '@/features/integration/SourcesSetupLink';
 import { useMemo, useState, type JSX } from 'react';
 import { Alert, Button, Select, Text } from '@mantine/core';
@@ -118,7 +119,7 @@ export function MappingPreviewPage(): JSX.Element {
         isEmpty={(all) => all.length === 0}
         emptyTitle={t('sources.empty')}
         emptyHint={t('sources.emptyHint')}
-        emptyAction={<SourcesSetupLink />}
+        emptyAction={<SourcesSetupLink href={routes.adminSources.path} />}
         onRetry={() => void sources.refetch()}
       >
         {() => null}

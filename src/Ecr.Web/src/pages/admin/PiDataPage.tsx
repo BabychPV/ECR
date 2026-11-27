@@ -1,3 +1,4 @@
+import { routes } from '@/app/routes';
 import { noSourcesYet, SourcesSetupLink } from '@/features/integration/SourcesSetupLink';
 import { Suspense, lazy, useMemo, useState, type JSX } from 'react';
 import { Anchor, Button, Card, Group, SegmentedControl, Select, Skeleton, Stack, Text, Title } from '@mantine/core';
@@ -154,7 +155,7 @@ export function PiDataPage(): JSX.Element {
         isEmpty={(all) => all.length === 0}
         emptyTitle={t('sources.empty')}
         emptyHint={t('sources.emptyHint')}
-        emptyAction={<SourcesSetupLink />}
+        emptyAction={<SourcesSetupLink href={routes.adminSources.path} />}
         onRetry={() => void sources.refetch()}
       >
         {() => null}
