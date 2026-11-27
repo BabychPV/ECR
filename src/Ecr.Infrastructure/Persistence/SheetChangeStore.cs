@@ -104,6 +104,7 @@ public sealed class SheetChangeStore(EcrDbContext db) : ISheetChangeStore
             SELECT rc.TableRowId, rc.ChangedByUserId, rc.ChangedAt, rc.Id, 0 AS IsRecalc, 0 AS IsHidden
               FROM aud.RowChange rc
              WHERE rc.DocumentId = @doc AND rc.ChangedAt >= @from
+               AND (@periods IS NULL OR rc.PeriodKey IN (SELECT p.value FROM OPENJSON(@periods) WITH (value int '$') p))
                AND rc.TableRowId IN (SELECT r.value FROM OPENJSON(@rows) WITH (value bigint '$') r)),
         ranked AS (
             SELECT c.*,
@@ -223,6 +224,17 @@ public sealed class SheetChangeStore(EcrDbContext db) : ISheetChangeStore
     public Task<SheetChangeAttribution> AttributeAsync(
         long documentId, IReadOnlyCollection<long> rowIds, IReadOnlyCollection<int> hiddenColumnIds, DateTime fromUtc,
         int viewerUserId, CancellationToken ct)
+        => AttributeCoreAsync(documentId, rowIds, hiddenColumnIds, fromUtc, viewerUserId, periodKeys: null, ct);
+
+    /// <inheritdoc />
+    public Task<SheetChangeAttribution> AttributeAsync(
+        long documentId, IReadOnlyCollection<long> rowIds, IReadOnlyCollection<int> hiddenColumnIds, DateTime fromUtc,
+        int viewerUserId, IReadOnlyCollection<int> periodKeys, CancellationToken ct)
+        => AttributeCoreAsync(documentId, rowIds, hiddenColumnIds, fromUtc, viewerUserId, periodKeys, ct);
+
+    private Task<SheetChangeAttribution> AttributeCoreAsync(
+        long documentId, IReadOnlyCollection<long> rowIds, IReadOnlyCollection<int> hiddenColumnIds, DateTime fromUtc,
+        int viewerUserId, IReadOnlyCollection<int>? periodKeys, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(rowIds);
         ArgumentNullException.ThrowIfNull(hiddenColumnIds);
@@ -237,6 +249,8 @@ public sealed class SheetChangeStore(EcrDbContext db) : ISheetChangeStore
                 parameters.Add("@hidden", SqlDbType.NVarChar, -1).Value = JsonSerializer.Serialize(hiddenColumnIds);
                 parameters.Add("@me", SqlDbType.Int).Value = viewerUserId;
                 parameters.Add("@recalc", SqlDbType.NVarChar, 32).Value = CellChangeOrigins.Recalculation;
+                parameters.Add("@periods", SqlDbType.NVarChar, -1).Value =
+                    periodKeys is { Count: > 0 } ? JsonSerializer.Serialize(periodKeys.Distinct().Order()) : DBNull.Value;
             },
             async (reader, token) =>
             {
