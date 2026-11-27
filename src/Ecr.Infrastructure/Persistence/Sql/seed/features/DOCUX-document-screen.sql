@@ -135,7 +135,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'calcStatus.upToDateIssues', N'kz', N'Ақаулармен есептелді {time}'),
     (N'calcStatus.issuesHint', N'ru', N'Последний расчёт завершён, но часть строк не рассчитана. Причины — в сообщении над таблицей и во вкладке «Статус».'),
     (N'calcStatus.issuesHint', N'kz', N'Соңғы есеп аяқталды, бірақ кейбір жолдар есептелмеді. Себептері — кесте үстіндегі хабарламада және «Күйі» қойындысында.'),
-    (N'grid.needsInput.hintMethodologyWarn', N'ru', N'Нужно методологии «{methodologies}» — без этого значения строка не рассчитывается'),
+    (N'grid.needsInput.hintMethodologyWarn', N'ru', N'Требуется для методологии «{methodologies}» — без этого значения строка не рассчитывается'),
     (N'grid.needsInput.hintMethodologyWarn', N'kz', N'«{methodologies}» әдістемесіне қажет — бұл мәнсіз жол есептелмейді'),
     (N'inspector.info.technicalAddress', N'ru', N'Технический адрес'),
     (N'inspector.info.technicalAddress', N'kz', N'Техникалық мекенжай'),
