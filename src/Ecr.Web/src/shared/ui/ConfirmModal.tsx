@@ -161,7 +161,17 @@ export function ConfirmModal({
          * читач очікує змісту.
          */}
         {items.length > 0 ? (
-          <List size="sm" spacing="xs" data-testid="confirm-consequences">
+          <List
+            size="sm"
+            spacing="xs"
+            data-testid="confirm-consequences"
+            /*
+             * ✎ DOCUX (огляд UI 27.11, «Delete document…»): маркер Mantine стоїть ВСЕРЕДИНІ рядка (`list-style-position: inside`),
+             * а обгортка пункту (`inline-flex`) займає всю ширину — довгий пункт виходив за діалог на ширину маркера, і в
+             * діалозі з'являлась горизонтальна прокрутка. Маркер — у відступі зліва, текст переноситься.
+             */
+            styles={{ root: { listStylePosition: 'outside', paddingInlineStart: 'var(--mantine-spacing-md)' } }}
+          >
             {items.map((item) => {
               const consequence = asConsequence(item);
 

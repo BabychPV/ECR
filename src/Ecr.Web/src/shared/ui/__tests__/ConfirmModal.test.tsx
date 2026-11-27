@@ -196,6 +196,16 @@ describe('ConfirmModal — наслідки (consequences)', () => {
     expect(screen.getByText('Sheets become read-only.')).toBeDefined();
   });
 
+  // ✎ DOCUX (огляд UI 27.11, «Delete document…»): маркер усередині рядка + обгортка пункту на всю ширину = горизонтальна
+  // прокрутка в діалозі. Маркер — зовні, у відступі списку (розкладку jsdom не рахує — перевіряється правило).
+  it('маркер наслідків — у відступі списку, не всередині рядка (без горизонтальної прокрутки)', () => {
+    renderWith(['A very long consequence that must wrap inside the dialog instead of widening it.']);
+
+    const list = screen.getByTestId('confirm-consequences');
+    expect(list.style.listStylePosition).toBe('outside');
+    expect(list.style.paddingInlineStart).toBe('var(--mantine-spacing-md)');
+  });
+
   it('фокус лишається на Cancel і тоді, коли наслідки є', async () => {
     renderWith(['Sheets become read-only.']);
     await focusSettled();
