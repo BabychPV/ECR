@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PeriodsPage, lockMomentOf, periodCaption, siteMomentText } from '@/pages/admin/PeriodsPage';
 import { testTheme } from '@/test/render';
+import { openPeriodDetails } from './periodDetailsOpen';
 
 /**
  * `X-34`/`F-20`: дати періодів на `/admin/periods` показувалися в поясі
@@ -68,6 +69,7 @@ function mockFetch(periodKind: 'Monthly' | 'Quarterly'): void {
 }
 
 function show(): void {
+  openPeriodDetails();
   render(
     <MantineProvider theme={testTheme}>
       <MemoryRouter initialEntries={['/admin/periods?projectId=7']}>

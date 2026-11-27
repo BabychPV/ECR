@@ -235,6 +235,34 @@ public static partial class StartupSequence
 
         Lap(logger, lap, "5 покинуті задачі");
 
+        // 5a) ✎ D-582: відкладені постановки Quartz (автоперерахунок після правки, ланки джерел), які процес, що зник, не встиг
+        //     запустити, — знову в чергу. ⚠ ПІСЛЯ кроку 5: прибирання закриває рядки-дзеркала попереднього процесу, і саме за
+        //     ними видно, що постановка осиротіла, а не належить живому сусідові. Збій не зупиняє старт.
+        if (scope.ServiceProvider.GetService<Infrastructure.Jobs.QuartzDelayedJobStore>() is { } delayedStore
+            && scope.ServiceProvider.GetService<IBackgroundJobScheduler>() is { } delayedScheduler)
+        {
+            try
+            {
+                var recovered = await Infrastructure.Jobs.QuartzDelayedJobRecovery.RecoverAsync(
+                        delayedStore,
+                        delayedScheduler,
+                        scope.ServiceProvider.GetRequiredService<Domain.Abstractions.IClock>(),
+                        logger,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                if (recovered > 0)
+                {
+                    LogDelayedRecovered(logger, recovered);
+                }
+            }
+            catch (SqlException ex)
+            {
+                LogDelayedRecoveryFailed(logger, ex.Message);
+            }
+
+            Lap(logger, lap, "5a відкладені постановки");
+        }
+
         // 4b) Вʼюхи сирих даних rpt.v_* для SSRS (ФВ-10.2, ФВ-10.4) по
         //     кожній таблиці опублікованих версій шаблонів. ⚠ ПІСЛЯ seed і на
         //     кожному старті: так вʼюхи отримують і версії, опубліковані до
@@ -318,6 +346,12 @@ public static partial class StartupSequence
             LogStepTiming(logger, step, ageMs);
         }
     }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Старт: відкладених постановок, загублених перезапуском, поставлено знову: {Count}.")]
+    private static partial void LogDelayedRecovered(ILogger logger, int count);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Старт: відкладені постановки не відновлено ({Error}); повтор — на наступному старті.")]
+    private static partial void LogDelayedRecoveryFailed(ILogger logger, string error);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Старт: крок «{Step}» — {Ms} мс.")]
     private static partial void LogStepTiming(ILogger logger, string step, long ms);

@@ -40,6 +40,10 @@ namespace Ecr.Application.Audit;
 /// довідник, порожньо або запису вже немає. Сирий id — у значенні (CSV-експорт — лише він).
 /// </param>
 /// <param name="NewValueLabelL10n">Те саме для нового значення.</param>
+/// <param name="RowAddedByUser">
+/// ✎ Борги 27.11 (п. 5): рядок правки додала людина (ключ поза рядками шаблону) — без мітки й номера клієнт показує «рядок,
+/// доданий користувачем», а не технічний ключ (<see cref="Ports.CellChangeView.RowAddedByUser"/>).
+/// </param>
 public sealed record SheetActivityItem(
     string Kind,
     DateTime At,
@@ -63,7 +67,8 @@ public sealed record SheetActivityItem(
     int? ColumnScale = null,
     int? RowOrdinal = null,
     LocalizedText? OldValueLabelL10n = null,
-    LocalizedText? NewValueLabelL10n = null);
+    LocalizedText? NewValueLabelL10n = null,
+    bool RowAddedByUser = false);
 
 /// <summary>Сторінка журналу дій аркуша.</summary>
 /// <param name="Items">Рядки, найновіші перші.</param>
@@ -251,7 +256,8 @@ public sealed class SheetActivityQuery(
                 c.Origin, c.PeriodKey, c.RowKey, c.RowLabelL10n, c.ColumnDefId, c.ColumnCode, c.ColumnHeaderL10n,
                 c.ColumnDataType, c.TableCode, c.TableNameL10n, c.OldValue, c.NewValue,
                 Action: null, FromState: null, ToState: null, Reason: null, ColumnScale: c.ColumnScale,
-                RowOrdinal: c.RowOrdinal, OldValueLabelL10n: c.OldValueLabelL10n, NewValueLabelL10n: c.NewValueLabelL10n)))
+                RowOrdinal: c.RowOrdinal, OldValueLabelL10n: c.OldValueLabelL10n, NewValueLabelL10n: c.NewValueLabelL10n,
+                RowAddedByUser: c.RowAddedByUser)))
             .ToList();
 
         return (rows, result.NextCursor is not null);

@@ -37,6 +37,7 @@ import {
 } from './api';
 import { ColumnDefPicker, savedColumnLabel } from './ColumnDefPicker';
 import { MethodologySection } from './MethodologySection';
+import { calendarModeLabel, numericModeLabel, traceLevelLabel } from './versionModeLabels';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 
 /**
@@ -677,8 +678,8 @@ export function MethodologyModesForm({
           disabled={!editable}
           value={numericMode}
           data={[
-            { value: 'Legacy', label: 'Legacy' },
-            { value: 'Strict', label: 'Strict' },
+            { value: 'Legacy', label: numericModeLabel('Legacy') },
+            { value: 'Strict', label: numericModeLabel('Strict') },
           ]}
           onChange={(value) => setNumericMode(value === 'Strict' ? 'Strict' : 'Legacy')}
         />
@@ -689,9 +690,9 @@ export function MethodologyModesForm({
           disabled={!editable}
           value={calendarMode}
           data={[
-            { value: 'Actual', label: 'Actual' },
-            { value: 'Fixed365', label: 'Fixed365' },
-            { value: 'Fixed360', label: 'Fixed360' },
+            { value: 'Actual', label: calendarModeLabel('Actual') },
+            { value: 'Fixed365', label: calendarModeLabel('Fixed365') },
+            { value: 'Fixed360', label: calendarModeLabel('Fixed360') },
           ]}
           onChange={(value) =>
             setCalendarMode(value === 'Fixed365' ? 'Fixed365' : value === 'Fixed360' ? 'Fixed360' : 'Actual')
@@ -704,9 +705,9 @@ export function MethodologyModesForm({
           disabled={!editable}
           value={traceLevel}
           data={[
-            { value: 'Off', label: 'Off' },
-            { value: 'ErrorsOnly', label: 'ErrorsOnly' },
-            { value: 'Full', label: 'Full' },
+            { value: 'Off', label: traceLevelLabel('Off') },
+            { value: 'ErrorsOnly', label: traceLevelLabel('ErrorsOnly') },
+            { value: 'Full', label: traceLevelLabel('Full') },
           ]}
           onChange={(value) =>
             setTraceLevel(value === 'Off' ? 'Off' : value === 'Full' ? 'Full' : 'ErrorsOnly')

@@ -39,6 +39,15 @@ public sealed partial class QuartzJobAdapter(
     /// <summary>Стан скасованої задачі в <c>itg.JobProgress</c>.</summary>
     private const string CancelledState = "Cancelled";
 
+    /// <summary>✎ D-582: знімає довговічний слід відкладеної постановки (<see cref="QuartzDelayedJobStore"/>), якщо він є.</summary>
+    private static async Task ForgetDelayedAsync(IServiceProvider provider, string jobId)
+    {
+        if (QuartzDelayedJobStore.IsTracked(jobId) && provider.GetService<QuartzDelayedJobStore>() is { } delayed)
+        {
+            await delayed.DeleteAsync(jobId, CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
     /// <inheritdoc />
     public async Task Execute(IJobExecutionContext context)
     {
@@ -178,8 +187,12 @@ public sealed partial class QuartzJobAdapter(
             await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None).ConfigureAwait(false);
             QuartzPayloadMerges.Forget(jobId);
             QuartzDocumentFifo.Forget(context.Scheduler.SchedulerName, jobId);
+            await ForgetDelayedAsync(provider, jobId).ConfigureAwait(false);
             return;
         }
+
+        // ✎ D-582: задача стартує — її відкладена постановка виконана, після перезапуску вона не повторюється.
+        await ForgetDelayedAsync(provider, jobId).ConfigureAwait(false);
 
         await StartAsync(progress, jobId, typeName!, attemptNumber, correlationId, clock, context.CancellationToken)
             .ConfigureAwait(false);

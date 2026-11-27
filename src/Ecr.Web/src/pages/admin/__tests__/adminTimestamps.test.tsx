@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuditPage } from '@/pages/admin/AuditPage';
 import { PeriodsPage } from '@/pages/admin/PeriodsPage';
+import { openPeriodDetails } from './periodDetailsOpen';
 import { StructureChangesPanel } from '@/features/audit/StructureChangesPanel';
 import { formatDateTime } from '@/shared/format';
 import { formatDateTime24 } from '@/shared/format/datetime';
@@ -244,6 +245,7 @@ describe('PeriodsPage: межі періоду і крайні строки', ()
         ['/periods', { ...calendar, periods: [{ ...calendar.periods[0], endsAt: LocksAt }] }],
         ['/api/v1/projects', { items: [project], nextCursor: null, totalCount: 1 }],
       ]);
+      openPeriodDetails();
       show(<PeriodsPage projectId={7} />, '/admin/periods?projectId=7');
 
       await screen.findByRole('table', {}, { timeout: SlowEnvTimeout });

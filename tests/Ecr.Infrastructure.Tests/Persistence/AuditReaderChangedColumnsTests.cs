@@ -17,7 +17,8 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// <remarks>
 /// ⛔ МУТАЦІЙНИЙ ДОКАЗ (AC-8): прибрати з <c>BuildCellChangeWhere</c> умову <c>ColumnDefId IN (SELECT Id FROM @visibleSet)</c>
 /// — у переліку з'являється прихована колонка 2, обидва тести переліку червоні. AC-13: прибрати <c>tr.Ordinal</c> з
-/// <c>PageWithNames</c> (або умову <c>tr.RowKey = a.RowKey</c>) — червоний тест номера рядка.
+/// <c>PageWithNames</c> (або умову <c>tr.RowKey = a.RowKey</c>) — червоний тест номера рядка. Борги 27.11 (п. 5): у
+/// <c>RowAddedByUser</c> завжди <c>0</c> — червоний той самий тест.
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class AuditReaderChangedColumnsTests(SqlServerFixture sql, ITestOutputHelper output)
@@ -110,6 +111,11 @@ public sealed class AuditReaderChangedColumnsTests(SqlServerFixture sql, ITestOu
         var foreign = Assert.Single(page.Items, c => c.RowKey == "FOREIGN-KEY");
         Assert.Null(foreign.RowOrdinal);
         Assert.Null(foreign.TableInstanceId);
+
+        // ✎ Борги 27.11 (п. 5): рядок шаблону — не «доданий користувачем» (лишає свій код); ключ поза рядками шаблону таблиці
+        // (динамічний рядок, тут — без рядка в doc.TableRow, як видалений) — доданий: клієнт не показує технічний ключ.
+        Assert.False(own.RowAddedByUser);
+        Assert.True(foreign.RowAddedByUser);
     }
 
     private static async Task InsertAsync(SqlConnection connection, TestDocument doc, long rowId, string rowKey, DateTime at)

@@ -455,6 +455,24 @@ public sealed class ScanCursorConfiguration : IEntityTypeConfiguration<ScanCurso
     }
 }
 
+/// <summary>Конфігурація <see cref="PendingDelayedJob"/> (✎ D-582).</summary>
+public sealed class PendingDelayedJobConfiguration : IEntityTypeConfiguration<PendingDelayedJob>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<PendingDelayedJob> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("PendingDelayedJob", "itg");
+        builder.HasKey(x => x.JobId).HasName("PK_PendingDelayedJob");
+        builder.Property(x => x.JobId).HasMaxLength(100);
+        builder.Property(x => x.JobCode).HasMaxLength(128);
+        builder.Property(x => x.Payload).HasColumnType("nvarchar(max)");
+        builder.Property(x => x.DueAt).HasColumnType("datetime2(3)");
+        builder.Property(x => x.CreatedAt).HasColumnType("datetime2(3)");
+    }
+}
+
 /// <summary>Конфігурація <see cref="JobProgress"/>.</summary>
 public sealed class JobProgressConfiguration : IEntityTypeConfiguration<JobProgress>
 {

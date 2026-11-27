@@ -77,6 +77,7 @@ import { t } from '@/shared/i18n';
 import { registerHeldEditRevealer, useSettledAction } from '@/features/grid/settleEdits';
 import { NoticeLine } from '@/features/documents/notices/NoticeLine';
 import { usePublishNotice } from '@/features/documents/notices/noticeStore';
+import { holdScrollPosition } from '@/features/documents/holdScrollPosition';
 
 /**
  * Панелі нижче — за `import()`, а не статичним імпортом (`D-132`).
@@ -743,27 +744,11 @@ export function DocumentPage(): JSX.Element {
     const saved = scrollAtSwitch.current;
     if (saved === null || saved.periodKey !== periodKey || !periodSettled) return;
     scrollAtSwitch.current = null;
-    window.scrollTo({ top: saved.y });
 
-    // Висота документа добирається ще кілька кадрів (слоти таблиць, смуга аркушів): повторюємо, доки людина
-    // сама не прокрутила (колесо, дотик, клавіша, клік) - її рух важливіший за збережену позицію.
-    let frames = 0;
-    let frame = 0;
-    const userScroll = ['wheel', 'touchstart', 'keydown', 'mousedown'] as const;
-    const stop = (): void => {
-      window.cancelAnimationFrame(frame);
-      for (const type of userScroll) window.removeEventListener(type, stop);
-    };
-    for (const type of userScroll) window.addEventListener(type, stop, { passive: true, once: true });
-    const retry = (): void => {
-      if (Math.abs(window.scrollY - saved.y) > 1) window.scrollTo({ top: saved.y });
-      frames += 1;
-      if (frames < 40) frame = window.requestAnimationFrame(retry);
-      else stop();
-    };
-    frame = window.requestAnimationFrame(retry);
-
-    return stop;
+    // Висота документа добирається ще якийсь час (слоти таблиць, зрізи сітки, смуга аркушів): утримуємо позицію, доки
+    // людина сама не прокрутила (колесо, дотик, клавіша, клік) - її рух важливіший за збережену позицію.
+    // ✎ Борги 27.11 (п. 8): за часом, а не 40 кадрів - див. `holdScrollPosition`.
+    return holdScrollPosition(saved.y);
   }, [periodKey, periodSettled]);
 
   // ⛔ D1-02: дата чинності довідників у сітці — календарний кінець періоду ІЗ СЕРВЕРА.

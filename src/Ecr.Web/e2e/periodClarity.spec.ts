@@ -72,6 +72,11 @@ test.describe('Period clarity', () => {
 
     // ✎ Projects (08.11): Periods — вкладка проєкту.
     await page.goto(`/projects/${String(card.projectId)}/periods`);
+    // Periods dedup: таблиця місяців — у згорнутому «Details»; спершу розгортаємо.
+    const detailsToggle = page.locator('[data-note="periods-details"]').getByRole('button');
+    await expect(detailsToggle).toBeVisible({ timeout: 60_000 });
+    await expect(detailsToggle).toHaveAttribute('aria-expanded', 'false');
+    await detailsToggle.click();
     const table = page.locator('[data-periods-table="months"]');
     await expect(table).toBeVisible({ timeout: 60_000 });
 

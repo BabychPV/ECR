@@ -3161,6 +3161,23 @@ CREATE INDEX IX_JobProgress_Document_State_UpdatedAt
     INCLUDE (JobCode)
     WHERE DocumentId IS NOT NULL;
 GO
+
+-- ✎ D-582: відкладені постановки Quartz, що чекають старту (автоперерахунок після правки ~20 с, ланки джерел ~10 с).
+-- Рядок — до триґера, тіло оновлює кожне злиття, знімається на старті задачі чи скасуванні; на старті процесу рядки,
+-- чий процес-власник зник (дзеркало JobProgress закрите як Failed без спроби), ставляться знову.
+-- Міграція D582PendingDelayedJob.
+CREATE TABLE itg.PendingDelayedJob
+(
+    JobId           nvarchar(100) NOT NULL,
+    JobCode         nvarchar(128) NOT NULL,
+    Payload         nvarchar(max) NOT NULL,
+    DueAt           datetime2(3)  NOT NULL,
+    CreatedByUserId int           NULL,
+    Revision        bigint        NOT NULL,
+    CreatedAt       datetime2(3)  NOT NULL,
+    CONSTRAINT PK_PendingDelayedJob PRIMARY KEY (JobId)
+);
+GO
 ```
 
 ---

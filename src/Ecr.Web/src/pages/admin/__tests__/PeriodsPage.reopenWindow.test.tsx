@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PeriodsPage } from '@/pages/admin/PeriodsPage';
 import { testTheme } from '@/test/render';
+import { openPeriodDetails } from './periodDetailsOpen';
 
 /**
  * Строк перевідкриття періоду: обіцянка, якої сервер не виконував.
@@ -146,6 +147,7 @@ function respond(
 }
 
 function show(): void {
+  openPeriodDetails();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(

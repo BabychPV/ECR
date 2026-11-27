@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PeriodsPage } from '@/pages/admin/PeriodsPage';
 import { testTheme } from '@/test/render';
+import { openPeriodDetails } from './periodDetailsOpen';
 
 /**
  * UI-аудит, lane 2: `lane2-make-current-closed-period.md` — «Make current»
@@ -107,6 +108,7 @@ function mockFetch(): void {
 }
 
 function show(): void {
+  openPeriodDetails();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(

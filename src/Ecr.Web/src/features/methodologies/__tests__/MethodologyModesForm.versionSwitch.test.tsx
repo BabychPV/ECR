@@ -104,11 +104,21 @@ function show(): { switchToB: () => void } {
 }
 
 /**
- * Показане значення поля. У Mantine `Select` підпис опції збігається з її
- * значенням для всіх трьох режимів (`Legacy`/`Strict`, `Actual`/`Fixed365`/
- * `Fixed360`, `Off`/`ErrorsOnly`/`Full`), тож це те саме твердження, що й
- * читання `value` у попереднього заглушеного `<select>`.
+ * ✎ Борги 27.11 (п. 3): опції режимів — словами, як бейджі переліку (`versionModeLabels`), а збережене значення — те
+ * саме перелічення. Поле `Select` показує ПІДПИС опції; значення перевіряються атрибутом `value` опцій і тілом `PUT`.
  */
+const Label = {
+  Legacy: '⟦methodologies.mode.numeric.Legacy⟧',
+  Strict: '⟦methodologies.mode.numeric.Strict⟧',
+  Actual: '⟦methodologies.mode.calendar.Actual⟧',
+  Fixed365: '⟦methodologies.mode.calendar.Fixed365⟧',
+  Fixed360: '⟦methodologies.mode.calendar.Fixed360⟧',
+  Off: '⟦methodologies.mode.trace.Off⟧',
+  ErrorsOnly: '⟦methodologies.mode.trace.ErrorsOnly⟧',
+  Full: '⟦methodologies.mode.trace.Full⟧',
+} as const;
+
+/** Показаний підпис поля (Mantine `Select` показує підпис вибраної опції). */
 function valueOf(label: string): string {
   return (screen.getByLabelText(label) as HTMLInputElement).value;
 }
@@ -129,17 +139,17 @@ describe('MethodologyModesForm: перемикання версії перема
     mockServer();
     const { switchToB } = show();
 
-    expect(valueOf(NumericLabel)).toBe('Legacy');
-    expect(valueOf(CalendarLabel)).toBe('Actual');
-    expect(valueOf(TraceLabel)).toBe('Off');
+    expect(valueOf(NumericLabel)).toBe(Label.Legacy);
+    expect(valueOf(CalendarLabel)).toBe(Label.Actual);
+    expect(valueOf(TraceLabel)).toBe(Label.Off);
 
     switchToB();
 
     // ⛔ Мутаційний доказ (RED до фіксу): у полях лишалися Legacy/Actual/Off —
     // режими ЧУЖОЇ версії, візуально не відрізнити від справжніх.
-    expect(valueOf(NumericLabel)).toBe('Strict');
-    expect(valueOf(CalendarLabel)).toBe('Fixed365');
-    expect(valueOf(TraceLabel)).toBe('Full');
+    expect(valueOf(NumericLabel)).toBe(Label.Strict);
+    expect(valueOf(CalendarLabel)).toBe(Label.Fixed365);
+    expect(valueOf(TraceLabel)).toBe(Label.Full);
   });
 
   it('«Зберегти режими» після переходу надсилає режими B, а не A', async () => {
@@ -166,12 +176,12 @@ describe('MethodologyModesForm: перемикання версії перема
     const { switchToB } = show();
 
     switchToB();
-    await pick(TraceLabel, 'ErrorsOnly');
+    await pick(TraceLabel, Label.ErrorsOnly);
 
     // ⚠ Зворотний бік фіксу: синхронізація мусить спрацювати РІВНО на зміну
     // версії, а не на кожен рендер — інакше вона затирала б власний вибір
     // адміна за мить після кліку.
-    expect(valueOf(TraceLabel)).toBe('ErrorsOnly');
+    expect(valueOf(TraceLabel)).toBe(Label.ErrorsOnly);
 
     fireEvent.click(screen.getByRole('button', { name: '⟦methodologies.saveModes⟧' }));
     await waitFor(() => expect(saved).toHaveLength(1));
@@ -181,5 +191,26 @@ describe('MethodologyModesForm: перемикання версії перема
       calendarMode: 'Fixed365',
       traceLevel: 'ErrorsOnly',
     });
+  });
+
+  it('опції — словами (як бейджі переліку), значення опцій — перелічення сервера', async () => {
+    mockServer();
+    show();
+
+    const cases: readonly (readonly [string, readonly (keyof typeof Label)[]])[] = [
+      [NumericLabel, ['Legacy', 'Strict']],
+      [CalendarLabel, ['Actual', 'Fixed365', 'Fixed360']],
+      [TraceLabel, ['Off', 'ErrorsOnly', 'Full']],
+    ];
+    for (const [field, values] of cases) {
+      fireEvent.click(screen.getByRole('textbox', { name: field }));
+      for (const value of values) {
+        const option = await screen.findByRole('option', { name: Label[value] });
+        expect(option.getAttribute('value')).toBe(value);
+
+        // Сирого значення на кшталт «ErrorsOnly» серед підписів немає.
+        expect(screen.queryByRole('option', { name: value })).toBeNull();
+      }
+    }
   });
 });
