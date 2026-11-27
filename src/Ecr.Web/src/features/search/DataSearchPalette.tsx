@@ -57,6 +57,8 @@ export interface DataSearchPaletteProps {
   readonly onPicked: () => void;
   /** Групи меню з пунктами, дозволеними цьому користувачеві (UI-12). */
   readonly groups?: readonly PaletteScreenGroup[];
+  /** ✎ DOCUX: набране після Ctrl+K до того, як поле отримало фокус (`SearchLauncher`); дописується в поле при фокусі. */
+  readonly takeTyped?: () => string;
 }
 
 const NoGroups: readonly PaletteScreenGroup[] = [];
@@ -135,7 +137,7 @@ function useShellActions(): CommandItem[] {
   ];
 }
 
-export function DataSearchPalette({ opened, onClose, onPicked, groups = NoGroups }: DataSearchPaletteProps): JSX.Element {
+export function DataSearchPalette({ opened, onClose, onPicked, groups = NoGroups, takeTyped }: DataSearchPaletteProps): JSX.Element {
   const navigate = useNavigate();
   const baseId = useId();
   const listId = `${baseId}-list`;
@@ -313,6 +315,11 @@ export function DataSearchPalette({ opened, onClose, onPicked, groups = NoGroups
     >
       <TextInput
         data-autofocus
+        data-palette-input=""
+        onFocus={() => {
+          const typed = takeTyped?.() ?? '';
+          if (typed.length > 0) setQuery((current) => current + typed);
+        }}
         classNames={{ root: 'ecr-palette-in' }}
         variant="unstyled"
         leftSection={<SearchGlyph />}
