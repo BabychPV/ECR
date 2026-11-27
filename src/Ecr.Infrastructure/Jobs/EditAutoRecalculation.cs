@@ -13,7 +13,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// ✎ D-577 (Q2, рішення людини 26.11: «автоперерахунок методологій після правок — так, тихо»): після успішного проходу
 /// <see cref="FormulaRecalculationJob"/> З НАСІННЯМ (правка людини: PATCH, вставка, імпорт, додано/видалено рядок, «з
 /// дозволу») — автоперерахунок методологій документа за періоди правки, з відкладенням і злиттям
-/// (<see cref="ICalculationTrigger.RequestAfterEditAsync"/>).
+/// (<see cref="ICalculationTrigger.RequestAfterEditAsync(long, PeriodKey, CancellationToken)"/>).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -79,67 +79,132 @@ public sealed partial class EditAutoRecalculation(
     /// <param name="changedColumns">Змінені колонки за періодом (насіння й похідні); <c>null</c> — невідомо (без розширення).</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Скільки періодів поставлено.</returns>
-    public async Task<int> OnEditedAsync(
+    public Task<int> OnEditedAsync(
         long documentId, IReadOnlyCollection<int> periodKeys, IReadOnlySet<int>? templateVersionIds,
         IReadOnlyDictionary<int, IReadOnlySet<int>>? changedColumns, CancellationToken ct)
+        => OnEditedAsync(
+            documentId,
+            new EditedPeriods(periodKeys) { TemplateVersionIds = templateVersionIds, ChangedColumns = changedColumns },
+            ct);
+
+    /// <summary>Повний варіант: усе, що задача формул знає про правку (<see cref="EditedPeriods"/>).</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="edit">Правка.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Скільки періодів поставлено.</returns>
+    public async Task<int> OnEditedAsync(long documentId, EditedPeriods edit, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(periodKeys);
-        if (documentId == 0 || periodKeys.Count == 0 || configuration?.GetValue(EnabledKey, true) == false)
+        ArgumentNullException.ThrowIfNull(edit);
+        ArgumentNullException.ThrowIfNull(edit.PeriodKeys);
+        if (documentId == 0 || edit.PeriodKeys.Count == 0 || configuration?.GetValue(EnabledKey, true) == false)
         {
             return 0;
         }
 
         try
         {
-            var keys = periodKeys.Distinct().ToList();
-            if (boundTables is not null && metadata is not null && templateVersionIds is { Count: > 0 })
+            var keys = edit.PeriodKeys.Distinct().ToList();
+            if (boundTables is not null && metadata is not null && edit.TemplateVersionIds is { Count: > 0 } versions)
             {
                 var bound = await boundTables.GetAsync(db, ct).ConfigureAwait(false);
                 var any = false;
-                foreach (var versionId in templateVersionIds)
+                foreach (var versionId in versions)
                 {
                     var snapshot = await metadata.GetAsync(versionId, ct).ConfigureAwait(false);
                     any |= snapshot.Sheets.SelectMany(sheet => sheet.Tables).Any(t => bound.Contains(t.Id));
                 }
 
-                return any
-                    ? await EnqueueAsync(
-                            documentId,
-                            await WithReaderMonthsAsync(documentId, keys, templateVersionIds, changedColumns, ct).ConfigureAwait(false),
-                            ct)
-                        .ConfigureAwait(false)
-                    : 0;
+                if (!any)
+                {
+                    return 0;
+                }
             }
-
-            var withMethodologies = await db.TableInstances
-                .AsNoTracking()
-                .Where(i => i.DocumentId == documentId && keys.Contains(i.PeriodKeyValue)
-                            && db.CalculationBindings.Any(b => b.IsActive && b.TableDefId == i.TableDefId))
-                .Select(i => i.PeriodKeyValue)
-                .Distinct()
-                .OrderBy(k => k)
-                .Take(keys.Count)
-                .ToListAsync(ct)
-                .ConfigureAwait(false);
-
-            // ⚠ Прив'язка — до таблиці, а скрипт методології читає й інші таблиці документа: період без прив'язаної таблиці,
-            // але з правкою, рахується, якщо в документі є методології хоч в одному з періодів правки.
-            if (withMethodologies.Count == 0)
+            else
             {
-                return 0;
+                var withMethodologies = await db.TableInstances
+                    .AsNoTracking()
+                    .Where(i => i.DocumentId == documentId && keys.Contains(i.PeriodKeyValue)
+                                && db.CalculationBindings.Any(b => b.IsActive && b.TableDefId == i.TableDefId))
+                    .Select(i => i.PeriodKeyValue)
+                    .Distinct()
+                    .OrderBy(k => k)
+                    .Take(keys.Count)
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+
+                // ⚠ Прив'язка — до таблиці, а скрипт методології читає й інші таблиці документа: період без прив'язаної таблиці,
+                // але з правкою, рахується, якщо в документі є методології хоч в одному з періодів правки.
+                if (withMethodologies.Count == 0)
+                {
+                    return 0;
+                }
             }
 
-            return await EnqueueAsync(
-                    documentId,
-                    await WithReaderMonthsAsync(documentId, keys, templateVersionIds, changedColumns, ct).ConfigureAwait(false),
-                    ct)
+            var periods = await WithReaderMonthsAsync(documentId, keys, edit.TemplateVersionIds, edit.ChangedColumns, ct)
                 .ConfigureAwait(false);
+
+            // ✎ Огляд H1: період, у який хук документа-джерела вже поставив ВЛАСНИЙ перерахунок (з місяцями правки, D-572), —
+            // не ставимо: злиття без місяців розширило б його на весь рік, а другий запит — ще один повний прогін.
+            if (edit.Claimed is { Count: > 0 } claimed)
+            {
+                periods = [.. periods.Where(p => !claimed.Contains(p))];
+            }
+
+            // ✎ Огляд H2 (c): важкий документ (рядків за період понад межу) — без автоперерахунку: прогін тримав би лок
+            // документа так довго, що проходи формул після кожної правки відкладались би; там лишається «застаріло» + кнопка.
+            periods = await WithoutHeavyAsync(documentId, periods, ct).ConfigureAwait(false);
+
+            return await EnqueueAsync(documentId, periods, edit.ApproverSheets, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogEnqueueFailed(_logger, documentId, ex);
             return 0;
         }
+    }
+
+    /// <summary>Ключ межі рядків документа за період, понад яку автоперерахунку немає (огляд H2 (c)); 0 — без межі.</summary>
+    public const string MaxRowsKey = "Calculations:AutoRecalcAfterEdit:MaxRowsPerPeriod";
+
+    /// <summary>
+    /// ✎ Огляд H2 (c): типова межа — 20 000 живих рядків документа за період. ⚠ Перед увімкненням на live потрібен вимір на
+    /// стенді Land (тривалість прогону місяця й відкладення проходів формул під локом документа); документи понад межу —
+    /// лише «застаріло» + «Перерахувати», як доти.
+    /// </summary>
+    public const int DefaultMaxRowsPerPeriod = 20_000;
+
+    private async Task<List<int>> WithoutHeavyAsync(long documentId, List<int> periods, CancellationToken ct)
+    {
+        var max = configuration?.GetValue(MaxRowsKey, DefaultMaxRowsPerPeriod) ?? DefaultMaxRowsPerPeriod;
+        if (periods.Count == 0 || max <= 0)
+        {
+            return periods;
+        }
+
+        var light = new List<int>(periods.Count);
+        foreach (var period in periods)
+        {
+            // Лічба обірвана на max+1: ціна запиту не росте з розміром документа.
+            var rows = await db.TableRows
+                .AsNoTracking()
+                .Where(r => r.PeriodKeyValue == period && !r.IsDeleted
+                            && db.TableInstances.Any(i => i.Id == r.TableInstanceId && i.PeriodKeyValue == period
+                                                          && i.DocumentId == documentId))
+                .Select(r => r.Id)
+                .OrderBy(id => id)
+                .Take(max + 1)
+                .CountAsync(ct)
+                .ConfigureAwait(false);
+            if (rows > max)
+            {
+                LogHeavySkipped(_logger, documentId, period, max);
+                continue;
+            }
+
+            light.Add(period);
+        }
+
+        return light;
     }
 
     /// <summary>
@@ -150,7 +215,7 @@ public sealed partial class EditAutoRecalculation(
     /// Читач — за полями, які читає скрипт методологій документа (<c>calc.MethodologyReadField</c>, D-568): поле з кодом зміненої
     /// не-місячної колонки — читає; версія без запису, з маркером «читає будь-що» (<c>*</c>) чи формульна — консервативно
     /// читає. Місяці — ті, де в документа є екземпляри таблиць у році; закриті, не відкриті й затверджені відсіє сама
-    /// постановка (<see cref="ICalculationTrigger.RequestAfterEditAsync"/>). Звернення до бази — лише коли правка справді
+    /// постановка (<see cref="ICalculationTrigger.RequestAfterEditAsync(long, PeriodKey, CancellationToken)"/>). Звернення до бази — лише коли правка справді
     /// зачепила не-місячну колонку версії річної розкладки (рідко), не на кожну правку.
     /// </remarks>
     internal async Task<List<int>> WithReaderMonthsAsync(
@@ -163,8 +228,8 @@ public sealed partial class EditAutoRecalculation(
             return keys;
         }
 
-        // Змінені НЕ-місячні колонки (коди) за роком.
-        var yearly = new Dictionary<int, HashSet<string>>();
+        // Змінені НЕ-місячні колонки (коди) і ✎ огляд M6 — основи місячних (`X` з `X_Mmm`) за роком.
+        var yearly = new Dictionary<int, (HashSet<string> Codes, HashSet<string> MonthBases)>();
         foreach (var versionId in templateVersionIds.Where(layouts.IsYearVersion))
         {
             var columns = (await metadata.GetAsync(versionId, ct).ConfigureAwait(false)).ColumnsById;
@@ -172,17 +237,26 @@ public sealed partial class EditAutoRecalculation(
             {
                 foreach (var columnId in changedColumns.GetValueOrDefault(key) ?? new HashSet<int>())
                 {
-                    if (!columns.TryGetValue(columnId, out var column) || column.IsMonthColumn)
+                    if (!columns.TryGetValue(columnId, out var column))
                     {
                         continue;
                     }
 
-                    if (!yearly.TryGetValue(key / 100, out var codes))
+                    if (!yearly.TryGetValue(key / 100, out var sets))
                     {
-                        yearly[key / 100] = codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        yearly[key / 100] = sets = (
+                            new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                            new HashSet<string>(StringComparer.OrdinalIgnoreCase));
                     }
 
-                    codes.Add(column.Code);
+                    if (!column.IsMonthColumn)
+                    {
+                        sets.Codes.Add(column.Code);
+                    }
+                    else if (MonthBaseOf(column.Code, column.MonthNumber) is { } monthBase)
+                    {
+                        sets.MonthBases.Add(monthBase);
+                    }
                 }
             }
         }
@@ -193,9 +267,10 @@ public sealed partial class EditAutoRecalculation(
         }
 
         var result = keys.ToHashSet();
-        foreach (var (year, codes) in yearly)
+        foreach (var (year, sets) in yearly)
         {
-            if (!await AnyReaderAsync(documentId, year, codes, ct).ConfigureAwait(false))
+            if ((sets.Codes.Count == 0 && sets.MonthBases.Count == 0)
+                || !await AnyReaderAsync(documentId, year, sets.Codes, sets.MonthBases, ct).ConfigureAwait(false))
             {
                 continue;
             }
@@ -219,8 +294,28 @@ public sealed partial class EditAutoRecalculation(
         return [.. result.Order()];
     }
 
-    /// <summary>Чи читає скрипт хоч однієї опублікованої версії методологій документа хоч одну з колонок (консервативно).</summary>
-    private async Task<bool> AnyReaderAsync(long documentId, int year, HashSet<string> codes, CancellationToken ct)
+    /// <summary>Основа місячної колонки <c>X_Mmm</c> (<c>X</c>); <c>null</c> — код не за правилом.</summary>
+    internal static string? MonthBaseOf(string code, int? month)
+    {
+        if (month is not { } number)
+        {
+            return null;
+        }
+
+        var suffix = "_M" + number.ToString("00", System.Globalization.CultureInfo.InvariantCulture);
+        return code.Length > suffix.Length && code.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+            ? code[..^suffix.Length]
+            : null;
+    }
+
+    /// <summary>
+    /// Чи читає скрипт хоч однієї опублікованої версії методологій документа хоч одну з не-місячних колонок <paramref name="codes"/>
+    /// (консервативно: версія без запису, «будь-що», не-скрипт) чи — ✎ огляд M6 — місячне поле <paramref name="monthBases"/> за
+    /// ІНШИЙ місяць (<c>row.X[m]</c>, <c>OtherMonths</c>) чи «будь-що». ⚠ Для місячної правки — лише за явним записом: без нього
+    /// (версія без запису, не-скрипт) кожна правка місяця будила б увесь рік (шторм); там лишається застарілість у чипі.
+    /// </summary>
+    private async Task<bool> AnyReaderAsync(
+        long documentId, int year, HashSet<string> codes, HashSet<string> monthBases, CancellationToken ct)
     {
         var from = year * 100;
         var to = (year + 1) * 100;
@@ -240,33 +335,39 @@ public sealed partial class EditAutoRecalculation(
             return false;
         }
 
-        if (versions.Any(v => v.Engine != Domain.Enums.MethodologyEngine.Script))
+        if (codes.Count > 0 && versions.Any(v => v.Engine != Domain.Enums.MethodologyEngine.Script))
         {
             return true;
         }
 
-        var ids = versions.Select(v => v.Id).ToList();
+        var ids = versions.Where(v => v.Engine == Domain.Enums.MethodologyEngine.Script).Select(v => v.Id).ToList();
         var fields = await db.MethodologyReadFields
             .AsNoTracking()
             .Where(f => ids.Contains(f.MethodologyVersionId))
-            .Select(f => new { f.MethodologyVersionId, f.FieldCode })
+            .Select(f => new { f.MethodologyVersionId, f.FieldCode, f.OtherMonths })
             .OrderBy(f => f.MethodologyVersionId)
             .Take(20_000)
             .ToListAsync(ct)
             .ConfigureAwait(false);
         var byVersion = fields.ToLookup(f => f.MethodologyVersionId);
 
-        return ids.Exists(id => !byVersion[id].Any()
+        return ids.Exists(id => (codes.Count > 0 && !byVersion[id].Any())
                                 || byVersion[id].Any(f => f.FieldCode == Domain.Entities.Calculations.MethodologyReadField.AllFields
-                                                          || codes.Contains(f.FieldCode)));
+                                                          || codes.Contains(f.FieldCode)
+                                                          || (f.OtherMonths && monthBases.Contains(f.FieldCode))));
     }
 
-    private async Task<int> EnqueueAsync(long documentId, List<int> keys, CancellationToken ct)
+    private async Task<int> EnqueueAsync(
+        long documentId, List<int> keys, IReadOnlyDictionary<int, IReadOnlySet<int>>? approverSheets, CancellationToken ct)
     {
         var enqueued = 0;
         foreach (var key in keys.Order())
         {
-            if (await trigger.RequestAfterEditAsync(documentId, new PeriodKey(key), ct).ConfigureAwait(false) is not null)
+            var approver = approverSheets?.GetValueOrDefault(key);
+            var jobId = approver is { Count: > 0 }
+                ? await trigger.RequestAfterEditAsync(documentId, new PeriodKey(key), approver, ct).ConfigureAwait(false)
+                : await trigger.RequestAfterEditAsync(documentId, new PeriodKey(key), ct).ConfigureAwait(false);
+            if (jobId is not null)
             {
                 enqueued++;
             }
@@ -274,6 +375,11 @@ public sealed partial class EditAutoRecalculation(
 
         return enqueued;
     }
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Автоперерахунок після правки документа {DocumentId} за період {Period} пропущено: рядків понад {Max} (огляд H2).")]
+    private static partial void LogHeavySkipped(ILogger logger, long documentId, int period, int max);
 
     [LoggerMessage(
         Level = LogLevel.Warning,
@@ -323,4 +429,32 @@ public sealed class BoundTablesCache
         _entry = new Entry(set, started);
         return set;
     }
+}
+
+/// <summary>✎ D-577: що задача формул знає про правку.</summary>
+/// <param name="PeriodKeys">Періоди, у які записала правка (насіння й похідні).</param>
+public sealed record EditedPeriods(IReadOnlyCollection<int> PeriodKeys)
+{
+    /// <summary>Версії шаблонів екземплярів у цих періодах; <c>null</c> — невідомо (ворота читають базу).</summary>
+    public IReadOnlySet<int>? TemplateVersionIds { get; init; }
+
+    /// <summary>Змінені колонки за періодом; <c>null</c> — невідомо (без розширення на місяці-читачі).</summary>
+    public IReadOnlyDictionary<int, IReadOnlySet<int>>? ChangedColumns { get; init; }
+
+    /// <summary>✎ M5 (D-442): аркуші правки погоджувача за періодом — автоперерахунок не ставить їм позначку «після подання».</summary>
+    public IReadOnlyDictionary<int, IReadOnlySet<int>>? ApproverSheets { get; init; }
+
+    /// <summary>✎ Огляд H1: періоди, де власний перерахунок уже поставив хук документа-джерела (<see cref="IOwnRecalculationClaims"/>).</summary>
+    public IReadOnlySet<int>? Claimed { get; init; }
+}
+
+/// <summary>
+/// ✎ Огляд H1: хук, що САМ ставить власний перерахунок документа за періоди правки (документ-джерело, з місяцями правки D-572),
+/// називає ці періоди, щоб автоперерахунок після правки їх не дублював і не розширював на весь рік.
+/// </summary>
+public interface IOwnRecalculationClaims
+{
+    /// <summary>Періоди документа, у які хук поставив (чи злив) власний перерахунок у межах цієї задачі формул.</summary>
+    /// <param name="documentId">Документ.</param>
+    public IReadOnlySet<int> OwnRecalculationQueued(long documentId);
 }

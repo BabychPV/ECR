@@ -1120,6 +1120,75 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
         await db.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// ✎ M5 (D-442, рішення людини): автоперерахунок після правки ПОГОДЖУВАЧА поданого аркуша (<c>ApproverSheets</c> у payload)
+    /// перераховує аркуш, але позначки «перераховано після подання» й запису журналу йому не ставить; інший поданий аркуш без
+    /// звільнення — з позначкою, як доти (B79).
+    /// </summary>
+    /// <remarks>Мутація (локально): прибрати пропуск <c>request.ApproverSheets</c> у циклі позначок — червоний («marked»).</remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-577")]
+    public async Task M5_автоперерахунок_після_правки_погоджувача_не_позначає_його_аркуш(bool approverEdit)
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m);
+        await SubmitOnlyAsync(arranged, arranged.SecondSheetId, Now.AddMinutes(-5));
+
+        await using (var auditDb = arranged.Builder.CreateContext())
+        {
+            await RunJobAsync(
+                arranged,
+                SheetRequest(arranged, sheetDefId: null) with
+                {
+                    TriggeredByUserId = null,
+                    RecalculateSubmitted = true,
+                    ApproverSheets = approverEdit ? [arranged.SecondSheetId] : null,
+                },
+                label: 2_000m,
+                audit: new AuditWriter(auditDb));
+        }
+
+        Assert.Equal(["A|2001", "B|2001"], await ShapeAsync(arranged));
+        Assert.Equal(
+            approverEdit ? 0 : 1,
+            await SheetLogCountAsync(arranged, arranged.SecondSheetId, RecalculationSkips.AuditRecalculatedAfterSubmission));
+        Assert.Equal(approverEdit ? "-,-" : "-,marked", await MarksAsync(arranged));
+    }
+
+    /// <summary>
+    /// ✎ D-577 (огляд H2 (b)): автоперерахунок після правки (<c>SkipIfFresh</c>) нічого не рахує, якщо актуальний прогін
+    /// документа за період новіший за входи (людина встигла натиснути «Перерахувати»); без актуального прогону — рахує.
+    /// </summary>
+    /// <remarks>Мутація (локально): прибрати ранній вихід <c>SkipIfFresh</c> у <c>RecalculationJob.ExecuteAsync</c> — червоний (2 прогони).</remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-577")]
+    public async Task H2_автоперерахунок_над_актуальним_прогоном_нічого_не_рахує(bool priorRun)
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false);
+        if (priorRun)
+        {
+            await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m);
+        }
+
+        await RunJobAsync(
+            arranged,
+            SheetRequest(arranged, sheetDefId: null) with { TriggeredByUserId = null, RecalculateSubmitted = true, SkipIfFresh = true },
+            label: 2_000m);
+
+        Assert.Equal(priorRun ? ["A|1001", "B|1001"] : ["A|2001", "B|2001"], await ShapeAsync(arranged));
+        await using var db = arranged.Builder.CreateContext();
+        Assert.Equal(1, await db.CalculationRuns.AsNoTracking().CountAsync(r =>
+            r.DocumentId == arranged.Document.DocumentId && r.PeriodKey == arranged.Document.PeriodKey.Value));
+    }
+
     private static RecalculationRequest SheetRequest(Arranged arranged, int? sheetDefId)
         => new(
             ProjectId: arranged.Document.ProjectId,

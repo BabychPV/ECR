@@ -465,6 +465,26 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                     SET @existing = JSON_MODIFY(@existing, '$.sourceHop', TRY_CAST(JSON_VALUE(@payload, '$.sourceHop') AS int));
                     SET @rewrite = 1;
                 END
+                IF JSON_QUERY(@existing, '$.approverSheets') IS NOT NULL
+                BEGIN
+                    -- ✎ M5 (D-442, D-577): аркуші правки погоджувача — ПЕРЕТИН: без позначки «після подання» лише аркуш, який
+                    -- правив погоджувач у кожній злитій постановці; постановка без поля знімає звільнення (позначка).
+                    SET @existing = JSON_MODIFY(@existing, '$.approverSheets', JSON_QUERY(N'[' + ISNULL(STUFF((
+                        SELECT N',' + e.[value]
+                        FROM OPENJSON(@existing, '$.approverSheets') AS e
+                        WHERE JSON_QUERY(@payload, '$.approverSheets') IS NOT NULL
+                          AND EXISTS (SELECT 1 FROM OPENJSON(@payload, '$.approverSheets') AS p WHERE p.[value] = e.[value])
+                        ORDER BY TRY_CAST(e.[value] AS int)
+                        FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N''), N'') + N']'));
+                    SET @rewrite = 1;
+                END
+                IF ISNULL(JSON_VALUE(@existing, '$.skipIfFresh'), N'false') = N'true'
+                   AND ISNULL(JSON_VALUE(@payload, '$.skipIfFresh'), N'false') <> N'true'
+                BEGIN
+                    -- ✎ Огляд H2 (b): злитий запит без «пропустити, якщо актуально» (натискання, хук джерела, збір) має виконатись.
+                    SET @existing = JSON_MODIFY(@existing, '$.skipIfFresh', CAST(0 AS bit));
+                    SET @rewrite = 1;
+                END
                 IF ISNULL(JSON_VALUE(@payload, '$.forceFull'), N'false') = N'true'
                    AND ISNULL(JSON_VALUE(@existing, '$.forceFull'), N'false') <> N'true'
                 BEGIN

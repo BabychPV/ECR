@@ -98,6 +98,9 @@ public sealed partial class FormulaRecalculationJob(
 
         // B179 L2: періоди правки (насіння) — вони змінились, навіть коли похідних формул немає (written = 0).
         var seedPeriods = work.Where(p => !p.Value.Dirty.IsEmpty).Select(p => p.Key).ToList();
+        // ✎ M5 (D-442): аркуші правки погоджувача за періодом — знімок до проходу (цикл проходу вибирає `work`).
+        var approverSheetsByPeriod = work.Where(p => p.Value.ApproverSheets.Count > 0)
+            .ToDictionary(p => p.Key, p => (IReadOnlySet<int>)p.Value.ApproverSheets.ToHashSet());
         if (work.Count == 0)
         {
             await progress.ReportKeyAsync(100, FormulaRecalcOutcome.NoneKey, ct).ConfigureAwait(false);
@@ -389,11 +392,20 @@ public sealed partial class FormulaRecalculationJob(
         // (відкладення й злиття — у тригері). Прохід лише з міжперіодних джерел його не ставить (петлі немає).
         if (editRecalculation is not null && seedPeriods.Count > 0)
         {
+            // ✎ Огляд H1: періоди, де хук документа-джерела вже поставив власний перерахунок (з місяцями правки), — не дублюємо.
+            // ✎ M5 (D-442, рішення людини): аркуші правки погоджувача — автоперерахунок пише їх без позначки.
             int[] editedPeriods = [.. writtenPeriods.Union(seedPeriods).Order()];
             await editRecalculation
                 .OnEditedAsync(
-                    documentId, editedPeriods, shared.TemplateVersionsOf(documentId, editedPeriods),
-                    changedColumnsByPeriod.ToDictionary(p => p.Key, p => (IReadOnlySet<int>)p.Value), ct)
+                    documentId,
+                    new EditedPeriods(editedPeriods)
+                    {
+                        TemplateVersionIds = shared.TemplateVersionsOf(documentId, editedPeriods),
+                        ChangedColumns = changedColumnsByPeriod.ToDictionary(p => p.Key, p => (IReadOnlySet<int>)p.Value),
+                        ApproverSheets = approverSheetsByPeriod,
+                        Claimed = (completionHook as IOwnRecalculationClaims)?.OwnRecalculationQueued(documentId),
+                    },
+                    ct)
                 .ConfigureAwait(false);
         }
     }

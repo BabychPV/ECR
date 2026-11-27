@@ -293,6 +293,69 @@ public sealed class DeleteRowTests(SqlServerFixture sql)
 
     // ── Побудова ─────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// ✎ Огляд M6 (D-577): видалення рядка таблиці «місяці в колонках» дзеркалить його в усі екземпляри року — і насіння
+    /// перерахунку йде з КОЖНОГО періоду, де рядок зник (агрегати тих місяців і автоперерахунок методологій після правки), а не
+    /// лише з періоду запиту.
+    /// </summary>
+    /// <remarks>Мутація (локально): повертати лише насіння рядка запиту (без <c>mirrorSeeds</c>) — червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-577")]
+    public async Task M6_дзеркальне_видалення_сіє_перерахунок_у_кожному_періоді_року()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(columnCount: 3, rowCount: Rows, rowMode: TableRowMode.Dynamic, ct: CancellationToken.None);
+        var february = await builder.AddPeriodInstanceAsync(doc, new PeriodKey(202602));
+        var key = RowKeyOf(doc, 2);
+
+        var db = CreateContext();
+        var clock = new FixedClock(Now);
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        jobs.EnlistsInCallerTransaction.Returns(false);
+        jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns("job-1");
+        var access = Substitute.For<IAccessDecisionService>();
+        access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+              .Returns(EditDecision.Allow());
+        access.CanCreateRowsAsync(
+                  Arg.Any<AccessProfile>(), doc.TableInstanceId, Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+              .Returns(call => (IReadOnlyDictionary<string, NewRowAccess>)call.ArgAt<IReadOnlyCollection<string>>(2)
+                  .ToDictionary(
+                      k => k,
+                      _ => new NewRowAccess(
+                          EditDecision.Allow() with { AnnualPeriods = [doc.PeriodKey.Value, 202602] },
+                          new Dictionary<int, EditDecision>()),
+                      StringComparer.Ordinal));
+        var router = Substitute.For<IMonthColumnRouter>();
+        router.Enabled.Returns(true);
+        router.AppliesToTable(Arg.Any<TableDef>()).Returns(true);
+        router.GetDocumentAsync(doc.DocumentId, Arg.Any<CancellationToken>())
+              .Returns(new MonthRoutingDocument(doc.DocumentId, doc.ProjectId, doc.TemplateVersionId));
+
+        var handler = new DeleteRowHandler(
+            new RowStore(db, new BulkCellLoader(sql.ConnectionString, 1000), clock), new DocumentStore(db),
+            Metadata(doc), access, new NormalizedCellStore(db), new AuditWriter(db), jobs,
+            new UnitOfWork(db), clock, new SheetEditGate(db), rowAudit: new RowChangeAudit(db), monthRouter: router);
+
+        await handler.HandleAsync(doc.DocumentId, doc.TableInstanceId, key, Profile(), CancellationToken.None);
+
+        var mirrorRowId = february.RowIds[1];
+        Assert.Equal(1, await ScalarAsync<int>(
+            $"SELECT CAST(IsDeleted AS int) FROM doc.TableRow WHERE PeriodKey = 202602 AND Id = {mirrorRowId}"));
+        var call = jobs.ReceivedCalls().Single(c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueCoalescedAsync));
+        var payload = System.Text.Json.JsonSerializer.Serialize(call.GetArguments()[1]);
+        Assert.Contains($"\"RowId\":{doc.RowIds[1]},", payload, StringComparison.Ordinal);
+        foreach (var column in doc.ColumnDefIds)
+        {
+            Assert.Contains(
+                $"\"RowId\":{mirrorRowId},\"ColumnDefId\":{column},\"PeriodKey\":202602,\"TableInstanceId\":{february.TableInstanceId}",
+                payload, StringComparison.Ordinal);
+        }
+    }
+
     private async Task<TestDocument> ArrangeAsync()
         => await new TestDocumentBuilder(sql.ConnectionString)
             .BuildAsync(columnCount: 3, rowCount: Rows, rowMode: TableRowMode.Dynamic, ct: CancellationToken.None);

@@ -101,9 +101,16 @@ public sealed partial class SourceDocumentChangeHook(
     IDocumentSourceFlagOverrides? overrides = null,
     ILogger<SourceDocumentChangeHook>? logger = null,
     // B179 L2 (perf): у DI завжди є (singleton); без нього (ручна збірка в тестах) ворота читаються з бази щоразу.
-    SourceBindingGateCache? gateCache = null) : IRecalculationCompletionHook
+    SourceBindingGateCache? gateCache = null) : IRecalculationCompletionHook, IOwnRecalculationClaims
 {
     private readonly ILogger _logger = (ILogger?)logger ?? NullLogger.Instance;
+
+    // ✎ Огляд H1: (документ, період), куди правка вже поставила власний перерахунок (з місяцями правки, D-572).
+    private readonly Dictionary<long, HashSet<int>> _ownQueued = [];
+
+    /// <inheritdoc />
+    public IReadOnlySet<int> OwnRecalculationQueued(long documentId)
+        => _ownQueued.TryGetValue(documentId, out var periods) ? periods : new HashSet<int>();
 
     /// <inheritdoc />
     public Task OnSucceededAsync(IReadOnlyDictionary<long, int[]> periodsByDocument, int sourceHop, CancellationToken ct)
@@ -202,6 +209,15 @@ public sealed partial class SourceDocumentChangeHook(
                     if (enqueued is null)
                     {
                         declined.Add((documentId, periodKey));
+                    }
+                    else
+                    {
+                        if (!_ownQueued.TryGetValue(documentId, out var own))
+                        {
+                            _ownQueued[documentId] = own = [];
+                        }
+
+                        own.Add(periodKey);
                     }
                 }
 

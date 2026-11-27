@@ -82,14 +82,39 @@ public sealed class CalculationTrigger(
     /// людей не обганяє ручне «Перерахувати» (D-564c). Закритий, не відкритий, архівований, затверджений — не ставиться
     /// (<see cref="WritableAsync"/>), подані перераховуються з позначкою (B83). Quartz (live) — те саме вікно в пам'яті (<c>QuartzJobScheduler.EnqueueCoalescedDelayedAsync</c>) і злиття на ціль.
     /// </remarks>
-    public async Task<string?> RequestAfterEditAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+    public Task<string?> RequestAfterEditAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+        => RequestAfterEditAsync(documentId, periodKey, approverSheetDefIds: null, ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ Огляд H2 (b): payload несе <c>SkipIfFresh</c> — задача нічого не рахує, якщо актуальний прогін уже новіший за останню
+    /// зміну входів (людина встигла натиснути «Перерахувати», або злитий прогін це покрив). ✎ M5 (рішення людини, D-442):
+    /// аркуші, які правив погоджувач поточного кроку (<paramref name="approverSheetDefIds"/>), — без позначки «перераховано після
+    /// подання» (<c>ApproverSheets</c>).
+    /// </remarks>
+    public async Task<string?> RequestAfterEditAsync(
+        long documentId, PeriodKey periodKey, IReadOnlyCollection<int>? approverSheetDefIds, CancellationToken ct)
     {
         if (!await WritableAsync(documentId, periodKey, ct).ConfigureAwait(false))
         {
             return null;
         }
 
-        return await EnqueueSubmittedAsync(AutoTargetOf(documentId, periodKey), documentId, periodKey, ct, delay: EditDebounce)
+        int[]? approver = approverSheetDefIds is { Count: > 0 } ? [.. approverSheetDefIds.Distinct().Order()] : null;
+        var payload = new
+        {
+            DocumentId = documentId,
+            PeriodKey = periodKey.Value,
+            TriggeredByUserId = (int?)null,
+            SheetDefId = (int?)null,
+            RecalculateSubmitted = true,
+            SkipIfFresh = true,
+            ApproverSheets = approver,
+        };
+
+        return await jobs
+            .EnqueueCoalescedDelayedAsync<IRecalculationJob>(
+                AutoTargetOf(documentId, periodKey), payload, EditDebounce, ct, createdByUserId: null)
             .ConfigureAwait(false);
     }
 
