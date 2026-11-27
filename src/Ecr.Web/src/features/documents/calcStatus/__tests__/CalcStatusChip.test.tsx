@@ -84,7 +84,7 @@ describe('calcStatusOf', () => {
       position: 3,
       origin: { kind: 'auto' },
     });
-    expect(calcStatusOf(dto({ resultsStale: true, lastFailure: { jobId: 'f', failedAt: 'x', errorCode: 'ECR-CALC-0512', correlationId: 'c', kind: 'manual', own: true } }), NoCard, Idle).status.kind).toBe('failed');
+    expect(calcStatusOf(dto({ resultsStale: true, lastFailure: { jobId: 'f', failedAt: 'x', errorCode: 'ECR-SYS-0500', correlationId: 'c', kind: 'manual', own: true } }), NoCard, Idle).status.kind).toBe('failed');
     expect(calcStatusOf(dto({ resultsStale: true, staleMonths: [{ periodKey: 202610, since: null, recalculable: true, lockedReason: null }] }), NoCard, Idle).status.kind).toBe('stale');
     expect(calcStatusOf(dto(), NoCard, Idle).status).toEqual({ kind: 'upToDate', at: '2026-11-26T14:02:00Z' });
     expect(calcStatusOf(undefined, NoCard, Idle).status.kind).toBe('unknown');
@@ -120,10 +120,10 @@ describe('CalcStatusChip', () => {
 
   it('L4-2: провал із сервера — червоний чип, Retry, у поясненні код і кореляція для підтримки', async () => {
     const { run } = show([
-      dto({ resultsStale: true, lastFailure: { jobId: 'f', failedAt: '2026-11-26T13:00:00Z', errorCode: 'ECR-CALC-0512', correlationId: '7f3a', kind: 'manual', own: true } }),
+      dto({ resultsStale: true, lastFailure: { jobId: 'f', failedAt: '2026-11-26T13:00:00Z', errorCode: 'ECR-SYS-0500', correlationId: '7f3a', kind: 'manual', own: true } }),
     ]);
     await waitFor(() => expect(kind()).toBe('failed'));
-    expect(screen.getByTestId('calc-status-chip').textContent).toContain('ECR-CALC-0512 · 7f3a');
+    expect(screen.getByTestId('calc-status-chip').textContent).toContain('ECR-SYS-0500 · 7f3a');
     fireEvent.click(screen.getByTestId('calc-status-action'));
     expect(run).toHaveBeenCalledTimes(1);
   });
