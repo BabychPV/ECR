@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openDocumentMore } from './documentMore';
+import { mockCalcStatus } from './staleContractMocks';
 
 /**
  * Застарілі числа методологій (лінія B) на живому стенді: бейдж у шапці документа і пункт
@@ -20,6 +21,11 @@ test.describe('застарілі результати методологій', 
     'ECR_E2E_OPTIONAL: стенда немає, перевіряти нічого. Стенд: tools/e2e-stand.ps1.',
   );
 
+  // ✎ e2e-stand RC b18: підміни не працюють після кінця тесту (чип і картка опитуються далі).
+  test.afterEach(async ({ page }) => {
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+  });
+
   test('бейдж є, поки числа застарілі; «Recalculate calculations» перечитує числа, і бейдж зникає', async ({ page }) => {
     test.slow();
 
@@ -28,10 +34,16 @@ test.describe('застарілі результати методологій', 
     // ✎ ui-sheet-bottom: застарілість — з КАРТКИ документа (поле resultsStale), а не з запиту чисел (його при відкритті
     // документа немає). Картку підміняємо лише в цьому полі.
     await page.route(new RegExp(`/api/v1/documents/${DocumentId}\\?`), async (route) => {
-      const response = await route.fetch();
-      const body = (await response.json()) as Record<string, unknown>;
-      await route.fulfill({ response, json: { ...body, resultsStale: stale } });
+      try {
+        const response = await route.fetch();
+        const body = (await response.json()) as Record<string, unknown>;
+        await route.fulfill({ response, json: { ...body, resultsStale: stale } });
+      } catch {
+        // Сторінку вже закрито (запит летів наприкінці тесту) — відповідати нікому.
+      }
     });
+    // ✎ DOCUX L4 (e2e-stand RC b18): чип «Results out of date» читає `GET …/calc-status`, а не картку — та сама підміна.
+    await mockCalcStatus(page, () => stale);
     await page.route(`**/api/v1/documents/${DocumentId}/recalculate`, (route) => {
       recalcPosts += 1;
       stale = false;

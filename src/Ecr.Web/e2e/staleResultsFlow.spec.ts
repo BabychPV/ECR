@@ -17,6 +17,12 @@ test.describe('застарілі результати: перелік, My tasks
     'ECR_E2E_OPTIONAL: стенда немає, перевіряти нічого. Стенд: tools/e2e-stand.ps1.',
   );
 
+  // ✎ e2e-stand RC b18: підміни над `route.fetch` не працюють після кінця тесту (чип і картка опитуються далі) — інакше
+  // «route.fetch: Target page … has been closed» валив тест після всіх перевірок.
+  test.afterEach(async ({ page }) => {
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+  });
+
   /** Перелік документів і зведення: документ стенда застарілий; фільтр `resultsStale` лишає лише його. */
   async function mockStaleList(page: import('@playwright/test').Page): Promise<void> {
     await page.route(/\/api\/v1\/documents\?/, async (route) => {

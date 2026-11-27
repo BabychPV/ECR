@@ -22,14 +22,31 @@ export async function signIn(page: Page): Promise<void> {
   await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 });
 }
 
-/** Справжня відповідь стенда як JSON; не-2xx віддається як є (`null` — підміна не потрібна). */
+/**
+ * Справжня відповідь стенда як JSON; не-2xx віддається як є (`null` — підміна не потрібна).
+ * ✎ e2e-stand RC b18: запит, що летів, коли тест уже закрив сторінку, — `route.fetch` кидав «Target page … has been closed»
+ * і валив тест ПІСЛЯ всіх перевірок. Закритій сторінці відповідь не потрібна — тихо `null`.
+ */
 async function realJson(route: Route): Promise<Record<string, unknown> | null> {
-  const response = await route.fetch();
-  if (!response.ok()) {
-    await route.fulfill({ response });
+  try {
+    const response = await route.fetch();
+    if (!response.ok()) {
+      await route.fulfill({ response });
+      return null;
+    }
+    return (await response.json()) as Record<string, unknown>;
+  } catch {
     return null;
   }
-  return (await response.json()) as Record<string, unknown>;
+}
+
+/** `route.fulfill`, що не падає, якщо сторінку вже закрито (див. `realJson`). */
+async function fulfillJson(route: Route, json: unknown): Promise<void> {
+  try {
+    await route.fulfill({ json });
+  } catch {
+    // Сторінку закрито — відповідати нікому.
+  }
 }
 
 /**
@@ -44,20 +61,33 @@ export async function mockDocumentCard(page: Page, state: { stale: boolean }): P
     card['templateVersion'] ??= '1.0.4.0';
     card['resultsStale'] = state.stale;
     card['resultsStaleSince'] = state.stale ? StaleSince : null;
-    return route.fulfill({ json: card });
+    return fulfillJson(route, card);
   });
-  // ✎ DOCUX L4: стан розрахунку чип читає з `GET …/calc-status` (контракт doc-ux-server) — та сама «правда», що й картка:
-  // застаріло — один місяць, який перерахунок перерахує; без задач у черзі (тихий автоперерахунок тут не потрібен).
+  await mockCalcStatus(page, () => state.stale);
+}
+
+/**
+ * ✎ DOCUX L4: стан розрахунку чип читає з `GET …/calc-status` (контракт doc-ux-server) — та сама «правда», що й картка:
+ * застаріло — один місяць, який перерахунок перерахує; без задач у черзі й без провалу (тихий автоперерахунок тут не
+ * потрібен). ✎ e2e-stand RC b18: відповідь ЦІЛКОМ підмінена, без `route.fetch` — чип опитує її й тоді, коли тест уже
+ * закриває сторінку.
+ */
+export async function mockCalcStatus(page: Page, stale: () => boolean): Promise<void> {
   await page.route(new RegExp(`/api/v1/documents/${DocumentId}/calc-status\\?`), async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
-    const status = await realJson(route);
-    if (status === null) return;
-    const periodKey = Number(status['periodKey']);
-    status['resultsStale'] = state.stale;
-    status['resultsStaleSince'] = state.stale ? StaleSince : null;
-    status['staleMonths'] = state.stale ? [{ periodKey, since: StaleSince, recalculable: true, lockedReason: null }] : [];
-    status['activeJobs'] = [];
-    status['lastFailure'] = null;
-    return route.fulfill({ json: status });
+    const periodKey = Number(new URL(route.request().url()).searchParams.get('periodKey') ?? PeriodKey);
+    const now = stale();
+    return fulfillJson(route, {
+      documentId: Number(DocumentId),
+      periodKey,
+      year: null,
+      resultsStale: now,
+      resultsStaleSince: now ? StaleSince : null,
+      resultsStaleUndetermined: null,
+      staleMonths: now ? [{ periodKey, since: StaleSince, recalculable: true, lockedReason: null }] : [],
+      activeJobs: [],
+      calculatedAt: now ? null : '2026-10-08T09:00:00Z',
+      lastFailure: null,
+    });
   });
 }
