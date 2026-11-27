@@ -88,11 +88,17 @@ test.describe('Період документа: межі проєкту (PERIODN
     // нижчий за вікно, притискав прокрутку до 0 уже після утримання (40 кадрів). Утримання тепер — за часом
     // (`holdScrollPosition`, 5 с); тут — дочекатися сітки (скелет -> сітка), а тоді позиції, а не фіксовані 1,5 с.
     await expect(page.locator('revo-grid').first(), 'сітка періоду не намалювалась').toBeVisible({ timeout: 30_000 });
+    // ✎ 27.11 (b21): у іншому періоді сторінка може бути НИЖЧОЮ (менше рядків) — тоді браузер законно притискає прокрутку
+    // до максимуму, якого вже менше за y0 (аж до 0, якщо сторінка влазить у вікно). Очікування — min(y0, доступна прокрутка).
     await expect
-      .poll(async () => Math.abs((await page.evaluate(() => window.scrollY)) - y0), {
-        message: `scrollY після перемикання далі ніж на 60 px від ${String(y0)}`,
-        timeout: 10_000,
-      })
+      .poll(
+        async () =>
+          page.evaluate((start) => {
+            const room = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+            return Math.abs(window.scrollY - Math.min(start, room));
+          }, y0),
+        { message: `scrollY після перемикання далі ніж на 60 px від min(${String(y0)}, доступна прокрутка)`, timeout: 10_000 },
+      )
       .toBeLessThanOrEqual(60);
   });
 });
