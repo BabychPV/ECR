@@ -231,7 +231,9 @@ export function PageHeader({
     if (userAlreadyMovedFocus(heading.current)) return;
     // ⚠ `focusVisible` — див. `keyboardModality` вище (`X-37`).
     if (!keyboardModality) setQuietFocus(true);
-    heading.current?.focus({ focusVisible: keyboardModality } as FocusOptions);
+    // ✎ 27.11 (periodNavBounds): `preventScroll` — фокус для зчитувача, але без прокрутки: заголовок документа монтується
+    // знову після перемикання періоду (скелет → документ), і фокус тягнув сторінку вгору поверх збереженої позиції.
+    heading.current?.focus({ focusVisible: keyboardModality, preventScroll: true } as FocusOptions);
   }, []);
 
   useEffect(() => {
