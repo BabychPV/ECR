@@ -1,5 +1,5 @@
 import { type JSX } from 'react';
-import { Box, Group, SimpleGrid, Stack, Text, Title, UnstyledButton } from '@mantine/core';
+import { Box, Button, Group, SimpleGrid, Stack, Text, Title, UnstyledButton } from '@mantine/core';
 import type { PeriodCalendarDto } from '@/api/types';
 import { formatCount, formatPeriodKey } from '@/shared/format';
 import { wholeDaysUntil } from '@/shared/siteMoment';
@@ -121,6 +121,14 @@ interface PeriodYearTilesProps {
   /** Ключ виділеної плитки (`aria-pressed`). */
   readonly selectedKey: number | null;
   readonly onPick: (periodKey: number) => void;
+  /**
+   * ✎ Reopen на плитці (людина 27.11): таблиця місяців згорнута в «Details», а «Reopen» жив лише в ній. Дає сторінка лише
+   * коли людині дозволено (`Period.Reopen` + грант Manage) — той самий діалог і та сама умова, що в таблиці; без нього
+   * дії на плитках немає. Показується лише на ефективно закритому місяці.
+   */
+  readonly onReopen?: ((periodId: number) => void) | undefined;
+  /** Підпис місяця для імені дії «Reopen <Month YYYY>»; за замовчуванням — підпис плитки. */
+  readonly reopenCaption?: ((period: Period) => string) | undefined;
 }
 
 /**
@@ -136,6 +144,8 @@ export function PeriodYearTiles({
   reopenedNote,
   selectedKey,
   onPick,
+  onReopen,
+  reopenCaption,
 }: PeriodYearTilesProps): JSX.Element | null {
   const now = Date.now();
   const year = currentPeriodOf(calendar)?.year ?? calendar.periods.at(-1)?.year;
@@ -158,10 +168,13 @@ export function PeriodYearTiles({
           const reopened = shown === 'Closed' ? (reopenedNote?.(period.periodKey) ?? null) : null;
           const note = reopened ?? periodNote(period, calendar, siteDate, now, projectStatus);
           const pressed = selectedKey === period.periodKey;
+          const canReopen = onReopen !== undefined && shown === 'Closed';
 
+          // ⛔ Не вкладаємо `<button>` у `<button>`: дія — сестринський елемент плитки, а не нащадок (тож клац по ній
+          // не доходить до `onPick` і без `stopPropagation`; він лишається, якщо плитку колись обернуть у клікабельний вузол).
           return (
+            <Box key={period.periodKey} pos="relative">
             <UnstyledButton
-              key={period.periodKey}
               data-period-tile={period.periodKey}
               data-state={shown}
               data-tile-reopened={reopened === null ? undefined : ''}
@@ -169,6 +182,9 @@ export function PeriodYearTiles({
               aria-label={`${caption}, ${state}. ${note}`}
               onClick={() => onPick(period.periodKey)}
               p="xs"
+              // Місце під рядок дії, щоб вона не налізала на примітку плитки.
+              {...(canReopen ? { pb: 'calc(var(--mantine-spacing-xs) + 1.5rem)' } : {})}
+              w="100%"
               // ⚠ «Ще не відкрито» — пунктирна межа, як у макеті (`.ops-month.notopened`), а не
               // прозорість: `opacity: 0.75` топила приглушений текст до 3.34:1 (batch-2-a, дефект 5).
               style={{
@@ -194,6 +210,24 @@ export function PeriodYearTiles({
                 </Text>
               </Stack>
             </UnstyledButton>
+            {canReopen && (
+              <Button
+                size="xs"
+                variant="subtle"
+                pos="absolute"
+                bottom={4}
+                right={4}
+                data-tile-reopen={period.periodKey}
+                aria-label={t('periods.tile.reopenAria', { period: (reopenCaption?.(period) ?? caption) })}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onReopen(period.id);
+                }}
+              >
+                {t('periods.tile.reopen')}
+              </Button>
+            )}
+            </Box>
           );
         })}
       </SimpleGrid>
