@@ -122,10 +122,11 @@ export function PermitsPage(): JSX.Element {
               placeholder: t('permits.list.search.placeholder'),
             }}
             filters={[
-              { id: 'type', label: t('permits.list.filter.type'), options: typeFilter },
+              { id: 'type', label: t('permits.list.filter.type'), placeholder: t('permits.list.filter.typeAll'), options: typeFilter },
               {
                 id: 'state',
                 label: t('permits.list.filter.state'),
+                placeholder: t('permits.list.filter.stateAll'),
                 options: FilterStates.map((value) => ({ value, label: permitStateLabel(value) })),
               },
             ]}
