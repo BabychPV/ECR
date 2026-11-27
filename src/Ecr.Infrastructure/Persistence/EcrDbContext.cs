@@ -272,6 +272,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<NotificationOutboxItem> NotificationOutbox => Set<NotificationOutboxItem>();
     public DbSet<JobProgress> JobProgresses => Set<JobProgress>();
 
+    /// <summary>✎ D-582: відкладені постановки Quartz, що чекають старту (див. <see cref="PendingDelayedJob"/>).</summary>
+    public DbSet<PendingDelayedJob> PendingDelayedJobs => Set<PendingDelayedJob>();
+
     /// <summary>Позиції відновлюваних сканувань (див. <see cref="ScanCursor"/>).</summary>
     public DbSet<ScanCursor> ScanCursors => Set<ScanCursor>();
 

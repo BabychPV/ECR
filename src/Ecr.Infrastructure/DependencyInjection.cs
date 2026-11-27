@@ -433,7 +433,10 @@ public static class DependencyInjection
             sp.GetService<ICorrelationIdAccessor>(),
             sp.GetService<Microsoft.Extensions.Logging.ILogger<Jobs.QuartzJobScheduler>>(),
             // N-5: коренева фабрика - відкладена перепостановка бере власний scope.
-            sp.GetService<IServiceScopeFactory>()));
+            sp.GetService<IServiceScopeFactory>(),
+            // ✎ D-582: довговічний слід відкладених постановок (відновлення після перезапуску).
+            sp.GetService<Jobs.QuartzDelayedJobStore>()));
+        services.AddScoped<Jobs.QuartzDelayedJobStore>();
 
         // MI-02 (F1c): черга в базі. Порти реєструються завжди (fencing читає оренду
         // й у режимі Quartz — там вона null); виконавець і адаптер — лише за

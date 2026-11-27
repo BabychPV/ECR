@@ -38,7 +38,8 @@ public sealed partial class QuartzJobScheduler(
     Ecr.Domain.Abstractions.IClock? clock = null,
     ICorrelationIdAccessor? correlation = null,
     Microsoft.Extensions.Logging.ILogger<QuartzJobScheduler>? logger = null,
-    IServiceScopeFactory? scopes = null) : IBackgroundJobScheduler
+    IServiceScopeFactory? scopes = null,
+    QuartzDelayedJobStore? delayed = null) : IBackgroundJobScheduler
 {
     private const string UnavailableCode = "ECR-SYS-0503";
 
@@ -229,10 +230,11 @@ public sealed partial class QuartzJobScheduler(
 
         // ✎ D-577 (Q2): відкладена постановка (вікно злиття) — старт через <paramref name="delay"/> за годинником застосунку;
         // без годинника (ручна збірка в тестах) — одразу, як доти.
-        var trigger = delay > TimeSpan.Zero && clock is not null
+        var delayedStart = delay > TimeSpan.Zero && clock is not null ? clock.UtcNow + delay : (DateTime?)null;
+        var trigger = delayedStart is { } startAt
             ? TriggerBuilder.Create()
                 .WithIdentity($"{jobId}-trigger")
-                .StartAt(new DateTimeOffset(clock.UtcNow + delay, TimeSpan.Zero))
+                .StartAt(new DateTimeOffset(startAt, TimeSpan.Zero))
                 .Build()
             : TriggerBuilder.Create()
                 .WithIdentity($"{jobId}-trigger")
@@ -252,6 +254,13 @@ public sealed partial class QuartzJobScheduler(
                 .ConfigureAwait(false);
         }
 
+        // ✎ D-582: відкладена постановка лишає довговічний слід ДО триґера — черга Quartz у пам'яті, і процес, що зник у вікні
+        // злиття, інакше забирав би її з собою (QuartzDelayedJobRecovery ставить її знову на старті).
+        if (delayedStart is { } dueAt && delayed is not null)
+        {
+            await delayed.SaveAsync(jobId, jobCode, json, dueAt, createdByUserId, clock!.UtcNow, ct).ConfigureAwait(false);
+        }
+
         // ⚠ Слухач злиття — ДО постановки: він має побачити старт кожної разової задачі,
         // інакше злиття з нею під час виконання не знало б, що вона жива.
         CoalescedRequeueListener.Of(instance, logger);
@@ -266,6 +275,11 @@ public sealed partial class QuartzJobScheduler(
         catch
         {
             QuartzDocumentFifo.ForgetIfGeneration(instance.SchedulerName, jobId, generation);
+            if (delayedStart is not null && delayed is not null)
+            {
+                await delayed.DeleteAsync(jobId, CancellationToken.None).ConfigureAwait(false);
+            }
+
             throw;
         }
 
@@ -524,9 +538,11 @@ public sealed partial class QuartzJobScheduler(
         var months = typeof(TJob) == typeof(IRecalculationJob);
         var json = months ? JsonSerializer.Serialize(payload, PayloadOptions) : null;
         // ✎ Огляд M4/M5: і решта полів злиття (ланка джерел, звільнення погоджувача, «пропустити, якщо актуально») — як у базі.
-        if (months && QuartzPayloadMerges.MergeOpen(instance.SchedulerName, prefix, json!, QuartzRecalculationMerge.Merge) is { } open)
+        if (months && QuartzPayloadMerges.MergeOpen(
+                instance.SchedulerName, prefix, json!, QuartzRecalculationMerge.Merge, out var merged, out var revision) is { } open)
         {
             await StartNowIfDelayedAsync(instance, open, delay, ct).ConfigureAwait(false);
+            await PersistMergeAsync(open, merged, revision, delay, ct).ConfigureAwait(false);
             return open;
         }
 
@@ -555,6 +571,7 @@ public sealed partial class QuartzJobScheduler(
             else if ((await instance.GetTriggersOfJob(key, ct).ConfigureAwait(false)).Count > 0)
             {
                 await StartNowIfDelayedAsync(instance, key.Name, delay, ct).ConfigureAwait(false);
+                await PersistMergeAsync(key.Name, null, 0, delay, ct).ConfigureAwait(false);
                 return key.Name;
             }
         }
@@ -651,6 +668,22 @@ public sealed partial class QuartzJobScheduler(
     }
 
     /// <summary>
+    /// ✎ D-582: злиття в задачу, що чекає вікна, — у її довговічний слід: нове тіло (номер злиття не дає старішому затерти
+    /// новіше) і ранній старт для постановки без відкладення (як <see cref="StartNowIfDelayedAsync"/>). Задачі без сліду — без
+    /// походу до бази.
+    /// </summary>
+    private async Task PersistMergeAsync(string jobId, string? merged, long revision, TimeSpan delay, CancellationToken ct)
+    {
+        if (delayed is null || !QuartzDelayedJobStore.IsTracked(jobId))
+        {
+            return;
+        }
+
+        var startNowAt = delay <= TimeSpan.Zero && clock is not null ? clock.UtcNow : (DateTime?)null;
+        await delayed.UpdateAsync(jobId, merged, revision, startNowAt, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// ✎ Огляд L4 (D-577): постановка БЕЗ відкладення (хук джерела, збір, натискання), що злилася в задачу, яка ще чекає вікна
     /// відкладення, — та стартує одразу: злиття бере РАНІШИЙ старт, як черга в базі (<c>AvailableAt</c> — менший).
     /// </summary>
@@ -708,6 +741,11 @@ public sealed partial class QuartzJobScheduler(
             await instance.DeleteJob(key, ct).ConfigureAwait(false);
             QuartzDocumentFifo.Forget(instance.SchedulerName, key.Name);
             QuartzPayloadMerges.Forget(key.Name);
+            if (delayed is not null)
+            {
+                await delayed.DeleteAsync(key.Name, ct).ConfigureAwait(false);
+            }
+
             if (progress is not null && clock is not null)
             {
                 await progress.CancelActiveAsync(key.Name, clock.UtcNow, ct).ConfigureAwait(false);
@@ -1136,6 +1174,12 @@ public sealed partial class QuartzJobScheduler(
             {
                 QuartzPayloadMerges.Forget(jobId);
             }
+
+            // ✎ D-582: знята задача не відновлюється після перезапуску.
+            if (delayed is not null)
+            {
+                await delayed.DeleteAsync(jobId, ct).ConfigureAwait(false);
+            }
         }
 
         // ⛔ U3: стан пишеться ТУТ, а не лише адаптером. Адаптер ставить
@@ -1465,6 +1509,20 @@ internal static class QuartzPayloadMerges
     /// <param name="json">Тіло постановки.</param>
     /// <param name="merge">Злиття (тіло задачі, тіло постановки) → нове тіло.</param>
     public static string? MergeOpen(string scope, string prefix, string json, Func<string, string, string> merge)
+        => MergeOpen(scope, prefix, json, merge, out _, out _);
+
+    /// <summary>
+    /// ✎ D-582: <see cref="MergeOpen(string, string, string, Func{string, string, string})"/>, що повертає й злите тіло з
+    /// номером злиття (зростає під тим самим замком) — для довговічного сліду задачі, що чекає.
+    /// </summary>
+    /// <param name="scope">Ім'я планувальника.</param>
+    /// <param name="prefix">Префікс цілі.</param>
+    /// <param name="json">Тіло постановки.</param>
+    /// <param name="merge">Злиття.</param>
+    /// <param name="merged">Злите тіло; <c>null</c> — задачі немає.</param>
+    /// <param name="revision">Номер злиття.</param>
+    public static string? MergeOpen(
+        string scope, string prefix, string json, Func<string, string, string> merge, out string? merged, out long revision)
     {
         ArgumentNullException.ThrowIfNull(merge);
         var target = $"{scope}|{prefix}";
@@ -1476,14 +1534,21 @@ internal static class QuartzPayloadMerges
                 && !open.Taken)
             {
                 open.Payload = merge(open.Payload, json);
+                merged = open.Payload;
+                revision = ++mergeRevision;
                 return openId;
             }
 
+            merged = null;
+            revision = 0;
             return null;
         }
     }
 
-    /// <summary>✎ PERF-06b: реєструє тіло нової задачі цілі як відкрите для злиття (<see cref="MergeOpen"/>).</summary>
+    /// <summary>Лічильник злиттів (під <see cref="Gate"/>).</summary>
+    private static long mergeRevision;
+
+    /// <summary>✎ PERF-06b: реєструє тіло нової задачі цілі як відкрите для злиття (<see cref="MergeOpen(string, string, string, Func{string, string, string})"/>).</summary>
     /// <param name="scope">Ім'я планувальника.</param>
     /// <param name="prefix">Префікс цілі.</param>
     /// <param name="json">Тіло.</param>
