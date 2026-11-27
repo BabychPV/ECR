@@ -523,8 +523,10 @@ public sealed partial class QuartzJobScheduler(
         // спершу в задачу цілі, що чекає й зареєстрована (QuartzPayloadMerges, межа — взяття адаптером), як черга в базі.
         var months = typeof(TJob) == typeof(IRecalculationJob);
         var json = months ? JsonSerializer.Serialize(payload, PayloadOptions) : null;
-        if (months && QuartzPayloadMerges.MergeOpen(instance.SchedulerName, prefix, json!, QuartzSourceMonths.Merge) is { } open)
+        // ✎ Огляд M4/M5: і решта полів злиття (ланка джерел, звільнення погоджувача, «пропустити, якщо актуально») — як у базі.
+        if (months && QuartzPayloadMerges.MergeOpen(instance.SchedulerName, prefix, json!, QuartzRecalculationMerge.Merge) is { } open)
         {
+            await StartNowIfDelayedAsync(instance, open, delay, ct).ConfigureAwait(false);
             return open;
         }
 
@@ -552,6 +554,7 @@ public sealed partial class QuartzJobScheduler(
             }
             else if ((await instance.GetTriggersOfJob(key, ct).ConfigureAwait(false)).Count > 0)
             {
+                await StartNowIfDelayedAsync(instance, key.Name, delay, ct).ConfigureAwait(false);
                 return key.Name;
             }
         }
@@ -564,8 +567,9 @@ public sealed partial class QuartzJobScheduler(
         {
             var created = prefix + Guid.NewGuid().ToString("N");
 
-            // ✎ PERF-06b: тіло з місяцями — відкрите для злиття наступних постановок, поки адаптер його не взяв.
-            if (months && QuartzSourceMonths.Has(json))
+            // ✎ PERF-06b: тіло перерахунку — відкрите для злиття наступних постановок, поки адаптер його не взяв (огляд M4/M5:
+            // будь-яке, не лише з місяцями, — злиття полів ланки й звільнень, QuartzRecalculationMerge).
+            if (months)
             {
                 QuartzPayloadMerges.Open(instance.SchedulerName, prefix, json!, created);
             }
@@ -644,6 +648,75 @@ public sealed partial class QuartzJobScheduler(
         }
 
         return await CoalesceAsync<TJob>(instance, prefix, payload, createdByUserId, running, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ Огляд L4 (D-577): постановка БЕЗ відкладення (хук джерела, збір, натискання), що злилася в задачу, яка ще чекає вікна
+    /// відкладення, — та стартує одразу: злиття бере РАНІШИЙ старт, як черга в базі (<c>AvailableAt</c> — менший).
+    /// </summary>
+    private static async Task StartNowIfDelayedAsync(IScheduler instance, string jobId, TimeSpan delay, CancellationToken ct)
+    {
+        if (delay > TimeSpan.Zero)
+        {
+            return;
+        }
+
+        var now = SystemTime.UtcNow();
+        foreach (var trigger in await instance.GetTriggersOfJob(new JobKey(jobId), ct).ConfigureAwait(false))
+        {
+            if (trigger.GetNextFireTimeUtc() is { } next && next > now.AddSeconds(1)
+                && trigger.JobDataMap.Count == 0)
+            {
+                var earlier = TriggerBuilder.Create()
+                    .WithIdentity(trigger.Key)
+                    .ForJob(trigger.JobKey)
+                    .StartNow()
+                    .Build();
+                await instance.RescheduleJob(trigger.Key, earlier, ct).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ Огляд H2 (a): задача цілі, що ЧЕКАЄ в цьому планувальнику (є триґер, не виконується), знімається: деталь, індекс
+    /// порядку документа, тіло злиття, стан <c>Cancelled</c> у прогресі. Виконувану не чіпаємо. Між інстансами — лише своя
+    /// черга (як і злиття).
+    /// </remarks>
+    public async Task<bool> CancelQueuedAsync<TJob>(string targetKey, string? coveredByJobId, CancellationToken ct)
+        where TJob : IBackgroundJob
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
+
+        var instance = await Scheduler(typeof(TJob).Name).GetScheduler(ct).ConfigureAwait(false);
+        var prefix = TargetPrefixOf<TJob>(targetKey);
+        var executing = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var context in await instance.GetCurrentlyExecutingJobs(ct).ConfigureAwait(false))
+        {
+            executing.Add(context.JobDetail.Key.Name);
+        }
+
+        var cancelled = false;
+        foreach (var key in await instance.GetJobKeys(GroupMatcher<JobKey>.AnyGroup(), ct).ConfigureAwait(false))
+        {
+            if (!key.Name.StartsWith(prefix, StringComparison.Ordinal) || executing.Contains(key.Name)
+                || (await instance.GetTriggersOfJob(key, ct).ConfigureAwait(false)).Count == 0)
+            {
+                continue;
+            }
+
+            await instance.DeleteJob(key, ct).ConfigureAwait(false);
+            QuartzDocumentFifo.Forget(instance.SchedulerName, key.Name);
+            QuartzPayloadMerges.Forget(key.Name);
+            if (progress is not null && clock is not null)
+            {
+                await progress.CancelActiveAsync(key.Name, clock.UtcNow, ct).ConfigureAwait(false);
+            }
+
+            cancelled = true;
+        }
+
+        return cancelled;
     }
 
     /// <summary>
