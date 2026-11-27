@@ -1373,6 +1373,8 @@ export function DocumentPage(): JSX.Element {
           messages={shownValidation?.messages ?? null}
           checkedAt={validationCheckedAt(!yearDocument && fresh?.scope === scope ? fresh : null, lastValidation.data)}
           validatedSeq={validatedSeq}
+          // ✎ DOCUX (огляд UI 27.11): Issues називає проблеми розрахунку з рядка повідомлень і веде у Status.
+          calcIssues={issuePanels}
           extraTriggers={
             <Suspense fallback={null}>
               <TableChatButton documentId={documentId} />

@@ -56,6 +56,8 @@ import './inspector.css';
 import { provenanceFrom, provenanceLines } from './cellProvenance';
 import { NoticeList, useNoticeCount } from '../notices/NoticeLine';
 import { useStatusRequests } from '../notices/useOpenStatus';
+import type { MonthUnmatchedRows } from '../useUnmatchedRows';
+import { CalcProblemsLine } from './CalcProblemsLine';
 
 export type { InspectorSheet, SheetLogTarget } from './SheetLog';
 
@@ -145,6 +147,11 @@ export interface DocumentInspectorProps {
    * збереженого результату не віддає); `null` — невідомо.
    */
   readonly checkedAt?: Date | null | undefined;
+  /**
+   * ✎ DOCUX (огляд UI 27.11): місяці з проблемами розрахунку (ті самі, що в рядку повідомлень) — Issues називає їх
+   * («Calculation problems: N — see Status»), а не лише «Not validated yet». Не задано — рядка немає.
+   */
+  readonly calcIssues?: readonly MonthUnmatchedRows[] | undefined;
 }
 
 export function DocumentInspector({
@@ -159,6 +166,7 @@ export function DocumentInspector({
   sheet = null,
   onOpenCell,
   checkedAt = null,
+  calcIssues,
 }: DocumentInspectorProps): JSX.Element {
   const [panel, setPanel] = useUrlState(PanelParam);
   const noticeCount = useNoticeCount();
@@ -428,6 +436,7 @@ export function DocumentInspector({
             </Tabs.List>
 
             <Tabs.Panel value="issues" className="ecr-insp-body">
+              <CalcProblemsLine months={calcIssues} tables={tables} onOpen={() => setPanel('status')} />
               <AttentionSection
                 attention={attention}
                 tables={tables}

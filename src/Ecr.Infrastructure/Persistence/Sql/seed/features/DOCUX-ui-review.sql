@@ -48,7 +48,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'methodologies.mode.calendar.Fixed360', N'ru', N'год 360 дней'),
     (N'methodologies.mode.calendar.Fixed360', N'kz', N'360 күндік жыл'),
     (N'sources.goToSources', N'ru', N'Настроить источники'),
-    (N'sources.goToSources', N'kz', N'Дереккөздерді баптау')
+    (N'sources.goToSources', N'kz', N'Дереккөздерді баптау'),
+    (N'inspector.calcProblems', N'ru', N'Проблем расчёта: {count}'),
+    (N'inspector.calcProblems', N'kz', N'Есеп мәселелері: {count}'),
+    (N'inspector.calcProblemsOpen', N'ru', N'Открыть «Статус»'),
+    (N'inspector.calcProblemsOpen', N'kz', N'«Күйі» қойындысын ашу')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -80,7 +84,9 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'methodologies.mode.calendar.Actual', N'en', N'actual days', 1),
     (N'methodologies.mode.calendar.Fixed365', N'en', N'365-day year', 1),
     (N'methodologies.mode.calendar.Fixed360', N'en', N'360-day year', 1),
-    (N'sources.goToSources', N'en', N'Set up sources', 1)
+    (N'sources.goToSources', N'en', N'Set up sources', 1),
+    (N'inspector.calcProblems', N'en', N'Calculation problems: {count}', 1),
+    (N'inspector.calcProblemsOpen', N'en', N'See Status', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO
