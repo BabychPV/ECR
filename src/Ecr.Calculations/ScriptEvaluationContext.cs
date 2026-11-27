@@ -50,7 +50,15 @@ internal sealed class ScriptEvaluationContext : IHostFunctionContext, IBudgetedE
     private readonly Dictionary<(CompiledScript Script, string Alias), IReadOnlyList<AliasRow>> _aliasRows = [];
     private readonly Dictionary<(CompiledScript Script, string Alias), AliasRow> _currentAlias = [];
     private readonly Dictionary<string, string?> _varUnits = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _readFields = new(StringComparer.OrdinalIgnoreCase);
+    private int _describing;
     private int _callDepth;
+
+    /// <summary>
+    /// ✎ Борги 27.11 (п. 4): поля рядка, які скрипт справді прочитав за ЦЕЙ прогін рядка (гілки, що виконались; виклики
+    /// функцій і бібліотек) — без читань, які робить лише опис кроку для трасування (<see cref="Describe"/>).
+    /// </summary>
+    internal IReadOnlySet<string> ReadFields => _readFields;
 
     internal ScriptEvaluationContext(
         ScriptRuntime runtime,
@@ -322,6 +330,11 @@ internal sealed class ScriptEvaluationContext : IHostFunctionContext, IBudgetedE
 
     private ExpressionValue RowField(string name, bool key)
     {
+        if (_describing == 0)
+        {
+            _readFields.Add(name);
+        }
+
         var optional = _runtime.IsOptionalField(_frames[^1].Script, name);
         if (!_arguments.TryGetValue(name, out var argument))
         {
@@ -746,6 +759,19 @@ internal sealed class ScriptEvaluationContext : IHostFunctionContext, IBudgetedE
     /// Деталі кроку: імена, які читає вираз, з їхніми значеннями й одиницями (форма JSON та сама, що в формул).
     /// </summary>
     internal TraceDetail Describe(AstNode expression, string? unitCode)
+    {
+        _describing++;
+        try
+        {
+            return DescribeCore(expression, unitCode);
+        }
+        finally
+        {
+            _describing--;
+        }
+    }
+
+    private TraceDetail DescribeCore(AstNode expression, string? unitCode)
     {
         var inputs = new List<TraceInput>();
         var seen = new HashSet<(TraceInputKind, string)>();
