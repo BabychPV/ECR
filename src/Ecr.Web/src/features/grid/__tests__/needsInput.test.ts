@@ -93,13 +93,34 @@ describe('needsInputCells', () => {
     expect([...maps.blocked.keys()]).toEqual(['fixed:NAME', 'typed:NAME']);
     expect([...maps.warning.keys()]).toEqual(['fixed:QTY', 'typed:FUEL']);
     expect(maps.blocked.get('fixed:NAME')).toContain('grid.needsInput.hintTemplate');
-    expect(maps.warning.get('typed:FUEL')).toContain('grid.needsInput.hintMethodology');
-    expect(maps.warning.get('fixed:QTY')).toContain('grid.needsInput.hintMethodologyUnnamed');
+    // ✎ DOCUX 27.11: попередження не обіцяє «аркуш не подати» — подання воно не блокує.
+    expect(maps.warning.get('typed:FUEL')).toContain('grid.needsInput.hintMethodologyWarn');
+    expect(maps.warning.get('fixed:QTY')).toContain('grid.legend.requiredWarn');
     expect([...needsInputByColumn(cells)]).toEqual([
       ['NAME', 2],
       ['QTY', 1],
       ['FUEL', 1],
     ]);
     expect(needsInputHint(cells[0]!)).toContain('hintTemplate');
+  });
+
+  // ✎ DOCUX (живий прохід 27.11): «Type of fuel» — ключ правил методології; спорожнили — рядок мовчки випадав із розрахунку.
+  // Сервер (`GET …/required-inputs`) тепер віддає такий ключ рівнем `warn`: амбра, лічильник, F8 — без блоку подання.
+  it('попередження сервера (порожній ключ правил) — амбра в мапі попереджень, у лічильнику колонки, без «не подати»', () => {
+    const cells = needsInputCells(
+      sources({
+        columns: [{ code: 'NAME', isRequired: false }, ...Columns.slice(1)],
+        server: [
+          { rowKey: 'typed', columnCode: 'FUEL', level: 'warn', methodologies: ['ECW_C05_01'] },
+          { rowKey: 'fixed', columnCode: 'QTY', level: 'block', methodologies: ['ECW_C05_01'] },
+        ],
+      }),
+    );
+    expect(keys(cells)).toEqual(['fixed:QTY:block:methodology', 'typed:FUEL:warn:methodology']);
+    const maps = needsInputMaps(cells);
+    expect([...maps.warning.keys()]).toEqual(['typed:FUEL']);
+    expect(maps.warning.get('typed:FUEL')).toBe('⟦grid.needsInput.hintMethodologyWarn (methodologies=ECW_C05_01)⟧');
+    expect(maps.blocked.get('fixed:QTY')).toContain('grid.needsInput.hintMethodology (');
+    expect(needsInputByColumn(cells).get('FUEL')).toBe(1);
   });
 });
