@@ -296,13 +296,13 @@ public sealed class SheetChangesMonthRoutedTests(SqlServerFixture sql)
             });
         store.AttributeAsync(
                 Arg.Any<long>(), Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<DateTime>(),
-                Arg.Any<int>(), Arg.Any<CancellationToken>())
+                Arg.Any<int>(), Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
             .Returns(c =>
             {
                 calls?.Add("Attribute");
                 return real.AttributeAsync(
                     c.ArgAt<long>(0), c.ArgAt<IReadOnlyCollection<long>>(1), c.ArgAt<IReadOnlyCollection<int>>(2),
-                    c.ArgAt<DateTime>(3), c.ArgAt<int>(4), c.ArgAt<CancellationToken>(5));
+                    c.ArgAt<DateTime>(3), c.ArgAt<int>(4), c.ArgAt<IReadOnlyCollection<int>>(5), c.ArgAt<CancellationToken>(6));
             });
 
         var handler = new GetSheetChangesHandler(

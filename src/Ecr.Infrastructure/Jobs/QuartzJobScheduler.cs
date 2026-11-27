@@ -167,6 +167,7 @@ public sealed partial class QuartzJobScheduler(
     /// <param name="payload">Завдання.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <param name="createdByUserId">Хто поставив задачу; <c>null</c> — системна (Q-156).</param>
+    /// <param name="delay">✎ D-577: відкладений старт (вікно злиття); нуль — одразу.</param>
     /// <returns>Ідентифікатор задачі.</returns>
     /// <remarks>
     /// ⚠ Виділено тому, що постановок стало дві — звичайна і з витісненням
@@ -175,7 +176,8 @@ public sealed partial class QuartzJobScheduler(
     /// клієнт отримав би <c>404</c> на задачу, яку щойно прийняли.
     /// </remarks>
     private async Task<string> EnqueueCoreAsync<TJob>(
-        IScheduler instance, string jobId, object? payload, CancellationToken ct, int? createdByUserId = null)
+        IScheduler instance, string jobId, object? payload, CancellationToken ct, int? createdByUserId = null,
+        TimeSpan delay = default)
         where TJob : IBackgroundJob
     {
         var correlationId = NewCorrelationId();
@@ -225,10 +227,17 @@ public sealed partial class QuartzJobScheduler(
             .StoreDurably()
             .Build();
 
-        var trigger = TriggerBuilder.Create()
-            .WithIdentity($"{jobId}-trigger")
-            .StartNow()
-            .Build();
+        // ✎ D-577 (Q2): відкладена постановка (вікно злиття) — старт через <paramref name="delay"/> за годинником застосунку;
+        // без годинника (ручна збірка в тестах) — одразу, як доти.
+        var trigger = delay > TimeSpan.Zero && clock is not null
+            ? TriggerBuilder.Create()
+                .WithIdentity($"{jobId}-trigger")
+                .StartAt(new DateTimeOffset(clock.UtcNow + delay, TimeSpan.Zero))
+                .Build()
+            : TriggerBuilder.Create()
+                .WithIdentity($"{jobId}-trigger")
+                .StartNow()
+                .Build();
 
         // ⚠ Запис прогресу створюється ДО постановки, а не при старті задачі.
         // Клієнт отримує 202 з jobId і одразу починає опитувати стан; без
@@ -387,6 +396,30 @@ public sealed partial class QuartzJobScheduler(
             .ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ D-577 (Q2, live — Quartz): відкладення в пам'яті — задача стартує не раніше <paramref name="delay"/> після ПЕРШОЇ
+    /// постановки; наступні постановки на ту саму ціль, поки вона чекає, повертають її (злиття, <see cref="CoalesceAsync{TJob}"/>),
+    /// тож масова вставка чи імпорт дає одну задачу, а вікно не подовжується. Постановка під час виконання — одна
+    /// перепостановка після завершення (як без відкладення). Доти Quartz ставив одразу (типова реалізація порту).
+    /// </remarks>
+    public async Task<string> EnqueueCoalescedDelayedAsync<TJob>(
+        string targetKey, object? payload, TimeSpan delay, CancellationToken ct, int? createdByUserId = null)
+        where TJob : IBackgroundJob
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
+
+        if (JobPayloadMerge.ArrayPathOf(typeof(TJob).FullName) is not null || delay <= TimeSpan.Zero)
+        {
+            return await EnqueueCoalescedAsync<TJob>(targetKey, payload, ct, createdByUserId).ConfigureAwait(false);
+        }
+
+        var instance = await Scheduler(typeof(TJob).Name).GetScheduler(ct).ConfigureAwait(false);
+        return await CoalesceAsync<TJob>(
+                instance, TargetPrefixOf<TJob>(targetKey), payload, createdByUserId, finishedJobId: null, ct, delay)
+            .ConfigureAwait(false);
+    }
+
     /// <summary>Злиття з об'єднанням масиву payload (O1, <see cref="JobPayloadMerge"/>).</summary>
     /// <remarks>
     /// ⚠ Масив дописується в задачу, що ЧЕКАЄ (ще не взяла payload у
@@ -483,15 +516,17 @@ public sealed partial class QuartzJobScheduler(
     /// <summary>Злиття на ціль; <paramref name="finishedJobId"/> — задача, що щойно завершилась (не рахується).</summary>
     private async Task<string> CoalesceAsync<TJob>(
         IScheduler instance, string prefix, object? payload, int? createdByUserId, string? finishedJobId,
-        CancellationToken ct)
+        CancellationToken ct, TimeSpan delay = default)
         where TJob : IBackgroundJob
     {
         // ✎ PERF-06b (D-572, live Quartz): перерахунок документа зливає місяці правки джерела (sourceMonths) об'єднанням —
         // спершу в задачу цілі, що чекає й зареєстрована (QuartzPayloadMerges, межа — взяття адаптером), як черга в базі.
         var months = typeof(TJob) == typeof(IRecalculationJob);
         var json = months ? JsonSerializer.Serialize(payload, PayloadOptions) : null;
-        if (months && QuartzPayloadMerges.MergeOpen(instance.SchedulerName, prefix, json!, QuartzSourceMonths.Merge) is { } open)
+        // ✎ Огляд M4/M5: і решта полів злиття (ланка джерел, звільнення погоджувача, «пропустити, якщо актуально») — як у базі.
+        if (months && QuartzPayloadMerges.MergeOpen(instance.SchedulerName, prefix, json!, QuartzRecalculationMerge.Merge) is { } open)
         {
+            await StartNowIfDelayedAsync(instance, open, delay, ct).ConfigureAwait(false);
             return open;
         }
 
@@ -519,6 +554,7 @@ public sealed partial class QuartzJobScheduler(
             }
             else if ((await instance.GetTriggersOfJob(key, ct).ConfigureAwait(false)).Count > 0)
             {
+                await StartNowIfDelayedAsync(instance, key.Name, delay, ct).ConfigureAwait(false);
                 return key.Name;
             }
         }
@@ -531,15 +567,16 @@ public sealed partial class QuartzJobScheduler(
         {
             var created = prefix + Guid.NewGuid().ToString("N");
 
-            // ✎ PERF-06b: тіло з місяцями — відкрите для злиття наступних постановок, поки адаптер його не взяв.
-            if (months && QuartzSourceMonths.Has(json))
+            // ✎ PERF-06b: тіло перерахунку — відкрите для злиття наступних постановок, поки адаптер його не взяв (огляд M4/M5:
+            // будь-яке, не лише з місяцями, — злиття полів ланки й звільнень, QuartzRecalculationMerge).
+            if (months)
             {
                 QuartzPayloadMerges.Open(instance.SchedulerName, prefix, json!, created);
             }
 
             try
             {
-                return await EnqueueCoreAsync<TJob>(instance, created, payload, ct, createdByUserId).ConfigureAwait(false);
+                return await EnqueueCoreAsync<TJob>(instance, created, payload, ct, createdByUserId, delay).ConfigureAwait(false);
             }
             catch
             {
@@ -611,6 +648,75 @@ public sealed partial class QuartzJobScheduler(
         }
 
         return await CoalesceAsync<TJob>(instance, prefix, payload, createdByUserId, running, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ Огляд L4 (D-577): постановка БЕЗ відкладення (хук джерела, збір, натискання), що злилася в задачу, яка ще чекає вікна
+    /// відкладення, — та стартує одразу: злиття бере РАНІШИЙ старт, як черга в базі (<c>AvailableAt</c> — менший).
+    /// </summary>
+    private static async Task StartNowIfDelayedAsync(IScheduler instance, string jobId, TimeSpan delay, CancellationToken ct)
+    {
+        if (delay > TimeSpan.Zero)
+        {
+            return;
+        }
+
+        var now = SystemTime.UtcNow();
+        foreach (var trigger in await instance.GetTriggersOfJob(new JobKey(jobId), ct).ConfigureAwait(false))
+        {
+            if (trigger.GetNextFireTimeUtc() is { } next && next > now.AddSeconds(1)
+                && trigger.JobDataMap.Count == 0)
+            {
+                var earlier = TriggerBuilder.Create()
+                    .WithIdentity(trigger.Key)
+                    .ForJob(trigger.JobKey)
+                    .StartNow()
+                    .Build();
+                await instance.RescheduleJob(trigger.Key, earlier, ct).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ Огляд H2 (a): задача цілі, що ЧЕКАЄ в цьому планувальнику (є триґер, не виконується), знімається: деталь, індекс
+    /// порядку документа, тіло злиття, стан <c>Cancelled</c> у прогресі. Виконувану не чіпаємо. Між інстансами — лише своя
+    /// черга (як і злиття).
+    /// </remarks>
+    public async Task<bool> CancelQueuedAsync<TJob>(string targetKey, string? coveredByJobId, CancellationToken ct)
+        where TJob : IBackgroundJob
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
+
+        var instance = await Scheduler(typeof(TJob).Name).GetScheduler(ct).ConfigureAwait(false);
+        var prefix = TargetPrefixOf<TJob>(targetKey);
+        var executing = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var context in await instance.GetCurrentlyExecutingJobs(ct).ConfigureAwait(false))
+        {
+            executing.Add(context.JobDetail.Key.Name);
+        }
+
+        var cancelled = false;
+        foreach (var key in await instance.GetJobKeys(GroupMatcher<JobKey>.AnyGroup(), ct).ConfigureAwait(false))
+        {
+            if (!key.Name.StartsWith(prefix, StringComparison.Ordinal) || executing.Contains(key.Name)
+                || (await instance.GetTriggersOfJob(key, ct).ConfigureAwait(false)).Count == 0)
+            {
+                continue;
+            }
+
+            await instance.DeleteJob(key, ct).ConfigureAwait(false);
+            QuartzDocumentFifo.Forget(instance.SchedulerName, key.Name);
+            QuartzPayloadMerges.Forget(key.Name);
+            if (progress is not null && clock is not null)
+            {
+                await progress.CancelActiveAsync(key.Name, clock.UtcNow, ct).ConfigureAwait(false);
+            }
+
+            cancelled = true;
+        }
+
+        return cancelled;
     }
 
     /// <summary>

@@ -1927,10 +1927,18 @@ public sealed partial class PatchCellsHandler(
             .ConfigureAwait(false)).FirstOrDefault();
 
     /// <summary>Те саме для кількох методологій — пакетом (<see cref="MethodologyRequiredInputs.ResolveAsync"/>).</summary>
-    private Task<List<ApplicableMethodology>> ResolveApplicableAsync(
+    private async Task<List<ApplicableMethodology>> ResolveApplicableAsync(
         IReadOnlyList<int> methodologyIds, DateOnly onDate, int templateVersionId, int tableDefId, CancellationToken ct)
-        => new MethodologyRequiredInputs(methodologies, columnMapper, rowActivity)
-            .ResolveAsync(methodologyIds, onDate, templateVersionId, tableDefId, ct);
+    {
+        // ✎ Рішення координатора 27.11: вимоги лише до колонок цієї таблиці (знімок версії — з пам'яті, без звернення до бази).
+        var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+        var table = snapshot.Sheets.SelectMany(s => s.Tables).FirstOrDefault(t => t.Id == tableDefId);
+        return await new MethodologyRequiredInputs(methodologies, columnMapper, rowActivity)
+            .ResolveAsync(
+                methodologyIds, onDate, templateVersionId, tableDefId, ct,
+                tableColumns: table?.Columns.Select(c => c.Id).ToHashSet())
+            .ConfigureAwait(false);
+    }
 
     // ⚠ Колонки предиката (раніше тут `MatchJsonColumnIds`) беруться з `MethodologyRuleMatcher.ColumnIds` над уже
     // ЛОКАЛІЗОВАНИМ `MatchJson` (C1): зламаний предикат не має жодної потрібної колонки, а не валить обробник.

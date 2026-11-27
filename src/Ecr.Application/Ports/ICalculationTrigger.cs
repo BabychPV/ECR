@@ -67,6 +67,19 @@ public interface ICalculationTrigger
         => Task.FromResult<string?>(null);
 
     /// <summary>
+    /// ✎ M5 (D-442, рішення людини 26.11): те саме з аркушами, які правив погоджувач поточного кроку, — автоперерахунок не
+    /// ставить їм позначки «перераховано після подання».
+    /// </summary>
+    /// <param name="documentId">Документ правки.</param>
+    /// <param name="periodKey">Період правки.</param>
+    /// <param name="approverSheetDefIds">Аркуші правки погоджувача; <c>null</c> — звичайна правка.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ідентифікатор задачі; <c>null</c> — не поставлено.</returns>
+    public Task<string?> RequestAfterEditAsync(
+        long documentId, PeriodKey periodKey, IReadOnlyCollection<int>? approverSheetDefIds, CancellationToken ct)
+        => RequestAfterEditAsync(documentId, periodKey, ct);
+
+    /// <summary>
     /// ✎ PERF-06b (<c>D-572</c>): те саме, що <see cref="RequestAsync(long, PeriodKey, CancellationToken)"/>, для власного
     /// перерахунку РІЧНОГО/КВАРТАЛЬНОГО документа-джерела після правки — з місяцями правки, які прогін донесе до каскаду
     /// споживачів (злиття постановок — об'єднанням; постановка без місяців — увесь рік).

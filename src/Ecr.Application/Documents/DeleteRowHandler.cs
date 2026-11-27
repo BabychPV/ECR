@@ -496,6 +496,9 @@ public sealed class DeleteRowHandler(
         };
 
         // ✎ Q-17: дзеркала в решті екземплярів — м'яко видаляються тією ж транзакцією.
+        // ✎ Огляд M6: і насіння перерахунку — для КОЖНОГО періоду, де рядок зник (агрегати й формули тих місяців, автоперерахунок
+        // методологій після правки), а не лише для періоду запиту.
+        var mirrorSeeds = new List<RecalculationSeed>();
         foreach (var other in mirrorInstances.Where(i => i.TableInstanceId != instance.TableInstanceId))
         {
             var mirrorRow = await rowStore
@@ -504,6 +507,11 @@ public sealed class DeleteRowHandler(
             if (mirrorRow is not null
                 && await rowStore.SoftDeleteRowAsync(mirrorRow.Id, new PeriodKey(other.PeriodKey), ct).ConfigureAwait(false))
             {
+                mirrorSeeds.AddRange(columns.Select(c => new RecalculationSeed(mirrorRow.Id, c.Id)
+                {
+                    PeriodKey = other.PeriodKey,
+                    TableInstanceId = other.TableInstanceId,
+                }));
                 journal.Add(RowDeletedRecord(
                     now, instance.DocumentId, other.PeriodKey, other.TableInstanceId, instance.TableDefId, mirrorRow.Id, key.Value, profile.UserId));
             }
@@ -540,7 +548,7 @@ public sealed class DeleteRowHandler(
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        return [.. columns.Select(c => new RecalculationSeed(row.Id, c.Id))];
+        return [.. columns.Select(c => new RecalculationSeed(row.Id, c.Id)), .. mirrorSeeds];
     }
 
     /// <summary>Запис «рядок видалено» для журналу рядків; походження — правка людини.</summary>

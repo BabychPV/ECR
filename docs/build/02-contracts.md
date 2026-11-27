@@ -5143,6 +5143,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/documents/{id}/sheet-copies/{sheetCopyId}` | `Document.Create` + запис у проєкті (видаляє копію в усіх періодах і перенумеровує решту; оригінал — 409 `ECR-DOC-0409` `sheetCopyIsOriginal`; копія з поданням/затвердженням/зрізом у будь-якому періоді — 409 `sheetCopyHasWorkflow`; → 204) | 8 |
 | `GET` | `/api/v1/documents/{id}/sheets/{sheetDefId}/activity` | `Document.View` | 3 |
 | `GET` | `/api/v1/documents/{id}/sheets/{sheetDefId}/changes` | `Document.View` (живе оновлення сітки: `periodKey`, `since` — маркер попереднього опитування; → `SheetChangesDto { marker, changed, lastChangedByUserId, lastChangedBy, lastChangedAt, changedTables: [{ tableCode, tableInstanceId }] }`; власні записи викликача лише пересувають маркер; схована таблиця не потрапляє в `changedTables`; невидимий документ і схований аркуш — 404; `Cache-Control: no-store`) | 8 |
+| `GET` | `/api/v1/documents/{id}/calc-status` | `Document.View` (✎ D-577 L3: `periodKey`; → `DocumentCalcStatusDto { resultsStale, resultsStaleSince, staleMonths: [{ periodKey, since, recalculable, lockedReason }], activeJobs: [{ jobId, state, kind, percent, queuePosition, estimatedStartAt, stepDone, stepTotal, currentPeriodKey, own, startedByDisplayName }], calculatedAt, lastFailure }`; `resultsStale` — лише місяці, які перерахунок перерахує (Q3); невидимий документ — 404; `Cache-Control: no-store`) | 8 |
+| `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}/required-inputs` | `Document.View` (✎ D-577 L6 / D-578: порожні обов'язкові входи методологій у рядках з введеним значенням і наперед заданих; → `RequiredInputsDto { cells: [{ rowKey, columnCode, level: block або warn, methodologies, message, derived }], total, truncated }`; доступ як у зрізу; сховані колонки відсутні) | 8 |
 | `GET` | `/api/v1/documents/{id}/submission-target` | `Document.View` | 3 |
 | `GET` | `/api/v1/documents/{id}/versions` | `Document.View` | 3 |
 | `GET` | `/api/v1/documents/{id}/compare` | `Document.View` | 3 |
@@ -5233,6 +5235,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/categories/{code}` | `Calculation.EditConstant` | 7 |
 | `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}/categories/{code}` | `Calculation.EditConstant` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/required-inputs` | `Calculation.View` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/derived-inputs` | `Calculation.View` (✎ D-578: поля, які читає скрипт версії, — виведені обов'язкові входи; `status` available/notRecorded/notCompiled/notScript; виняток методолога з `required-inputs`) | 8 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/required-inputs/{columnDefId}` | `Calculation.ManageRequiredInputs` | 7 |
 | `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}/required-inputs/{columnDefId}` | `Calculation.ManageRequiredInputs` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/outputs` | `Calculation.View` | 7 |
@@ -6492,6 +6495,10 @@ public sealed record RowDto(
 #### `ITableDiscussionStore`
 
 Сховище чатів таблиць документа (TC; `doc.TableDiscussionMessage`, `doc.TableDiscussion`, `doc.TableDiscussionRead`, `doc.TableDiscussionMention`, міграція `TC01_TableDiscussion`). Порт не знає про права: рішення про доступ (документ видимий, таблиця читається межею читання, період у межах звуженої ролі) приймає обробник ДО звернення. Чат ключується `(DocumentId, TableDefCode)` — код таблиці стабільний між версіями шаблону. `SummaryAsync` — підсумок усіх таблиць документа ОДНІЄЮ командою (таблиці з повним доступом — зі зведень `doc.TableDiscussion` + корельовані лічильники «непрочитано» по індексу чату; таблиці, видимі лише в частині періодів, — з повідомлень дозволених періодів, `UNION ALL` у тій самій команді). `LockStateAsync` — зведення під `UPDLOCK, HOLDLOCK`: ревізія (ETag опитування) і лічильник оновлюються в ТІЙ САМІЙ транзакції, що й повідомлення. Видалення м'яке (`DeletedAt`), текст лишається в рядку й у журналі безпеки. Порт НЕ торкається комірок, розрахунків і станів аркушів. Видалення документа прибирає чат явно (`DocumentDeletionStore`).
+
+#### `IDocumentCalcStatusStore`
+
+✎ D-577 (L3): факти стану розрахунку документа для `GET …/calc-status` — застарілі місяці (той самий предикат, що картка, `StaleResultsByIdsQuery`, по місяцю), задачі перерахунку документа в черзі й у роботі (`IX_JobProgress_Document_Active`), кінець останнього актуального прогону, провал за добу (`IX_JobProgress_State_UpdatedAt`). Лише читання; які місяці можна перерахувати й видимість — у `GetDocumentCalcStatusHandler`/`DocumentStaleMonths`.
 
 #### `ISheetChangeStore`
 

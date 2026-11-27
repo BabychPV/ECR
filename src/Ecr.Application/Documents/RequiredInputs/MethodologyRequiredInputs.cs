@@ -21,6 +21,101 @@ public sealed class MethodologyRequiredInputs(
     IMethodologyStore methodologies, IColumnPathMapper? columnMapper, IRowActivityFilterSource? rowActivity)
 {
     /// <summary>
+    /// ✎ Огляд M1: пам'ять відповідей сховища на час ОДНОГО звернення (подання аркуша, «Перевірити»): таблиці, прив'язані до тих
+    /// самих методологій, не повторюють читань версій, правил, вимог, підписів і полів читання. <c>null</c> — без пам'яті (PATCH).
+    /// </summary>
+    public Dictionary<string, object>? Memo { get; init; }
+
+    private async Task<T> MemoAsync<T>(
+        string kind, IReadOnlyCollection<int> ids, Func<Task<T>> load, Func<T, HashSet<int>, T>? narrow = null)
+        where T : class
+    {
+        if (Memo is null)
+        {
+            return await load().ConfigureAwait(false);
+        }
+
+        // ✎ Огляд M1: відповідь, наперед прочитана на ВСІ методології аркуша (PrefetchAsync), — підмножиною, без звернення.
+        if (narrow is not null && Memo.TryGetValue(kind + ":*", out var wide) && wide is WideAnswer<T> all
+            && ids.All(all.Ids.Contains))
+        {
+            return narrow(all.Value, [.. ids]);
+        }
+
+        var key = kind + ":" + string.Join(',', ids.Order());
+        if (Memo.TryGetValue(key, out var known))
+        {
+            return (T)known;
+        }
+
+        var loaded = await load().ConfigureAwait(false);
+        Memo[key] = loaded;
+        return loaded;
+    }
+
+    private sealed record WideAnswer<T>(HashSet<int> Ids, T Value);
+
+    private static IReadOnlyList<MethodologyVersion> NarrowPublished(IReadOnlyList<MethodologyVersion> all, HashSet<int> ids)
+        => [.. all.Where(v => ids.Contains(v.MethodologyId))];
+
+    private static IReadOnlyList<MethodologyRule> NarrowRules(IReadOnlyList<MethodologyRule> all, HashSet<int> ids)
+        => [.. all.Where(r => ids.Contains(r.MethodologyVersionId))];
+
+    private static IReadOnlyList<MethodologyRequiredInput> NarrowInputs(IReadOnlyList<MethodologyRequiredInput> all, HashSet<int> ids)
+        => [.. all.Where(r => ids.Contains(r.MethodologyVersionId))];
+
+    private static IReadOnlyList<MethodologyReadFieldInfo> NarrowReads(IReadOnlyList<MethodologyReadFieldInfo> all, HashSet<int> ids)
+        => [.. all.Where(r => ids.Contains(r.MethodologyVersionId))];
+
+    private static IReadOnlyDictionary<int, MethodologyVersionLabel> NarrowLabels(
+        IReadOnlyDictionary<int, MethodologyVersionLabel> all, HashSet<int> ids)
+        => all.Where(p => ids.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value);
+
+    /// <summary>
+    /// ✎ Огляд M1 (D-577, L6): наперед — ОДНИМ зверненням на вид даних для ВСІХ методологій аркуша (версії, правила, вимоги, поля
+    /// читання, підписи), щоб подальші <see cref="ResolveAsync"/> кожної таблиці брали підмножину з пам'яті: подання аркуша з
+    /// N таблицями й різними методологіями робить ті самі ~5 звернень, що й з однією (доти — 5 на таблицю під замком аркуша).
+    /// </summary>
+    /// <param name="methodologyIds">Методології всіх таблиць.</param>
+    /// <param name="onDate">Дата вибору версії.</param>
+    /// <param name="ct">Токен скасування.</param>
+    internal async Task PrefetchAsync(IReadOnlyCollection<int> methodologyIds, DateOnly onDate, CancellationToken ct)
+    {
+        if (Memo is null || methodologyIds.Count == 0)
+        {
+            return;
+        }
+
+        var published = await methodologies.GetPublishedVersionsOfAsync(methodologyIds, ct).ConfigureAwait(false);
+        Memo["published:*"] = new WideAnswer<IReadOnlyList<MethodologyVersion>>([.. methodologyIds], published);
+
+        var lookup = published.ToLookup(v => v.MethodologyId);
+        List<int> versionIds = [.. methodologyIds.Select(id => Choose(lookup[id], onDate)).OfType<MethodologyVersion>().Select(v => v.Id).Distinct()];
+        if (versionIds.Count == 0)
+        {
+            return;
+        }
+
+        var rules = await methodologies.GetRulesOfVersionsAsync(versionIds, ct).ConfigureAwait(false);
+        Memo["rules:*"] = new WideAnswer<IReadOnlyList<MethodologyRule>>([.. versionIds], rules);
+        var inputs = await methodologies.GetRequiredInputsOfVersionsAsync(versionIds, ct).ConfigureAwait(false);
+        Memo["inputs:*"] = new WideAnswer<IReadOnlyList<MethodologyRequiredInput>>([.. versionIds], inputs);
+        var reads = await methodologies.GetReadFieldsOfVersionsAsync(versionIds, ct).ConfigureAwait(false);
+        Memo["reads:*"] = new WideAnswer<IReadOnlyList<MethodologyReadFieldInfo>>([.. versionIds], reads);
+        var labels = await methodologies.GetVersionLabelsAsync(versionIds, ct).ConfigureAwait(false);
+        Memo["labels:*"] = new WideAnswer<IReadOnlyDictionary<int, MethodologyVersionLabel>>([.. versionIds], labels);
+    }
+
+    /// <summary>Те саме правило вибору, що й <c>MethodologyResolver.ResolveVersionAsync</c>.</summary>
+    private static MethodologyVersion? Choose(IEnumerable<MethodologyVersion> published, DateOnly onDate)
+        => published
+            .Where(v => v.EffectiveFrom is not null && v.EffectiveFrom <= onDate)
+            .OrderByDescending(
+                v => new MethodologyVersionKey(v.EffectiveFrom, v.Version, v.Id),
+                MethodologyVersionKey.Currency)
+            .FirstOrDefault();
+
+    /// <summary>
     /// Колонки для зіставлення правил (<c>MatchJson</c>) і перевірки вимог,
     /// разом — щоб прочитати їх ОДНИМ пакетним запитом на всі рядки батчу.
     /// </summary>
@@ -136,7 +231,7 @@ public sealed class MethodologyRequiredInputs(
         ApplicableMethodology applied, IReadOnlyDictionary<string, string?> matchValues)
     {
         var requiredByKey = new Dictionary<string, LocalizedRequiredInput>(StringComparer.Ordinal);
-        foreach (var required in applied.RequiredInputs.Where(r => r.IsMapped))
+        foreach (var required in applied.RequiredInputs.Where(r => r.IsMapped && r.Severity != RequiredInputSeverity.Optional))
         {
             requiredByKey.TryAdd(
                 required.ColumnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture), required);
@@ -200,15 +295,19 @@ public sealed class MethodologyRequiredInputs(
     /// </remarks>
     internal async Task<List<ApplicableMethodology>> ResolveAsync(
         IReadOnlyList<int> methodologyIds, DateOnly onDate, int templateVersionId, int tableDefId, CancellationToken ct,
-        TableDef? derivedFor = null)
+        TableDef? derivedFor = null,
+        IReadOnlySet<int>? tableColumns = null)
     {
+        // ✎ Рішення координатора 27.11: вимога (заведена чи виведена), чия колонка — НЕ в цій таблиці (методологія прив'язана
+        // до кількох таблиць шаблону, у кожної своя колонка), для цієї таблиці пропускається, а не «порожня» в кожному рядку.
+        var ownColumns = tableColumns ?? derivedFor?.Columns.Select(c => c.Id).ToHashSet();
         var result = new List<ApplicableMethodology>();
         if (methodologyIds.Count == 0)
         {
             return result;
         }
 
-        var published = (await methodologies.GetPublishedVersionsOfAsync(methodologyIds, ct).ConfigureAwait(false))
+        var published = (await MemoAsync("published", methodologyIds, () => methodologies.GetPublishedVersionsOfAsync(methodologyIds, ct), NarrowPublished).ConfigureAwait(false))
             .ToLookup(v => v.MethodologyId);
 
         var chosen = new List<(int MethodologyId, MethodologyVersion Version)>();
@@ -217,12 +316,7 @@ public sealed class MethodologyRequiredInputs(
             // ⚠ Те саме правило вибору, що й `MethodologyResolver.ResolveVersionAsync`
             // (пізніша `EffectiveFrom` → старша версія → більший Id) — той самий
             // компаратор домену, не друга копія.
-            var version = published[methodologyId]
-                .Where(v => v.EffectiveFrom is not null && v.EffectiveFrom <= onDate)
-                .OrderByDescending(
-                    v => new MethodologyVersionKey(v.EffectiveFrom, v.Version, v.Id),
-                    MethodologyVersionKey.Currency)
-                .FirstOrDefault();
+            var version = Choose(published[methodologyId], onDate);
 
             if (version is not null)
             {
@@ -236,7 +330,7 @@ public sealed class MethodologyRequiredInputs(
         }
 
         var versionIds = chosen.Select(c => c.Version.Id).Distinct().ToList();
-        var rulesByVersion = (await methodologies.GetRulesOfVersionsAsync(versionIds, ct).ConfigureAwait(false))
+        var rulesByVersion = (await MemoAsync("rules", versionIds, () => methodologies.GetRulesOfVersionsAsync(versionIds, ct), NarrowRules).ConfigureAwait(false))
             .ToLookup(r => r.MethodologyVersionId);
 
         // Версія без активних правил не перевіряє нічого — вимоги для неї не питаються (як і поштучно).
@@ -253,7 +347,7 @@ public sealed class MethodologyRequiredInputs(
             return result;
         }
 
-        var inputsByVersion = (await methodologies.GetRequiredInputsOfVersionsAsync(withRules, ct).ConfigureAwait(false))
+        var inputsByVersion = (await MemoAsync("inputs", withRules, () => methodologies.GetRequiredInputsOfVersionsAsync(withRules, ct), NarrowInputs).ConfigureAwait(false))
             .ToLookup(r => r.MethodologyVersionId);
 
         // ✎ D-578 (рішення людини 26.11): вимоги, ВИВЕДЕНІ з полів, які читає скрипт версії (лише коли викликач передав
@@ -270,7 +364,7 @@ public sealed class MethodologyRequiredInputs(
 
         // Код методології — для тексту вимоги; раніше `FindByVersionAsync` (агрегат з усіма версіями, 2 звернення
         // на методологію, ще й у відстеженні контексту запису), тепер підпис версії одним зверненням.
-        var labels = await methodologies.GetVersionLabelsAsync([.. gated], ct).ConfigureAwait(false);
+        var labels = await MemoAsync("labels", gated, () => methodologies.GetVersionLabelsAsync([.. gated], ct), NarrowLabels).ConfigureAwait(false);
 
         // ⛔ C1: переклад Id колонок на версію шаблону документа — ОДНИМ зверненням на всі версії: переклад кожного Id
         // не залежить від сусідів у наборі (шлях аркуш/таблиця/колонка), тож підмножина спільної відповіді — рівно те,
@@ -313,13 +407,23 @@ public sealed class MethodologyRequiredInputs(
             var statusColumns = activity?.ColumnsOf(tableDefId) ?? [];
 
             // ✎ D-578: виведені — лише колонки, яких немає в переліку методолога (його Block/Warn/Optional — виняток, Q3).
-            var declared = localized.RequiredInputs.Where(i => i.IsMapped).Select(i => i.ColumnDefId).ToHashSet();
+            var ownInputs = localized.RequiredInputs
+                .Where(i => !i.IsMapped || ownColumns is null || ownColumns.Contains(i.ColumnDefId))
+                .ToList();
+            var declared = ownInputs.Where(i => i.IsMapped).Select(i => i.ColumnDefId).ToHashSet();
             IReadOnlyList<LocalizedRequiredInput> requiredInputs =
             [
-                .. localized.RequiredInputs,
+                .. ownInputs,
                 .. (derived.GetValueOrDefault(version.Id) ?? [])
                     .Where(c => !declared.Contains(c))
-                    .Select(c => new LocalizedRequiredInput(c, c, true, RequiredInputSeverity.Block, null, Derived: true)),
+                    // ✎ Огляд H3: версія-скрипт БЕЗ правил відбору (MatchesEveryRow) — кожен рядок таблиці «в межах», а поле, яке
+                    // скрипт читає лише в гілці (`if gas: row.GasFactor`), не потрібне рядкам, де гілка не виконується. Пер-рядкового
+                    // обліку прочитаних полів немає (трасування вимкнене, D-565), а поле запису читання гілки не знає — тож для таких
+                    // версій виведена вимога лише ПОПЕРЕДЖАЄ; Block — коли застосовність рядка задають правила.
+                    .Select(c => new LocalizedRequiredInput(
+                        c, c, true,
+                        scriptWithoutRules.Contains(version.Id) ? RequiredInputSeverity.Warn : RequiredInputSeverity.Block,
+                        null, Derived: true)),
             ];
 
             result.Add(new ApplicableMethodology(
@@ -351,11 +455,17 @@ public sealed class MethodologyRequiredInputs(
             return result;
         }
 
+        // ✎ Огляд H3: лише ПОЛЯ ВВОДУ — обчислені (Calculated приходить накладенням результатів, не з комірок), формульні,
+        // «лише для читання» й колонки з формулою шаблону не вимагаються: людина їх не заповнює, і рядок блокувався б назавжди.
+        var formulaColumns = table.Formulas
+            .Where(f => !f.IsDeleted && f.ColumnDefId is not null)
+            .Select(f => f.ColumnDefId!.Value)
+            .ToHashSet();
         var byCode = table.Columns
-            .Where(c => !c.IsDeleted)
+            .Where(c => !c.IsDeleted && !c.IsComputed && !c.IsReadOnly && !formulaColumns.Contains(c.Id))
             .GroupBy(c => c.Code, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
-        foreach (var version in (await methodologies.GetReadFieldsOfVersionsAsync(versionIds, ct).ConfigureAwait(false))
+        foreach (var version in (await MemoAsync("reads", versionIds, () => methodologies.GetReadFieldsOfVersionsAsync(versionIds, ct), NarrowReads).ConfigureAwait(false))
                      .GroupBy(f => f.MethodologyVersionId))
         {
             if (version.Any(f => f.FieldCode == MethodologyReadField.AllFields))

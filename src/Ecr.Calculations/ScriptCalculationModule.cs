@@ -289,7 +289,11 @@ public sealed class ScriptCalculationModule(
             input.TableInstanceId > 0 ? input.TableInstanceId : (long?)null)
         {
             // Рядок без жодного значення — назвати обов'язкові поля, яких бракує (інакше тихий нуль).
-            MissingArguments = values.Count == 0 && script.Outputs.Count > 0
+            // ✎ D-578 (Q2, рішення людини 26.11: «бракує даних — не 0»): і рядок, що дав ЧАСТИНУ виходів, — коли хоч одного
+            // виходу немає, а поле, яке читає скрипт, порожнє, — рядок теж отримує названу проблему MissingInputs.
+            // ⚠ Огляд M3: у скрипті вихід не зв'язаний статично з полями (поля — на весь скрипт, `RowFields`), тож названо всі
+            // порожні обов'язкові поля скрипта, а не лише полів відсутнього виходу (у формул — лише їх, GenericCalculationModule).
+            MissingArguments = script.Outputs.Count > 0 && AnyOutputAbsent(script.Outputs.Select(o => o.Code), values)
                 ? MissingArgumentsOf(runtime.Program, arguments)
                 : null,
             StepError = trace.FirstFailure is { } failure
@@ -428,6 +432,13 @@ public sealed class ScriptCalculationModule(
 
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<MethodologyConstant>> EmptyConstants =
         new Dictionary<string, IReadOnlyList<MethodologyConstant>>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>✎ D-578 (Q2): хоч один оголошений вихід рядок не дав (усі — і нуль значень — теж «відсутні»).</summary>
+    internal static bool AnyOutputAbsent(IEnumerable<string> outputCodes, IReadOnlyCollection<CalculationOutputValue> values)
+    {
+        var produced = values.Select(v => v.OutputCode).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return outputCodes.Any(code => !produced.Contains(code));
+    }
 
     private static List<string>? MissingArgumentsOf(LoadedProgram program, Dictionary<string, CalculationArgument> arguments)
     {

@@ -5984,6 +5984,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "DocumentId", "State" }, "IX_JobProgress_Document_Active"), new[] { "Lane" });
 
+                    b.HasIndex(new[] { "DocumentId", "State", "UpdatedAt" }, "IX_JobProgress_Document_State_UpdatedAt")
+                        .HasFilter("[DocumentId] IS NOT NULL");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "DocumentId", "State", "UpdatedAt" }, "IX_JobProgress_Document_State_UpdatedAt"), new[] { "JobCode" });
+
                     b.HasIndex(new[] { "FanOutParentJobId" }, "IX_JobProgress_FanOutParent");
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "FanOutParentJobId" }, "IX_JobProgress_FanOutParent"), new[] { "State" });

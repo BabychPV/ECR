@@ -991,6 +991,31 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> GetMethodologyIdsBoundPerTableAsync(
+        IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tableDefIds);
+        var ids = tableDefIds.Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return new Dictionary<int, IReadOnlyList<int>>();
+        }
+
+        var rows = await db.CalculationBindings
+                .AsNoTracking()
+                .Where(b => b.IsActive && ids.Contains(b.TableDefId))
+                .Select(b => new { b.TableDefId, b.MethodologyId })
+                .Distinct()
+                .OrderBy(b => b.TableDefId).ThenBy(b => b.MethodologyId)
+                .Take(MaxChildren * 10)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+        var byTable = rows.ToLookup(r => r.TableDefId, r => r.MethodologyId);
+        return ids.ToDictionary(id => id, id => (IReadOnlyList<int>)[.. byTable[id]]);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<MethodologyReadFieldInfo>> GetReadFieldsOfVersionsAsync(
         IReadOnlyCollection<int> methodologyVersionIds, CancellationToken ct)
     {

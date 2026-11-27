@@ -118,7 +118,8 @@ public sealed class GetSheetChangesHandler(
         var attribution = await store
             .AttributeAsync(
                 documentId, [.. probe.Rows.Select(r => r.TableRowId).Distinct()], hidden,
-                issued - AttributionSlack, currentUser.UserId!.Value, ct)
+                issued - AttributionSlack, currentUser.UserId!.Value,
+                [.. probe.Rows.Select(r => r.PeriodKey ?? periodKey).Append(periodKey).Distinct()], ct)
             .ConfigureAwait(false);
 
         // ✎ B43: рядок перегляду, лише «захоплений» правкою колонки з чужим власником, — авторство рядка власника.

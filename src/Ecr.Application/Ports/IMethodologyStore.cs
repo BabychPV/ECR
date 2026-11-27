@@ -310,6 +310,23 @@ public interface IMethodologyStore
     public Task<IReadOnlyList<int>> GetMethodologyIdsBoundToTableAsync(
         int tableDefId, CancellationToken ct);
 
+    /// <summary>✎ Огляд M1: методології, активно прив'язані до КОЖНОЇ з таблиць, — одним зверненням (подання аркуша).</summary>
+    /// <param name="tableDefIds">Таблиці.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>Типова реалізація (тестові заглушки) — по таблиці, через <see cref="GetMethodologyIdsBoundToTableAsync"/>.</remarks>
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> GetMethodologyIdsBoundPerTableAsync(
+        IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tableDefIds);
+        var result = new Dictionary<int, IReadOnlyList<int>>();
+        foreach (var tableDefId in tableDefIds.Distinct())
+        {
+            result[tableDefId] = await GetMethodologyIdsBoundToTableAsync(tableDefId, ct).ConfigureAwait(false);
+        }
+
+        return result;
+    }
+
     /// <summary>
     /// ✎ D-578: поля власної таблиці, які читає скрипт версій (<c>calc.MethodologyReadField</c>, D-568), — одним зверненням.
     /// Службові рядки (<c>""</c> — «перелік записано», <c>*</c> — «читає будь-що») — як є.

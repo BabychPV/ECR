@@ -4,6 +4,7 @@ using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.ValueObjects;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace Ecr.Application.Documents.CalcStatus;
 
@@ -35,8 +36,17 @@ public sealed class GetDocumentCalcStatusHandler(
     IClock clock,
     IJobQueuePosition? queuePosition = null,
     ITemplateLayoutRegistry? layouts = null,
-    IProjectVersionTimeline? timeline = null)
+    IProjectVersionTimeline? timeline = null,
+    // ✎ D-577 (огляд M7): короткий кеш застарілості, актуального прогону й провалу на документ і період; без нього — щоразу.
+    IMemoryCache? cache = null)
 {
+    /// <summary>
+    /// ✎ Огляд M7: скільки живе кеш частини «застарілість + провал». Ключ несе склад живих задач документа (JobId і стан) і
+    /// кінець актуального прогону (вузький запит щоразу): старт, завершення чи провал задачі й новий прогін — новий ключ, тож
+    /// чип не відстає від них; правка без задачі видна щонайпізніше через це вікно.
+    /// </summary>
+    public static readonly TimeSpan CacheLifetime = TimeSpan.FromSeconds(4);
+
     /// <summary>Право — як у перерахунку свого документа.</summary>
     public const string Permission = RecalculateDocumentHandler.Permission;
 
@@ -65,16 +75,16 @@ public sealed class GetDocumentCalcStatusHandler(
 
         var year = await YearOfAsync(projectId, key, ct).ConfigureAwait(false);
 
-        IReadOnlyList<CalcStaleMonthDto> months = hidden
-            ? []
-            : await staleMonths.ClassifyAsync(documentId, projectId, key.Value, year, ct).ConfigureAwait(false);
+        var me = currentUser.UserId;
+        var jobs = (await store.ActiveAsync(documentId, ct).ConfigureAwait(false))
+            .OrderBy(j => j.State == "Running" ? 0 : 1)
+            .ThenBy(j => j.QueuedAt)
+            .ToList();
+        var (months, calculatedAt, failure) = await FactsAsync(documentId, projectId, key, year, hidden, jobs, ct).ConfigureAwait(false);
         var recalculable = months.Where(m => m.Recalculable).ToList();
 
-        var me = currentUser.UserId;
         var active = new List<CalcActiveJobDto>();
-        foreach (var job in (await store.ActiveAsync(documentId, ct).ConfigureAwait(false))
-                     .OrderBy(j => j.State == "Running" ? 0 : 1)
-                     .ThenBy(j => j.QueuedAt))
+        foreach (var job in jobs)
         {
             var position = job.State == "Queued" && queuePosition is not null
                 ? await queuePosition.GetAsync(job.JobId, ct).ConfigureAwait(false)
@@ -85,16 +95,6 @@ public sealed class GetDocumentCalcStatusHandler(
                 Utc(job.QueuedAt), Utc(job.StartedAt), Own: me is not null && job.CreatedByUserId == me,
                 StartedByDisplayName: hidden ? null : job.CreatedByDisplayName));
         }
-
-        int[] runPeriods = year is { } y
-            ? [.. Enumerable.Range(1, 12).Select(m => (y * 100) + m)]
-            : [key.Value];
-        var calculatedAt = Utc(await store.CalculatedAtAsync(documentId, projectId, runPeriods, ct).ConfigureAwait(false));
-
-        var floor = clock.UtcNow - FailureWindow;
-        var failure = await store
-            .LastFailureAsync(documentId, calculatedAt is { } at && at > floor ? at : floor, ct)
-            .ConfigureAwait(false);
 
         return new DocumentCalcStatusDto(
             documentId,
@@ -112,6 +112,47 @@ public sealed class GetDocumentCalcStatusHandler(
                     failure.JobId, Utc(failure.FailedAt)!.Value, failure.ErrorCode, failure.CorrelationId,
                     CalcJobKinds.Of(failure.TargetKey ?? failure.JobId, failure.CreatedByUserId),
                     Own: me is not null && failure.CreatedByUserId == me));
+    }
+
+    /// <summary>
+    /// Застарілі місяці (порожньо для звуженого читача), актуальний прогін і останній провал — з короткого кешу (огляд M7),
+    /// ключ якого несе склад живих задач документа.
+    /// </summary>
+    private async Task<(IReadOnlyList<CalcStaleMonthDto> Months, DateTime? CalculatedAt, RecalculationFailureFact? Failure)> FactsAsync(
+        long documentId, int projectId, PeriodKey key, int? year, bool hidden, IReadOnlyList<ActiveRecalculationFact> jobs, CancellationToken ct)
+    {
+        int[] runPeriods = year is { } y
+            ? [.. Enumerable.Range(1, 12).Select(m => (y * 100) + m)]
+            : [key.Value];
+        var calculatedAt = Utc(await store.CalculatedAtAsync(documentId, projectId, runPeriods, ct).ConfigureAwait(false));
+
+        var cacheKey = cache is null
+            ? null
+            : string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"calc-status:{documentId}:{key.Value}:{hidden}:{calculatedAt?.Ticks}:{string.Join(',', jobs.Select(j => j.JobId + "/" + j.State))}");
+        if (cacheKey is not null
+            && cache!.TryGetValue(cacheKey, out (IReadOnlyList<CalcStaleMonthDto>, DateTime?, RecalculationFailureFact?) known))
+        {
+            return known;
+        }
+
+        IReadOnlyList<CalcStaleMonthDto> months = hidden
+            ? []
+            : await staleMonths.ClassifyAsync(documentId, projectId, key.Value, year, ct).ConfigureAwait(false);
+
+        var floor = clock.UtcNow - FailureWindow;
+        var failure = await store
+            .LastFailureAsync(documentId, calculatedAt is { } at && at > floor ? at : floor, ct)
+            .ConfigureAwait(false);
+
+        var facts = (months, calculatedAt, failure);
+        if (cacheKey is not null)
+        {
+            cache!.Set(cacheKey, facts, CacheLifetime);
+        }
+
+        return facts;
     }
 
     /// <summary>

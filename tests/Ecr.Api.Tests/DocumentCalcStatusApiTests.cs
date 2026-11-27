@@ -124,7 +124,7 @@ public sealed class DocumentCalcStatusApiTests(SqlServerFixture sql)
                 var failed = new JobProgress(failedId, JobListKinds.RecalculationJobCode, now.AddMinutes(-5), createdByUserId: null);
                 failed.Queue(now.AddMinutes(-5), "corr-failed", s.Document.DocumentId);
                 failed.Begin(now.AddMinutes(-4));
-                failed.Finish("Failed", "boom", now.AddMinutes(-3), "ECR-CALC-0512");
+                failed.Finish("Failed", "boom", now.AddMinutes(-3), "ECR-SYS-0500");
                 db.JobProgresses.Add(failed);
 
                 var queued = new JobProgress(queuedId, JobListKinds.RecalculationJobCode, now, s.UserId);
@@ -143,7 +143,7 @@ public sealed class DocumentCalcStatusApiTests(SqlServerFixture sql)
 
             var failure = busy.GetProperty("lastFailure");
             Assert.Equal(failedId, failure.GetProperty("jobId").GetString());
-            Assert.Equal("ECR-CALC-0512", failure.GetProperty("errorCode").GetString());
+            Assert.Equal("ECR-SYS-0500", failure.GetProperty("errorCode").GetString());
             Assert.Equal("corr-failed", failure.GetProperty("correlationId").GetString());
             Assert.Equal("auto", failure.GetProperty("kind").GetString());
             Assert.False(failure.GetProperty("own").GetBoolean());
@@ -157,6 +157,54 @@ public sealed class DocumentCalcStatusApiTests(SqlServerFixture sql)
         {
             await using var db = s.Builder.CreateContext();
             await db.JobProgresses.Where(p => p.JobId == queuedId || p.JobId == failedId).ExecuteDeleteAsync().ConfigureAwait(true);
+        }
+    }
+
+    /// <summary>
+    /// ✎ D-577 (огляд «тестові прогалини»): читач, якому в проєкті документа сховано колонку, застарілості не отримує
+    /// (<c>resultsStale = null</c>, причина <c>PartiallyHidden</c>), а ім'я автора задачі — теж; стан задачі лишається.
+    /// </summary>
+    /// <remarks>Мутація (локально): у <c>GetDocumentCalcStatusHandler</c> <c>hidden</c> → <c>false</c> — червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-577")]
+    public async Task L3_звужений_читач_без_застарілості_й_без_імені_автора()
+    {
+        var s = await ArrangeAsync(yearLayout: false).ConfigureAwait(true);
+        var period = s.Document.PeriodKey.Value;
+        var queuedId = $"IRecalculationJob~doc{Num(s.Document.DocumentId)}-p{Num(period)}~{Guid.NewGuid():N}";
+        try
+        {
+            await using (var db = s.Builder.CreateContext())
+            {
+                var version = await VersionAsync(db).ConfigureAwait(true);
+                await MonthRunAsync(db, s.Document, version, period, RunAt).ConfigureAwait(true);
+                await EditAsync(db, s.Document, period, RunAt.AddHours(1)).ConfigureAwait(true);
+
+                var role = await db.RoleAssignments.Where(a => a.UserId == s.UserId).Select(a => a.RoleId).FirstAsync().ConfigureAwait(true);
+                db.ResourceGrants.Add(new ResourceGrant(role, ResourceKind.Column, s.Document.ColumnDefIds[0], GrantLevel.Read, isDeny: true));
+                var queued = new JobProgress(queuedId, JobListKinds.RecalculationJobCode, DateTime.UtcNow, s.UserId);
+                queued.Queue(DateTime.UtcNow, "corr-hidden", s.Document.DocumentId);
+                db.JobProgresses.Add(queued);
+                await db.SaveChangesAsync().ConfigureAwait(true);
+            }
+
+            using var app = new EcrApiFactory(sql);
+            using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+            var status = await StatusAsync(client, s.Document.DocumentId, period).ConfigureAwait(true);
+            Assert.Equal(JsonValueKind.Null, status.GetProperty("resultsStale").ValueKind);
+            Assert.Equal("PartiallyHidden", status.GetProperty("resultsStaleUndetermined").GetString());
+            Assert.Empty(status.GetProperty("staleMonths").EnumerateArray());
+            var job = Assert.Single(status.GetProperty("activeJobs").EnumerateArray());
+            Assert.Equal("Queued", job.GetProperty("state").GetString());
+            Assert.Equal(JsonValueKind.Null, job.GetProperty("startedByDisplayName").ValueKind);
+        }
+        finally
+        {
+            await using var db = s.Builder.CreateContext();
+            await db.JobProgresses.Where(p => p.JobId == queuedId).ExecuteDeleteAsync().ConfigureAwait(true);
+            await ReleaseAsync(s).ConfigureAwait(true);
         }
     }
 

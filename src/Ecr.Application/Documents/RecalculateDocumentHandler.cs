@@ -400,6 +400,23 @@ public sealed class RecalculateDocumentHandler(
                 .EnqueueCoalescedAsync<IRecalculationJob>(target, payload, ct, currentUser.UserId)
                 .ConfigureAwait(false);
 
+        // ✎ Огляд H2 (a, D-577): натискання на ВЕСЬ документ покриває тихий автоперерахунок після правки (`-auto`), що ще
+        // чекає вікна відкладення: без цього за прогоном натискання йшов би другий такий самий. Знімається лише задача, що
+        // ЧЕКАЄ (виконувану не чіпаємо), і лише після постановки натискання — у жодну мить цілі без задачі немає.
+        if (sheetDefId is null && jobId is { Length: > 0 })
+        {
+            int[] covered = year is { } coveredYear
+                ? [.. Enumerable.Range(1, 12).Select(m => (coveredYear * 100) + m)]
+                : [periodKey.Value];
+            foreach (var key in covered)
+            {
+                await jobs
+                    .CancelQueuedAsync<IRecalculationJob>(
+                        Calculations.CalculationTrigger.AutoTargetOf(documentId, new PeriodKey(key)), jobId, ct)
+                    .ConfigureAwait(false);
+            }
+        }
+
         return new Calculations.RecalculationRequestOutcome(jobId, skipped, truncated);
     }
 

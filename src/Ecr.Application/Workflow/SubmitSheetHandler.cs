@@ -100,6 +100,12 @@ public sealed class SubmitSheetHandler(
     // (тестові фабрики) — перевірки немає, як доти.
     Documents.RequiredInputs.RequiredInputsScanner? requiredInputs = null)
 {
+    /// <summary>
+    /// ✎ Огляд H4: стеля повідомлень у тілі відмови подання (як перелік при відкритті, <c>GetRequiredInputsHandler.MaxCells</c>):
+    /// не будувати мегабайтних переліків під винятковим замком аркуша.
+    /// </summary>
+    public const int MaxRequiredInputMessages = 5000;
+
     /// <summary>✎ C-5: дефолти колонок версії для незаповнених комірок (02b §6.3), як у «Перевірити».</summary>
     private readonly Recalculation.ColumnDefaultValues columnDefaults = new(metadata, registries);
 
@@ -679,31 +685,42 @@ public sealed class SubmitSheetHandler(
         // наперед заданих (Q4), а не лише по рядках, які правили (ворота PATCH). Блокує рівень Block — заведений методологом
         // і ВИВЕДЕНИЙ з полів, які читає скрипт (D-578; виняток методолога Optional/Warn знімає);
         // попередження входів — у «Перевірити» й переліку при відкритті, не діалог підтвердження подання. Без прив'язаних
-        // методологій — одне звернення на аркуш (пакетний пошук прив'язок), зрізи не читаються.
-        if (requiredInputs is not null && tables.Count > 0
-            && (await methodologies.GetMethodologyIdsBoundToTablesAsync([.. tables.Keys], ct).ConfigureAwait(false)).Count > 0)
+        // методологій (той самий пакетний пошук прив'язок, що для свіжості вище) — жодного нового звернення.
+        // ✎ Огляд M1/H4: план — ОДИН на аркуш (прив'язки одним зверненням, читання методологій спільні), зрізи таблиць поза
+        // перевіркою вище — одним пакетом; повідомлень у тілі 422 — не більше MaxRequiredInputMessages (решта — лічильником).
+        var requiredInputsTotal = 0;
+        var requiredInputsListed = 0;
+        if (requiredInputs is not null && boundMethodologyIds.Count > 0)
         {
-            foreach (var instance in instances.Where(i => tables.ContainsKey(i.TableDefId)))
+            var sheetInstances = instances.Where(i => tables.ContainsKey(i.TableDefId)).ToList();
+            var plans = await requiredInputs
+                .PlanManyAsync(documentId, key.Value, templateVersionId, [.. sheetInstances.Select(i => tables[i.TableDefId]).Distinct()], ct)
+                .ConfigureAwait(false);
+            var planned = sheetInstances.Where(i => plans.ContainsKey(i.TableDefId)).ToList();
+            var unread = planned.Select(i => i.TableInstanceId).Where(id => !cellsByInstance.ContainsKey(id)).ToList();
+            IReadOnlyDictionary<long, IReadOnlyList<CellRecord>> extraCells = unread.Count == 0
+                ? new Dictionary<long, IReadOnlyList<CellRecord>>()
+                : await cellStore.ReadSlicesAsync(unread, key, ct).ConfigureAwait(false);
+            IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>> extraRows = unread.Count == 0
+                ? new Dictionary<long, IReadOnlyDictionary<string, long>>()
+                : await rowStore.GetRowIdsBatchAsync(unread, key, ct).ConfigureAwait(false);
+
+            foreach (var instance in planned)
             {
                 var table = tables[instance.TableDefId];
-                var plan = await requiredInputs
-                    .PlanAsync(documentId, key.Value, templateVersionId, table, ct)
-                    .ConfigureAwait(false);
-                if (plan is null)
-                {
-                    continue;
-                }
-
-                var rowIds = rowIdsByInstance.TryGetValue(instance.TableInstanceId, out var known)
+                var id = instance.TableInstanceId;
+                var rowIds = rowIdsByInstance.TryGetValue(id, out var known)
                     ? known
-                    : await rowStore.GetRowIdsAsync(instance.TableInstanceId, key, ct).ConfigureAwait(false);
-                var cells = cellsByInstance.TryGetValue(instance.TableInstanceId, out var read)
-                    ? read
-                    : await cellStore.ReadSliceAsync(instance.TableInstanceId, key, ct).ConfigureAwait(false);
+                    : extraRows.GetValueOrDefault(id) ?? new Dictionary<string, long>(StringComparer.Ordinal);
+                var cells = cellsByInstance.TryGetValue(id, out var read) ? read : extraCells.GetValueOrDefault(id) ?? [];
                 rowIdsByTable.TryAdd(table.Id, rowIds);
-                blocking.AddRange(Documents.RequiredInputs.RequiredInputsScanner
-                    .Scan(plan, table, snapshot.ColumnsById, cells, rowIds, currentUser.Language)
-                    .Where(m => m.Severity == ValidationSeverity.Error));
+                var listed = Documents.RequiredInputs.RequiredInputsScanner.Scan(
+                    plans[table.Id], table, snapshot.ColumnsById, cells, rowIds, currentUser.Language,
+                    Math.Max(0, MaxRequiredInputMessages - requiredInputsListed),
+                    m => m.Severity == ValidationSeverity.Error, out var total);
+                blocking.AddRange(listed);
+                requiredInputsListed += listed.Count;
+                requiredInputsTotal += total;
             }
         }
 
@@ -734,11 +751,18 @@ public sealed class SubmitSheetHandler(
                 ["messageKey"] = onlyHidden
                     ? Validation.HiddenValidationIssues.MessageKey
                     : "err.ECR-SUB-4221.validationBlocked",
-                ["messages"] = MessageDetails(shown),
+                ["messages"] = MessageDetails(shown.Take(MaxRequiredInputMessages)),
             };
             if (!onlyHidden)
             {
-                details["messageCount"] = shown.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                // ✎ Огляд H4: лічильник — усіх (і тих, що не потрапили в перелік через стелю); `truncated` — перелік обрізано.
+                var hiddenByCap = requiredInputsTotal - requiredInputsListed;
+                var count = shown.Count + hiddenByCap;
+                details["messageCount"] = count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (count > Math.Min(shown.Count, MaxRequiredInputMessages))
+                {
+                    details["truncated"] = "true";
+                }
             }
 
             throw new BusinessRuleException(

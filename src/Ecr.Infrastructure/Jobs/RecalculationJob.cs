@@ -221,6 +221,16 @@ public sealed partial class RecalculationJob(
                 .FirstOrDefaultAsync(ct)
                 .ConfigureAwait(false);
 
+        // ✎ D-577 (огляд H2 (b)): автоперерахунок після правки (`SkipIfFresh`) нічого не рахує, якщо актуальний прогін документа
+        // за період уже новіший за останню зміну входів — людина встигла натиснути «Перерахувати» або його покрив інший прогін.
+        // Без актуального прогону (ще не рахувалось) — рахує.
+        if (request.SkipIfFresh && request.PeriodKey is { } freshPeriod
+            && await FreshAsync(projectId, request.DocumentId, freshPeriod, ct).ConfigureAwait(false))
+        {
+            await progress.ReportAsync(100, null, ct).ConfigureAwait(false);
+            return;
+        }
+
         // ✎ PSS-15 (D-562): роки нічного розкладу визначаються в момент виконання (тригер ставиться на старті і живе через
         // Новий рік) і в дочірні задачі йдуть уже числом. Розклад проєкту (є планувальник) вибирає їх сам — поточний і
         // попередній у пільговому строку (NightlyYears); тут — лише шлях без розкладу: поточний рік.
@@ -2217,6 +2227,14 @@ public sealed partial class RecalculationJob(
                     continue;
                 }
 
+                // ✎ M5 (D-442, рішення людини): поданий аркуш, який правив погоджувач поточного кроку, — автоперерахунок
+                // після його правки позначки «перераховано після подання» не ставить (це його власна правка).
+                if (!approvedRow && request.ApproverSheets is { Length: > 0 } approverSheets
+                    && approverSheets.Contains(row.SheetDefId))
+                {
+                    continue;
+                }
+
                 // ✎ B79: поданий аркуш, у якому прогін не змінив жодного числа, — без запису й без позначки.
                 if (!approvedRow && !changes.Contains(documentId, row.PeriodKey, row.SheetDefId, row.SheetCopyId))
                 {
@@ -4025,6 +4043,26 @@ public sealed partial class RecalculationJob(
     private static partial void LogPurgeAfterLockFailed(ILogger logger, int runs, Exception exception);
 
     /// <summary>
+    /// ✎ D-577 (огляд H2 (b)): є актуальний прогін документа за період (власний чи проєктний) і після нього входи не мінялись
+    /// (той самий предикат застарілості, що картка, <see cref="StaleResultsByIdsQuery"/>).
+    /// </summary>
+    private async Task<bool> FreshAsync(int projectId, long documentId, int periodKey, CancellationToken ct)
+    {
+        int? key = periodKey;
+        var hasCurrent = await db.CalculationRuns
+            .AsNoTracking()
+            .AnyAsync(r => r.ProjectId == projectId && r.PeriodKey == key && r.Status == Domain.Entities.Calculations.CalculationRun.CurrentStatus
+                           && (r.DocumentId == documentId || r.DocumentId == null), ct)
+            .ConfigureAwait(false);
+        if (!hasCurrent)
+        {
+            return false;
+        }
+
+        return !await StaleResultsByIdsQuery.Documents(db, periodKey, [documentId]).AnyAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// ✎ PSS-04: прогрес кроку ланцюжка — його 0…100 у частці всього ланцюжка: крок <c>Done + 1</c> із
     /// <see cref="Total"/>, тож шкала рядка задачі не стрибає назад на кожному кроці.
     /// </summary>
@@ -4230,6 +4268,13 @@ public sealed partial class RecalculationJob(
 /// <c>-dependents-approved</c> — надмножина роботи), але пізніші місяці, що читають їхні обчислені числа, — так: задача
 /// названого періоду будить лише ранніших читачів. Злиття — об'єднанням.
 /// </param>
+/// <param name="SkipIfFresh">
+/// ✎ D-577 (огляд H2 (b)): автоперерахунок після правки — нічого не рахувати, якщо актуальний прогін документа за період
+/// новіший за останню зміну входів.
+/// </param>
+/// <param name="ApproverSheets">
+/// ✎ M5 (D-442): аркуші правки погоджувача поточного кроку — без позначки «перераховано після подання».
+/// </param>
 /// <param name="SourceMonths">
 /// ✎ PERF-06b (<c>D-572</c>): власний перерахунок (<c>-auto</c>) РІЧНОГО/КВАРТАЛЬНОГО документа-джерела після правки — місяці
 /// правки (усі змінені колонки місячні). Успіх прогону передає їх хуку джерела, ЯКЩО методології й формули джерела не
@@ -4265,7 +4310,9 @@ public sealed record RecalculationRequest(
     int[]? CascadePeriods = null,
     int[]? CascadeAppend = null,
     int[]? CascadeSeeds = null,
-    int[]? SourceMonths = null)
+    int[]? SourceMonths = null,
+    bool SkipIfFresh = false,
+    int[]? ApproverSheets = null)
 {
     /// <summary>
     /// ✎ B59: нижня межа ключа періоду скоупу (включно); без року — <see cref="int.MinValue"/>.

@@ -163,6 +163,10 @@ public sealed class SubmitBlockedMessageOrderTests(SqlServerFixture sql)
 
         var store = Substitute.For<IMethodologyStore>();
         store.GetMethodologyIdsBoundToTableAsync(tableDefId, Arg.Any<CancellationToken>()).Returns(new List<int> { MethodologyId });
+        // ✎ Огляд M1: подання планує вимоги на аркуш — прив'язки всіх таблиць одним зверненням.
+        store.GetMethodologyIdsBoundPerTableAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+             .Returns(call => (IReadOnlyDictionary<int, IReadOnlyList<int>>)call.Arg<IReadOnlyCollection<int>>()
+                 .ToDictionary(id => id, id => (IReadOnlyList<int>)(id == tableDefId ? [MethodologyId] : [])));
         store.GetMethodologyIdsBoundToTablesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
              .Returns(new List<int> { MethodologyId });
         store.GetPublishedVersionsOfAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
@@ -303,7 +307,10 @@ public sealed class SubmitBlockedMessageOrderTests(SqlServerFixture sql)
         methodologies.GetMethodologyIdsBoundToTableAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
                      .Returns(new List<int>());
         methodologies.GetMethodologyIdsBoundToTablesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
-                     .Returns(new List<int>());
+                     .Returns(requiredInputs is null ? new List<int>() : new List<int> { 4_577 });
+        methodologies.GetCalculationFreshnessAsync(
+                         Arg.Any<long>(), Arg.Any<int>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
+                     .Returns(new CalculationFreshness(null, null));
 
         var metadata = Metadata(doc);
 

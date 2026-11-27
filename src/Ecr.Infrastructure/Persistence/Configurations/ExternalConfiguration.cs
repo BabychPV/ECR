@@ -573,6 +573,13 @@ public sealed class JobProgressConfiguration : IEntityTypeConfiguration<JobProgr
         builder.HasIndex(x => new { x.Lane, x.State, x.CreatedByUserId }, "IX_JobProgress_User_Active")
                .IncludeProperties(x => new { x.AvailableAt, x.FanOutParentJobId, x.EnqueueSeq })
                .HasFilter("[Lane] IS NOT NULL AND [State] IN ('Queued', 'Running')");
+
+        // ✎ D-577 (огляд M7): чип «Стан розрахунку» — останній провал перерахунку документа після його актуального прогону
+        // (`DocumentCalcStatusStore.LastFailureAsync`: DocumentId + State = Failed + UpdatedAt > …, найновіший) — пошуком, а
+        // не сканом історії черги (30 днів). Будує міграція `D577CalcStatusFailureIndex` сирим SQL (ONLINE, де він є).
+        builder.HasIndex(x => new { x.DocumentId, x.State, x.UpdatedAt }, "IX_JobProgress_Document_State_UpdatedAt")
+               .IncludeProperties(x => x.JobCode)
+               .HasFilter("[DocumentId] IS NOT NULL");
     }
 }
 

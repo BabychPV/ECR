@@ -243,6 +243,9 @@ public static class QuartzDocumentFifo
         }
 
         var name = scheduler.SchedulerName;
+
+        // ✎ Огляд M4 (D-577): задачі у вікні відкладення (перший триґер ще в майбутньому) — пропущені, а не голова, що тримає.
+        var debouncing = new HashSet<string>(StringComparer.Ordinal);
         while (true)
         {
             string? head = null;
@@ -259,7 +262,7 @@ public static class QuartzDocumentFifo
                             break;
                         }
 
-                        if (!string.Equals(jobId, detail.Key.Name, StringComparison.Ordinal))
+                        if (!string.Equals(jobId, detail.Key.Name, StringComparison.Ordinal) && !debouncing.Contains(jobId))
                         {
                             head = jobId;
                             if (ByJob.TryGetValue((name, jobId), out var entry))
@@ -285,8 +288,20 @@ public static class QuartzDocumentFifo
             }
 
             var key = new JobKey(head);
-            if ((await scheduler.GetTriggersOfJob(key, ct).ConfigureAwait(false)).Count > 0
-                || (await scheduler.GetCurrentlyExecutingJobs(ct).ConfigureAwait(false)).Any(c => c.JobDetail.Key.Equals(key)))
+            var triggers = await scheduler.GetTriggersOfJob(key, ct).ConfigureAwait(false);
+            var running = (await scheduler.GetCurrentlyExecutingJobs(ct).ConfigureAwait(false)).Any(c => c.JobDetail.Key.Equals(key));
+
+            // ✎ Огляд M4 (D-577): раніша задача, що ще чекає вікна ВІДКЛАДЕННЯ (автоперерахунок після правки, залежні — 15–20 с;
+            // єдиний триґер постановки, без даних повтору, спрацює в майбутньому), не тримає пізніші: доти пізніша негайна
+            // задача документа (власний перерахунок джерела, натискання системи) стояла б усе вікно. Її місце в черзі — момент
+            // спрацювання, як у базі (`ORDER BY AvailableAt`). Повтор і відкладення за локом (триґер з даними) — тримають, як доти.
+            if (!running && triggers.Count > 0 && triggers.All(t => IsDebounceWindow(t)))
+            {
+                debouncing.Add(head);
+                continue;
+            }
+
+            if (triggers.Count > 0 || running)
             {
                 return head;
             }
@@ -300,6 +315,12 @@ public static class QuartzDocumentFifo
             ForgetIfGeneration(name, head, generation);
         }
     }
+    /// <summary>Триґер постановки з відкладенням (без даних повтору), що спрацює пізніше ніж за секунду.</summary>
+    internal static bool IsDebounceWindow(ITrigger trigger)
+        => trigger.JobDataMap is { Count: 0 }
+           && trigger.GetNextFireTimeUtc() is { } next
+           && next > SystemTime.UtcNow().AddSeconds(1);
+
     private static bool TryRead(JobDataMap map, out long documentId, out long sequence)
     {
         documentId = 0;

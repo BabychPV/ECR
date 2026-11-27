@@ -59,6 +59,10 @@ public sealed partial class DenyLeakGuardTests
         ["src/Ecr.Application/Validation/ValidationMessage.cs"] = "визначення запису",
         ["src/Ecr.Application/Validation/ValidationEngine.cs"] = "виробник: правила таблиці",
         ["src/Ecr.Application/Validation/TableValidation.cs"] = "виробник: структура й обов'язковість",
+        ["src/Ecr.Application/Documents/RequiredInputs/MethodologyRequiredInputs.cs"] =
+            "виробник: обов'язкові входи методологій (D-577, винесено з PatchCellsHandler); назовні — через PATCH (фільтр там), перелік/подання/«Перевірити» нижче",
+        ["src/Ecr.Application/Documents/RequiredInputs/RequiredInputsScanner.cs"] =
+            "виробник: вимоги по всіх рядках зрізу; GetRequiredInputsHandler відсіює сховані колонки (CanReadAt), подання — HiddenValidationIssues.ForViewer, «Перевірити» — фільтр читання результату",
         ["src/Ecr.Application/Validation/RequiredHeaderCheck.cs"] = "виробник: порожні обов'язкові поля шапки (D-PS); лише коди, без значень",
         ["src/Ecr.Application/Validation/RelationCheckRunner.cs"] = "виробник: зв'язки Check (джерело — правило 1)",
         ["src/Ecr.Application/Validation/PermitCoverageIssues.cs"] =
@@ -168,8 +172,6 @@ public sealed partial class DenyLeakGuardTests
             (1, "ехо вводу (колонки немає у версії)"),
         ["src/Ecr.Application/Documents/PatchCellsHandler.cs | деталь columnCode | columnCode"] =
             (1, "колонки з запиту немає у версії (ехо вводу)"),
-        ["src/Ecr.Application/Documents/PatchCellsHandler.cs | деталь column | column?.HeaderL10n?.Get(language ?? \"en\") ?? columnCode"] =
-            (1, "✎ 25.11: назва колонки в підстановці ECR-CALC-0437 — ValidationMessage з ColumnCode, фільтр visible (і cells відмови .Where(visible))"),
         ["src/Ecr.Application/Documents/PatchCellsHandler.cs | текст | codeById[a.ColumnDefId]"] =
             (1, "ключі «рядок:колонка» лише комірок, які батч щойно записав з дозволом"),
         ["src/Ecr.Application/Documents/PatchCellsHandler.cs | текст | cell.ColumnCode"] =
