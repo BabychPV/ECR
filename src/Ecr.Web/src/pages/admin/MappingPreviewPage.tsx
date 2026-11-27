@@ -1,3 +1,4 @@
+import { noSourcesYet, SourcesSetupLink } from '@/features/integration/SourcesSetupLink';
 import { useMemo, useState, type JSX } from 'react';
 import { Alert, Button, Select, Text } from '@mantine/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -61,7 +62,9 @@ export function MappingPreviewPage(): JSX.Element {
     <>
       <PageHeader
         title={t('mapping.title')}
+        // ✎ DOCUX (огляд UI 27.11): джерел немає — вибору сутності немає (порожній стан нижче веде до Sources).
         actions={
+          noSourcesYet(sources.data) ? undefined : (
           <FilterRow>
             <Select
               size="xs"
@@ -84,6 +87,7 @@ export function MappingPreviewPage(): JSX.Element {
               </Button>
             )}
           </FilterRow>
+          )
         }
       />
 
@@ -114,12 +118,13 @@ export function MappingPreviewPage(): JSX.Element {
         isEmpty={(all) => all.length === 0}
         emptyTitle={t('sources.empty')}
         emptyHint={t('sources.emptyHint')}
+        emptyAction={<SourcesSetupLink />}
         onRetry={() => void sources.refetch()}
       >
         {() => null}
       </AsyncBoundary>
 
-      {entityId === null ? (
+      {noSourcesYet(sources.data) ? null : entityId === null ? (
         <Text c="dimmed">{t('mapping.pickHint')}</Text>
       ) : (
         <AsyncBoundary<MappingPreview>

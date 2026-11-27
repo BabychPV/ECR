@@ -46,7 +46,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'methodologies.mode.calendar.Fixed365', N'ru', N'год 365 дней'),
     (N'methodologies.mode.calendar.Fixed365', N'kz', N'365 күндік жыл'),
     (N'methodologies.mode.calendar.Fixed360', N'ru', N'год 360 дней'),
-    (N'methodologies.mode.calendar.Fixed360', N'kz', N'360 күндік жыл')
+    (N'methodologies.mode.calendar.Fixed360', N'kz', N'360 күндік жыл'),
+    (N'sources.goToSources', N'ru', N'Настроить источники'),
+    (N'sources.goToSources', N'kz', N'Дереккөздерді баптау')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -77,7 +79,8 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'methodologies.mode.trace.FullHint', N'en', N'Full trace: every step of the calculation is recorded (slower; for detailed checks).', 1),
     (N'methodologies.mode.calendar.Actual', N'en', N'actual days', 1),
     (N'methodologies.mode.calendar.Fixed365', N'en', N'365-day year', 1),
-    (N'methodologies.mode.calendar.Fixed360', N'en', N'360-day year', 1)
+    (N'methodologies.mode.calendar.Fixed360', N'en', N'360-day year', 1),
+    (N'sources.goToSources', N'en', N'Set up sources', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

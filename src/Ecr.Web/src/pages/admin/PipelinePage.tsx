@@ -1,3 +1,4 @@
+import { noSourcesYet, SourcesSetupLink } from '@/features/integration/SourcesSetupLink';
 import { Suspense, lazy, useEffect, type JSX } from 'react';
 import { Select, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
@@ -58,7 +59,9 @@ export function PipelinePage(): JSX.Element {
     <>
       <PageHeader
         title={t('pipeline.title')}
+        // ✎ DOCUX (огляд UI 27.11): джерел немає — вибору сутності немає (порожній стан нижче веде до Sources).
         actions={
+          noSourcesYet(sources.data) ? undefined : (
           <Select
             size="xs"
             miw={260}
@@ -71,6 +74,7 @@ export function PipelinePage(): JSX.Element {
               label: source.displayName ?? source.code,
             }))}
           />
+          )
         }
       />
 
@@ -83,12 +87,13 @@ export function PipelinePage(): JSX.Element {
         isEmpty={(all) => all.length === 0}
         emptyTitle={t('sources.empty')}
         emptyHint={t('sources.emptyHint')}
+        emptyAction={<SourcesSetupLink />}
         onRetry={() => void sources.refetch()}
       >
         {() => null}
       </AsyncBoundary>
 
-      {entity === undefined ? (
+      {noSourcesYet(sources.data) ? null : entity === undefined ? (
         <Text c="dimmed">{t('pipeline.pickHint')}</Text>
       ) : (
         <Suspense fallback={null}>
