@@ -620,7 +620,7 @@ function DataTableView<Row>({
                   приглушений другий рядок мав 4.34:1 (живий прогін batch-2-a, дефект 5). */}
               <Table striped highlightOnHover highlightOnHoverColor="var(--ecr-hover)" className="ecr-sticky-head">
                 {caption !== undefined && (
-                  <Table.Caption className={captionHidden === true ? 'mantine-visually-hidden' : undefined}>{caption}</Table.Caption>
+                  <Table.Caption {...(captionHidden === true ? { className: 'mantine-visually-hidden' } : {})}>{caption}</Table.Caption>
                 )}
 
                 <Table.Thead>
