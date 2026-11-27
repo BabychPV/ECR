@@ -8,6 +8,7 @@ import { PeriodsPage } from '@/pages/admin/PeriodsPage';
 import { queryKeys } from '@/api/queryKeys';
 import { siteMomentText } from '@/shared/siteMoment';
 import { testTheme } from '@/test/render';
+import { openPeriodDetails } from './periodDetailsOpen';
 
 /**
  * Приймальна i4: «Projects → Periods tab: January shows "Locked · 1 document reopened until …" with the document name
@@ -89,6 +90,7 @@ function mockFetch(items: unknown[], canClose = true): void {
 }
 
 function show(client = new QueryClient({ defaultOptions: { queries: { retry: false } } })): QueryClient {
+  openPeriodDetails();
   render(
     <MantineProvider theme={testTheme}>
       <MemoryRouter initialEntries={['/projects/7/periods']}>

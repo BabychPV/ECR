@@ -20,7 +20,7 @@ export function readNoteCollapsed(key: string): boolean | null {
   }
 }
 
-function writeNoteCollapsed(key: string, collapsed: boolean): void {
+export function writeNoteCollapsed(key: string, collapsed: boolean): void {
   try {
     window.localStorage.setItem(key, collapsed ? '1' : '0');
   } catch {

@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PeriodsPage } from '@/pages/admin/PeriodsPage';
 import { testTheme } from '@/test/render';
+import { openPeriodDetails } from './periodDetailsOpen';
 
 /**
  * Аудит-пас 5: `Badge` стану періоду (`periods.state`) обтинався еліпсисом,
@@ -96,6 +97,7 @@ function mockFetch(): void {
 }
 
 function show(): void {
+  openPeriodDetails();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
