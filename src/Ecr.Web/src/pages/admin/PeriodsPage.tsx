@@ -1,9 +1,9 @@
-import { Suspense, lazy, useState, type JSX } from 'react';
-import { Badge, Button, Group, Modal, ScrollArea, Stack, Table, Text, Textarea, VisuallyHidden } from '@mantine/core';
+import { Suspense, lazy, useId, useState, type JSX } from 'react';
+import { Badge, Box, Button, Group, Modal, ScrollArea, Stack, Table, Text, Textarea, UnstyledButton, VisuallyHidden } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { PeriodCalendarDto, ReopenPeriodRequest } from '@/api/types';
-import { CollapsibleNote } from '@/features/common/CollapsibleNote';
+import { CollapsibleNote, noteStorageKey, readNoteCollapsed, writeNoteCollapsed } from '@/features/common/CollapsibleNote';
 import { hasProjectGrant } from '@/features/documents/projectGrant';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -171,6 +171,17 @@ export function PeriodsPage({ projectId }: { readonly projectId: number }): JSX.
   const [tileKey, setTileKey] = useState<number | null>(null);
   const queryClient = useQueryClient();
   const session = useSession();
+
+  // ✎ Periods dedup (людина 27.11): таблиця місяців — у згорнутому «Details» (за замовчуванням закрито), вибір
+  // пам'ятається на людину тим самим ключем `ecr.note.*`, що й згортання пояснень (`CollapsibleNote`).
+  const detailsKey = noteStorageKey('periods-details', session.data?.userId);
+  const [detailsChosen, setDetailsChosen] = useState<{ key: string; open: boolean } | null>(null);
+  const detailsOpen = detailsChosen?.key === detailsKey ? detailsChosen.open : readNoteCollapsed(detailsKey) === false;
+  const detailsBodyId = useId();
+  const toggleDetails = (): void => {
+    writeNoteCollapsed(detailsKey, detailsOpen);
+    setDetailsChosen({ key: detailsKey, open: !detailsOpen });
+  };
 
   // Який період відкриваємо; `null` — діалог закритий.
   const [reopening, setReopening] = useState<number | null>(null);
@@ -353,7 +364,12 @@ export function PeriodsPage({ projectId }: { readonly projectId: number }): JSX.
             selectedKey={tileKey}
             onPick={(key) => {
               setTileKey(key);
-              document.querySelector(`[data-period-row="${String(key)}"]`)?.scrollIntoView?.({ block: 'nearest' });
+              // Рядок таблиці — у «Details»: плитка розгортає його (без запису вибору — це не вибір людини) і веде до рядка.
+              setDetailsChosen({ key: detailsKey, open: true });
+              window.setTimeout(
+                () => document.querySelector(`[data-period-row="${String(key)}"]`)?.scrollIntoView?.({ block: 'nearest' }),
+                0,
+              );
             }}
           />
         </Suspense>
@@ -371,6 +387,23 @@ export function PeriodsPage({ projectId }: { readonly projectId: number }): JSX.
             стан (Open / Late (flagged) / Locked) і ОДНА дата «Locks on»; ключ і порядковий номер — у підказці.
             Колонки «Range» (початок — жорстке закриття, що читалось як «місяць триває до 15-го наступного») і
             «Grace until» прибрано: пізні правки позначаються як і раніше (`D-70`), їх видно станом рядка. */}
+        <Box className="ecr-note" data-note="periods-details" data-collapsed={detailsOpen ? 'false' : 'true'} mb="xs">
+          <UnstyledButton
+            className="ecr-note-toggle"
+            aria-expanded={detailsOpen}
+            aria-controls={detailsBodyId}
+            onClick={toggleDetails}
+            title={detailsOpen ? t('common.noteCollapse') : t('common.noteExpand')}
+          >
+            <span aria-hidden="true" className="ecr-note-chevron">
+              {detailsOpen ? '▾' : '▸'}
+            </span>
+            <Text span size="sm" fw={500} className="ecr-note-summary">
+              {t('periods.details')}
+            </Text>
+          </UnstyledButton>
+        </Box>
+        <div id={detailsBodyId} hidden={!detailsOpen}>
         <ScrollArea type="auto" offsetScrollbars>
         <Table striped className="ecr-sticky-head" data-periods-table="months">
           <Table.Thead>
@@ -511,6 +544,7 @@ export function PeriodsPage({ projectId }: { readonly projectId: number }): JSX.
           </Table.Tbody>
         </Table>
         </ScrollArea>
+        </div>
         </>
         )}
       </AsyncBoundary>

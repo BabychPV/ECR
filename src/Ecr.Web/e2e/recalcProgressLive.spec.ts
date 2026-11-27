@@ -130,6 +130,11 @@ test.describe('recalcProgress: прогрес перерахунку проєк�
 
     // ── e2: Periods не каже «closes today» для минулої межі ─────────────────────────────────────
     await page.goto(`/admin/periods?projectId=${String(projectId)}`);
+    // Periods dedup: таблиця місяців — у згорнутому «Details»; спершу розгортаємо.
+    const detailsToggle = page.locator('[data-note="periods-details"]').getByRole('button');
+    await expect(detailsToggle).toBeVisible({ timeout: 60_000 });
+    await expect(detailsToggle).toHaveAttribute('aria-expanded', 'false');
+    await detailsToggle.click();
     await expect(page.locator('[data-periods-table="months"]')).toBeVisible({ timeout: 60_000 });
     const now = Date.now();
     const calendar = await ok<{ periods: { periodKey: number; endsAt: string; state: string }[] }>(

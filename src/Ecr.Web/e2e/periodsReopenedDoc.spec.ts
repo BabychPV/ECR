@@ -56,6 +56,11 @@ test.describe('Periods reopened doc', () => {
     expect(reopens.canClose).toBe(true);
 
     await page.goto(`/projects/${String(card.projectId)}/periods`);
+    // Periods dedup: таблиця місяців — у згорнутому «Details»; спершу розгортаємо.
+    const detailsToggle = page.locator('[data-note="periods-details"]').getByRole('button');
+    await expect(detailsToggle).toBeVisible({ timeout: 60_000 });
+    await expect(detailsToggle).toHaveAttribute('aria-expanded', 'false');
+    await detailsToggle.click();
     const row = page.locator(`[data-period-row="${String(periodKey)}"]`);
     await expect(row).toBeVisible({ timeout: 60_000 });
     // ✎ debt-1109 i4-P3: з винятками бейджа «Locked» над рядком немає (рядок сам каже «Locked · …») — атрибут стану є.

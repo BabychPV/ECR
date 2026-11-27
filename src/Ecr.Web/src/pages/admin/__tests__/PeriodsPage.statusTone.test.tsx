@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PeriodsPage } from '@/pages/admin/PeriodsPage';
 import { testTheme } from '@/test/render';
 import { statusTable } from '@/shared/ui/StatusBadge';
+import { openPeriodDetails } from './periodDetailsOpen';
 
 /**
  * Стан періоду фарбує набір, а не сама сторінка.
@@ -115,6 +116,7 @@ function mockFetch(): void {
 }
 
 function show(): void {
+  openPeriodDetails();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(

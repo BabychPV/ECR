@@ -132,6 +132,11 @@ test.describe('Projects 08.11', () => {
 
     await page.goto(`/projects/${String(card.projectId)}/periods`);
     await expect(page.getByTestId('periods-year')).toBeVisible({ timeout: 60_000 });
+    // Periods dedup: таблиця місяців — у згорнутому «Details»; спершу розгортаємо.
+    const detailsToggle = page.locator('[data-note="periods-details"]').getByRole('button');
+    await expect(detailsToggle).toBeVisible({ timeout: 60_000 });
+    await expect(detailsToggle).toHaveAttribute('aria-expanded', 'false');
+    await detailsToggle.click();
     const row = page.locator(`[data-period-row="${String(periodKey)}"]`);
     await expect(row).toContainText(/Open|Late \(flagged\)|Locked/);
     // Плитка і рядок кажуть одне.

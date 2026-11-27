@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PeriodsPage } from '@/pages/admin/PeriodsPage';
 import { testTheme } from '@/test/render';
+import { openPeriodDetails } from './periodDetailsOpen';
 
 /**
  * ✎ Period clarity (людина 07.11, п. a): сторінка Periods — лише блокування місяців. Рядок = місяць: підпис, стан
@@ -78,6 +79,7 @@ function mockFetch(): void {
 }
 
 function show(): void {
+  openPeriodDetails();
   render(
     <MantineProvider theme={testTheme}>
       <MemoryRouter initialEntries={['/admin/periods?projectId=7']}>

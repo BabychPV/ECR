@@ -1,6 +1,7 @@
 import { afterEach, describe, it, vi } from 'vitest';
 import { fireEvent, screen, within } from '@testing-library/react';
 import { PeriodsPage } from '@/pages/admin/PeriodsPage';
+import { openPeriodDetails } from './periodDetailsOpen';
 import { holdWrites, renderKeepMounted } from '@/test/closedDialogProbe';
 import { gateReads, probeThreeWindows } from '@/test/stillOpenProbe';
 
@@ -69,6 +70,7 @@ describe('B149: PeriodsPage «Reopen period» — одне перевідкри�
   it('подвійний клік, очікування перечитування і закритий діалог — рівно один POST …/reopen', async () => {
     const server = holdWrites({ read });
     const gate = gateReads();
+    openPeriodDetails();
     renderKeepMounted(<PeriodsPage projectId={7} />, '/admin/periods?projectId=7');
 
     fireEvent.click(await screen.findByRole('button', { name: /⟦periods\.reopen⟧/ }, { timeout: 10_000 }));
