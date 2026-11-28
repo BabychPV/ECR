@@ -6,37 +6,37 @@
   </PropertyGroup>
 
   <ItemGroup Label="EF Core і БД">
-    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.15" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.Data.SqlClient" Version="6.1.7" />
+    <PackageVersion Include="Microsoft.Data.SqlClient" Version="6.1.8" />
   </ItemGroup>
 
   <ItemGroup Label="Хостинг, DI, кеш">
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.Extensions.Caching.Memory" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.Extensions.Caching.SqlServer" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Caching.Memory" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Caching.SqlServer" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.15" />
 
     <!-- PI SQL Client (RTQP) ходить через ODBC, не OLE DB (D-46).
          System.Data.Odbc НЕ входить у спільний фреймворк .NET: тип у ньому
          лише переспрямований, і без цього пакета збірка падає з CS1069. -->
-    <PackageVersion Include="System.Data.Odbc" Version="10.0.13" />
+    <PackageVersion Include="System.Data.Odbc" Version="10.0.15" />
 
     <!-- HttpClientFactory: власноруч створений HttpClient тримає зʼєднання
          після зміни DNS, і збір ходить на адресу, якої вже немає. -->
-    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.15" />
   </ItemGroup>
 
   <ItemGroup Label="ASP.NET Core">
-    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="10.0.15" />
     <PackageVersion Include="Microsoft.AspNetCore.Diagnostics.HealthChecks" Version="10.0.13" />
 
     <!-- MIT, як і решта ASP.NET Core. Кільце ключів DataProtection у БД
@@ -49,7 +49,7 @@
          ганяються у Development — умовне посилання лише для Release розходилося б із конфігом, який тестується,
          і ховало б код від компілятора там, де він шипиться. Поверхня в проді закрита гейтом середовища, а пакет сам
          кінцевих точок не додає (їх створює лише `MapScalarApiReference`); виграш — розмір, не безпека, тож пакет лишається. -->
-    <PackageVersion Include="Scalar.AspNetCore" Version="2.0.0" />
+    <PackageVersion Include="Scalar.AspNetCore" Version="2.21.0" />
   </ItemGroup>
 
   <ItemGroup Label="Транзитивні пін-версії (NuGet audit)">
@@ -67,7 +67,7 @@
   <ItemGroup Label="Домен і обчислення">
     <!-- NCalc — ОБЧИСЛЮВАЧ, не парсер нашої мови (D-19). Парсер власний. -->
     <PackageVersion Include="NCalcSync" Version="6.1.1" />
-    <PackageVersion Include="ClosedXML" Version="0.104.2" />
+    <PackageVersion Include="ClosedXML" Version="0.105.1" />
     <!--
       ⛔ Microsoft.CodeAnalysis.CSharp.Scripting НЕ підключений (D-105, D-113).
       Рівень 2 (виконання C# на сервері) у першому релізі не будується, а
@@ -77,9 +77,9 @@
   </ItemGroup>
 
   <ItemGroup Label="Фонові задачі — Apache-2.0, без ліцензійного питання до ІБ">
-    <PackageVersion Include="Quartz" Version="3.13.1" />
-    <PackageVersion Include="Quartz.Extensions.Hosting" Version="3.13.1" />
-    <PackageVersion Include="Quartz.Serialization.Json" Version="3.13.1" />
+    <PackageVersion Include="Quartz" Version="3.22.11" />
+    <PackageVersion Include="Quartz.Extensions.Hosting" Version="3.22.11" />
+    <PackageVersion Include="Quartz.Serialization.Json" Version="3.22.11" />
   </ItemGroup>
 
   <!--
@@ -89,19 +89,19 @@
     консоль лишається за хостом, і рядок не пишеться двічі.
   -->
   <ItemGroup Label="Файловий журнал — Apache-2.0">
-    <PackageVersion Include="Serilog" Version="4.3.1" />
+    <PackageVersion Include="Serilog" Version="4.4.0" />
     <PackageVersion Include="Serilog.Extensions.Logging" Version="10.0.0" />
     <PackageVersion Include="Serilog.Sinks.File" Version="7.0.0" />
   </ItemGroup>
 
   <ItemGroup Label="Телеметрія (OTLP) — Apache-2.0">
-    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.19.1" />
-    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.19.1" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.21.0" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.21.0" />
   </ItemGroup>
 
   <ItemGroup Label="Тести">
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
-    <PackageVersion Include="xunit" Version="2.9.2" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.2" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
     <PackageVersion Include="NSubstitute" Version="5.3.0" />
 
@@ -113,9 +113,9 @@
       мав жодної константи, взятої з припущення.
     -->
     <PackageVersion Include="NCalc" Version="1.3.8" />
-    <PackageVersion Include="Testcontainers.MsSql" Version="4.14.0" />
+    <PackageVersion Include="Testcontainers.MsSql" Version="4.17.0" />
     <PackageVersion Include="NetArchTest.Rules" Version="1.3.2" />
-    <PackageVersion Include="coverlet.collector" Version="6.0.2" />
+    <PackageVersion Include="coverlet.collector" Version="6.0.4" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.13" />
   </ItemGroup>
 
